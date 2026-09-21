@@ -50,25 +50,30 @@ formatted rows, never format ahead of scroll.
 
 ## Phase 0 measurement (shell side, 21 September 2026)
 
-Measured by `HexTableIntegrationTests.scrollingTheWholeImageStaysUnderBudget`
-in the macOS shell's test bundle: the real `NSTableView` data-source path
-builds every row view of the development ROM (196,608 rows in 40-row
-"frames") from a cold cache, creates its `CTLine` and draws it into an
-offscreen bitmap. Debug build, M5 Pro.
+The first hex view was an `NSTableView` with one `HexRowView` per row. It
+measured fine off screen (worst 40-row frame 2.2 ms) but hung the app in a
+real trackpad scroll: AppKit stopped recycling row views during the long live
+scroll (158,790 were attached after scrolling to row 158,700, 828 MB
+resident), and SwiftUI's hosting view walked the whole subtree on every
+constraint pass looking for nested hosts, so each layout pass cost seconds.
+The container was swapped for the fallback the plan named: a single canvas
+view as tall as the image that draws the rows in the dirty rect from the
+batch cache. The row painter did not change.
+
+Measured by `HexTableIntegrationTests` in the macOS shell's test bundle on
+the development ROM (196,608 rows), debug build, M5 Pro:
 
 | Quantity | Value |
 |---|---|
-| Whole ROM, cold cache, format + draw | 4.9 s (25 µs per row) |
-| Worst 40-row frame | 2.2 ms |
+| Whole ROM drawn in 40-row frames, cold cache | 3.6 s (18 µs per row) |
+| Worst 40-row frame | 2.1 ms |
+| Live page-by-page scroll through the image, 9,338 pages | 3.3 s, worst step 19 ms (first page) |
 | 120 Hz budget per frame | 8.3 ms |
-| Batch misses | 768 (one per 256-row batch, as designed) |
+| Views in the canvas after a full scroll | 0 |
 
-So a full page of fresh rows costs about a quarter of a frame in a debug
-build, before AppKit's own work; cached rows cost only the draw. The
-`NSTableView` container stays. The row view is container-independent, so a
-single-canvas fallback remains a container swap if Instruments ever shows
-hitches on real hardware; that Instruments pass (Animation Hitches over a
-full scroll) is still to be done by hand.
+A page of fresh rows costs about a quarter of a frame in a debug build,
+before AppKit's own work; cached rows cost only the draw. The Instruments
+pass (Animation Hitches over a full trackpad scroll) is still a manual step.
 
 ## Not measured, still to check in Phase 0
 
