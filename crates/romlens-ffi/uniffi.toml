@@ -1,0 +1,4 @@
+[bindings.swift]
+module_name = "RomlensKit"
+ffi_module_name = "RomlensFFI"
+generate_immutable_records = true

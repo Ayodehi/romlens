@@ -7,8 +7,12 @@ pairs the student with an AI tutor that works only through the app's own
 tools. Over time it grows into a decompiler and an educational visualization
 tool in the spirit of 3Blue1Brown.
 
-Status: **proposal stage**. No application code yet; `spikes/` holds the FFI
-measurement. Start with the docs. Romlens is a study and visualization tool
+Status: **Phase 0 ("open and see") implemented**, 21 September 2026. The
+Rust core, FFI crate, generated Swift package, CLI and the macOS shell exist;
+the app opens an `.sfc`/`.smc`, shows the structured hex view with the dual
+address column, header and vector overlays, the byte inspector and jump to
+address. `spikes/` holds the FFI measurement that shaped the API. Start with
+the docs, then `docs/14-phase0-plan.md` for what was built and why. Romlens is a study and visualization tool
 first: it needs no commercial ROM, works on homebrew builds, and its dynamic
 views come from recordings in our own format. A debugger visualizer with an
 embedded core is the planned next step after that, feeding the same views.
@@ -28,6 +32,8 @@ embedded core is the planned next step after that, feeding the same views.
 | [docs/11-naming.md](docs/11-naming.md) | Why "Romlens" should be replaced, identifier scheme without a domain, shortlist |
 | [docs/12-content-policy.md](docs/12-content-policy.md) | ROM handling, third-party disassemblies, Nintendo posture, signing and distribution logistics |
 | [docs/13-recording-format.md](docs/13-recording-format.md) | The .romrec format: frame-by-frame CPU and PPU memory snapshots, deltas, optional layers, producers |
+| [docs/14-phase0-plan.md](docs/14-phase0-plan.md) | Phase 0 implementation plan: layout, work breakdown, tests, CI, verification |
+| [docs/15-conformance-checklist.md](docs/15-conformance-checklist.md) | Frontend conformance checklist: what every shell must expose, with the CLI scenario for each item |
 
 Decisions so far are listed at the end of the interactive proposal and in
 `docs/01-vision-and-roadmap.md` (Phase 0 acceptance criteria and working
@@ -36,6 +42,45 @@ agreements).
 The interactive version of this proposal (UX mockups, live hex/asm demo) is
 published as a Claude artifact: https://claude.ai/artifact/FPovXe1FGDZNPvcQidxtB2
 
+
+## Building
+
+Toolchain: Rust stable via rustup (`rust-toolchain.toml`), Xcode 27 / Swift
+6.4, XcodeGen (`brew install xcodegen`). `make help` lists every target.
+
+```
+make test        # cargo fmt --check, clippy -D warnings, cargo test --workspace
+make test-rom    # the same plus the tests pinned to roms/SuperMetroid.F8DF.sfc
+make swift       # build the XCFramework + RomlensKit Swift package, swift test
+make app         # xcodegen generate + xcodebuild build (after make swift)
+make app-test    # xcodebuild test for the macOS shell
+make cross       # cargo check for Linux and Windows targets
+make docker-test # cargo test --workspace inside rust:1.95, a real Linux run
+make ci-local    # all of the above: the local stand-in for CI
+```
+
+Layout:
+
+```
+Cargo.toml                    workspace: crates/romlens-core, romlens-ffi, romlens-cli
+bindings/swift/RomlensKit/    Swift package wrapping the generated bindings (generated files are git-ignored)
+shells/macos/                 XcodeGen spec + Swift sources; Romlens.xcodeproj is generated
+scripts/                      build-xcframework.sh, check-cross.sh
+.github/workflows/ci.yml      core tests on macOS, Windows, Ubuntu; advisory macOS shell job
+```
+
+The CLI mirrors the shell so every feature has a scriptable twin:
+
+```
+cargo run -p romlens-cli -- info roms/SuperMetroid.F8DF.sfc
+cargo run -p romlens-cli -- hex roms/SuperMetroid.F8DF.sfc --from '$80:841C' --rows 4
+cargo run -p romlens-cli -- resolve roms/SuperMetroid.F8DF.sfc '$80:841C'
+cargo run -p romlens-cli -- testrom --out /tmp/t.sfc --mapping lorom
+```
+
+If a `cargo` from Homebrew is also installed, the scripts and Makefile put
+rustup's `~/.cargo/bin` first on `PATH`: cargo invokes `rustc` from `PATH`,
+and only rustup's has the cross-compilation targets.
 
 ## Test ROM
 

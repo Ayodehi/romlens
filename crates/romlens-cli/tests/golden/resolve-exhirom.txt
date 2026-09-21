@@ -1,0 +1,8 @@
+0x408000 = $40:8000  row 264192
+mirrors: $00:8000, $40:8000
+0x40FFC0 = $40:FFC0  row 266236
+mirrors: $00:FFC0, $40:FFC0
+[exit code 1]
+Error: $7E:0000 is not mapped to ROM
+[exit code 1]
+Error: file offset 0xFFFFFFF is past the end of the ROM (4259840 bytes)

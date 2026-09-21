@@ -1,0 +1,25 @@
+[package]
+name = "romlens-ffi"
+description = "Romlens public API: UniFFI object over the core, built as an XCFramework for the macOS shell"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[lib]
+name = "romlens_ffi"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+
+[[bin]]
+name = "uniffi-bindgen-swift"
+path = "src/bin/uniffi-bindgen-swift.rs"
+
+[dependencies]
+romlens-core = { path = "../romlens-core" }
+uniffi.workspace = true
+thiserror.workspace = true

@@ -1,0 +1,86 @@
+# XcodeGen spec for the macOS shell. `xcodegen generate` (or `make app`)
+# writes Romlens.xcodeproj, which is git-ignored.
+name: Romlens
+options:
+  bundleIdPrefix: io.github.placeholder
+  deploymentTarget:
+    macOS: "27.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+packages:
+  RomlensKit:
+    path: ../../bindings/swift/RomlensKit
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    MACOSX_DEPLOYMENT_TARGET: "27.0"
+    # Ad-hoc signing until the GitHub account and Apple team are chosen;
+    # sandboxed, ad-hoc signed apps run locally. Release builds set a team.
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "-"
+    DEVELOPMENT_TEAM: ""
+targets:
+  Romlens:
+    type: application
+    platform: macOS
+    sources:
+      - path: Romlens
+    dependencies:
+      - package: RomlensKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.placeholder.Romlens
+        PRODUCT_NAME: Romlens
+        ENABLE_HARDENED_RUNTIME: YES
+        GENERATE_INFOPLIST_FILE: NO
+        COMBINE_HIDPI_IMAGES: YES
+    info:
+      path: Romlens/Info.plist
+      properties:
+        CFBundleName: Romlens
+        CFBundleDisplayName: Romlens
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        NSPrincipalClass: NSApplication
+        NSHumanReadableCopyright: "0BSD"
+        LSApplicationCategoryType: public.app-category.developer-tools
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: SNES ROM image
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Alternate
+            LSItemContentTypes: [io.github.placeholder.romlens.sfc]
+            NSDocumentClass: $(PRODUCT_MODULE_NAME).RomDocument
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: io.github.placeholder.romlens.sfc
+            UTTypeDescription: SNES ROM image
+            UTTypeConformsTo: [public.data]
+            UTTypeTagSpecification:
+              public.filename-extension: [sfc, smc]
+    entitlements:
+      path: Romlens/Romlens.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.files.user-selected.read-only: true
+  RomlensTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: RomlensTests
+    dependencies:
+      - target: Romlens
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.placeholder.RomlensTests
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  Romlens:
+    build:
+      targets:
+        Romlens: all
+        RomlensTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets: [RomlensTests]

@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  core:
+    name: core (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+      # Development-ROM tests are skipped: ROMLENS_ROM_DIR is never set in CI.
+
+  macos-shell:
+    name: macOS shell
+    runs-on: macos-latest
+    # Advisory until the runner images carry Xcode 27 and the macOS 27 SDK.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - run: brew install xcodegen
+      - run: scripts/build-xcframework.sh
+      - run: swift test
+        working-directory: bindings/swift/RomlensKit
+      - run: xcodegen generate
+        working-directory: shells/macos
+      - run: >
+          xcodebuild build test
+          -project shells/macos/Romlens.xcodeproj -scheme Romlens
+          -destination 'platform=macOS'
+          CODE_SIGNING_ALLOWED=NO

@@ -1,0 +1,20 @@
+File:            SuperMetroid.F8DF.sfc
+Size:            3145728 bytes (196608 rows)
+SHA-256:         12b77c4bc9c1832cee8881244659065ee1d84c70c3d29e6eaf92e6798cc2ca72
+Mapping:         LoROM (FastROM), header at 0x007FC0
+Title:           "Super Metroid"
+Map mode:        $30
+Cartridge type:  $02 = ROM + RAM + battery
+ROM size:        $0C = 4096 KB declared
+RAM size:        $03 = 8 KB
+Region:          $00 = Japan
+Developer:       $01
+Version:         1.0
+Checksum:        $F8DF, complement $0720 (pair valid), computed $F8DF (match, mirrored sum)
+Vectors:         native            emulation
+  COP             $8573   COP             $8573
+  BRK             $8573   (unused)        $8573
+  ABORT           $8573   ABORT           $8573
+  NMI             $9583   NMI             $8573
+  RESET (unused)  $8573   RESET           $841C
+  IRQ             $986A   IRQ/BRK         $8573

@@ -1,0 +1,20 @@
+File:            romlens-test-lorom.sfc
+Size:            32768 bytes (2048 rows)
+SHA-256:         a2462f1d74f993d0b3e10ae9425cd9b48253ac82c99913f07ef704d9c85dc6ee
+Mapping:         LoROM (SlowROM), header at 0x007FC0
+Title:           "ROMLENS TEST"
+Map mode:        $20
+Cartridge type:  $00 = ROM only
+ROM size:        $05 = 32 KB declared
+RAM size:        $00 = 0 KB
+Region:          $01 = USA / Canada
+Developer:       $00
+Version:         1.0
+Checksum:        $1564, complement $EA9B (pair valid), computed $1564 (match, mirrored sum)
+Vectors:         native            emulation
+  COP             $800E   COP             $800E
+  BRK             $800E   (unused)        $800E
+  ABORT           $800E   ABORT           $800E
+  NMI             $800E   NMI             $800E
+  RESET (unused)  $800E   RESET           $8000
+  IRQ             $800E   IRQ/BRK         $800E

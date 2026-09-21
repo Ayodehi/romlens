@@ -1,0 +1,20 @@
+File:            romlens-test-hirom.sfc
+Size:            65536 bytes (4096 rows)
+SHA-256:         8046a17b970e4f40fab93d11ca0e4b827ac3fb829c4de1cb1ef07ee44d46d564
+Mapping:         HiROM (SlowROM), header at 0x00FFC0
+Title:           "ROMLENS TEST"
+Map mode:        $21
+Cartridge type:  $00 = ROM only
+ROM size:        $06 = 64 KB declared
+RAM size:        $00 = 0 KB
+Region:          $01 = USA / Canada
+Developer:       $00
+Version:         1.0
+Checksum:        $1566, complement $EA99 (pair valid), computed $1566 (match, mirrored sum)
+Vectors:         native            emulation
+  COP             $800E   COP             $800E
+  BRK             $800E   (unused)        $800E
+  ABORT           $800E   ABORT           $800E
+  NMI             $800E   NMI             $800E
+  RESET (unused)  $800E   RESET           $8000
+  IRQ             $800E   IRQ/BRK         $800E

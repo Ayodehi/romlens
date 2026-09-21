@@ -1,0 +1,20 @@
+File:            romlens-test-exhirom.sfc
+Size:            4259840 bytes (266240 rows)
+SHA-256:         e16ad03463322f7189cb0c57f6bd64d80773d988a7ebe9eecce7bb135f485915
+Mapping:         ExHiROM (SlowROM), header at 0x40FFC0
+Title:           "ROMLENS TEST"
+Map mode:        $25
+Cartridge type:  $00 = ROM only
+ROM size:        $0D = 8192 KB declared
+RAM size:        $00 = 0 KB
+Region:          $01 = USA / Canada
+Developer:       $00
+Version:         1.0
+Checksum:        $5C40, complement $A3BF (pair valid), computed $5C40 (match, mirrored sum)
+Vectors:         native            emulation
+  COP             $800E   COP             $800E
+  BRK             $800E   (unused)        $800E
+  ABORT           $800E   ABORT           $800E
+  NMI             $800E   NMI             $800E
+  RESET (unused)  $800E   RESET           $8000
+  IRQ             $800E   IRQ/BRK         $800E

@@ -48,6 +48,28 @@ what the C# generator ultimately calls.
 Shell rule confirmed for the macOS table: format per visible row, cache
 formatted rows, never format ahead of scroll.
 
+## Phase 0 measurement (shell side, 21 September 2026)
+
+Measured by `HexTableIntegrationTests.scrollingTheWholeImageStaysUnderBudget`
+in the macOS shell's test bundle: the real `NSTableView` data-source path
+builds every row view of the development ROM (196,608 rows in 40-row
+"frames") from a cold cache, creates its `CTLine` and draws it into an
+offscreen bitmap. Debug build, M5 Pro.
+
+| Quantity | Value |
+|---|---|
+| Whole ROM, cold cache, format + draw | 4.9 s (25 µs per row) |
+| Worst 40-row frame | 2.2 ms |
+| 120 Hz budget per frame | 8.3 ms |
+| Batch misses | 768 (one per 256-row batch, as designed) |
+
+So a full page of fresh rows costs about a quarter of a frame in a debug
+build, before AppKit's own work; cached rows cost only the draw. The
+`NSTableView` container stays. The row view is container-independent, so a
+single-canvas fallback remains a container swap if Instruments ever shows
+hitches on real hardware; that Instruments pass (Animation Hitches over a
+full scroll) is still to be done by hand.
+
 ## Not measured, still to check in Phase 0
 
 - Async call and callback-interface overhead (event delivery from the core's
