@@ -1,0 +1,53 @@
+# ROM images and other licensed content: never commit.
+# roms/ is ignored wholesale; the extension rules catch a ROM dropped anywhere else.
+# (Genesis .md images are covered by roms/ only, since *.md is markdown here.)
+roms/*
+!roms/README.md
+!roms/.gitkeep
+*.sfc
+*.smc
+*.fig
+*.swc
+*.bs
+*.st
+*.nes
+*.fds
+*.gb
+*.gbc
+*.gba
+*.z64
+*.n64
+*.v64
+*.gen
+*.bin
+*.iso
+*.chd
+*.cue
+*.srm
+*.sav
+*.romrec
+*.mss
+*.bst
+*.bsz
+
+# Rust
+target/
+Cargo.lock.bak
+
+# Xcode / Swift
+shells/macos/**/xcuserdata/
+shells/macos/**/DerivedData/
+*.xcuserstate
+.build/
+.swiftpm/
+
+# .NET
+shells/windows/**/bin/
+shells/windows/**/obj/
+
+# Tooling and OS
+.playwright-mcp/
+.DS_Store
+.idea/
+.vscode/
+*.log

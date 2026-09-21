@@ -1,0 +1,229 @@
+# Architecture
+
+## Decision (revision 3): a Rust core, a native shell per platform
+
+Revision 1 chose a pure Swift core for a single toolchain, with a note to
+revisit if Windows or Linux became goals. They have (see
+`08-cross-platform.md`), so the split is now:
+
+- **`romlens-core`** — a Rust crate with no UI dependencies: ROM loading,
+  mapping, header parsing, the 65816 decoder, the analyzer, regions, project
+  serialization, importers/exporters, graphics decoders, the reference PPU,
+  recording index and provenance, the tutor loop, the scene model and a
+  software rasterizer for export.
+- **`romlens-ffi`** — the public API: UniFFI definitions that generate
+  Swift and C# bindings over a C ABI, plus the XCFramework build for macOS.
+- **`romlens-cli`** — headless commands over the same core, used by CI on
+  macOS, Windows and Linux and by scripted conformance scenarios.
+- **`shells/macos`** — a document-based macOS app. SwiftUI for window
+  chrome, navigator, inspector, settings. AppKit (`NSTableView`,
+  `NSScrollView`, custom `NSView` drawing) wrapped in `NSViewRepresentable`
+  for the hex and disassembly tables, because they must virtualize hundreds
+  of thousands of rows with per-glyph drawing and stay smooth. SwiftUI
+  `Canvas` or Metal for the Atlas view. Consumes the generated Swift package.
+- **`shells/windows`** (later) — .NET 10, WinUI 3, consuming the generated
+  C# bindings.
+- **`shells/linux`** (later) — Rust, GTK4 + libadwaita, linking the core
+  crate directly.
+
+Toolchain on this machine: macOS 27, Xcode 27, Swift 6.4, Rust 1.95.
+Swift 6 strict concurrency stays on in the shell; the core runs analysis on
+its own thread pool and publishes immutable snapshots through async calls and
+callback events.
+
+### Alternatives considered
+
+| Option | Why not |
+|---|---|
+| Pure Swift core (revision 1) | One toolchain, but Swift is a poor citizen inside a .NET app and GTK from Swift is immature. Would make Windows the worst experience. |
+| C# core with NativeAOT C exports | Workable, keeps Windows simple, but a hand-maintained header for Swift and a heavier Linux story than Rust. |
+| C++ core | Portable and fast, but worse binding generation and memory safety; heavier HTTP/JSON stack for the tutor. |
+| One cross-platform UI (Avalonia, MAUI, Qt, Electron, Tauri) | Rejected by the requirement of a native experience on each platform. |
+| Extending Ghidra / DiztinGUIsh | Great analysis engines, but the goal is a purpose-built visual and educational tool. We import from and export to them instead. |
+
+## Module layout
+
+```
+snes_visualizer/
+├── Cargo.toml                    # workspace
+├── crates/
+│   ├── romlens-core/src/
+│   │   ├── rom/        RomImage, CopierHeader, MappingMode, HeaderScorer
+│   │   ├── memory/     AddressSpace, SnesAddress ↔ FileOffset, Mirrors
+│   │   ├── cpu65816/   opcode table, AddressingMode, Decoder, FlagState
+│   │   ├── analysis/   RecursiveDescent, LinearSweep, FlagPropagation,
+│   │   │               heuristics (entropy, pointer tables), TraceImport
+│   │   ├── model/      Region, Label, Comment, XRef, Function, Project, Undo
+│   │   ├── io/         ProjectStore (JSON), CdlImporter, DizImporter,
+│   │   │               AsarExporter, SymbolExporter
+│   │   ├── graphics/   TileDecoder (2/4/8 bpp), PaletteDecoder, OamDecoder,
+│   │   │               TilemapDecoder, SmDecompressor, ReferencePpu (layers)
+│   │   ├── recording/  RomrecReader/Writer (keyframes + sparse deltas, zstd),
+│   │   │               mesen_recorder.lua asset, SavestateImport,
+│   │   │               ChangeIndex (when did a byte change), Provenance
+│   │   │               (content match, or exact from the write-log layer)
+│   │   ├── tutor/      ClaudeClient (HTTPS, Messages API), ToolRegistry,
+│   │   │               SelectionContext, RomDigest, ProposalStore, CostMeter,
+│   │   │               CredentialStore (Keychain / Credential Manager / Secret Service)
+│   │   ├── scene/      scene model, timeline, software rasterizer for export
+│   │   ├── viewmodel/  HexRows, AsmLines (typed tokens), RegionSummary,
+│   │   │               AtlasTiles, TileBitmap, FrameImage
+│   │   └── platform/   Platform trait (future NES/GB/Genesis)
+│   ├── romlens-ffi/ UniFFI definitions, C ABI, binding generation,
+│   │                   XCFramework + Swift package build script
+│   └── romlens-cli/ info, dump, disasm, analyze, export, record-index,
+│                       tutor (scripted), conformance scenarios
+├── tests/
+│   ├── decoder         all 256 opcodes × M/X states
+│   ├── mapping         LoROM/HiROM/ExHiROM round-trips
+│   ├── header          bundled ROM header, mirrored checksum
+│   ├── golden/         CLI output files that must match on all three OSes
+│   └── ground_truth/   compare analyzer against PJBoy labels (opt-in, needs ROM)
+└── shells/
+    ├── macos/          Romlens.xcodeproj (SwiftUI + AppKit; depends on the generated Swift package)
+    ├── windows/        Romlens.sln (.NET 10, WinUI 3; generated C# bindings)   [later]
+    └── linux/          Cargo crate (gtk4-rs + libadwaita-rs; links core directly) [later]
+```
+
+## Core data model
+
+```swift
+struct SNESAddress { var bank: UInt8; var offset: UInt16 }   // $80:841C
+struct FileOffset  { var value: Int }                        // 0x41C
+
+enum MappingMode { case loROM, hiROM, exHiROM, sa1, superFX, ... }
+protocol AddressMap {
+  func fileOffset(for: SNESAddress) -> FileOffset?
+  func address(for: FileOffset) -> SNESAddress   // canonical (FastROM bank)
+  func mirrors(of: SNESAddress) -> [SNESAddress]
+}
+
+struct FlagState { var m: Bool; var x: Bool; var e: Bool; var dbr: UInt8?; var dp: UInt16? }
+
+enum RegionKind {
+  case unknown, code
+  case data(DataKind)   // byte, word, long, pointer, table, string,
+                        // graphics(bpp), tilemap, palette, compressed, struct
+}
+enum Evidence { case vectorReach(depth: Int), trace(file: String, hits: Int),
+                heuristic(name: String, score: Double), imported(String), user }
+struct Region { var range: Range<FileOffset>; var kind: RegionKind;
+                var confidence: Double; var evidence: [Evidence] }
+
+struct Instruction { var address: SNESAddress; var bytes: [UInt8];
+                     var opcode: Opcode; var mode: AddressingMode;
+                     var operand: Operand; var flagsBefore: FlagState }
+```
+
+The analyzer produces an immutable `AnalysisSnapshot` (regions, instructions,
+labels, xrefs). Shells never mutate it; user edits go into a `Project`
+overlay through core commands and trigger an incremental re-analysis on the
+core's thread pool. The Swift shapes above are illustrative; the source of
+truth is the Rust types, and the generated Swift and C# mirror them.
+
+The FFI surface is UniFFI, chosen after measurement (`10-ffi-spike.md`):
+hot paths return flat buffers or pre-formatted text per batch, everything
+else returns typed records. It follows the rules in `08-cross-platform.md`: chunky calls
+that return batches of view-model rows, semantic kinds rather than styles,
+events through callback interfaces, async for anything slow, and no platform
+types across the boundary.
+
+## Tutor module boundaries
+
+- `ClaudeClient` lives in the core so all three shells share one
+  implementation. It knows the wire format and nothing about SNES. One
+  request builder, one streaming parser, one place where the model id
+  (`claude-opus-5`), effort and beta flags live. Shells receive
+  `tutor_event`s (text delta, tool call started/finished, proposal added,
+  turn ended, cost update) and render them.
+- `ToolRegistry` maps tool names to closures over an `AnalysisSnapshot`, a
+  `Recording` and the `Project`. Read-only tools are marked parallel-safe.
+  Proposal tools return a `Proposal` value and never touch the project.
+- `RomDigest` is the cached prefix: header facts, mapping, register table,
+  symbol names, region statistics. Regenerated on project change.
+- `ProposalStore` holds pending cards; accepting one applies it through the
+  same undo-able path as a manual edit, tagged `ai (accepted by user)`.
+- The API key lives in the platform credential store (Keychain, Windows
+  Credential Manager, Secret Service), behind one `CredentialStore` in the
+  core; shells only provide the entry UI.
+
+## Recording module boundaries
+
+- `.romrec` is a single chunked file: header, frame index, keyframes every
+  60 frames and sparse deltas in between, all zstd-compressed, plus
+  optional layers (framebuffer, write log, execution trace). Full spec in
+  `13-recording-format.md`.
+- `ChangeIndex` answers "when did this byte change" by binary search over
+  frames and is cached on disk beside the recording.
+- `MachineStateSource` is the trait every dynamic view consumes. `.romrec`
+  implements it now; the Phase 5 embedded debugger core implements it later
+  and records to `.romrec` while running.
+- `ReferencePPU` renders BG layers and OBJ from a snapshot for the Layers
+  view. Modes 0, 1 and OBJ first; it is also the seed of the Phase 4 core.
+
+## Project file
+
+`Name.romlens` is a package directory:
+
+```
+Name.romlens/
+├── project.json     rom { sha256, size, mapping, title }, settings
+├── labels.json      [{ address, name, source }]
+├── comments.json    [{ address, text, kind: line|block }]
+├── regions.json     user-marked regions and overrides only
+├── flags.json       per-address M/X/E overrides
+├── traces/          imported CDL / trace files (copied, small)
+├── recordings/      references to .romrec packages by hash and path
+├── proposals.json   accepted and rejected tutor proposals with reasons
+└── tutor/           transcripts per conversation, cost totals
+```
+
+Human-readable JSON so it diffs well in git and can be shared without the
+ROM. The ROM is located by hash first, then by remembered path, then by
+asking the user.
+
+## Performance budget
+
+- Open a 4 MB ROM and show hex: under 200 ms.
+- Full recursive-descent analysis of a 4 MB ROM: under 2 s on Apple silicon,
+  off the main thread, with progress.
+- Hex and disassembly tables: 120 Hz scrolling; row height fixed; text drawn
+  with `CTLine` caching per row on macOS. Row batches cross the FFI in
+  chunks of a few hundred and are cached shell-side; the FFI cost is
+  measured in Phase 0 against this budget.
+- Core tests and CLI golden files pass on macOS, Windows and Linux CI
+  runners from Phase 0.
+- Memory: ROM bytes memory-mapped once; instruction cache lazily built per
+  bank.
+
+## Testing strategy
+
+- Decoder table tested exhaustively against a generated oracle (all opcodes,
+  both M and X states, emulation mode) and against asar's assembler output
+  for round-trips.
+- Mapping tested with known addresses from public docs (fullsnes, SNESdev
+  wiki) for LoROM, HiROM, ExHiROM, plus mirror equivalence.
+- Tile decoder tested against hand-built tiles in all three depths and
+  against Mesen2's tile viewer output for a savestate.
+- Provenance tested on a synthetic recording with known writers.
+- Tutor tool handlers unit-tested without the network; the golden question
+  set in `06-ai-tutor.md` runs on demand against the live API.
+- Header tests pinned to the bundled ROM's facts (title, `$30` map mode,
+  vectors, `F8DF` checksum via mirrored sum).
+- Analyzer accuracy: precision/recall of code bytes against PJBoy's Super
+  Metroid disassembly, reported in CI output so regressions are visible.
+
+## Licensing and ROM handling
+
+- Everything in the repository under 0BSD (decided; see
+  `09-emulator-core-licensing.md` and `LICENSE`). Third-party notices in
+  `THIRD-PARTY-NOTICES.md`. No GPL code is linked; GPL emulators are used
+  out of process only.
+- macOS deployment target is macOS 27; the shell may use any API available
+  there. Bundle identifier is a placeholder (`io.github.placeholder.Romlens`)
+  until the GitHub account is chosen; it changes once, before the first
+  public release.
+- Workflow: direct commits to `main` while the project is young; branches
+  and pull requests once there is enough to break.
+- ROMs are never bundled, uploaded or copied into project files.
+- Imported third-party symbol lists keep their own license notices.
