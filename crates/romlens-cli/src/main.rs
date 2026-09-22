@@ -2,15 +2,15 @@
 //! feature has a scriptable twin (docs/08 rule 7) and CI can pin output on
 //! all three operating systems.
 
-use std::fmt::Write as _;
-use std::path::{Path, PathBuf};
+mod commands;
 
-use anyhow::{Context, Result};
+use std::path::PathBuf;
+
+use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
-use romlens_core::{
-    AddressStyle, MappingMode, RomImage, RomInfo, SpanIndex, fixtures, format_rows_text,
-    header_spans,
-};
+use romlens_core::{AddressStyle, MappingMode};
+
+use commands::labels::SourceFilter;
 
 fn long_version() -> &'static str {
     static VERSION: std::sync::OnceLock<String> = std::sync::OnceLock::new();
@@ -60,6 +60,189 @@ enum Command {
         out: PathBuf,
         #[arg(long, value_enum, default_value_t = MappingArg::Lorom)]
         mapping: MappingArg,
+        /// The 32 KB LoROM holding all 256 opcodes in order.
+        #[arg(long)]
+        all_opcodes: bool,
+    },
+    /// Disassemble: the analyzed listing, or a raw linear decode with --flags.
+    Disasm {
+        rom: PathBuf,
+        /// Start address (default: the first line).
+        #[arg(long)]
+        from: Option<String>,
+        /// Lines (or instructions with --flags).
+        #[arg(long, default_value_t = 32)]
+        count: u32,
+        /// A .romlens package to apply.
+        #[arg(long)]
+        project: Option<PathBuf>,
+        /// Decode linearly under these flags (e.g. m1x0e0), ignoring the analysis.
+        #[arg(long)]
+        flags: Option<String>,
+        #[arg(long, value_enum, default_value_t = AddressArg::Both)]
+        address: AddressArg,
+        /// Add the flag state column.
+        #[arg(long)]
+        verbose: bool,
+    },
+    /// Run the analyzer and report code/data/unknown coverage.
+    Analyze {
+        rom: PathBuf,
+        #[arg(long)]
+        project: Option<PathBuf>,
+        /// Print the statistics (the default; kept for scripts).
+        #[arg(long)]
+        stats: bool,
+        #[arg(long)]
+        json: bool,
+        /// Report phases on stderr.
+        #[arg(long)]
+        progress: bool,
+    },
+    /// List labels.
+    Labels {
+        rom: PathBuf,
+        #[arg(long)]
+        project: Option<PathBuf>,
+        #[arg(long)]
+        from: Option<String>,
+        #[arg(long)]
+        to: Option<String>,
+        #[arg(long, value_enum, default_value_t = SourceArg::All)]
+        source: SourceArg,
+        #[arg(long)]
+        count: Option<u32>,
+    },
+    /// References to and from an address.
+    Xrefs {
+        rom: PathBuf,
+        expr: String,
+        #[arg(long)]
+        project: Option<PathBuf>,
+    },
+    /// Export an assembly listing or a symbol file.
+    Export {
+        #[command(subcommand)]
+        what: ExportCommand,
+    },
+    /// Everything known about one address.
+    Inspect {
+        rom: PathBuf,
+        expr: String,
+        #[arg(long)]
+        project: Option<PathBuf>,
+    },
+    /// Find a byte pattern such as "78 18 ?? 5C".
+    Search {
+        rom: PathBuf,
+        pattern: String,
+        #[arg(long)]
+        from: Option<String>,
+        #[arg(long)]
+        to: Option<String>,
+        #[arg(long, default_value_t = 100)]
+        max: u32,
+    },
+    /// Create or edit a .romlens package.
+    Project {
+        /// The package directory.
+        path: PathBuf,
+        #[command(subcommand)]
+        action: ProjectCommand,
+    },
+    /// The built-in hardware register names.
+    Registers { address: Option<String> },
+}
+
+#[derive(Subcommand)]
+enum ExportCommand {
+    /// asar-syntax listing with explicit operand widths.
+    Asm {
+        rom: PathBuf,
+        /// Output file, or - for stdout.
+        #[arg(long)]
+        out: PathBuf,
+        #[arg(long)]
+        project: Option<PathBuf>,
+        /// start..end address expressions (end exclusive).
+        #[arg(long)]
+        range: Option<String>,
+    },
+    /// bsnes-plus style symbol file (labels and comments only).
+    Sym {
+        rom: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+        #[arg(long)]
+        project: Option<PathBuf>,
+        /// Also write the analyzer's automatic labels.
+        #[arg(long)]
+        include_auto: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum ProjectCommand {
+    /// Create an empty package for a ROM.
+    Init {
+        #[arg(long)]
+        rom: PathBuf,
+    },
+    /// Set (or remove with `-`) the label at an address.
+    Label {
+        expr: String,
+        name: String,
+        #[arg(long)]
+        rom: Option<PathBuf>,
+    },
+    /// Set (or remove with `-`) a comment.
+    Comment {
+        expr: String,
+        text: String,
+        #[arg(long, conflicts_with = "block")]
+        line: bool,
+        #[arg(long)]
+        block: bool,
+        #[arg(long)]
+        rom: Option<PathBuf>,
+    },
+    /// Mark a range as code, a data kind or unknown.
+    Mark {
+        expr: String,
+        len: u32,
+        kind: String,
+        #[arg(long)]
+        rom: Option<PathBuf>,
+    },
+    /// Remove marks from a range.
+    Clear {
+        expr: String,
+        len: u32,
+        #[arg(long)]
+        rom: Option<PathBuf>,
+    },
+    /// Pin M/X/E, the data bank or the direct page at an address.
+    Flags {
+        expr: String,
+        #[arg(long)]
+        m: Option<u8>,
+        #[arg(long)]
+        x: Option<u8>,
+        #[arg(long)]
+        e: Option<u8>,
+        #[arg(long)]
+        dbr: Option<String>,
+        #[arg(long)]
+        dp: Option<String>,
+        #[arg(long)]
+        remove: bool,
+        #[arg(long)]
+        rom: Option<PathBuf>,
+    },
+    /// List what the package holds.
+    History {
+        #[arg(long)]
+        rom: Option<PathBuf>,
     },
 }
 
@@ -97,200 +280,151 @@ impl From<MappingArg> for MappingMode {
     }
 }
 
-fn load(path: &Path) -> Result<RomImage> {
-    RomImage::load(path).with_context(|| format!("opening {}", path.display()))
+#[derive(Clone, Copy, ValueEnum)]
+enum SourceArg {
+    Auto,
+    User,
+    Imported,
+    All,
+}
+
+impl From<SourceArg> for SourceFilter {
+    fn from(s: SourceArg) -> Self {
+        match s {
+            SourceArg::Auto => SourceFilter::Auto,
+            SourceArg::User => SourceFilter::User,
+            SourceArg::Imported => SourceFilter::Imported,
+            SourceArg::All => SourceFilter::All,
+        }
+    }
 }
 
 fn main() -> Result<()> {
     match Cli::parse().command {
-        Command::Info { rom, json } => {
-            let rom = load(&rom)?;
-            let info = rom.info();
-            print!(
-                "{}",
-                if json {
-                    info_json(&info)
-                } else {
-                    info_text(&info)
-                }
-            );
-        }
+        Command::Info { rom, json } => commands::rom::info(&rom, json),
         Command::Hex {
             rom,
             from,
             rows,
             address,
-        } => {
-            let rom = load(&rom)?;
-            let start_row = match from {
-                Some(expr) => rom.resolve(&expr)?.row,
-                None => 0,
-            };
-            let index = SpanIndex::new(&header_spans(&rom));
-            print!(
-                "{}",
-                format_rows_text(&rom, &index, start_row, rows, address.into())
-            );
+        } => commands::rom::hex(&rom, from.as_deref(), rows, address.into()),
+        Command::Resolve { rom, expr } => commands::rom::resolve(&rom, &expr),
+        Command::Testrom {
+            out,
+            mapping,
+            all_opcodes,
+        } => commands::rom::testrom(&out, mapping.into(), all_opcodes),
+        Command::Disasm {
+            rom,
+            from,
+            count,
+            project,
+            flags,
+            address,
+            verbose,
+        } => commands::disasm::run(commands::disasm::DisasmArgs {
+            rom: &rom,
+            from: from.as_deref(),
+            count,
+            project: project.as_deref(),
+            flags: flags.as_deref(),
+            style: address.into(),
+            verbose,
+        }),
+        Command::Analyze {
+            rom,
+            project,
+            stats: _,
+            json,
+            progress,
+        } => commands::analyze::run(&rom, project.as_deref(), json, progress),
+        Command::Labels {
+            rom,
+            project,
+            from,
+            to,
+            source,
+            count,
+        } => commands::labels::run(commands::labels::LabelsArgs {
+            rom: &rom,
+            project: project.as_deref(),
+            from: from.as_deref(),
+            to: to.as_deref(),
+            source: source.into(),
+            count,
+        }),
+        Command::Xrefs { rom, expr, project } => {
+            commands::xrefs::run(&rom, &expr, project.as_deref())
         }
-        Command::Resolve { rom, expr } => {
-            let rom = load(&rom)?;
-            let r = rom.resolve(&expr)?;
-            let snes = r
-                .snes_address
-                .map_or_else(|| "(unreachable)".to_owned(), |a| a.to_string());
-            println!("{} = {}  row {}", r.file_offset, snes, r.row);
-            let mirrors: Vec<String> = rom
-                .mirrors(r.file_offset)
-                .iter()
-                .map(ToString::to_string)
-                .collect();
-            println!("mirrors: {}", mirrors.join(", "));
-        }
-        Command::Testrom { out, mapping } => {
-            let mode: MappingMode = mapping.into();
-            std::fs::write(&out, fixtures::for_mapping(mode))
-                .with_context(|| format!("writing {}", out.display()))?;
-            println!("wrote {} {} test ROM", out.display(), mode);
-        }
-    }
-    Ok(())
-}
-
-fn info_text(i: &RomInfo) -> String {
-    let h = &i.header;
-    let mut s = String::new();
-    let _ = writeln!(s, "File:            {}", i.source_name);
-    let _ = writeln!(
-        s,
-        "Size:            {} bytes ({} rows){}",
-        i.byte_len,
-        i.row_count,
-        if i.has_copier_header {
-            ", 512-byte copier header stripped"
-        } else {
-            ""
-        }
-    );
-    let _ = writeln!(s, "SHA-256:         {}", i.sha256);
-    let _ = writeln!(
-        s,
-        "Mapping:         {} ({}), header at {}",
-        i.mapping,
-        if i.fast_rom { "FastROM" } else { "SlowROM" },
-        i.header_offset
-    );
-    let _ = writeln!(s, "Title:           {:?}", h.title);
-    let _ = writeln!(s, "Map mode:        ${:02X}", h.map_mode);
-    let _ = writeln!(
-        s,
-        "Cartridge type:  ${:02X} = {}",
-        h.cartridge_type,
-        h.cartridge_type_name()
-    );
-    let _ = writeln!(
-        s,
-        "ROM size:        ${:02X} = {} KB declared",
-        h.rom_size_code,
-        h.declared_rom_size() / 1024
-    );
-    let _ = writeln!(
-        s,
-        "RAM size:        ${:02X} = {} KB",
-        h.ram_size_code,
-        h.declared_ram_size() / 1024
-    );
-    let _ = writeln!(
-        s,
-        "Region:          ${:02X} = {}",
-        h.region,
-        h.region_name()
-    );
-    let _ = writeln!(s, "Developer:       ${:02X}", h.developer_id);
-    let _ = writeln!(s, "Version:         1.{}", h.version);
-    if let Some(e) = &h.extended {
-        let _ = writeln!(
-            s,
-            "Extended header: maker {:?}, game {:?}, chipset subtype ${:02X}",
-            e.maker_code, e.game_code, e.chipset_subtype
-        );
-    }
-    let _ = writeln!(
-        s,
-        "Checksum:        ${:04X}, complement ${:04X} ({}), computed ${:04X} ({})",
-        h.checksum,
-        h.complement,
-        if h.complement_valid() {
-            "pair valid"
-        } else {
-            "pair invalid"
+        Command::Export { what } => match what {
+            ExportCommand::Asm {
+                rom,
+                out,
+                project,
+                range,
+            } => commands::export::asm(&rom, &out, project.as_deref(), range.as_deref()),
+            ExportCommand::Sym {
+                rom,
+                out,
+                project,
+                include_auto,
+            } => commands::export::sym(&rom, &out, project.as_deref(), include_auto),
         },
-        i.computed_checksum,
-        if i.checksum_ok {
-            "match, mirrored sum"
-        } else {
-            "mismatch"
+        Command::Inspect { rom, expr, project } => {
+            commands::inspect::run(&rom, &expr, project.as_deref())
         }
-    );
-    let _ = writeln!(s, "Vectors:         native            emulation");
-    let native = h.native.named(true);
-    let emu = h.emulation.named(false);
-    for (n, e) in native.iter().zip(emu.iter()) {
-        let _ = writeln!(s, "  {:<16}${:04X}   {:<16}${:04X}", n.0, n.1, e.0, e.1);
-    }
-    s
-}
-
-fn json_str(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 2);
-    out.push('"');
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            c if (c as u32) < 0x20 => {
-                let _ = write!(out, "\\u{:04x}", c as u32);
+        Command::Search {
+            rom,
+            pattern,
+            from,
+            to,
+            max,
+        } => commands::search::run(&rom, &pattern, from.as_deref(), to.as_deref(), max),
+        Command::Project { path, action } => match action {
+            ProjectCommand::Init { rom } => commands::project::init(&path, &rom),
+            ProjectCommand::Label { expr, name, rom } => {
+                commands::project::label(&path, rom.as_deref(), &expr, &name)
             }
-            c => out.push(c),
-        }
+            ProjectCommand::Comment {
+                expr,
+                text,
+                line: _,
+                block,
+                rom,
+            } => commands::project::comment(&path, rom.as_deref(), &expr, block, &text),
+            ProjectCommand::Mark {
+                expr,
+                len,
+                kind,
+                rom,
+            } => commands::project::mark(&path, rom.as_deref(), &expr, len, &kind),
+            ProjectCommand::Clear { expr, len, rom } => {
+                commands::project::clear(&path, rom.as_deref(), &expr, len)
+            }
+            ProjectCommand::Flags {
+                expr,
+                m,
+                x,
+                e,
+                dbr,
+                dp,
+                remove,
+                rom,
+            } => commands::project::flags(
+                &path,
+                rom.as_deref(),
+                &expr,
+                commands::project::FlagArgs {
+                    m,
+                    x,
+                    e,
+                    dbr: dbr.as_deref(),
+                    dp: dp.as_deref(),
+                    remove,
+                },
+            ),
+            ProjectCommand::History { rom } => commands::project::history(&path, rom.as_deref()),
+        },
+        Command::Registers { address } => commands::registers::run(address.as_deref()),
     }
-    out.push('"');
-    out
-}
-
-fn info_json(i: &RomInfo) -> String {
-    let h = &i.header;
-    let vectors = |v: &romlens_core::Vectors| {
-        format!(
-            "{{\"cop\":{},\"brk\":{},\"abort\":{},\"nmi\":{},\"reset\":{},\"irq\":{}}}",
-            v.cop, v.brk, v.abort, v.nmi, v.reset, v.irq
-        )
-    };
-    let mut s = String::new();
-    s.push_str("{\n");
-    let _ = writeln!(s, "  \"file\": {},", json_str(&i.source_name));
-    let _ = writeln!(s, "  \"size\": {},", i.byte_len);
-    let _ = writeln!(s, "  \"rows\": {},", i.row_count);
-    let _ = writeln!(s, "  \"copierHeader\": {},", i.has_copier_header);
-    let _ = writeln!(s, "  \"sha256\": {},", json_str(&i.sha256));
-    let _ = writeln!(s, "  \"mapping\": {},", json_str(i.mapping.name()));
-    let _ = writeln!(s, "  \"fastRom\": {},", i.fast_rom);
-    let _ = writeln!(s, "  \"headerOffset\": {},", i.header_offset.value());
-    let _ = writeln!(s, "  \"title\": {},", json_str(&h.title));
-    let _ = writeln!(s, "  \"mapMode\": {},", h.map_mode);
-    let _ = writeln!(s, "  \"cartridgeType\": {},", h.cartridge_type);
-    let _ = writeln!(s, "  \"romSizeCode\": {},", h.rom_size_code);
-    let _ = writeln!(s, "  \"ramSizeCode\": {},", h.ram_size_code);
-    let _ = writeln!(s, "  \"region\": {},", h.region);
-    let _ = writeln!(s, "  \"developerId\": {},", h.developer_id);
-    let _ = writeln!(s, "  \"version\": {},", h.version);
-    let _ = writeln!(s, "  \"checksum\": {},", h.checksum);
-    let _ = writeln!(s, "  \"complement\": {},", h.complement);
-    let _ = writeln!(s, "  \"complementValid\": {},", h.complement_valid());
-    let _ = writeln!(s, "  \"computedChecksum\": {},", i.computed_checksum);
-    let _ = writeln!(s, "  \"checksumOk\": {},", i.checksum_ok);
-    let _ = writeln!(s, "  \"nativeVectors\": {},", vectors(&h.native));
-    let _ = writeln!(s, "  \"emulationVectors\": {}", vectors(&h.emulation));
-    s.push_str("}\n");
-    s
 }

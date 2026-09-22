@@ -67,10 +67,8 @@ pub fn detect_mapping(payload: &[u8]) -> Result<SlotScore, RomError> {
             .filter(|s| s.header.complement_valid())
             .count()
             == 2;
-        if both_valid {
-            if let Some(s) = scores.iter_mut().find(|s| s.mode == MappingMode::ExHiRom) {
-                s.score += 1;
-            }
+        if both_valid && let Some(s) = scores.iter_mut().find(|s| s.mode == MappingMode::ExHiRom) {
+            s.score += 1;
         }
     }
     // Stable order LoROM, HiROM, ExHiROM; max_by keeps the last maximum, so

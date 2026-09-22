@@ -12,6 +12,7 @@ fn golden_dir() -> PathBuf {
 
 fn temp_dir(test: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("romlens-golden-{}-{test}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     dir
 }
@@ -22,6 +23,8 @@ fn write_fixture(dir: &Path, mode: MappingMode) -> PathBuf {
     path
 }
 
+/// stdout, plus `[exit code N]` and stderr on failure. stderr is otherwise
+/// dropped so timings never enter a golden.
 fn run(args: &[&str]) -> String {
     let out = Command::new(env!("CARGO_BIN_EXE_romlens"))
         .args(args)
@@ -107,7 +110,210 @@ fn fixtures_match_goldens() {
                 run(&["resolve", rom, "0xFFFFFFF"])
             ),
         );
+        check(
+            &format!("disasm-{}", slug(mode)),
+            &run(&[
+                "disasm",
+                rom,
+                "--from",
+                "$00:8000",
+                "--count",
+                "16",
+                "--verbose",
+            ]),
+        );
+        check(
+            &format!("analyze-{}", slug(mode)),
+            &format!(
+                "{}{}",
+                run(&["analyze", rom, "--stats"]),
+                run(&["analyze", rom, "--json"])
+            ),
+        );
     }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn lorom_analysis_commands() {
+    let dir = temp_dir("lorom");
+    let rom = write_fixture(&dir, MappingMode::LoRom);
+    let rom = rom.to_str().unwrap();
+    check("labels-lorom", &run(&["labels", rom]));
+    check(
+        "xrefs-lorom",
+        &format!(
+            "{}{}",
+            run(&["xrefs", rom, "$00:800E"]),
+            run(&["xrefs", rom, "0x7"])
+        ),
+    );
+    check(
+        "export-asm-lorom",
+        &format!(
+            "{}{}",
+            run(&[
+                "export",
+                "asm",
+                rom,
+                "--out",
+                "-",
+                "--range",
+                "$00:8000..$00:8020"
+            ]),
+            run(&[
+                "export",
+                "asm",
+                rom,
+                "--out",
+                "-",
+                "--range",
+                "0x7FC0..0x8000"
+            ])
+        ),
+    );
+    check(
+        "export-sym-lorom",
+        &run(&["export", "sym", rom, "--out", "-", "--include-auto"]),
+    );
+    check(
+        "inspect-lorom",
+        &format!(
+            "{}\n{}",
+            run(&["inspect", rom, "$00:8007"]),
+            run(&["inspect", rom, "$00:2100"])
+        ),
+    );
+    check(
+        "search-lorom",
+        &format!(
+            "{}{}",
+            run(&["search", rom, "78 18 FB"]),
+            run(&[
+                "search", rom, "8D ?? 21", "--from", "$00:8000", "--to", "$00:8010"
+            ])
+        ),
+    );
+    check(
+        "disasm-flags-lorom",
+        &run(&[
+            "disasm",
+            rom,
+            "--from",
+            "$00:8000",
+            "--count",
+            "8",
+            "--flags",
+            "m0x0e0",
+            "--address",
+            "snes",
+        ]),
+    );
+    check(
+        "registers",
+        &format!(
+            "{}{}",
+            run(&["registers", "$420D"]),
+            run(&["registers", "$2145"])
+        ),
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn all_opcodes_disassemble() {
+    let dir = temp_dir("opcodes");
+    let rom = dir.join("ops.sfc");
+    let wrote = run(&["testrom", "--out", rom.to_str().unwrap(), "--all-opcodes"]);
+    assert!(wrote.contains("all-opcodes"), "{wrote}");
+    assert_eq!(std::fs::read(&rom).unwrap(), fixtures::all_opcodes_lorom());
+    check(
+        "disasm-allopcodes",
+        &run(&[
+            "disasm",
+            rom.to_str().unwrap(),
+            "--count",
+            "256",
+            "--flags",
+            "m0x0e0",
+            "--address",
+            "file",
+        ]),
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A scripted editing session: init, label, comment, mark, flags, list,
+/// and the listing that results; then remove each and check the package is
+/// empty again.
+#[test]
+fn project_scenario() {
+    let dir = temp_dir("project");
+    let rom = write_fixture(&dir, MappingMode::LoRom);
+    let rom = rom.to_str().unwrap();
+    let pkg = dir.join("Test.romlens");
+    let pkg = pkg.to_str().unwrap();
+    let mut log = String::new();
+    log += &run(&["project", pkg, "init", "--rom", rom])
+        .replace(&dir.to_string_lossy().to_string(), "<tmp>");
+    log += &run(&["project", pkg, "init", "--rom", rom])
+        .replace(&dir.to_string_lossy().to_string(), "<tmp>");
+    log += &run(&["project", pkg, "label", "$00:8000", "Boot"]);
+    log += &run(&["project", pkg, "label", "$80:800E", "Idle"]);
+    log += &run(&["project", pkg, "label", "$7E:0A1C", "SamusPose"]);
+    log += &run(&["project", pkg, "label", "$00:8007", "bad name"]);
+    log += &run(&[
+        "project",
+        pkg,
+        "comment",
+        "$00:8000",
+        "disable IRQ",
+        "--line",
+    ]);
+    log += &run(&[
+        "project",
+        pkg,
+        "comment",
+        "$00:8007",
+        "Force blank\nthen spin",
+        "--block",
+    ]);
+    log += &run(&["project", pkg, "mark", "0x20", "6", "word"]);
+    log += &run(&["project", pkg, "mark", "0x22", "2", "code"]);
+    log += &run(&["project", pkg, "mark", "0x100", "0", "byte"]);
+    log += &run(&["project", pkg, "flags", "0x5", "--m", "0", "--dbr", "$7E"]);
+    log += &run(&["project", pkg, "history"]).replace(&dir.to_string_lossy().to_string(), "<tmp>");
+    log += &run(&["disasm", rom, "--project", pkg, "--count", "24"]);
+    log += &run(&["labels", rom, "--project", pkg, "--source", "user"]);
+    log += &run(&["export", "sym", rom, "--project", pkg, "--out", "-"]);
+    log += &run(&["project", pkg, "label", "$00:8000", "-"]);
+    log += &run(&["project", pkg, "label", "$00:800E", "-"]);
+    log += &run(&["project", pkg, "label", "$7E:0A1C", "-"]);
+    log += &run(&["project", pkg, "comment", "$00:8000", "-", "--line"]);
+    log += &run(&["project", pkg, "comment", "$00:8007", "-", "--block"]);
+    log += &run(&["project", pkg, "clear", "0x20", "6"]);
+    log += &run(&["project", pkg, "flags", "0x5", "--remove"]);
+    log += &run(&["project", pkg, "history"]).replace(&dir.to_string_lossy().to_string(), "<tmp>");
+    check("project-lorom", &log);
+    // The package is the same five files an empty project writes.
+    let empty = romlens_core::io::to_files(
+        &romlens_core::RomImage::load(rom).unwrap(),
+        &romlens_core::model::Project::new(&romlens_core::RomImage::load(rom).unwrap()),
+    );
+    let back = romlens_core::io::read_package(Path::new(pkg)).unwrap();
+    assert_eq!(back, empty);
+    // A different ROM is refused.
+    let other = write_fixture(&dir, MappingMode::HiRom);
+    let refused = run(&[
+        "project",
+        pkg,
+        "label",
+        "$00:8000",
+        "X",
+        "--rom",
+        other.to_str().unwrap(),
+    ]);
+    assert!(refused.contains("different ROM"), "{refused}");
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -156,4 +362,26 @@ fn dev_rom_golden() {
         ),
     );
     check("resolve-supermetroid", &run(&["resolve", rom, "$80:841C"]));
+    // The docs/04 boot listing.
+    check(
+        "disasm-supermetroid",
+        &run(&[
+            "disasm",
+            rom,
+            "--from",
+            "$80:841C",
+            "--count",
+            "34",
+            "--address",
+            "snes",
+            "--verbose",
+        ]),
+    );
+    check("analyze-supermetroid", &run(&["analyze", rom, "--stats"]));
+    check(
+        "labels-supermetroid",
+        &run(&["labels", rom, "--count", "40"]),
+    );
+    check("xrefs-supermetroid", &run(&["xrefs", rom, "$80:8573"]));
+    check("inspect-supermetroid", &run(&["inspect", rom, "$80:8427"]));
 }

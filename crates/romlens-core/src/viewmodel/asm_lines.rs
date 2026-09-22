@@ -348,7 +348,7 @@ fn data_directive(kind: RegionKind, len: u32) -> (&'static str, u32) {
         RegionKind::Data(DataKind::Word | DataKind::Palette | DataKind::Tilemap) => ("dw", 2),
         RegionKind::Data(DataKind::Long) => ("dl", 3),
         RegionKind::Data(DataKind::Pointer) => {
-            if len % 3 == 0 && len % 2 != 0 {
+            if len.is_multiple_of(3) && !len.is_multiple_of(2) {
                 ("dl", 3)
             } else {
                 ("dw", 2)

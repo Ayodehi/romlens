@@ -241,7 +241,7 @@ impl<'a> Walk<'a> {
     pub fn run(&mut self, control: &AnalysisControl) -> Result<(), Cancelled> {
         while let Some(entry) = self.worklist.pop_front() {
             self.processed += 1;
-            if self.processed % 4096 == 0 {
+            if self.processed.is_multiple_of(4096) {
                 control.check()?;
                 control.report(
                     AnalysisPhase::Descent,

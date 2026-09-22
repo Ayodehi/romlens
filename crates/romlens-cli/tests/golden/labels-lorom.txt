@@ -1,0 +1,3 @@
+0x000000  $00:8000  RESET_008000             auto
+0x00000A  $00:800A  CODE_00800A              auto
+0x00000E  $00:800E  NMI_00800E               auto

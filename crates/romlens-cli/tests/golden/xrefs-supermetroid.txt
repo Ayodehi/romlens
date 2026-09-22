@@ -1,0 +1,13 @@
+references to $80:8573: 10
+  from 0x000573  $80:8573  jump
+  from 0x007FE4  $80:FFE4  vector
+  from 0x007FE6  $80:FFE6  vector
+  from 0x007FE8  $80:FFE8  vector
+  from 0x007FEC  $80:FFEC  vector
+  from 0x007FF4  $80:FFF4  vector
+  from 0x007FF6  $80:FFF6  vector
+  from 0x007FF8  $80:FFF8  vector
+  from 0x007FFA  $80:FFFA  vector
+  from 0x007FFE  $80:FFFE  vector
+references from 0x000573: 1
+  to $80:8573  0x000573  jump

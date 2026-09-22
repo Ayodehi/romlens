@@ -1,0 +1,28 @@
+; Romlens export of "ROMLENS TEST"
+; SHA-256 a2462f1d74f993d0b3e10ae9425cd9b48253ac82c99913f07ef704d9c85dc6ee
+; LoROM SlowROM; range 0x000000..0x000020
+; Reassemble with asar: every operand carries an explicit width, so no
+; flag tracking is needed; `; flags:` comments are notes only.
+lorom
+
+org $008000
+; ---- code (90%) ----
+RESET_008000:  ; flags: M=1 X=1 E=1 DBR=$00 DP=$0000
+  SEI
+  CLC
+  XCE
+  SEP.b #$30
+  LDA.b #$80
+  STA.w $2100  ; INIDISP
+CODE_00800A:  ; flags: M=1 X=1 E=0 DBR=$00 DP=$0000
+  BRA CODE_00800A
+; ---- unknown (0%) ----
+  db $EA,$EA
+; ---- code (70%) ----
+NMI_00800E:  ; flags: M=1 X=1 E=0 DBR=? DP=?
+  RTI
+; ---- unknown (0%) ----
+  db $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+  db $00
+[exit code 1]
+Error: file offset 0x008000 is past the end of the ROM (32768 bytes)

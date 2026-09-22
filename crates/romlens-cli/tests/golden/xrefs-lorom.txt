@@ -1,0 +1,16 @@
+references to $00:800E: 11
+  from 0x007FE4  $00:FFE4  vector
+  from 0x007FE6  $00:FFE6  vector
+  from 0x007FE8  $00:FFE8  vector
+  from 0x007FEA  $00:FFEA  vector
+  from 0x007FEC  $00:FFEC  vector
+  from 0x007FEE  $00:FFEE  vector
+  from 0x007FF4  $00:FFF4  vector
+  from 0x007FF6  $00:FFF6  vector
+  from 0x007FF8  $00:FFF8  vector
+  from 0x007FFA  $00:FFFA  vector
+  from 0x007FFE  $00:FFFE  vector
+references from 0x00000E: 0
+references to $00:8007: 0
+references from 0x000007: 1
+  to $00:2100            write

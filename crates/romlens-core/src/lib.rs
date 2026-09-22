@@ -22,7 +22,8 @@ pub use memory::address::{FileOffset, SnesAddress};
 pub use memory::map::{AddressMap, MappingMode, MemoryClass, mirror_offset};
 pub use memory::parse::{AddressExpr, parse_address_expr};
 pub use rom::header::{ExtendedHeader, RomHeader, Vectors};
-pub use rom::image::{Resolved, RomImage, RomInfo};
+pub use rom::image::{Resolved, ResolvedAny, RomImage, RomInfo};
+pub use rom::search::{Pattern, parse_pattern, search_bytes};
 pub use viewmodel::asm_lines::{
     ASM_BATCH_HEADER_LEN, ASM_LINE_STRIDE, ASM_LINE_VERSION, LineIndex, LineKind, LineRef,
     TextOptions, encode_lines, format_lines_text,

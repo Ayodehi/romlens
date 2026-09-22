@@ -1,0 +1,15 @@
+Address:       $80:8427
+File offset:   0x000427
+Memory:        ROM
+Mirrors:       $00:8427, $80:8427
+Bytes:         u8 141 ($8D), i8 -115
+               u16 LE 3469 ($0D8D), i16 3469
+               u24 LE 4328845 ($420D8D)
+               as SNES address $42:0D8D
+Region:        code 0x00041C..0x00045F (67 bytes), confidence 90%: reached from a vector through 0 calls
+Instruction:   STA $420D at $80:8427 (3 bytes: 8D 0D 42)
+               Store the accumulator to memory (absolute)
+Flags before:  M=1 X=1 E=0 DBR=$00 DP=$0000
+Flags after:   M=1 X=1 E=0 DBR=$00 DP=$0000
+Target:        $00:420D (Data)
+References:    write $00:420D

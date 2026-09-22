@@ -1,0 +1,22 @@
+Address:       $00:8007
+File offset:   0x000007
+Memory:        ROM
+Mirrors:       $00:8007, $80:8007
+Bytes:         u8 141 ($8D), i8 -115
+               u16 LE 141 ($008D), i16 141
+               u24 LE 2162829 ($21008D)
+               as SNES address $21:008D
+Region:        code 0x000000..0x00000C (12 bytes), confidence 90%: reached from a vector through 0 calls
+Instruction:   STA $2100 at $00:8007 (3 bytes: 8D 00 21)
+               Store the accumulator to memory (absolute)
+Flags before:  M=1 X=1 E=0 DBR=$00 DP=$0000
+Flags after:   M=1 X=1 E=0 DBR=$00 DP=$0000
+Target:        $00:2100 (Data)
+References:    write $00:2100
+
+Address:       $00:2100
+File offset:   (not in ROM)
+Memory:        hardware registers
+Register:      INIDISP (W) Screen display: force blank and brightness
+Referenced by: 1
+  0x000007  write

@@ -51,7 +51,7 @@ pub fn sweep(walk: &mut Walk<'_>, control: &AnalysisControl) -> Result<Vec<InsnR
             continue;
         }
         gaps += 1;
-        if gaps % 256 == 0 {
+        if gaps.is_multiple_of(256) {
             control.check()?;
             control.report(AnalysisPhase::Sweep, run_end as u64, n as u64);
         }

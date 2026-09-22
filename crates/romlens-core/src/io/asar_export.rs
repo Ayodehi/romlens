@@ -101,7 +101,9 @@ fn data_directive(kind: RegionKind, len: u32) -> (&'static str, u32) {
     match kind {
         RegionKind::Data(DataKind::Word | DataKind::Palette | DataKind::Tilemap) => ("dw", 2),
         RegionKind::Data(DataKind::Long) => ("dl", 3),
-        RegionKind::Data(DataKind::Pointer) if len % 3 == 0 && len % 2 != 0 => ("dl", 3),
+        RegionKind::Data(DataKind::Pointer) if len.is_multiple_of(3) && !len.is_multiple_of(2) => {
+            ("dl", 3)
+        }
         RegionKind::Data(DataKind::Pointer) => ("dw", 2),
         _ => ("db", 1),
     }
@@ -250,8 +252,14 @@ pub fn export_asar(
             region_end - pos,
         );
         let mut row_end = (pos + (16 / width) * width).min(region_end);
-        if let Some(r) = snap.instructions.get(rec_i) {
-            row_end = row_end.min(r.offset.max(pos + 1));
+        match rec {
+            // An instruction the range cuts short: its bytes as one row.
+            Some(r) => row_end = row_end.min(r.end()),
+            None => {
+                if let Some(r) = snap.instructions.get(rec_i) {
+                    row_end = row_end.min(r.offset.max(pos + 1));
+                }
+            }
         }
         row_end = row_end.min((pos / bank + 1) * bank);
         for b in pos + 1..row_end {

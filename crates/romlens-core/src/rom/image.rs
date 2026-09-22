@@ -7,8 +7,9 @@ use sha2::{Digest, Sha256};
 
 use crate::error::{AddressError, RomError};
 use crate::memory::address::{FileOffset, SnesAddress};
-use crate::memory::map::{AddressMap, MappingMode};
+use crate::memory::map::{AddressMap, MappingMode, MemoryClass};
 use crate::memory::parse::{AddressExpr, parse_address_expr};
+use crate::model::hardware::{HardwareRegister, hardware_register, is_system_bank};
 use crate::rom::checksum::compute_checksum;
 use crate::rom::copier::{COPIER_HEADER_LEN, split_copier_header};
 use crate::rom::header::{RomHeader, Vectors};
@@ -47,6 +48,17 @@ pub struct RomInfo {
     pub computed_checksum: u16,
     pub checksum_ok: bool,
     pub sha256: String,
+}
+
+/// Any address resolved: ROM, RAM or hardware.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedAny {
+    pub snes_address: SnesAddress,
+    /// Present only for ROM addresses.
+    pub file_offset: Option<FileOffset>,
+    pub memory_class: MemoryClass,
+    pub register: Option<&'static HardwareRegister>,
+    pub mirrors: Vec<SnesAddress>,
 }
 
 /// An address expression resolved against one image.
@@ -210,6 +222,42 @@ impl RomImage {
 
     pub fn mirrors(&self, off: FileOffset) -> Vec<SnesAddress> {
         self.map.mirrors(off)
+    }
+
+    /// Resolve an expression that may name RAM or a hardware register as
+    /// well as ROM. File offsets must be in the image; CPU addresses may be
+    /// anything.
+    pub fn resolve_any(&self, text: &str) -> Result<ResolvedAny, AddressError> {
+        let addr = match parse_address_expr(text)? {
+            AddressExpr::File(off) => {
+                if off.as_usize() >= self.len() {
+                    return Err(AddressError::PastEnd(off.0, self.len()));
+                }
+                self.snes_address_for(off)
+                    .ok_or(AddressError::PastEnd(off.0, self.len()))?
+            }
+            AddressExpr::Snes(a) => a,
+        };
+        let file_offset = self.file_offset_for(addr);
+        let memory_class = self.map.classify(addr);
+        let register = if memory_class == MemoryClass::Hardware && is_system_bank(addr.bank()) {
+            hardware_register(addr.offset())
+        } else {
+            None
+        };
+        let mirrors = match file_offset {
+            Some(off) => self.mirrors(off),
+            None => Vec::new(),
+        };
+        Ok(ResolvedAny {
+            snes_address: file_offset
+                .and_then(|o| self.snes_address_for(o))
+                .unwrap_or(addr),
+            file_offset,
+            memory_class,
+            register,
+            mirrors,
+        })
     }
 
     /// Parse and resolve an address expression against this image.

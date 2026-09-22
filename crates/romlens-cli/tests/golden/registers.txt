@@ -1,0 +1,3 @@
+$420D  MEMSEL    W   FastROM enable
+[exit code 1]
+Error: no register at $2145

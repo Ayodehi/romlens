@@ -1,0 +1,18 @@
+Code:          13 bytes (0.0%) in 2 blocks, 8 instructions
+Data:          64 bytes (0.0%)
+Unknown:       4259763 bytes (100.0%)
+Labels:        3
+Xrefs:         14
+Warnings:      0 (0 flag conflicts)
+{
+  "bytes": 4259840,
+  "codeBytes": 13,
+  "dataBytes": 64,
+  "unknownBytes": 4259763,
+  "instructions": 8,
+  "blocks": 2,
+  "labels": 3,
+  "xrefs": 14,
+  "warnings": 0,
+  "conflicts": 0
+}
