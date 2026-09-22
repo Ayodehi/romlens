@@ -716,7 +716,21 @@ impl From<SourceArg> for SourceFilter {
     }
 }
 
+/// The stack every command runs on: what macOS and Linux give a main thread.
+/// Windows gives 1 MB, and an unoptimized build of `run`, one `match` whose
+/// arms' locals all share its frame, has outgrown that.
+const STACK: usize = 8 << 20;
+
 fn main() -> Result<()> {
+    std::thread::Builder::new()
+        .stack_size(STACK)
+        .spawn(run)
+        .expect("the command thread starts")
+        .join()
+        .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+}
+
+fn run() -> Result<()> {
     match Cli::parse().command {
         Command::Info { rom, json } => commands::rom::info(&rom, json),
         Command::Hex {
