@@ -7,7 +7,10 @@ scenario that checks the same behaviour from a script
 following the shell column gets the same answer as the CLI column.
 
 Status: macOS ✅ done, ⬜ not yet; Windows and Linux start after macOS
-Phase 1.
+Phase 1. The macOS manual pass below was completed on 21 September 2026
+(items 0.1–0.11), which also caught the NSTableView row-view leak, the
+missing app delegate and the sideways-scroll bug; the Instruments pass is
+still open.
 
 ## Phase 0
 
@@ -16,7 +19,7 @@ Phase 1.
 | 0.1 | Open a ROM (`.sfc`/`.smc`) | File › Open, Open Recent, drag onto the app; copier header stripped silently | `romlens info <rom>` prints size and "copier header stripped" when present | ✅ | ⬜ | ⬜ |
 | 0.2 | Refuse non-ROMs with the core's message | The error text comes from the core, verbatim | `romlens info /dev/zero`-style input exits 1 with "no valid SNES header" | ✅ | ⬜ | ⬜ |
 | 0.3 | Header summary | Mapping, FastROM, header offset, title, sizes, region, developer, version, checksum with mirrored-sum verdict, SHA-256, twelve vectors | `romlens info <rom>` (and `--json`) | ✅ | ⬜ | ⬜ |
-| 0.4 | Hex view, 16 bytes per row, virtualized | Scrolls the whole image smoothly; last row may be partial | `romlens hex <rom> --from <expr> --rows N` | ✅ | ⬜ | ⬜ |
+| 0.4 | Hex view, 16 bytes per row, virtualized | Scrolls the whole image smoothly; sticky column header `00`–`0F` with the selected column emphasised; last row may be partial | `romlens hex <rom> --from <expr> --rows N` | ✅ | ⬜ | ⬜ |
 | 0.5 | Dual address column with toggle | Both / SNES / file, switchable without refetching | `--address both\|snes\|file` | ✅ | ⬜ | ⬜ |
 | 0.6 | Header and vector overlays | Coloured spans over the header bytes; name and decoded value on hover or selection; click a span in the summary to jump | Rows carrying a span are marked `*` in `romlens hex`; `romlens info` lists the values | ✅ | ⬜ | ⬜ |
 | 0.7 | Jump to address | ⌘L / Ctrl+L sheet; live preview `0x00041C = $80:841C` or the core's message; Return jumps and centres the row | `romlens resolve <rom> <expr>` | ✅ | ⬜ | ⬜ |
