@@ -177,6 +177,23 @@ import Testing
         #expect(m.label?.name == "MyOwnBoot")
     }
 
+    // MARK: Navigator
+
+    @Test func theNavigatorAsksForABoundedList() async throws {
+        let m = try await model()
+        try await Fixture.settle(until: { !m.navigator.regions.isEmpty })
+        #expect(m.navigator.regions.count <= Int(NavigatorModel.regionLimit) * 2)
+        #expect(m.navigator.regions.allSatisfy { $0.kind != .unknown })
+        // Address order, because the navigator lists regions rather than
+        // ranking them.
+        for (a, b) in zip(m.navigator.regions, m.navigator.regions.dropFirst()) {
+            #expect(a.start <= b.start)
+        }
+        // The fixture has far fewer regions than the limit, so nothing is
+        // hidden and the list must not claim otherwise.
+        #expect(!m.navigator.regionsTruncated)
+    }
+
     // MARK: Menu wiring
 
     @Test func theNewMenuItemsExist() throws {

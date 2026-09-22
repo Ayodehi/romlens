@@ -67,6 +67,21 @@ struct NavigatorView: View {
     }
 
     private var regions: some View {
+        VStack(spacing: 0) {
+            if model.navigator.regionsTruncated {
+                Text("Largest \(NavigatorModel.regionLimit) of each kind")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 4)
+                    .help("A classified ROM has far more regions than a list can usefully hold; the overview strip shows all of them.")
+            }
+            regionList
+        }
+    }
+
+    private var regionList: some View {
         List(model.navigator.filteredRegions, id: \.start) { region in
             Button {
                 model.jump(to: region.start)

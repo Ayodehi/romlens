@@ -36,20 +36,36 @@ final class NavigatorModel {
     private(set) var filteredLabels: [LabelInfo] = []
     private(set) var filteredRegions: [RegionInfo] = []
     private(set) var isLoading = false
+    /// Whether the region list is the largest few rather than all of them.
+    private(set) var regionsTruncated = false
     @ObservationIgnored private var filterTask: Task<Void, Never>?
     @ObservationIgnored var filterDelay: Duration = .milliseconds(150)
+
+    /// The largest of each kind, per kind.
+    ///
+    /// The navigator used to ask for every region and filter shell-side, which
+    /// was fine at a thousand and is not at the forty thousand a trace import
+    /// produces — the whole list would cross the FFI as generated records on
+    /// every analysis, to be mostly discarded. The largest blocks are what a
+    /// person navigates by, and the list says when it is not showing
+    /// everything rather than pretending it is.
+    static let regionLimit: UInt32 = 500
 
     /// Load from the workbench off the main actor.
     func reload(workbench: Workbench, rom: Rom) async {
         isLoading = true
+        let limit = Self.regionLimit
         let (labels, regions, banks) = await Task.detached(priority: .userInitiated) {
             let labels = workbench.labels()
-            let regions = workbench.regionsSummary().filter { $0.kind != .unknown }
+            var regions = workbench.regionsOfKind(kind: .code, limit: limit)
+            regions.append(contentsOf: workbench.regionsOfKind(kind: .data, limit: limit))
+            regions.sort { $0.start < $1.start }
             let banks = Self.banks(rom: rom)
             return (labels, regions, banks)
         }.value
         self.labels = labels
         self.regions = regions
+        regionsTruncated = regions.count >= Int(limit)
         self.banks = banks
         applyFilter()
         isLoading = false
