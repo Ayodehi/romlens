@@ -50,7 +50,7 @@ pass is listed below and still to run. The Phase 2 rows were written from
 | 1.12 | Undo and redo | ⌘Z / ⇧⌘Z with the command's title; one stack in the core; the document's edited state follows every command | `romlens project <P> history` lists the package's contents | 🧪 | ⬜ | ⬜ |
 | 1.13 | Project package | Opening a ROM makes an untitled `.romlens`; Save/Save As/Revert/Duplicate; reopening finds the ROM by hash, then the remembered path, then asks (and rejects a wrong file) | `romlens project <P> init --rom <rom>`; every command takes `--project` | 🧪 | ⬜ | ⬜ |
 | 1.14 | Export | File › Export ▸ Assembly Listing… (byte columns off by default, docs/12 message), Labels and Comments…, Symbol File… | `romlens export asm <rom> --out F [--range a..b]`, `export sym [--include-auto]` | 🧪 | ⬜ | ⬜ |
-| 1.15 | Byte search | (Phase 2 UI) | `romlens search <rom> "78 18 ?? 5C"` | n/a | ⬜ | ⬜ |
+| 1.15 | Byte search | (see 2.7) | `romlens search <rom> "78 18 ?? 5C"` | n/a | ⬜ | ⬜ |
 | 1.16 | Hardware registers | `STA $420D` carries `; MEMSEL`; the inspector shows the register's access and description | `romlens registers [address]` | 🧪 | ⬜ | ⬜ |
 | 1.17 | Hex region tint | Hex rows tint code and data bytes by confidence after analysis without a refetch | (the hex-row batch's span lane) | 🧪 | ⬜ | ⬜ |
 | 1.18 | Range selection | Shift+arrows and shift-click extend the highlighted range in either canvas; mouse-drag and cross-canvas drag are not in Phase 1 | n/a (interaction) | 🧪 | ⬜ | ⬜ |
@@ -62,28 +62,30 @@ track 2B (graphics) 2.20–2.27 and track 2C (recordings) 2.28–2.36. The
 numbering leaves a gap after 2.8 so 2A can grow without renumbering the other
 tracks.
 
-A row is marked here only when the *shell* exposes it, so every Phase 2 row is
-still ⬜. The core and CLI behind 2.1 to 2.6 and 2.8 landed on 22 September
-2026 — jump tables, scored heuristics, trace and symbol import, typed data,
-the overview strip's data and the accuracy harness,
-each with goldens that need no commercial ROM — and what those rows still want
-is the shell work in tasks T8 and T10. 2.3's DiztinGUIsh column is dropped
-rather than deferred: the format was never verified, and a Diz user can export
-a bsnes usage map or a WLA `.sym`, both of which are read. Nothing in 2B or 2C
-is started.
+Track 2A landed on 22 September 2026: jump tables, scored heuristics, trace
+and symbol import, typed data, the overview strip, byte and text search, and
+the accuracy harness, each with goldens that need no commercial ROM. Its rows
+are 🧪 — built and covered by the app test bundle, not yet verified by hand —
+except 2.8, whose shell half is deliberately not built: the toolbar already
+reports the classified percentage from the analysis, and the accuracy number
+needs ground truth that never ships, so it stays a CLI capability.
+
+2.3's DiztinGUIsh column is dropped rather than deferred: the format was never
+verified, and a Diz user can export a bsnes usage map or a WLA `.sym`, both of
+which are read. Nothing in 2B or 2C is started.
 
 ### 2A — classification
 
 | # | Capability | Shell must expose | CLI scenario | macOS | Win | Linux |
 |---|---|---|---|---|---|---|
-| 2.1 | Jump tables resolved | Table rows render `dw CODE_…` with a "jump table" region badge; the evidence popover names the dispatching instruction and links to it; the `computed jump` warning becomes informational | `romlens tables <rom> [--json]` | ⬜ | ⬜ | ⬜ |
-| 2.2 | Heuristic scores visible | The evidence popover lists every heuristic with its score, sorted descending, with the detail string ("entropy 7.4 bits/byte over `$96:0000`–`$96:8000`") | `romlens heuristics <rom> [--kind …] [--from --to] [--json]` | ⬜ | ⬜ | ⬜ |
-| 2.3 | Trace and coverage import | File › Import ▸ Execution Trace…; a coverage lane in the overview strip; the analysis status reports traced bytes | `romlens import trace <P> --rom R <file> [--format cdl\|usage]` | ⬜ | ⬜ | ⬜ |
-| 2.4 | Symbol import | File › Import ▸ Symbols…; imported labels visibly distinct from auto; collisions and rewritten names reported, never silently dropped | `romlens import symbols <P> --rom R <file> [--format wla\|nocash\|lbl] [--source NAME]` | ⬜ | ⬜ | ⬜ |
-| 2.5 | Data typing with parameters | Mark as ▸ submenu covering every data kind, with a sheet for stride, bank rule, element kind and bpp; a pointer table renders as labelled targets with xrefs | `romlens project <P> mark <expr> <len> table --stride 2 --elem code\|pointer\|raw --bank same\|$C0\|entry` | ⬜ | ⬜ | ⬜ |
-| 2.6 | Region overview strip | A minimap under the editor coloured by kind and confidence, hatched where a bucket is mixed, with the visible range as a playhead; click and drag to scroll | `romlens map <rom> [--buckets N] [--json]` | ⬜ | ⬜ | ⬜ |
-| 2.7 | Byte and text search | ⌘F sheet validating the pattern live against the core's message; a results list in the right pane; ⌘G / ⇧⌘G for next and previous; Return jumps and centres | `romlens search <rom> "78 18 ?? 5C"`, `romlens search <rom> --text "Nintendo" [--ignore-case]` | ⬜ | ⬜ | ⬜ |
-| 2.8 | Classifier accuracy | A line at the end of analysis reporting the classified percentage | `romlens accuracy <rom> --truth F [--project P] [--json] [--min-f1 X]`, `romlens truth from-cdl <cdl> --rom R --out F` | ⬜ | ⬜ | ⬜ |
+| 2.1 | Jump tables resolved | Table rows render `dw CODE_…` with a "jump table" region badge; the evidence popover names the dispatching instruction and links to it; the `computed jump` warning becomes informational | `romlens tables <rom> [--json]` | 🧪 | ⬜ | ⬜ |
+| 2.2 | Heuristic scores visible | The evidence popover lists every heuristic with its score, sorted descending, with the detail string ("entropy 7.4 bits/byte over `$96:0000`–`$96:8000`") | `romlens heuristics <rom> [--kind …] [--from --to] [--json]` | 🧪 | ⬜ | ⬜ |
+| 2.3 | Trace and coverage import | File › Import ▸ Execution Trace…; a coverage lane in the overview strip; the analysis status reports traced bytes | `romlens import trace <P> --rom R <file> [--format cdl\|usage]` | 🧪 | ⬜ | ⬜ |
+| 2.4 | Symbol import | File › Import ▸ Symbols…; imported labels visibly distinct from auto; collisions and rewritten names reported, never silently dropped | `romlens import symbols <P> --rom R <file> [--format wla\|nocash\|lbl] [--source NAME]` | 🧪 | ⬜ | ⬜ |
+| 2.5 | Data typing with parameters | Mark as ▸ submenu covering every data kind, with a sheet for stride, bank rule, element kind and bpp; a pointer table renders as labelled targets with xrefs | `romlens project <P> mark <expr> <len> table --stride 2 --elem code\|pointer\|raw --bank same\|$C0\|entry` | 🧪 | ⬜ | ⬜ |
+| 2.6 | Region overview strip | A minimap under the editor coloured by kind and confidence, hatched where a bucket is mixed, with the selection as a caret and a lane for traced bytes; click and drag to jump | `romlens map <rom> [--buckets N] [--json]` | 🧪 | ⬜ | ⬜ |
+| 2.7 | Byte and text search | ⌘F sheet reporting the core's message; a results list under the editor showing each hit's bytes in context; ⌘G / ⇧⌘G for next and previous; Return jumps and centres | `romlens search <rom> "78 18 ?? 5C"`, `romlens search <rom> --text "Nintendo" [--ignore-case]` | 🧪 | ⬜ | ⬜ |
+| 2.8 | Classifier accuracy | A line at the end of analysis reporting the classified percentage | `romlens accuracy <rom> --truth F\|--fixture [--project P] [--json]`, `romlens truth from-cdl <rom> <cdl> --out F` | ⬜ | ⬜ | ⬜ |
 
 ### 2B — graphics
 

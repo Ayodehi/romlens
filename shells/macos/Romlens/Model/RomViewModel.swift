@@ -29,7 +29,7 @@ final class RomViewModel {
     }
 
     enum Sheet: Identifiable {
-        case jump, renameLabel, comment, flags
+        case jump, renameLabel, comment, flags, find, dataType
         var id: Self { self }
     }
 
@@ -45,6 +45,7 @@ final class RomViewModel {
     let rowCount: UInt32
     let session: WorkbenchSession
     let navigator = NavigatorModel()
+    let search = SearchModel()
     @ObservationIgnored let cache: HexRowCache
     @ObservationIgnored let asmCache: AsmLineCache
     let metrics = MonoMetrics()
@@ -86,6 +87,11 @@ final class RomViewModel {
     var rightPane: RightPane = .inspector
     var isNavigatorVisible = true
     var isInspectorVisible = true
+    var isResultsVisible = false
+    var isStripVisible = true
+    /// Bumped when the strip's data is stale; it re-reduces rather than
+    /// redrawing what the last analysis said.
+    private(set) var stripGeneration = 0
 
     /// Compatibility with the Phase 0 jump sheet binding.
     var isShowingJumpSheet: Bool {
@@ -152,6 +158,7 @@ final class RomViewModel {
             asmLineCount = workbench.lineCount()
             asmGeneration += 1
             lineGeneration += 1
+            stripGeneration += 1
             refreshSelectionDetails()
             Task { await navigator.reload(workbench: workbench, rom: rom) }
         case .project:
@@ -350,10 +357,46 @@ final class RomViewModel {
     // MARK: Editing
 
     /// Mark the highlighted range (or the selected item) with a kind.
-    func mark(_ kind: OverrideKind, dataKind: DataKind = .byte) {
+    func mark(
+        _ kind: OverrideKind,
+        dataKind: DataKind = .byte,
+        stride: UInt8? = nil,
+        bpp: UInt8? = nil,
+        elem: TableElem? = nil,
+        bank: BankRule? = nil
+    ) {
         guard let range = highlightedRange else { return }
-        try? session.mark(start: range.lowerBound, len: UInt32(range.count), kind: kind, dataKind: kind == .data ? dataKind : nil)
+        try? session.mark(
+            start: range.lowerBound,
+            len: UInt32(range.count),
+            kind: kind,
+            dataKind: kind == .data ? dataKind : nil,
+            stride: stride,
+            bpp: bpp,
+            elem: elem,
+            bank: bank
+        )
         refreshSelectionDetails()
+    }
+
+    // MARK: Find
+
+    func runSearch() {
+        search.search(in: workbench)
+        if let hit = search.hits.first {
+            jump(to: hit.fileOffset)
+        }
+    }
+
+    /// ⌘G / ⇧⌘G.
+    func stepSearch(by delta: Int) {
+        guard let hit = search.step(by: delta) else { return }
+        jump(to: hit.fileOffset)
+    }
+
+    func goToHit(at index: Int) {
+        guard let hit = search.select(index) else { return }
+        jump(to: hit.fileOffset)
     }
 
     func clearMark() {

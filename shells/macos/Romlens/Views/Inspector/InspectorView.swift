@@ -66,7 +66,9 @@ struct SelectionHeader: View {
                     .font(.title3.monospaced().weight(.semibold))
                 Spacer()
                 if let region = model.region {
-                    RegionChip(region: region)
+                    RegionChip(region: region) { address in
+                        model.jump(toSnesAddress: address)
+                    }
                 }
             }
             if let offset = model.selectedOffset {
@@ -86,7 +88,30 @@ struct SelectionHeader: View {
 /// The region kind with an evidence popover.
 struct RegionChip: View {
     let region: RegionInfo
+    /// Jump to a dispatcher or a target the evidence names.
+    var goTo: ((UInt32) -> Void)?
     @State private var showEvidence = false
+
+    /// Strongest first. A region can carry several pieces of evidence and the
+    /// one that decided it should lead; "why is this data?" is answered by the
+    /// best answer, not the first one the pipeline happened to record.
+    private var sorted: [EvidenceInfo] {
+        region.evidence.sorted { a, b in
+            if a.score != b.score { return a.score > b.score }
+            return rank(a.kind) < rank(b.kind)
+        }
+    }
+
+    /// Observation, then the user, then inference.
+    private func rank(_ kind: EvidenceKind) -> Int {
+        switch kind {
+        case .user: 0
+        case .trace: 1
+        case .imported: 2
+        case .vectorReach: 3
+        case .heuristic: 4
+        }
+    }
 
     var body: some View {
         Button {
@@ -107,8 +132,20 @@ struct RegionChip: View {
                 if region.evidence.isEmpty {
                     Text("Nothing reached these bytes.").foregroundStyle(.secondary)
                 }
-                ForEach(Array(region.evidence.enumerated()), id: \.offset) { _, e in
-                    Label(e.detail, systemImage: icon(for: e.kind))
+                ForEach(Array(sorted.enumerated()), id: \.offset) { _, e in
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Label(e.detail, systemImage: icon(for: e.kind))
+                        if e.score > 0, e.score < 1 {
+                            Text(String(format: "%.0f%%", e.score * 100))
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
+                        if let target = dispatcher(in: e.detail), let goTo {
+                            Button("Go") { goTo(target) }
+                                .buttonStyle(.link)
+                                .help("Go to the instruction this evidence names")
+                        }
+                    }
                 }
                 Text("\(formatFileOffset(offset: region.start)) · \(region.len) bytes")
                     .font(.caption.monospaced())
@@ -117,6 +154,23 @@ struct RegionChip: View {
             .padding()
             .frame(minWidth: 260)
         }
+    }
+
+    /// The `$bb:aaaa` a jump table's evidence names, as a SNES address.
+    ///
+    /// Parsing the detail string is not elegant, but the alternative — a typed
+    /// back-reference on every evidence variant, across the FFI — is a lot of
+    /// surface for one link, and the string is ours.
+    private func dispatcher(in detail: String) -> UInt32? {
+        guard let range = detail.range(of: #"\$[0-9A-F]{2}:[0-9A-F]{4}"#, options: .regularExpression)
+        else { return nil }
+        let text = detail[range].dropFirst()
+        let parts = text.split(separator: ":")
+        guard parts.count == 2,
+              let bank = UInt32(parts[0], radix: 16),
+              let offset = UInt32(parts[1], radix: 16)
+        else { return nil }
+        return bank << 16 | offset
     }
 
     private func icon(for kind: EvidenceKind) -> String {
@@ -173,8 +227,16 @@ struct InstructionSection: View {
                 ForEach(insn.assumptions, id: \.self) { a in
                     Label(a, systemImage: "questionmark.circle").font(.caption).foregroundStyle(.orange)
                 }
-                ForEach(Array(model.warnings.enumerated()), id: \.offset) { _, w in
-                    Label(w.text, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
+                // Sorted by severity so a gap in the map is not lost among
+                // the notes about decisions the analyzer made on purpose.
+                ForEach(Array(model.warnings.sorted { a, b in
+                    a.severity == .warning && b.severity == .info
+                }.enumerated()), id: \.offset) { _, w in
+                    Label(w.text, systemImage: w.severity == .warning
+                        ? "exclamationmark.triangle"
+                        : "info.circle")
+                        .font(.caption)
+                        .foregroundStyle(w.severity == .warning ? Color.orange : Color.secondary)
                 }
             }
         )

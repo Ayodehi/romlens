@@ -277,6 +277,49 @@ pub fn core_data_kind(
     }
 }
 
+/// What an import did, for the sheet that reports it.
+///
+/// Every count is here because nothing may be dropped silently: a shell that
+/// shows only the successes is the bug `io::import::symbols` is written to
+/// prevent.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct ImportResult {
+    pub source: String,
+    pub format: String,
+    pub labels_added: u32,
+    pub labels_replaced: u32,
+    pub comments_added: u32,
+    /// Addresses left alone because the user had named them.
+    pub kept_user: u32,
+    /// `original -> rewritten`, for the names that had to change.
+    pub rewritten: Vec<String>,
+    /// Lines that were not understood.
+    pub skipped: Vec<String>,
+    /// The file's leading comment block, kept with the project.
+    pub notice: String,
+    /// For a trace: bytes seen to execute and to be read.
+    pub executed_bytes: u64,
+    pub read_bytes: u64,
+    /// Whether the trace recorded M/X widths.
+    pub has_widths: bool,
+}
+
+/// One search result, with enough context to judge it without a second call.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct SearchHit {
+    pub file_offset: u32,
+    pub snes_address: Option<String>,
+    /// Bytes matched.
+    pub len: u32,
+    /// The match and some bytes either side.
+    pub context: Vec<u8>,
+    /// Where the match starts inside `context`.
+    pub match_start: u32,
+    /// What the analyzer calls these bytes, so a hit inside code reads
+    /// differently from one inside a table.
+    pub region_kind: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
 pub enum EvidenceKind {
     VectorReach,

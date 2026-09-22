@@ -147,6 +147,24 @@ final class WorkbenchSession {
         finishCommand(affectsAnalysis: affects)
     }
 
+    /// Import a trace or a symbol file.
+    ///
+    /// Through the session rather than straight to the workbench, so an import
+    /// schedules the re-analysis and marks the document dirty exactly as an
+    /// edit does. An import that left the map showing the state before it
+    /// would be worse than no import.
+    func importTrace(source: String, bytes: Data) throws -> ImportResult {
+        let result = try workbench.importTrace(source: source, bytes: bytes)
+        finishCommand(affectsAnalysis: true)
+        return result
+    }
+
+    func importSymbols(source: String, text: String) throws -> ImportResult {
+        let result = try workbench.importSymbols(source: source, text: text)
+        finishCommand(affectsAnalysis: true)
+        return result
+    }
+
     @discardableResult
     func undo() -> Bool {
         let affects = workbench.needsAnalysis()

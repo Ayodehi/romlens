@@ -792,6 +792,208 @@ impl Workbench {
         ))
     }
 
+    // ---- importing ---------------------------------------------------------
+
+    /// Import a Mesen2 CDL or a bsnes-plus usage map.
+    ///
+    /// Not a `Command`: an import is a body of observation rather than an edit
+    /// with an inverse, and putting two megabytes of bitsets on the undo stack
+    /// would be absurd. It marks the project dirty and re-analyzes like one.
+    pub fn import_trace(
+        &self,
+        source: String,
+        bytes: Vec<u8>,
+    ) -> Result<ImportResult, RomlensError> {
+        let (format, coverage) = io::import::read_trace(&bytes, &self.rom.image, None)?;
+        if coverage.is_empty() {
+            return Err(RomlensError::Project {
+                msg: format!("{source} records nothing for this ROM"),
+            });
+        }
+        let result = ImportResult {
+            source: source.clone(),
+            format: format.name().to_owned(),
+            labels_added: 0,
+            labels_replaced: 0,
+            comments_added: 0,
+            kept_user: 0,
+            rewritten: Vec::new(),
+            skipped: Vec::new(),
+            notice: String::new(),
+            executed_bytes: coverage.executed.count(),
+            read_bytes: coverage.read.count(),
+            has_widths: coverage.flags.recorded,
+        };
+        let (generation, dirty) = {
+            let mut inner = self.lock();
+            inner.project.add_trace(
+                model::TraceRecord {
+                    source,
+                    format: format.name().to_owned(),
+                    executed_bytes: result.executed_bytes,
+                    read_bytes: result.read_bytes,
+                },
+                coverage,
+            );
+            inner.undo.clear();
+            self.after_edit(&mut inner, true)
+        };
+        self.emit(WorkbenchEvent::ProjectChanged { dirty });
+        self.emit(WorkbenchEvent::ViewChanged {
+            view_generation: generation,
+        });
+        Ok(result)
+    }
+
+    /// Import a symbol file. One undo entry, all or nothing.
+    pub fn import_symbols(
+        &self,
+        source: String,
+        text: String,
+    ) -> Result<ImportResult, RomlensError> {
+        use romlens_core::io::import::symbols;
+        let file = symbols::read(&text, None)?;
+        let format = symbols::detect(&text);
+        let (result, generation, dirty) = {
+            let mut inner = self.lock();
+            let plan = symbols::plan(&self.rom.image, &inner.project, &file);
+            let result = ImportResult {
+                source: source.clone(),
+                format: format.name().to_owned(),
+                labels_added: plan.labels_added as u32,
+                labels_replaced: plan.replaced as u32,
+                comments_added: plan.comments_added as u32,
+                kept_user: plan.kept_user.len() as u32,
+                rewritten: file
+                    .rewritten
+                    .iter()
+                    .map(|(from, to)| format!("{from} -> {to}"))
+                    .collect(),
+                skipped: file.skipped.clone(),
+                notice: file.notice.clone(),
+                executed_bytes: 0,
+                read_bytes: 0,
+                has_widths: false,
+            };
+            if !plan.commands.is_empty() {
+                let entry = inner.project.apply_batch(
+                    &self.rom.image,
+                    plan.commands,
+                    model::Origin::Import(source.clone()),
+                )?;
+                inner.undo.push(entry);
+            }
+            inner.project.add_import(model::ImportRecord {
+                source,
+                format: format.name().to_owned(),
+                labels: file.labels.len() as u64,
+                comments: file.comments.len() as u64,
+                notice: file.notice,
+            });
+            let (generation, dirty) = self.after_edit(&mut inner, true);
+            (result, generation, dirty)
+        };
+        self.emit(WorkbenchEvent::ProjectChanged { dirty });
+        self.emit(WorkbenchEvent::ViewChanged {
+            view_generation: generation,
+        });
+        Ok(result)
+    }
+
+    /// What has been imported, for the inspector and the licence notices.
+    pub fn imports(&self) -> Vec<ImportResult> {
+        let inner = self.lock();
+        let mut out: Vec<ImportResult> = inner
+            .project
+            .traces
+            .iter()
+            .map(|t| ImportResult {
+                source: t.source.clone(),
+                format: t.format.clone(),
+                labels_added: 0,
+                labels_replaced: 0,
+                comments_added: 0,
+                kept_user: 0,
+                rewritten: Vec::new(),
+                skipped: Vec::new(),
+                notice: String::new(),
+                executed_bytes: t.executed_bytes,
+                read_bytes: t.read_bytes,
+                has_widths: false,
+            })
+            .collect();
+        out.extend(inner.project.imports.iter().map(|i| ImportResult {
+            source: i.source.clone(),
+            format: i.format.clone(),
+            labels_added: i.labels as u32,
+            labels_replaced: 0,
+            comments_added: i.comments as u32,
+            kept_user: 0,
+            rewritten: Vec::new(),
+            skipped: Vec::new(),
+            notice: i.notice.clone(),
+            executed_bytes: 0,
+            read_bytes: 0,
+            has_widths: false,
+        }));
+        out
+    }
+
+    /// Search for hex bytes or text, with context around each hit.
+    ///
+    /// `text` matches the pattern's own bytes instead of parsing it as hex,
+    /// and `ignore_case` matches ASCII letters in either case. The case mask
+    /// is applied inside the search rather than over its results, or `max`
+    /// would be spent on candidates before the first real hit.
+    pub fn search(
+        &self,
+        pattern: String,
+        text: bool,
+        ignore_case: bool,
+        start: u32,
+        len: u32,
+        max: u32,
+        context: u32,
+    ) -> Result<Vec<SearchHit>, RomlensError> {
+        let bytes = self.rom.image.bytes();
+        let (offsets, width) = if text || ignore_case {
+            let (p, mask) = romlens_core::pattern_from_text(&pattern, ignore_case)?;
+            let n = p.len() as u32;
+            (
+                romlens_core::search_masked(bytes, &p, &mask, start, len, max),
+                n,
+            )
+        } else {
+            let p = romlens_core::parse_pattern(&pattern)?;
+            let n = p.len() as u32;
+            (romlens_core::search_bytes(bytes, &p, start, len, max), n)
+        };
+        let inner = self.lock();
+        let n = bytes.len() as u32;
+        Ok(offsets
+            .into_iter()
+            .map(|offset| {
+                let from = offset.saturating_sub(context);
+                let to = (offset + width + context).min(n);
+                SearchHit {
+                    file_offset: offset,
+                    snes_address: self
+                        .rom
+                        .image
+                        .snes_address_for(FileOffset(offset))
+                        .map(|a| a.to_string()),
+                    len: width,
+                    context: bytes[from as usize..to as usize].to_vec(),
+                    match_start: offset - from,
+                    region_kind: inner
+                        .snapshot
+                        .region_at(FileOffset(offset))
+                        .map_or_else(|| "unknown".to_owned(), |r| r.kind.name().to_owned()),
+                }
+            })
+            .collect())
+    }
+
     /// The raw text of one instruction without labels (for copy).
     pub fn plain_text(&self, file_offset: u32) -> Option<String> {
         let inner = self.lock();

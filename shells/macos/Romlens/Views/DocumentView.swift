@@ -29,7 +29,19 @@ struct DocumentView: View {
             NavigatorView(model: model)
                 .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 360)
         } detail: {
-            EditorView(model: model)
+            VStack(spacing: 0) {
+                if model.isStripVisible {
+                    RegionStripView(model: model)
+                        .frame(height: 28)
+                        .help("The whole ROM: one column per pixel. Click to jump.")
+                    Divider()
+                }
+                EditorView(model: model)
+                if model.isResultsVisible {
+                    Divider()
+                    SearchResultsView(model: model)
+                }
+            }
         }
         .inspector(isPresented: inspectorPresented) {
             RightPaneView(model: model)
@@ -86,6 +98,8 @@ struct DocumentView: View {
             case .renameLabel: RenameLabelSheet(model: model)
             case .comment: CommentSheet(model: model)
             case .flags: FlagOverrideSheet(model: model)
+            case .find: FindSheet(model: model)
+            case .dataType: DataTypeSheet(model: model)
             }
         }
     }

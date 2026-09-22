@@ -54,6 +54,10 @@ enum MainMenu {
             item("Labels and Comments…", #selector(RomWindowController.exportAnnotations(_:))),
             item("Symbol File…", #selector(RomWindowController.exportSymbols(_:))),
         ])
+        let importMenu = submenu("Import", [
+            item("Execution Trace…", #selector(RomWindowController.importTrace(_:))),
+            item("Symbols…", #selector(RomWindowController.importSymbols(_:))),
+        ])
         return submenu("File", [
             item("Open…", #selector(NSDocumentController.openDocument(_:)), "o"),
             recent,
@@ -64,6 +68,7 @@ enum MainMenu {
             item("Duplicate", #selector(NSDocument.duplicate(_:)), "s", modifiers: [.command, .shift, .option]),
             item("Revert to Saved", #selector(NSDocument.revertToSaved(_:))),
             .separator(),
+            importMenu,
             export,
         ])
     }
@@ -81,15 +86,37 @@ enum MainMenu {
             item("Rename Label…", #selector(RomWindowController.renameLabel(_:))),
             item("Comment…", #selector(RomWindowController.editComment(_:))),
             .separator(),
-            item("Mark as Code", #selector(RomWindowController.markAsCode(_:))),
-            item("Mark as Data", #selector(RomWindowController.markAsData(_:))),
-            item("Mark as Unknown", #selector(RomWindowController.markAsUnknown(_:))),
+            markAsMenu(),
             item("Clear Mark", #selector(RomWindowController.clearMark(_:))),
             item("Set Flags…", #selector(RomWindowController.setFlags(_:))),
             .separator(),
             item("Copy Address", #selector(RomWindowController.copyAddress(_:)), "c", modifiers: [.command, .option]),
             item("Copy Line", #selector(RomWindowController.copyLine(_:)), "c", modifiers: [.command, .shift]),
         ])
+    }
+
+    /// Every kind reachable in one gesture, with the parameterised ones
+    /// behind a sheet. The three Phase 1 items keep their wording and their
+    /// place at the top, so existing muscle memory is untouched.
+    private static func markAsMenu() -> NSMenuItem {
+        var items = [
+            item("Code", #selector(RomWindowController.markAsCode(_:))),
+            item("Data", #selector(RomWindowController.markAsData(_:))),
+            item("Unknown", #selector(RomWindowController.markAsUnknown(_:))),
+            .separator(),
+            item("Data…", #selector(RomWindowController.markAsDataWithOptions(_:))),
+            .separator(),
+        ]
+        items.append(contentsOf: [
+            item("String", #selector(RomWindowController.markAsString(_:))),
+            item("Word", #selector(RomWindowController.markAsWord(_:))),
+            item("Pointer", #selector(RomWindowController.markAsPointer(_:))),
+            item("Graphics", #selector(RomWindowController.markAsGraphics(_:))),
+            item("Palette", #selector(RomWindowController.markAsPalette(_:))),
+            item("Tilemap", #selector(RomWindowController.markAsTilemap(_:))),
+            item("Compressed", #selector(RomWindowController.markAsCompressed(_:))),
+        ])
+        return submenu("Mark as", items)
     }
 
     private static func viewMenu() -> NSMenuItem {
@@ -104,6 +131,8 @@ enum MainMenu {
             .separator(),
             item("Show Navigator", #selector(RomWindowController.toggleNavigator(_:)), "0"),
             item("Show Inspector", #selector(RomWindowController.toggleInspector(_:)), "0", modifiers: [.command, .option]),
+            item("Show Overview Strip", #selector(RomWindowController.toggleStrip(_:)), "0", modifiers: [.command, .shift]),
+            item("Show Find Results", #selector(RomWindowController.toggleResults(_:)), "0", modifiers: [.command, .control]),
             .separator(),
             item("Enter Full Screen", #selector(NSWindow.toggleFullScreen(_:)), "f", modifiers: [.command, .control]),
         ])
@@ -111,6 +140,10 @@ enum MainMenu {
 
     private static func goMenu() -> NSMenuItem {
         submenu("Go", [
+            item("Find…", #selector(RomWindowController.find(_:)), "f"),
+            item("Find Next", #selector(RomWindowController.findNext(_:)), "g"),
+            item("Find Previous", #selector(RomWindowController.findPrevious(_:)), "G", modifiers: [.command, .shift]),
+            .separator(),
             item("Jump to Address…", #selector(RomWindowController.jumpToAddress(_:)), "l"),
             item("Follow Reference", #selector(RomWindowController.followReference(_:)), "\r"),
             item("Back", #selector(RomWindowController.goBack(_:)), "["),

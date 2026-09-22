@@ -226,6 +226,12 @@ enum Command {
         to: Option<String>,
         #[arg(long, default_value_t = 100)]
         max: u32,
+        /// Match the pattern as text rather than as hex bytes.
+        #[arg(long)]
+        text: bool,
+        /// Match text in either case. Implies `--text`.
+        #[arg(long)]
+        ignore_case: bool,
     },
     /// Create or edit a .romlens package.
     Project {
@@ -627,7 +633,17 @@ fn main() -> Result<()> {
             from,
             to,
             max,
-        } => commands::search::run(&rom, &pattern, from.as_deref(), to.as_deref(), max),
+            text,
+            ignore_case,
+        } => commands::search::run(commands::search::SearchArgs {
+            rom: &rom,
+            pattern: &pattern,
+            from: from.as_deref(),
+            to: to.as_deref(),
+            max,
+            text,
+            ignore_case,
+        }),
         Command::Project { path, action } => match action {
             ProjectCommand::Init { rom } => commands::project::init(&path, &rom),
             ProjectCommand::Label { expr, name, rom } => {

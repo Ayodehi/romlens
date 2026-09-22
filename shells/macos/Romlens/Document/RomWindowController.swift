@@ -33,6 +33,9 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
     // MARK: Navigation
 
     @objc func jumpToAddress(_ sender: Any?) { model.activeSheet = .jump }
+    @objc func find(_ sender: Any?) { model.activeSheet = .find }
+    @objc func findNext(_ sender: Any?) { model.stepSearch(by: 1) }
+    @objc func findPrevious(_ sender: Any?) { model.stepSearch(by: -1) }
     @objc func followReference(_ sender: Any?) { model.followReference() }
     @objc func goBack(_ sender: Any?) { model.goBack() }
     @objc func goForward(_ sender: Any?) { model.goForward() }
@@ -56,6 +59,8 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
     // content.
     @objc func toggleNavigator(_ sender: Any?) { withAnimation { model.isNavigatorVisible.toggle() } }
     @objc func toggleInspector(_ sender: Any?) { withAnimation { model.isInspectorVisible.toggle() } }
+    @objc func toggleStrip(_ sender: Any?) { withAnimation { model.isStripVisible.toggle() } }
+    @objc func toggleResults(_ sender: Any?) { withAnimation { model.isResultsVisible.toggle() } }
 
     // MARK: Editing
 
@@ -66,6 +71,18 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
     @objc func markAsCode(_ sender: Any?) { model.mark(.code) }
     @objc func markAsData(_ sender: Any?) { model.mark(.data) }
     @objc func markAsUnknown(_ sender: Any?) { model.mark(.unknown) }
+    @objc func markAsDataWithOptions(_ sender: Any?) {
+        if model.highlightedRange != nil { model.activeSheet = .dataType }
+    }
+    @objc func markAsString(_ sender: Any?) { model.mark(.data, dataKind: .string) }
+    @objc func markAsWord(_ sender: Any?) { model.mark(.data, dataKind: .word) }
+    @objc func markAsPointer(_ sender: Any?) {
+        model.mark(.data, dataKind: .pointer, bank: .sameBank)
+    }
+    @objc func markAsGraphics(_ sender: Any?) { model.mark(.data, dataKind: .graphics, bpp: 4) }
+    @objc func markAsPalette(_ sender: Any?) { model.mark(.data, dataKind: .palette) }
+    @objc func markAsTilemap(_ sender: Any?) { model.mark(.data, dataKind: .tilemap) }
+    @objc func markAsCompressed(_ sender: Any?) { model.mark(.data, dataKind: .compressed) }
     @objc func clearMark(_ sender: Any?) { model.clearMark() }
     @objc func setFlags(_ sender: Any?) { if model.selectedOffset != nil { model.activeSheet = .flags } }
 
@@ -86,6 +103,14 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
     @objc func exportAssembly(_ sender: Any?) { export(.assembly) }
     @objc func exportAnnotations(_ sender: Any?) { export(.annotations) }
     @objc func exportSymbols(_ sender: Any?) { export(.symbols) }
+
+    @objc func importTrace(_ sender: Any?) { importFile(.trace) }
+    @objc func importSymbols(_ sender: Any?) { importFile(.symbols) }
+
+    private func importFile(_ kind: ImportController.Kind) {
+        guard let document = projectDocument else { return }
+        ImportController.run(kind, document: document, window: window)
+    }
 
     private func export(_ kind: ExportController.Kind) {
         guard let document = projectDocument else { return }
@@ -127,8 +152,20 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
             return model.instruction?.targetFileOffset != nil || model.inspection?.pointerTargetFileOffset != nil
         case #selector(renameLabel(_:)), #selector(editComment(_:)), #selector(markAsCode(_:)),
              #selector(markAsData(_:)), #selector(markAsUnknown(_:)), #selector(clearMark(_:)),
-             #selector(setFlags(_:)), #selector(copyAddress(_:)), #selector(copyLine(_:)):
+             #selector(setFlags(_:)), #selector(copyAddress(_:)), #selector(copyLine(_:)),
+             #selector(markAsDataWithOptions(_:)), #selector(markAsString(_:)),
+             #selector(markAsWord(_:)), #selector(markAsPointer(_:)), #selector(markAsGraphics(_:)),
+             #selector(markAsPalette(_:)), #selector(markAsTilemap(_:)),
+             #selector(markAsCompressed(_:)):
             return hasSelection
+        case #selector(findNext(_:)), #selector(findPrevious(_:)):
+            return model.search.hasResults
+        case #selector(toggleResults(_:)):
+            item.title = model.isResultsVisible ? "Hide Find Results" : "Show Find Results"
+            return model.search.hasResults
+        case #selector(toggleStrip(_:)):
+            item.title = model.isStripVisible ? "Hide Overview Strip" : "Show Overview Strip"
+            return true
         case #selector(exportAssembly(_:)), #selector(exportAnnotations(_:)), #selector(exportSymbols(_:)):
             return model.hasDisassembly
         default:
