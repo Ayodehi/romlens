@@ -195,6 +195,7 @@ final class WorkbenchSession {
     static func phaseName(_ phase: AnalysisPhase) -> String {
         switch phase {
         case .descent: "walking code"
+        case .tables: "resolving jump tables"
         case .sweep: "sweeping gaps"
         case .labels: "naming"
         case .lines: "building lines"

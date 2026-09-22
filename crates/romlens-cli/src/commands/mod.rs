@@ -10,4 +10,5 @@ pub mod registers;
 pub mod rom;
 pub mod search;
 pub mod session;
+pub mod tables;
 pub mod xrefs;

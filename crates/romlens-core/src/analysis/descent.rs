@@ -12,6 +12,7 @@ use std::collections::{BTreeMap, VecDeque};
 use crate::analysis::control::{AnalysisControl, AnalysisPhase, Cancelled};
 use crate::analysis::flow::refine;
 use crate::analysis::inline::ReturnAdjust;
+use crate::analysis::jumptable::Resolution;
 use crate::analysis::snapshot::{InsnRecord, Warning, WarningKind};
 use crate::analysis::xrefs::{vector_slots, xref_for};
 use crate::cpu65816::{
@@ -44,6 +45,23 @@ pub enum SeedSource {
     /// Bytes after a call that the callee skips by adjusting its return
     /// address (0.8).
     InlineArgument,
+}
+
+/// A `JMP (abs,X)` / `JSR (abs,X)` the walk reached. The table behind it is
+/// resolved between passes by `analysis::jumptable`, which needs the flags at
+/// the dispatch: they are the correct M/X state for every routine the table
+/// points at.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TableSite {
+    /// The dispatching instruction.
+    pub offset: u32,
+    pub address: SnesAddress,
+    /// The table's base, which the decoder already computes for this mode.
+    pub base: SnesAddress,
+    /// `JSR (abs,X)` rather than `JMP (abs,X)`: its targets are subroutines.
+    pub call: bool,
+    pub flags: FlagState,
+    pub depth: u16,
 }
 
 /// A data range an instruction pointed at.
@@ -107,6 +125,11 @@ pub struct Walk<'a> {
     pub inline_args: BTreeMap<u32, u16>,
     /// Callees this pass saw adding to their stacked return address.
     pub found_inline_args: BTreeMap<u32, u16>,
+    /// Jump tables resolved after an earlier pass, by dispatcher offset; the
+    /// same feedback loop `inline_args` uses.
+    pub jump_tables: BTreeMap<u32, Resolution>,
+    /// Dispatch sites this pass reached, for the resolver to work on.
+    pub found_table_sites: Vec<TableSite>,
     worklist: VecDeque<Entry>,
     processed: u64,
 }
@@ -177,6 +200,8 @@ impl<'a> Walk<'a> {
             conflicts: Vec::new(),
             inline_args: BTreeMap::new(),
             found_inline_args: BTreeMap::new(),
+            jump_tables: BTreeMap::new(),
+            found_table_sites: Vec::new(),
             worklist: VecDeque::new(),
             processed: 0,
         }
@@ -188,6 +213,84 @@ impl<'a> Walk<'a> {
             kind,
             text,
         });
+    }
+
+    /// A `JMP (abs,X)` / `JSR (abs,X)`. Records the site for the resolver and,
+    /// once a previous pass has resolved it, walks the targets.
+    ///
+    /// Nothing is decided here: the extent heuristic needs a finished walk, so
+    /// the first pass to reach a dispatcher can only note it. That is the same
+    /// shape inline arguments use, and it is why `MAX_PASSES` exists.
+    #[allow(clippy::too_many_arguments)]
+    fn dispatch(
+        &mut self,
+        off: u32,
+        addr: SnesAddress,
+        insn: &Instruction,
+        after: FlagState,
+        depth: u16,
+        trust: WidthTrust,
+        call: bool,
+    ) {
+        let Some(base) = insn.target.map(|t| t.address) else {
+            self.warn(
+                off,
+                WarningKind::ComputedJump,
+                format!("{addr}: dispatch table address could not be decoded"),
+            );
+            return;
+        };
+        self.found_table_sites.push(TableSite {
+            offset: off,
+            address: addr,
+            base,
+            call,
+            flags: after,
+            depth,
+        });
+        // Cloned out of the map so the arms can push xrefs and entries; a
+        // table is a handful of addresses, and this runs once per dispatcher.
+        match self.jump_tables.get(&off).cloned() {
+            Some(Resolution::Table(table)) => {
+                let table_len = table.len();
+                let depth = if call { depth.saturating_add(1) } else { depth };
+                let targets: Vec<SnesAddress> = table.targets.iter().map(|(a, _)| *a).collect();
+                // The dispatcher's own reference to the base is emitted by
+                // `xref_for` like any other operand. What only this knows is
+                // where each entry points — uncertain, because the index is a
+                // run-time value and nothing proves any one entry is taken.
+                for (i, target) in targets.iter().enumerate() {
+                    let slot = FileOffset(table.base + i as u32 * 2);
+                    self.xrefs.push((
+                        XRef {
+                            from: slot,
+                            to: Project::canonical(self.rom, *target),
+                            to_offset: self.rom.file_offset_for(*target),
+                            kind: if call { XRefKind::Call } else { XRefKind::Jump },
+                            certain: false,
+                        },
+                        true,
+                    ));
+                    self.push(*target, after, depth, true, trust);
+                }
+                self.warn(
+                    off,
+                    WarningKind::JumpTable,
+                    format!(
+                        "{addr}: {} entries at {} ({} bytes), bounded by {}",
+                        targets.len(),
+                        base,
+                        table_len,
+                        table.stop.name()
+                    ),
+                );
+            }
+            Some(Resolution::Unresolved(why)) => {
+                self.warn(off, WarningKind::ComputedJump, format!("{addr}: {why}"));
+            }
+            // First pass to reach this dispatcher: the resolver runs next.
+            None => {}
+        }
     }
 
     /// Queue an entry if the address maps to ROM.
@@ -457,7 +560,7 @@ impl<'a> Walk<'a> {
             if let Some(x) = xref_for(self.rom, &insn) {
                 let labelable = insn.assumptions & ASSUMED_DBR == 0;
                 self.xrefs.push((x, labelable));
-                if x.kind != XRefKind::Pointer
+                if !x.kind.is_indirect()
                     && !x.kind.is_code()
                     && let Some(to) = x.to_offset
                     && labelable
@@ -515,11 +618,9 @@ impl<'a> Walk<'a> {
                 }
             } else if m.is_call() {
                 match insn.mode {
-                    AddressingMode::AbsoluteIndexedIndirect => self.warn(
-                        off,
-                        WarningKind::ComputedJump,
-                        format!("{}: JSR through a table; targets not followed", addr),
-                    ),
+                    AddressingMode::AbsoluteIndexedIndirect => {
+                        self.dispatch(off, addr, &insn, after, depth, trust, true);
+                    }
                     _ => {
                         if let Some(t) = target {
                             self.push(t.address, after, depth.saturating_add(1), true, trust);
@@ -582,11 +683,9 @@ impl<'a> Walk<'a> {
                             ),
                         }
                     }
-                    AddressingMode::AbsoluteIndexedIndirect => self.warn(
-                        off,
-                        WarningKind::ComputedJump,
-                        format!("{}: jump through a table; targets not followed", addr),
-                    ),
+                    AddressingMode::AbsoluteIndexedIndirect => {
+                        self.dispatch(off, addr, &insn, after, depth, trust, false);
+                    }
                     _ => {
                         if let Some(t) = target {
                             self.push(t.address, after, depth, false, trust);

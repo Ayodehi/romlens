@@ -149,6 +149,23 @@ fn lorom_analysis_commands() {
     let dir = temp_dir("lorom");
     let rom = write_fixture(&dir, MappingMode::LoRom);
     let rom = rom.to_str().unwrap();
+    // Dispatch tables, on a fixture so the golden needs no commercial ROM.
+    let dispatch = dir.join("dispatch.sfc");
+    std::fs::write(&dispatch, fixtures::dispatch_lorom()).unwrap();
+    let dispatch = dispatch.to_str().unwrap();
+    check(
+        "tables-dispatch",
+        &format!(
+            "{}{}{}",
+            run(&["tables", dispatch, "--entries", "--unresolved"]),
+            run(&["tables", dispatch, "--json"]),
+            run(&["analyze", dispatch, "--warnings"]),
+        ),
+    );
+    check(
+        "tables-none",
+        &run(&["tables", rom, "--entries", "--unresolved"]),
+    );
     check("labels-lorom", &run(&["labels", rom]));
     check(
         "xrefs-lorom",
@@ -386,6 +403,15 @@ fn dev_rom_golden() {
         ]),
     );
     check("analyze-supermetroid", &run(&["analyze", rom, "--stats"]));
+    // Without table resolution, to attribute the gain (`16-phase2-plan.md`).
+    check(
+        "analyze-supermetroid-no-tables",
+        &run(&["analyze", rom, "--stats", "--no-tables"]),
+    );
+    check(
+        "tables-supermetroid",
+        &run(&["tables", rom, "--unresolved"]),
+    );
     check(
         "warnings-supermetroid",
         &run(&["analyze", rom, "--warnings"]),

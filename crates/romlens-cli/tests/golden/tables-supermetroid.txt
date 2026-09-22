@@ -1,0 +1,91 @@
+34 jump tables resolved
+0x001616  $80:9616   14 entries  JSR   from $80:987B  0.80  code
+0x002E76  $80:AE76    4 entries  JSR   from $80:AE5C  0.85  first target
+0x008D03  $81:8D03    6 entries  JSR   from $81:8CFE  0.85  first target
+0x0090BD  $81:90BD    8 entries  JSR   from $81:90B8  0.85  first target
+0x00940A  $81:940A   34 entries  JSR   from $81:9405  0.85  first target
+0x009E4D  $81:9E4D   23 entries  JSR   from $81:9E48  0.85  first target
+0x010981  $82:8981   45 entries  JSR   from $82:896B  0.85  first target
+0x010A22  $82:8A22    5 entries  JSR   from $82:8A00  0.85  first target
+0x011110  $82:9110    8 entries  JSR   from $82:910A  0.85  first target
+0x01126E  $82:926E    5 entries  JSR   from $82:9268  0.85  first target
+0x012622  $82:A622    3 entries  JSR   from $82:A61D  0.85  first target
+0x012C68  $82:AC68    4 entries  JSR   from $82:AC5A  0.85  first target
+0x012C87  $82:AC87    2 entries  JSR   from $82:AC7C  0.80  code
+0x012D25  $82:AD25    2 entries  JSR   from $82:AD1B  0.85  first target
+0x0169D5  $82:E9D5    8 entries  JSR   from $82:E9CD  0.85  first target
+0x016BC1  $82:EBC1   13 entries  JSR   from $82:EBAA  0.85  first target
+0x016DA7  $82:EDA7    5 entries  JSR   from $82:ED9A  0.85  first target
+0x017088  $82:F088    3 entries  JSR   from $82:F084  0.85  first target
+0x0171C9  $82:F1C9    9 entries  JSR   from $82:F1C1  0.80  code
+0x04003E  $88:803E   27 entries  JSR   from $88:800D  0.85  first target
+0x040211  $88:8211    4 entries  JSR   from $88:820D  0.85  first target
+0x080324  $90:8324   16 entries  JSR   from $90:8310  0.85  first target
+0x08064E  $90:864E   28 entries  JSR   from $90:89D4  0.85  first target
+0x08064E  $90:864E   28 entries  JSR   from $90:8A2C  0.85  first target
+0x080C5C  $90:8C5C   28 entries  JSR   from $90:8C3F  0.85  first target
+0x080C5C  $90:8C5C   28 entries  JSR   from $90:8C58  0.85  first target
+0x080E26  $90:8E26    8 entries  JSR   from $90:8E20  0.85  first target
+0x0870AE  $90:F0AE   32 entries  JSR   from $90:F090  0.80  code
+0x08E6E1  $91:E6E1   28 entries  JSR   from $91:E641  0.80  code
+0x08F4A2  $91:F4A2   28 entries  JSR   from $91:F473  0.85  first target
+0x08F4A2  $91:F4A2   28 entries  JSR   from $91:F490  0.85  first target
+0x08F790  $91:F790   16 entries  JSR   from $91:F771  0.85  first target
+0x08F7A8  $91:F7A8    4 entries  JSR   from $91:F77B  0.80  code
+0x1A181F  $B4:981F   17 entries  JSR   from $B4:981A  0.85  first target
+
+54 dispatch sites unresolved
+0x00098A  $80:898A: jump through a pointer in RAM; target unknown
+0x01017B  $82:817B: table base $82:0012 is not in ROM; the table is built at run time
+0x010C09  $82:8C09: table base $82:0000 is not in ROM; the table is built at run time
+0x010C2B  $82:8C2B: table base $82:1B0D is not in ROM; the table is built at run time
+0x010C45  $82:8C45: jump through a pointer in RAM; target unknown
+0x010D11  $82:8D11: jump through a pointer in RAM; target unknown
+0x01138B  $82:938B: jump through a pointer in RAM; target unknown
+0x013BED  $82:BBED: jump through a pointer in RAM; target unknown
+0x01616F  $82:E16F: jump through a pointer in RAM; target unknown
+0x01628F  $82:E28F: jump through a pointer in RAM; target unknown
+0x020461  $84:8461: table base $84:0000 is not in ROM; the table is built at run time
+0x0204DD  $84:84DD: table base $84:0000 is not in ROM; the table is built at run time
+0x0205DA  $84:85DA: table base $84:1CD7 is not in ROM; the table is built at run time
+0x0205FA  $84:85FA: jump through a pointer in RAM; target unknown
+0x03008D  $86:808D: table base $86:0000 is not in ROM; the table is built at run time
+0x030125  $86:8125: table base $86:1A03 is not in ROM; the table is built at run time
+0x03013F  $86:813F: jump through a pointer in RAM; target unknown
+0x03809D  $87:809D: jump through a pointer in RAM; target unknown
+0x04052C  $88:852C: jump through a pointer in RAM; target unknown
+0x04AC51  $89:AC51: jump through a pointer in RAM; target unknown
+0x059516  $8B:9516: table base $8B:0000 is not in ROM; the table is built at run time
+0x059A2B  $8B:9A2B: jump through a pointer in RAM; target unknown
+0x05A364  $8B:A364: jump through a pointer in RAM; target unknown
+0x05D44C  $8B:D44C: jump through a pointer in RAM; target unknown
+0x06C51E  $8D:C51E: table base $8D:0000 is not in ROM; the table is built at run time
+0x06C54C  $8D:C54C: table base $8D:1EAD is not in ROM; the table is built at run time
+0x06C567  $8D:C567: jump through a pointer in RAM; target unknown
+0x06C57B  $8D:C57B: jump through a pointer in RAM; target unknown
+0x07E5E3  $8F:E5E3: jump through a pointer in RAM; target unknown
+0x07E89D  $8F:E89D: table base $8F:0018 is not in ROM; the table is built at run time
+0x07E8B7  $8F:E8B7: jump through a pointer in RAM; target unknown
+0x07E8C8  $8F:E8C8: table base $8F:07DF is not in ROM; the table is built at run time
+0x08156B  $90:956B: table base $90:07E9 is not in ROM; the table is built at run time
+0x0836D5  $90:B6D5: jump through a pointer in RAM; target unknown
+0x08373B  $90:B73B: jump through a pointer in RAM; target unknown
+0x086692  $90:E692: jump through a pointer in RAM; target unknown
+0x086722  $90:E722: jump through a pointer in RAM; target unknown
+0x086B4E  $90:EB4E: jump through a pointer in RAM; target unknown
+0x0883B8  $91:83B8: table base $91:0000 is not in ROM; the table is built at run time
+0x08880D  $91:880D: jump through a pointer in RAM; target unknown
+0x08D4DD  $91:D4DD: jump through a pointer in RAM; target unknown
+0x1008CB  $A0:88CB: jump through a pointer in RAM; target unknown
+0x100BF0  $A0:8BF0: jump through a pointer in RAM; target unknown
+0x1010A3  $A0:90A3: jump through a pointer in RAM; target unknown
+0x101420  $A0:9420: jump through a pointer in RAM; target unknown
+0x101B4C  $A0:9B4C: jump through a pointer in RAM; target unknown
+0x101D20  $A0:9D20: jump through a pointer in RAM; target unknown
+0x101E97  $A0:9E97: jump through a pointer in RAM; target unknown
+0x102140  $A0:A140: jump through a pointer in RAM; target unknown
+0x102233  $A0:A233: jump through a pointer in RAM; target unknown
+0x102303  $A0:A303: jump through a pointer in RAM; target unknown
+0x1023AC  $A0:A3AC: jump through a pointer in RAM; target unknown
+0x104292  $A0:C292: jump through a pointer in RAM; target unknown
+0x1A3CE8  $B4:BCE8: jump through a pointer in RAM; target unknown

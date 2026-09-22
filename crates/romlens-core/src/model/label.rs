@@ -29,8 +29,8 @@ pub struct Label {
 
 /// Prefixes the analyzer uses; a user name of this shape at another address
 /// would be misleading.
-pub const AUTO_PREFIXES: [&str; 11] = [
-    "RESET", "NMI", "IRQ", "COP", "BRK", "ABORT", "SUB", "CODE", "PTR", "DATA", "LOCAL",
+pub const AUTO_PREFIXES: [&str; 12] = [
+    "RESET", "NMI", "IRQ", "COP", "BRK", "ABORT", "SUB", "CODE", "PTR", "JTBL", "DATA", "LOCAL",
 ];
 
 /// Check `[A-Za-z_][A-Za-z0-9_]{0,63}` and refuse an auto-style name

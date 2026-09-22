@@ -1,4 +1,4 @@
-references to $80:8573: 10
+references to $80:8573: 11
   from 0x000573  $80:8573  jump
   from 0x007FE4  $80:FFE4  vector
   from 0x007FE6  $80:FFE6  vector
@@ -9,5 +9,6 @@ references to $80:8573: 10
   from 0x007FF8  $80:FFF8  vector
   from 0x007FFA  $80:FFFA  vector
   from 0x007FFE  $80:FFFE  vector
+  from 0x08DF5D  $91:DF5D  jump
 references from 0x000573: 1
   to $80:8573  0x000573  jump

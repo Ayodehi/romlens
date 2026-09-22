@@ -158,6 +158,47 @@ pub fn all_opcodes_lorom() -> Vec<u8> {
 
 pub const ALL_OPCODES_TITLE: &str = "ROMLENS OPCODES";
 
+pub const DISPATCH_TITLE: &str = "ROMLENS DISPATCH";
+
+/// 32 KB LoROM whose boot dispatches through two jump tables, so the resolver
+/// and `romlens tables` have a golden that needs no commercial ROM
+/// (`12-content-policy.md` rule 1).
+///
+/// ```text
+/// $00:8000  18 FB E2 30   CLC; XCE; SEP #$30    ; native, 8-bit A and X
+/// $00:8004  FC 20 80      JSR ($8020,X)         ; dispatch, eight entries
+/// $00:8007  7C 60 80      JMP ($8060,X)         ; dispatch, two entries
+/// $00:800A  60            RTS
+/// $00:800E  40            RTI                   ; the catch-all vector target
+/// $00:8020  eight entries over $8030 $8038 $8040 $8048
+/// $00:8060  two entries   → $8030 $8038, then filler
+/// $00:8030  A9 nn 60      LDA #nn; RTS          ; and at $8038 $8040 $8048
+/// ```
+///
+/// The two tables stop for different reasons, which is the point: the first
+/// runs up to `$00:8030`, the routine its own first entry names, while the
+/// second is followed by zeroes, which are not addresses of anything.
+pub fn dispatch_lorom() -> Vec<u8> {
+    let mut code = vec![0u8; 0x80];
+    let mut put = |at: usize, bytes: &[u8]| code[at..at + bytes.len()].copy_from_slice(bytes);
+    put(0x00, &[0x18, 0xFB, 0xE2, 0x30]);
+    put(0x04, &[0xFC, 0x20, 0x80]);
+    put(0x07, &[0x7C, 0x60, 0x80]);
+    put(0x0A, &[0x60]);
+    put(0x0E, &[0x40]);
+    let routines = [0x8030u16, 0x8038, 0x8040, 0x8048];
+    for i in 0..8 {
+        put(0x20 + i * 2, &routines[i % routines.len()].to_le_bytes());
+    }
+    for (i, target) in routines[..2].iter().enumerate() {
+        put(0x60 + i * 2, &target.to_le_bytes());
+    }
+    for (i, at) in routines.iter().enumerate() {
+        put(*at as usize - 0x8000, &[0xA9, i as u8 + 1, 0x60]);
+    }
+    build_with_code(MappingMode::LoRom, 0x8000, false, &code, DISPATCH_TITLE)
+}
+
 /// The fixture for a mapping, by name.
 pub fn for_mapping(mode: MappingMode) -> Vec<u8> {
     match mode {

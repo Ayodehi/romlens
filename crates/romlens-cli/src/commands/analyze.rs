@@ -4,7 +4,7 @@ use std::path::Path;
 
 use anyhow::Result;
 use romlens_core::RomImage;
-use romlens_core::analysis::{AnalysisStats, Warning};
+use romlens_core::analysis::{AnalysisOptions, AnalysisStats, Warning};
 
 use crate::commands::session;
 
@@ -14,8 +14,9 @@ pub fn run(
     json: bool,
     progress: bool,
     warnings: bool,
+    options: AnalysisOptions,
 ) -> Result<()> {
-    let s = session::open(rom, project, progress)?;
+    let s = session::open_options(rom, project, progress, options)?;
     let st = s.snap.stats;
     eprintln!("elapsed: {} ms", st.elapsed_ms);
     if json {

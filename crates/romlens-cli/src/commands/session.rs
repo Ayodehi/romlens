@@ -4,7 +4,7 @@
 use std::path::Path;
 
 use anyhow::{Context, Result, anyhow};
-use romlens_core::analysis::{AnalysisControl, AnalysisSnapshot, analyze};
+use romlens_core::analysis::{AnalysisControl, AnalysisOptions, AnalysisSnapshot, analyze_with};
 use romlens_core::io::{
     from_files, locate_rom, read_identity, read_package, to_files, write_package,
 };
@@ -60,15 +60,29 @@ pub fn rom_for_project(dir: &Path, rom: Option<&Path>) -> Result<RomImage> {
 }
 
 pub fn open(rom: &Path, project: Option<&Path>, progress: bool) -> Result<Session> {
+    open_options(rom, project, progress, AnalysisOptions::default())
+}
+
+pub fn open_options(
+    rom: &Path,
+    project: Option<&Path>,
+    progress: bool,
+    options: AnalysisOptions,
+) -> Result<Session> {
     let rom = load_rom(rom)?;
     let project = match project {
         Some(dir) => load_project(&rom, dir)?,
         None => Project::new(&rom),
     };
-    open_with(rom, project, progress)
+    open_with_options(rom, project, progress, options)
 }
 
-pub fn open_with(rom: RomImage, project: Project, progress: bool) -> Result<Session> {
+pub fn open_with_options(
+    rom: RomImage,
+    project: Project,
+    progress: bool,
+    options: AnalysisOptions,
+) -> Result<Session> {
     let control = if progress {
         AnalysisControl::with_progress(|p| {
             eprintln!("{}: {}/{}", p.phase.name(), p.done, p.total);
@@ -76,7 +90,8 @@ pub fn open_with(rom: RomImage, project: Project, progress: bool) -> Result<Sess
     } else {
         AnalysisControl::silent()
     };
-    let snap = analyze(&rom, &project, &control).map_err(|_| anyhow!("analysis cancelled"))?;
+    let snap = analyze_with(&rom, &project, &control, options)
+        .map_err(|_| anyhow!("analysis cancelled"))?;
     if progress {
         eprintln!("analysis: {} ms", snap.stats.elapsed_ms);
     }

@@ -8,6 +8,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
+use romlens_core::analysis::AnalysisOptions;
 use romlens_core::{AddressStyle, MappingMode};
 
 use commands::labels::SourceFilter;
@@ -101,6 +102,24 @@ enum Command {
         /// Also list the analyzer's warnings.
         #[arg(long)]
         warnings: bool,
+        /// Leave `JMP`/`JSR (abs,X)` dispatch tables unresolved, to measure
+        /// what resolving them is worth.
+        #[arg(long)]
+        no_tables: bool,
+    },
+    /// List the dispatch tables the analyzer resolved.
+    Tables {
+        rom: PathBuf,
+        #[arg(long)]
+        project: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
+        /// List each table's entries, not just one line per table.
+        #[arg(long)]
+        entries: bool,
+        /// Also list the dispatch sites that could not be resolved.
+        #[arg(long)]
+        unresolved: bool,
     },
     /// List labels.
     Labels {
@@ -341,7 +360,24 @@ fn main() -> Result<()> {
             json,
             progress,
             warnings,
-        } => commands::analyze::run(&rom, project.as_deref(), json, progress, warnings),
+            no_tables,
+        } => commands::analyze::run(
+            &rom,
+            project.as_deref(),
+            json,
+            progress,
+            warnings,
+            AnalysisOptions {
+                jump_tables: !no_tables,
+            },
+        ),
+        Command::Tables {
+            rom,
+            project,
+            json,
+            entries,
+            unresolved,
+        } => commands::tables::run(&rom, project.as_deref(), json, entries, unresolved),
         Command::Labels {
             rom,
             project,

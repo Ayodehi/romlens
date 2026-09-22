@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 
+use crate::analysis::jumptable::JumpTable;
 use crate::cpu65816::{FlagState, Instruction, decode};
 use crate::memory::address::{FileOffset, SnesAddress};
 use crate::model::label::Label;
@@ -63,6 +64,10 @@ impl InsnRecord {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum WarningKind {
     ComputedJump,
+    /// A `JMP`/`JSR (abs,X)` whose table was resolved. Informational, and it
+    /// replaces the `ComputedJump` that site used to report: the walk no longer
+    /// stops there, but the entries are a guess worth showing.
+    JumpTable,
     FlagConflict,
     UnknownCarryXce,
     SuspiciousEntry,
@@ -101,7 +106,7 @@ impl WarningKind {
     /// Every other kind marks something the analyzer could not settle.
     pub const fn severity(self) -> Severity {
         match self {
-            WarningKind::WalkedIntoUserData => Severity::Info,
+            WarningKind::JumpTable | WarningKind::WalkedIntoUserData => Severity::Info,
             WarningKind::ComputedJump
             | WarningKind::FlagConflict
             | WarningKind::UnknownCarryXce
@@ -114,6 +119,7 @@ impl WarningKind {
     pub const fn name(self) -> &'static str {
         match self {
             WarningKind::ComputedJump => "computed jump",
+            WarningKind::JumpTable => "jump table",
             WarningKind::FlagConflict => "flag conflict",
             WarningKind::UnknownCarryXce => "unknown carry at XCE",
             WarningKind::SuspiciousEntry => "suspicious entry",
@@ -153,6 +159,8 @@ pub struct AnalysisSnapshot {
     pub regions: Vec<Region>,
     pub auto_labels: BTreeMap<SnesAddress, Label>,
     /// Sorted by target then source.
+    /// Resolved dispatch tables, by base then dispatcher.
+    pub jump_tables: Vec<JumpTable>,
     pub xrefs_by_target: Vec<XRef>,
     /// Sorted by source then target.
     pub xrefs_by_source: Vec<XRef>,

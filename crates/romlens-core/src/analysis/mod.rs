@@ -9,6 +9,7 @@ pub mod control;
 pub mod descent;
 pub mod flow;
 pub mod inline;
+pub mod jumptable;
 pub mod labels;
 pub mod snapshot;
 pub mod sweep;
@@ -18,9 +19,11 @@ use std::collections::BTreeMap;
 use std::time::Instant;
 
 pub use control::{AnalysisControl, AnalysisPhase, Cancelled, Progress};
+pub use jumptable::{JumpTable, StopReason};
 pub use snapshot::{AnalysisSnapshot, AnalysisStats, InsnRecord, Severity, Warning, WarningKind};
 
 use crate::analysis::descent::{KIND_NONE, SeedSource, Walk};
+use crate::analysis::jumptable::Resolution;
 use crate::cpu65816::ASSUMED_WIDTHS;
 use crate::memory::address::FileOffset;
 use crate::model::project::Project;
@@ -36,11 +39,15 @@ const TAG_POINTER: u8 = 4;
 const TAG_HEADER: u8 = 5;
 const TAG_USER: u8 = 6;
 const TAG_INLINE: u8 = 7;
+const TAG_TABLE: u8 = 8;
 
-/// Passes of the descent: a callee found adjusting its return address in
-/// one pass makes its callers skip the inline arguments in the next, which
-/// can uncover the next such callee. Each pass is a few milliseconds.
-const MAX_PASSES: u32 = 6;
+/// Passes of the descent. A callee found adjusting its return address in one
+/// pass makes its callers skip the inline arguments in the next, which can
+/// uncover the next such callee; a jump table resolved after one pass is walked
+/// in the next, and its targets can dispatch through tables of their own. Eight
+/// covers the nested dispatchers a real ROM has, and the loop leaves early the
+/// moment a pass adds nothing. Each pass is a few milliseconds.
+const MAX_PASSES: u32 = 8;
 
 /// The per-byte lanes the classifier paints, then collapses into regions.
 ///
@@ -78,9 +85,6 @@ impl Paint {
     }
 
     /// Record evidence belonging to one span and return the id to paint with.
-    // Jump tables (2A.1) are the first producer; every stage today has evidence
-    // that follows from its tag, so nothing calls this yet.
-    #[allow(dead_code)]
     fn intern(&mut self, evidence: Vec<Evidence>) -> u32 {
         self.evidence.push(evidence);
         (self.evidence.len() - 1) as u32
@@ -106,24 +110,60 @@ impl Paint {
     }
 }
 
+/// Knobs that exist to attribute a result, not to configure the product: a
+/// shell always runs with the defaults, and only `romlens analyze` changes
+/// them, to answer "how much of this did jump tables buy us?".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AnalysisOptions {
+    /// Resolve `JMP`/`JSR (abs,X)` dispatch tables (`jumptable`).
+    pub jump_tables: bool,
+}
+
+impl Default for AnalysisOptions {
+    fn default() -> Self {
+        Self { jump_tables: true }
+    }
+}
+
 /// Run the analyzer over a ROM under a project's overrides.
 pub fn analyze(
     rom: &RomImage,
     project: &Project,
     control: &AnalysisControl,
 ) -> Result<AnalysisSnapshot, Cancelled> {
+    analyze_with(rom, project, control, AnalysisOptions::default())
+}
+
+/// [`analyze`] with the attribution knobs.
+pub fn analyze_with(
+    rom: &RomImage,
+    project: &Project,
+    control: &AnalysisControl,
+    options: AnalysisOptions,
+) -> Result<AnalysisSnapshot, Cancelled> {
     let started = Instant::now();
     let mut inline_args: BTreeMap<u32, u16> = BTreeMap::new();
+    let mut jump_tables: BTreeMap<u32, Resolution> = BTreeMap::new();
     let mut pass = 0;
     let mut walk = loop {
         pass += 1;
         let mut walk = Walk::new(rom, project);
         walk.inline_args = inline_args.clone();
+        walk.jump_tables = jump_tables.clone();
         walk.seed();
         walk.run(control)?;
         let mut grew = false;
         for (callee, n) in &walk.found_inline_args {
             grew |= inline_args.insert(*callee, *n) != Some(*n);
+        }
+        // Resolving here, against a walk that has finished, is what keeps the
+        // answer independent of worklist order (`jumptable`).
+        if options.jump_tables {
+            control.report(AnalysisPhase::Tables, 0, 1);
+            for (site, resolution) in jumptable::resolve(&walk) {
+                grew |= jump_tables.insert(site, resolution.clone()) != Some(resolution);
+            }
+            control.report(AnalysisPhase::Tables, 1, 1);
         }
         if !grew || pass == MAX_PASSES {
             break walk;
@@ -191,6 +231,31 @@ pub fn analyze(
             paint.set(b, code, conf, tag, 0);
         }
     }
+    // Jump-table extents. Unlike a data seed, a table's evidence names the
+    // dispatcher that reads it, which is the answer to "why is this data?" and
+    // differs per table — so it goes in the side table rather than the tag.
+    //
+    // It paints over an unclaimed byte, and over one the linear sweep claimed:
+    // the sweep is a 0.3 guess made without a caller, while a table entry was
+    // read by a real dispatch instruction. It never paints over the descent.
+    for resolution in jump_tables.values() {
+        let Resolution::Table(table) = resolution else {
+            continue;
+        };
+        let conf = (table.confidence() * 100.0) as u8;
+        let hid = paint.intern(vec![Evidence::Heuristic {
+            name: table.description(),
+            score: table.confidence(),
+        }]);
+        let code = RegionKind::Data(DataKind::Table { stride: 2 }).code();
+        for b in table.base..table.end().min(n as u32) {
+            let b = b as usize;
+            if paint.cls[b] != 0 && paint.tag[b] != TAG_SWEEP {
+                continue;
+            }
+            paint.set(b, code, conf, TAG_TABLE, hid);
+        }
+    }
     // The user's word is final.
     for r in &project.region_overrides {
         let end = (r.end() as usize).min(n);
@@ -254,6 +319,7 @@ pub fn analyze(
                 score: 1.0,
             }],
             TAG_USER => vec![Evidence::User],
+            // TAG_TABLE's evidence is per-table and already in the side table.
             _ => Vec::new(),
         });
         regions.push(Region {
@@ -314,8 +380,17 @@ pub fn analyze(
     }
     stats.elapsed_ms = started.elapsed().as_millis() as u64;
     let _ = KIND_NONE;
+    let mut tables: Vec<JumpTable> = jump_tables
+        .into_values()
+        .filter_map(|r| match r {
+            Resolution::Table(t) => Some(t),
+            Resolution::Unresolved(_) => None,
+        })
+        .collect();
+    tables.sort_by_key(|t| (t.base, t.site));
     Ok(AnalysisSnapshot {
         instructions,
+        jump_tables: tables,
         regions,
         auto_labels,
         xrefs_by_target,

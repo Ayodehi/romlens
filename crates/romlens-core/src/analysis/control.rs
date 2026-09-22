@@ -6,6 +6,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AnalysisPhase {
     Descent,
+    /// Resolving jump tables between descent passes.
+    Tables,
     Sweep,
     Labels,
     /// Building the line index (done by the caller after `analyze`).
@@ -16,6 +18,7 @@ impl AnalysisPhase {
     pub const fn name(self) -> &'static str {
         match self {
             AnalysisPhase::Descent => "descent",
+            AnalysisPhase::Tables => "tables",
             AnalysisPhase::Sweep => "sweep",
             AnalysisPhase::Labels => "labels",
             AnalysisPhase::Lines => "lines",

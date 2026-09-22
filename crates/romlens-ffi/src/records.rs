@@ -357,6 +357,7 @@ pub enum XRefKind {
     Write,
     ReadWrite,
     Pointer,
+    JumpTable,
     Vector,
 }
 
@@ -370,6 +371,7 @@ impl From<model::XRefKind> for XRefKind {
             model::XRefKind::Write => XRefKind::Write,
             model::XRefKind::ReadWrite => XRefKind::ReadWrite,
             model::XRefKind::Pointer => XRefKind::Pointer,
+            model::XRefKind::JumpTable => XRefKind::JumpTable,
             model::XRefKind::Vector => XRefKind::Vector,
         }
     }
@@ -442,6 +444,7 @@ impl From<&model::Comment> for CommentInfo {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
 pub enum WarningKind {
     ComputedJump,
+    JumpTable,
     FlagConflict,
     UnknownCarryXce,
     SuspiciousEntry,
@@ -450,11 +453,20 @@ pub enum WarningKind {
     WalkedIntoUserData,
 }
 
+/// How a warning reads. A shell sorts and styles by this rather than by kind,
+/// so a new kind does not need a shell change to be shown sensibly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum Severity {
+    Info,
+    Warning,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct WarningInfo {
     pub file_offset: u32,
     pub kind: WarningKind,
     pub kind_name: String,
+    pub severity: Severity,
     pub text: String,
 }
 
@@ -464,6 +476,7 @@ impl From<&snapshot::Warning> for WarningInfo {
             file_offset: w.offset.0,
             kind: match w.kind {
                 snapshot::WarningKind::ComputedJump => WarningKind::ComputedJump,
+                snapshot::WarningKind::JumpTable => WarningKind::JumpTable,
                 snapshot::WarningKind::FlagConflict => WarningKind::FlagConflict,
                 snapshot::WarningKind::UnknownCarryXce => WarningKind::UnknownCarryXce,
                 snapshot::WarningKind::SuspiciousEntry => WarningKind::SuspiciousEntry,
@@ -472,6 +485,10 @@ impl From<&snapshot::Warning> for WarningInfo {
                 snapshot::WarningKind::WalkedIntoUserData => WarningKind::WalkedIntoUserData,
             },
             kind_name: w.kind.name().to_owned(),
+            severity: match w.kind.severity() {
+                snapshot::Severity::Info => Severity::Info,
+                snapshot::Severity::Warning => Severity::Warning,
+            },
             text: w.text.clone(),
         }
     }
@@ -712,6 +729,7 @@ impl From<Command> for model::Command {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
 pub enum AnalysisPhase {
     Descent,
+    Tables,
     Sweep,
     Labels,
     Lines,
@@ -721,6 +739,7 @@ impl From<analysis::AnalysisPhase> for AnalysisPhase {
     fn from(p: analysis::AnalysisPhase) -> Self {
         match p {
             analysis::AnalysisPhase::Descent => AnalysisPhase::Descent,
+            analysis::AnalysisPhase::Tables => AnalysisPhase::Tables,
             analysis::AnalysisPhase::Sweep => AnalysisPhase::Sweep,
             analysis::AnalysisPhase::Labels => AnalysisPhase::Labels,
             analysis::AnalysisPhase::Lines => AnalysisPhase::Lines,

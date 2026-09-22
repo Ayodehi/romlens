@@ -1,6 +1,6 @@
 //! Cross-reference construction and indexing.
 
-use crate::cpu65816::{Instruction, Mnemonic, TargetKind};
+use crate::cpu65816::{AddressingMode, Instruction, Mnemonic, TargetKind};
 use crate::memory::address::{FileOffset, SnesAddress};
 use crate::model::project::Project;
 use crate::model::xref::{XRef, XRefKind};
@@ -10,6 +10,12 @@ use crate::rom::image::RomImage;
 pub fn xref_for(rom: &RomImage, insn: &Instruction) -> Option<XRef> {
     let t = insn.target?;
     let kind = match t.kind {
+        // A `JMP/JSR (abs,X)` points at a table of addresses, not at one
+        // pointer, and the distinction decides the auto label: `JTBL_` reads
+        // as a dispatch table, `PTR_` as a single indirect slot.
+        TargetKind::Pointer if insn.mode == AddressingMode::AbsoluteIndexedIndirect => {
+            XRefKind::JumpTable
+        }
         TargetKind::Pointer => XRefKind::Pointer,
         TargetKind::Code => match insn.mnemonic {
             Mnemonic::JSR | Mnemonic::JSL => XRefKind::Call,

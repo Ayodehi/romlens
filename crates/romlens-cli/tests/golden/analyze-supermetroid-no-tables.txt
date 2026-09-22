@@ -1,0 +1,6 @@
+Code:          6872 bytes (0.2%) in 76 blocks, 3029 instructions
+Data:          160 bytes (0.0%)
+Unknown:       3138696 bytes (99.8%)
+Labels:        256
+Xrefs:         1554
+Warnings:      10 (8 flag conflicts)

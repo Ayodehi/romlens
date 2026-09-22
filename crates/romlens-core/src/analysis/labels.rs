@@ -1,5 +1,6 @@
 //! Automatic labels: a prefix that says what the analyzer believed plus the
-//! six-digit canonical address. Priority vector > SUB > CODE > PTR > DATA.
+//! six-digit canonical address.
+//! Priority vector > SUB > CODE > PTR > JTBL > DATA.
 
 use std::collections::BTreeMap;
 
@@ -21,8 +22,12 @@ fn rank(prefix: &str) -> u8 {
         "SUB" => 6,
         "CODE" => 7,
         "PTR" => 8,
-        "DATA" => 9,
-        _ => 10,
+        // Below PTR: a single `JMP (abs)` slot names its target more precisely
+        // than a table base does. Above DATA: a dispatcher reading the base is
+        // stronger evidence than an anonymous load.
+        "JTBL" => 9,
+        "DATA" => 10,
+        _ => 11,
     }
 }
 
@@ -51,6 +56,7 @@ pub fn build(
             XRefKind::Call => "SUB",
             XRefKind::Jump | XRefKind::Branch => "CODE",
             XRefKind::Pointer => "PTR",
+            XRefKind::JumpTable => "JTBL",
             XRefKind::Read | XRefKind::Write | XRefKind::ReadWrite => "DATA",
             XRefKind::Vector => continue,
         };

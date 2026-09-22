@@ -1,0 +1,31 @@
+2 jump tables resolved
+0x000020  $00:8020    8 entries  JSR   from $00:8004  0.85  first target
+    [  0]  0x000030  $00:8030
+    [  1]  0x000038  $00:8038
+    [  2]  0x000040  $00:8040
+    [  3]  0x000048  $00:8048
+    [  4]  0x000030  $00:8030
+    [  5]  0x000038  $00:8038
+    [  6]  0x000040  $00:8040
+    [  7]  0x000048  $00:8048
+0x000060  $00:8060    2 entries  JMP   from $00:8007  0.65  implausible entry
+    [  0]  0x000030  $00:8030
+    [  1]  0x000038  $00:8038
+
+0 dispatch sites unresolved
+{
+  "tables": [
+    {"base": 32, "baseAddress": "$00:8020", "site": 4, "siteAddress": "$00:8004", "call": true, "entries": 8, "bytes": 16, "stop": "first target", "confidence": 0.85},
+    {"base": 96, "baseAddress": "$00:8060", "site": 7, "siteAddress": "$00:8007", "call": false, "entries": 2, "bytes": 4, "stop": "implausible entry", "confidence": 0.65}
+  ],
+  "unresolved": 0
+}
+Code:          23 bytes (0.1%) in 6 blocks, 14 instructions
+Data:          84 bytes (0.3%)
+Unknown:       32661 bytes (99.7%)
+Labels:        8
+Xrefs:         24
+Warnings:      2 (0 flag conflicts)
+
+0x000004  $00:8004   jump table               $00:8004: 8 entries at $00:8020 (16 bytes), bounded by first target
+0x000007  $00:8007   jump table               $00:8007: 2 entries at $00:8060 (4 bytes), bounded by implausible entry
