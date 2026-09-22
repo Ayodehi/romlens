@@ -21,7 +21,7 @@ struct HexRowRecord: Sendable {
 
 /// A batch of rows as fetched from the core, decoded on demand, with one
 /// cached `CTLine` per row for the current address style.
-final class HexBatch {
+final class HexBatch: RowBatch {
     static let rowsPerBatch: UInt32 = 256
     static let stride = 64
     static let headerLength = 8

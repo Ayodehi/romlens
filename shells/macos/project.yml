@@ -46,12 +46,23 @@ targets:
         NSHumanReadableCopyright: "0BSD"
         LSApplicationCategoryType: public.app-category.developer-tools
         CFBundleDocumentTypes:
+          - CFBundleTypeName: Romlens Project
+            CFBundleTypeRole: Editor
+            LSHandlerRank: Owner
+            LSTypeIsPackage: true
+            LSItemContentTypes: [io.github.placeholder.romlens.project]
+            NSDocumentClass: $(PRODUCT_MODULE_NAME).ProjectDocument
           - CFBundleTypeName: SNES ROM image
             CFBundleTypeRole: Viewer
             LSHandlerRank: Alternate
             LSItemContentTypes: [io.github.placeholder.romlens.sfc]
-            NSDocumentClass: $(PRODUCT_MODULE_NAME).RomDocument
+            NSDocumentClass: $(PRODUCT_MODULE_NAME).ProjectDocument
         UTExportedTypeDeclarations:
+          - UTTypeIdentifier: io.github.placeholder.romlens.project
+            UTTypeDescription: Romlens Project
+            UTTypeConformsTo: [com.apple.package]
+            UTTypeTagSpecification:
+              public.filename-extension: [romlens]
           - UTTypeIdentifier: io.github.placeholder.romlens.sfc
             UTTypeDescription: SNES ROM image
             UTTypeConformsTo: [public.data]
@@ -61,7 +72,8 @@ targets:
       path: Romlens/Romlens.entitlements
       properties:
         com.apple.security.app-sandbox: true
-        com.apple.security.files.user-selected.read-only: true
+        com.apple.security.files.user-selected.read-write: true
+        com.apple.security.files.bookmarks.app-scope: true
   RomlensTests:
     type: bundle.unit-test
     platform: macOS

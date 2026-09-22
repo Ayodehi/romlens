@@ -6,7 +6,7 @@ import Testing
 @MainActor
 @Suite struct RomViewModelTests {
     private func model() throws -> RomViewModel {
-        RomViewModel(rom: try Rom.fromBytes(bytes: makeTestRom(mapping: .loRom), name: "t.sfc"))
+        RomViewModel(rom: try Rom.fromBytes(bytes: makeTestRom(mapping: .loRom), name: "t.sfc"), startAnalysis: false)
     }
 
     @Test func jumpSelectsScrollsAndRecordsHistory() throws {
@@ -76,5 +76,50 @@ import Testing
         #expect(m.spans.count == 22)
         #expect(m.palette.color(forSpanId: 1) != nil)
         #expect(m.palette.color(forSpanId: 0) == nil)
+    }
+
+    @Test func selectionRangeAndHistory() async throws {
+        let m = try await Fixture.analyzedModel(rom: try Fixture.smallRom())
+        m.select(offset: 8)
+        #expect(m.instruction?.mnemonic == "STA")
+        #expect(m.highlightedRange == 7..<10, "the containing instruction's bytes")
+        #expect(m.selectedAddress == 0x8007)
+        m.extendSelection(to: 12)
+        #expect(m.highlightedRange == 8..<13)
+        m.perform(.extendRight, from: .hex)
+        #expect(m.highlightedRange == 8..<14)
+        m.select(offset: 0)
+        #expect(m.highlightedRange == 0..<1)
+        m.perform(.down, from: .asm)
+        #expect(m.selectedOffset == 1)
+        m.perform(.down, from: .hex)
+        #expect(m.selectedOffset == 17)
+        m.jump(to: 0x100)
+        m.jump(to: 0x200)
+        m.goBack()
+        #expect(m.selectedOffset == 0x100 && m.canGoForward)
+        m.goForward()
+        #expect(m.selectedOffset == 0x200 && !m.canGoForward)
+        // Follow the BRA at $800A to its target.
+        m.select(offset: 10)
+        m.followReference()
+        #expect(m.selectedOffset == 10, "BRA $800A targets itself")
+        #expect(m.scrollRequest?.offset == 10)
+        // Editing through the model.
+        m.select(offset: 0)
+        try m.setLabel(name: "Boot")
+        #expect(m.label?.name == "Boot" && m.label?.source == .user)
+        try m.setComment(kind: .line, text: "disable IRQ")
+        #expect(m.lineComment?.text == "disable IRQ")
+        m.undo()
+        #expect(m.lineComment == nil)
+        m.redo()
+        #expect(m.lineComment?.text == "disable IRQ")
+        #expect(m.selectedLineText?.contains("SEI") == true)
+        #expect(m.selectedAddressText == "$00:8000")
+        m.perform(.rename, from: .asm)
+        #expect(m.activeSheet == .renameLabel)
+        m.isShowingJumpSheet = true
+        #expect(m.activeSheet == .jump)
     }
 }

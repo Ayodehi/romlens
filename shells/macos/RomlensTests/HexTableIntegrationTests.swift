@@ -5,39 +5,11 @@ import Testing
 @testable import Romlens
 
 /// Drives the real window and hex canvas off screen. Uses the development
-/// ROM when `ROMLENS_ROM_DIR` is set, else a padded fixture.
-@MainActor
-enum Fixture {
-    static func rom(megabytes: Int = 1) throws -> Rom {
-        if let dir = ProcessInfo.processInfo.environment["ROMLENS_ROM_DIR"] {
-            let url = URL(fileURLWithPath: dir).appendingPathComponent("SuperMetroid.F8DF.sfc")
-            if FileManager.default.fileExists(atPath: url.path) {
-                return try Rom.open(path: url.path)
-            }
-        }
-        var bytes = makeTestRom(mapping: .loRom)
-        bytes.append(Data(repeating: 0xEA, count: (megabytes << 20) - bytes.count))
-        return try Rom.fromBytes(bytes: bytes, name: "big.sfc")
-    }
-
-    static func window(_ model: RomViewModel) throws -> (RomWindowController, NSScrollView, HexCanvasView) {
-        let controller = RomWindowController(model: model)
-        controller.window?.orderFront(nil)
-        let content = try #require(controller.window?.contentView)
-        content.layoutSubtreeIfNeeded()
-        func find<T: NSView>(_ view: NSView, _: T.Type) -> T? {
-            if let t = view as? T { return t }
-            for sub in view.subviews { if let t = find(sub, T.self) { return t } }
-            return nil
-        }
-        return (controller, try #require(find(content, NSScrollView.self)), try #require(find(content, HexCanvasView.self)))
-    }
-}
-
+/// ROM when `ROMLENS_ROM_DIR` is set, else a padded fixture (see `Fixture`).
 @MainActor
 @Suite struct HexTableIntegrationTests {
     @Test func windowShowsEveryRow() throws {
-        let model = RomViewModel(rom: try Fixture.rom())
+        let model = RomViewModel(rom: try Fixture.rom(), startAnalysis: false)
         let (controller, scrollView, canvas) = try Fixture.window(model)
         let content = try #require(controller.window?.contentView)
         #expect(canvas.rowCount == Int(model.rowCount))
@@ -49,7 +21,9 @@ enum Fixture {
         #expect(canvas.bounds.width == max(model.layout.totalWidth, clipWidth))
         #expect(scrollView.horizontalScrollElasticity == .none)
         // Widen the window: the canvas must follow the viewport exactly.
-        controller.window?.setContentSize(NSSize(width: 1600, height: 720))
+        controller.window?.setContentSize(NSSize(width: 2000, height: 720))
+        content.layoutSubtreeIfNeeded()
+        Fixture.spin(0.05)
         content.layoutSubtreeIfNeeded()
         #expect(scrollView.contentView.bounds.width > model.layout.totalWidth)
         #expect(canvas.bounds.width == scrollView.contentView.bounds.width)
@@ -66,7 +40,7 @@ enum Fixture {
 
         // Jump lands the header row in view and selects it.
         model.jump(to: model.info.headerOffset)
-        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        Fixture.spin(0.05)
         let headerRow = Int(model.info.headerOffset / 16)
         #expect(canvas.visibleRows.contains(headerRow))
         #expect(model.selectedOffset == model.info.headerOffset)
@@ -75,7 +49,7 @@ enum Fixture {
     }
 
     @Test func drawingTheWholeImageStaysUnderBudget() throws {
-        let model = RomViewModel(rom: try Fixture.rom(megabytes: 3))
+        let model = RomViewModel(rom: try Fixture.rom(megabytes: 3), startAnalysis: false)
         let (controller, _, canvas) = try Fixture.window(model)
         let rows = canvas.rowCount
         let stride = 40 // rows per "frame"
@@ -112,7 +86,7 @@ enum Fixture {
     /// spinning the run loop after each step so AppKit draws as it would for
     /// a user scroll, and checks that nothing accumulates.
     @Test func liveScrollHasNoStalls() throws {
-        let model = RomViewModel(rom: try Fixture.rom(megabytes: 3))
+        let model = RomViewModel(rom: try Fixture.rom(megabytes: 3), startAnalysis: false)
         let (controller, scrollView, canvas) = try Fixture.window(model)
         let clip = scrollView.contentView
         let pageHeight = clip.bounds.height
@@ -125,7 +99,7 @@ enum Fixture {
             clip.scroll(to: NSPoint(x: 0, y: y))
             scrollView.reflectScrolledClipView(clip)
             canvas.displayIfNeeded()
-            RunLoop.main.run(until: Date())
+            Fixture.spin(0)
             worst = max(worst, Date().timeIntervalSince(t0))
             steps += 1
             y += pageHeight
@@ -142,7 +116,7 @@ enum Fixture {
 
     /// The same through scroll-wheel events, the path a mouse wheel takes.
     @Test func wheelScrollWorks() throws {
-        let model = RomViewModel(rom: try Fixture.rom(megabytes: 3))
+        let model = RomViewModel(rom: try Fixture.rom(megabytes: 3), startAnalysis: false)
         let (controller, scrollView, canvas) = try Fixture.window(model)
         var worst: TimeInterval = 0
         for _ in 0..<2000 {
@@ -150,7 +124,7 @@ enum Fixture {
             let ev = try #require(NSEvent(cgEvent: cg))
             let t0 = Date()
             scrollView.scrollWheel(with: ev)
-            RunLoop.main.run(until: Date())
+            Fixture.spin(0)
             worst = max(worst, Date().timeIntervalSince(t0))
         }
         let y = scrollView.contentView.bounds.origin.y

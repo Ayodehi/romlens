@@ -5,38 +5,26 @@ import CoreText
 /// in a byte buffer with a 256-entry hex table, never `String(format:)`
 /// (docs/10 measured that at 7 µs per row).
 struct HexRowLayout {
-    static let hexTable: [UInt8] = {
-        var table = [UInt8](repeating: 0, count: 512)
-        let digits = Array("0123456789ABCDEF".utf8)
-        for b in 0..<256 {
-            table[b * 2] = digits[b >> 4]
-            table[b * 2 + 1] = digits[b & 0xF]
-        }
-        return table
-    }()
+    static var hexTable: [UInt8] { MonoMetrics.hexTable }
 
     let style: AddressStyle
-    let font: NSFont
-    let charWidth: CGFloat
-    let ascent: CGFloat
-    let descent: CGFloat
-    let rowHeight: CGFloat
+    let metrics: MonoMetrics
     let leftPadding: CGFloat = 8
 
-    init(style: AddressStyle, font: NSFont = .monospacedSystemFont(ofSize: 12, weight: .regular)) {
+    init(style: AddressStyle, metrics: MonoMetrics) {
         self.style = style
-        self.font = font
-        let ctFont = font as CTFont
-        var glyph: CGGlyph = 0
-        var char: UniChar = 0x30 // "0"
-        CTFontGetGlyphsForCharacters(ctFont, &char, &glyph, 1)
-        var advance = CGSize.zero
-        CTFontGetAdvancesForGlyphs(ctFont, .horizontal, &glyph, &advance, 1)
-        charWidth = advance.width
-        ascent = CTFontGetAscent(ctFont)
-        descent = CTFontGetDescent(ctFont)
-        rowHeight = ceil(ascent + descent + CTFontGetLeading(ctFont)) + 4
+        self.metrics = metrics
     }
+
+    init(style: AddressStyle, font: NSFont = .monospacedSystemFont(ofSize: 12, weight: .regular)) {
+        self.init(style: style, metrics: MonoMetrics(font: font))
+    }
+
+    var font: NSFont { metrics.font }
+    var charWidth: CGFloat { metrics.charWidth }
+    var ascent: CGFloat { metrics.ascent }
+    var descent: CGFloat { metrics.descent }
+    var rowHeight: CGFloat { metrics.rowHeight }
 
     /// Characters before the first hex byte, including the trailing gap.
     var prefixChars: Int { style == .both ? 20 : 10 }

@@ -10,6 +10,22 @@
 	<array>
 		<dict>
 			<key>CFBundleTypeName</key>
+			<string>Romlens Project</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>io.github.placeholder.romlens.project</string>
+			</array>
+			<key>LSTypeIsPackage</key>
+			<true/>
+			<key>NSDocumentClass</key>
+			<string>$(PRODUCT_MODULE_NAME).ProjectDocument</string>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
 			<string>SNES ROM image</string>
 			<key>CFBundleTypeRole</key>
 			<string>Viewer</string>
@@ -20,7 +36,7 @@
 				<string>io.github.placeholder.romlens.sfc</string>
 			</array>
 			<key>NSDocumentClass</key>
-			<string>$(PRODUCT_MODULE_NAME).RomDocument</string>
+			<string>$(PRODUCT_MODULE_NAME).ProjectDocument</string>
 		</dict>
 	</array>
 	<key>CFBundleExecutable</key>
@@ -45,6 +61,23 @@
 	<string>NSApplication</string>
 	<key>UTExportedTypeDeclarations</key>
 	<array>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>com.apple.package</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Romlens Project</string>
+			<key>UTTypeIdentifier</key>
+			<string>io.github.placeholder.romlens.project</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>romlens</string>
+				</array>
+			</dict>
+		</dict>
 		<dict>
 			<key>UTTypeConformsTo</key>
 			<array>

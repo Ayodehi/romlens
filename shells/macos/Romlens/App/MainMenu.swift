@@ -28,7 +28,7 @@ enum MainMenu {
         modifiers: NSEvent.ModifierFlags = .command
     ) -> NSMenuItem {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
-        item.keyEquivalentModifierMask = modifiers
+        item.keyEquivalentModifierMask = key.isEmpty ? [] : modifiers
         return item
     }
 
@@ -49,26 +49,61 @@ enum MainMenu {
         let recent = submenu("Open Recent", [
             item("Clear Menu", #selector(NSDocumentController.clearRecentDocuments(_:))),
         ])
+        let export = submenu("Export", [
+            item("Assembly Listing…", #selector(RomWindowController.exportAssembly(_:))),
+            item("Labels and Comments…", #selector(RomWindowController.exportAnnotations(_:))),
+            item("Symbol File…", #selector(RomWindowController.exportSymbols(_:))),
+        ])
         return submenu("File", [
             item("Open…", #selector(NSDocumentController.openDocument(_:)), "o"),
             recent,
             .separator(),
             item("Close", #selector(NSWindow.performClose(_:)), "w"),
+            item("Save", #selector(NSDocument.save(_:)), "s"),
+            item("Save As…", #selector(NSDocument.saveAs(_:)), "S", modifiers: [.command, .shift]),
+            item("Duplicate", #selector(NSDocument.duplicate(_:)), "s", modifiers: [.command, .shift, .option]),
+            item("Revert to Saved", #selector(NSDocument.revertToSaved(_:))),
+            .separator(),
+            export,
         ])
     }
 
     private static func editMenu() -> NSMenuItem {
         submenu("Edit", [
+            item("Undo", #selector(RomWindowController.undo(_:)), "z"),
+            item("Redo", #selector(RomWindowController.redo(_:)), "Z", modifiers: [.command, .shift]),
+            .separator(),
+            item("Cut", #selector(NSText.cut(_:)), "x"),
             item("Copy", #selector(NSText.copy(_:)), "c"),
+            item("Paste", #selector(NSText.paste(_:)), "v"),
             item("Select All", #selector(NSText.selectAll(_:)), "a"),
+            .separator(),
+            item("Rename Label…", #selector(RomWindowController.renameLabel(_:))),
+            item("Comment…", #selector(RomWindowController.editComment(_:))),
+            .separator(),
+            item("Mark as Code", #selector(RomWindowController.markAsCode(_:))),
+            item("Mark as Data", #selector(RomWindowController.markAsData(_:))),
+            item("Mark as Unknown", #selector(RomWindowController.markAsUnknown(_:))),
+            item("Clear Mark", #selector(RomWindowController.clearMark(_:))),
+            item("Set Flags…", #selector(RomWindowController.setFlags(_:))),
+            .separator(),
+            item("Copy Address", #selector(RomWindowController.copyAddress(_:)), "c", modifiers: [.command, .option]),
+            item("Copy Line", #selector(RomWindowController.copyLine(_:)), "c", modifiers: [.command, .shift]),
         ])
     }
 
     private static func viewMenu() -> NSMenuItem {
         submenu("View", [
+            item("Hex", #selector(RomWindowController.showHex(_:)), "1", modifiers: [.command, .option]),
+            item("Disassembly", #selector(RomWindowController.showDisassembly(_:)), "2", modifiers: [.command, .option]),
+            item("Both", #selector(RomWindowController.showBoth(_:)), "3", modifiers: [.command, .option]),
+            .separator(),
             item("File Offset and SNES Address", #selector(RomWindowController.showBothAddresses(_:)), "1"),
             item("SNES Address Only", #selector(RomWindowController.showSnesAddresses(_:)), "2"),
             item("File Offset Only", #selector(RomWindowController.showFileOffsets(_:)), "3"),
+            .separator(),
+            item("Show Navigator", #selector(RomWindowController.toggleNavigator(_:)), "0"),
+            item("Show Inspector", #selector(RomWindowController.toggleInspector(_:)), "0", modifiers: [.command, .option]),
             .separator(),
             item("Enter Full Screen", #selector(NSWindow.toggleFullScreen(_:)), "f", modifiers: [.command, .control]),
         ])
@@ -77,7 +112,9 @@ enum MainMenu {
     private static func goMenu() -> NSMenuItem {
         submenu("Go", [
             item("Jump to Address…", #selector(RomWindowController.jumpToAddress(_:)), "l"),
+            item("Follow Reference", #selector(RomWindowController.followReference(_:)), "\r"),
             item("Back", #selector(RomWindowController.goBack(_:)), "["),
+            item("Forward", #selector(RomWindowController.goForward(_:)), "]"),
             .separator(),
             item("Header", #selector(RomWindowController.goToHeader(_:)), "h", modifiers: [.command, .shift]),
             item("Reset Vector", #selector(RomWindowController.goToReset(_:)), "r", modifiers: [.command, .shift]),

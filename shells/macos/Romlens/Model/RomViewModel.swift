@@ -1,14 +1,41 @@
+import AppKit
 import Foundation
 import Observation
 import RomlensKit
 
-/// Per-document state shared by the hex table, inspector and jump sheet.
+/// Per-document state shared by the hex and disassembly canvases, the
+/// navigator, the inspector and the sheets. Selection and jump history stay
+/// here (shell-side) in Phase 1; the core provides the line/offset mappings.
 @MainActor
 @Observable
 final class RomViewModel {
     struct ScrollRequest: Equatable {
         let id: Int
-        let row: UInt32
+        let offset: UInt32
+        /// Compatibility for hex-only callers.
+        var row: UInt32 { offset / 16 }
+    }
+
+    enum EditorTab: String, CaseIterable, Identifiable {
+        case hex, disassembly, both
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .hex: "Hex"
+            case .disassembly: "Disassembly"
+            case .both: "Both"
+            }
+        }
+    }
+
+    enum Sheet: Identifiable {
+        case jump, renameLabel, comment, flags
+        var id: Self { self }
+    }
+
+    /// The one-case right pane keeps room for the tutor later.
+    enum RightPane: Hashable {
+        case inspector
     }
 
     let rom: Rom
@@ -16,61 +43,220 @@ final class RomViewModel {
     let spans: [Span]
     let palette: SpanPalette
     let rowCount: UInt32
+    let session: WorkbenchSession
+    let navigator = NavigatorModel()
     @ObservationIgnored let cache: HexRowCache
+    @ObservationIgnored let asmCache: AsmLineCache
+    let metrics = MonoMetrics()
 
     var addressStyle: AddressStyle = .both {
         didSet {
             guard addressStyle != oldValue else { return }
-            layout = HexRowLayout(style: addressStyle, font: layout.font)
+            layout = HexRowLayout(style: addressStyle, metrics: metrics)
+            asmLayout = AsmLineLayout(style: addressStyle, metrics: metrics)
             lineGeneration += 1
+            asmGeneration += 1
         }
     }
     private(set) var layout: HexRowLayout
-    /// Bumped whenever cached `CTLine`s must be rebuilt.
+    private(set) var asmLayout: AsmLineLayout
+    /// Bumped whenever cached hex `CTLine`s must be rebuilt.
     private(set) var lineGeneration = 0
+    /// Bumped whenever cached asm lines must be rebuilt (also on snapshot change).
+    private(set) var asmGeneration = 0
+    private(set) var asmLineCount: UInt32 = 0
 
     private(set) var selectedOffset: UInt32?
+    private(set) var selectionAnchor: UInt32?
     private(set) var inspection: ByteInterpretation?
+    private(set) var instruction: InstructionInfo?
+    private(set) var region: RegionInfo?
+    private(set) var label: LabelInfo?
+    private(set) var lineComment: CommentInfo?
+    private(set) var blockComment: CommentInfo?
+    private(set) var xrefsTo: [XRefInfo] = []
+    private(set) var xrefsFrom: [XRefInfo] = []
+    private(set) var warnings: [WarningInfo] = []
+    private(set) var flagOverride: FlagOverride?
     private(set) var history: [UInt32] = []
+    private(set) var forwardHistory: [UInt32] = []
     private(set) var scrollRequest: ScrollRequest?
-    var isShowingJumpSheet = false
+    var editorTab: EditorTab = .hex
+    var activeSheet: Sheet?
+    var rightPane: RightPane = .inspector
+    var isNavigatorVisible = true
+    var isInspectorVisible = true
 
-    init(rom: Rom, cacheCapacity: Int = 64) {
+    /// Compatibility with the Phase 0 jump sheet binding.
+    var isShowingJumpSheet: Bool {
+        get { activeSheet == .jump }
+        set { activeSheet = newValue ? .jump : (activeSheet == .jump ? nil : activeSheet) }
+    }
+
+    init(rom: Rom, workbench: Workbench? = nil, cacheCapacity: Int = 64, startAnalysis: Bool = true) {
         self.rom = rom
         info = rom.info()
         spans = rom.spans()
         palette = SpanPalette(spans: spans)
         rowCount = rom.rowCount()
-        cache = HexRowCache(rom: rom, capacity: cacheCapacity)
-        layout = HexRowLayout(style: .both)
+        let workbench = workbench ?? Workbench(rom: rom)
+        session = WorkbenchSession(workbench: workbench)
+        cache = HexRowCache(workbench: workbench, capacity: cacheCapacity)
+        asmCache = AsmLineCache(workbench: workbench, capacity: cacheCapacity)
+        layout = HexRowLayout(style: .both, metrics: metrics)
+        asmLayout = AsmLineLayout(style: .both, metrics: metrics)
+        asmLineCount = workbench.lineCount()
+        session.onChange = { [weak self] kind in self?.handleChange(kind) }
+        if startAnalysis {
+            session.startAnalysis()
+        }
     }
 
+    var workbench: Workbench { session.workbench }
     var byteCount: UInt32 { info.byteLen }
     var canGoBack: Bool { !history.isEmpty }
+    var canGoForward: Bool { !forwardHistory.isEmpty }
+    /// The disassembly exists once the first analysis has landed.
+    var hasDisassembly: Bool { session.hasSnapshot && asmLineCount > 0 }
+
+    /// Bytes to highlight: the shift-selected range, else the selected
+    /// instruction's bytes, else the byte.
+    var highlightedRange: Range<UInt32>? {
+        guard let selected = selectedOffset else { return nil }
+        if let anchor = selectionAnchor {
+            let lo = min(anchor, selected)
+            let hi = max(anchor, selected)
+            return lo..<min(hi + 1, byteCount)
+        }
+        if let insn = instruction, insn.fileOffset <= selected, selected < insn.fileOffset + UInt32(insn.len) {
+            return insn.fileOffset..<insn.fileOffset + UInt32(insn.len)
+        }
+        return selected..<selected + 1
+    }
+
+    // MARK: Caches
 
     func batch(containingRow row: UInt32) -> HexBatch {
         cache.batch(containingRow: row)
     }
 
-    /// Select a byte without scrolling (mouse, arrow keys).
+    func asmBatch(containingLine line: UInt32) -> AsmBatch {
+        asmCache.batch(containingRow: line)
+    }
+
+    private func handleChange(_ kind: WorkbenchSession.ChangeKind) {
+        switch kind {
+        case .snapshot, .view:
+            cache.invalidateAll()
+            asmCache.invalidateAll()
+            asmLineCount = workbench.lineCount()
+            asmGeneration += 1
+            lineGeneration += 1
+            refreshSelectionDetails()
+            Task { await navigator.reload(workbench: workbench, rom: rom) }
+        case .project:
+            break
+        }
+    }
+
+    // MARK: Selection
+
+    /// Select a byte without scrolling (mouse, arrow keys). Clears any range.
     func select(offset: UInt32?) {
+        selectionAnchor = nil
+        setSelected(offset)
+    }
+
+    /// Extend the range from the current selection (shift-click, shift+arrows).
+    func extendSelection(to offset: UInt32) {
+        guard offset < byteCount else { return }
+        if selectionAnchor == nil { selectionAnchor = selectedOffset ?? offset }
+        setSelected(offset)
+    }
+
+    private func setSelected(_ offset: UInt32?) {
         guard let offset else {
             selectedOffset = nil
             inspection = nil
+            clearDetails()
             return
         }
         guard offset < byteCount else { return }
         selectedOffset = offset
         inspection = rom.inspect(fileOffset: offset)
+        refreshSelectionDetails()
+    }
+
+    private func clearDetails() {
+        instruction = nil
+        region = nil
+        label = nil
+        lineComment = nil
+        blockComment = nil
+        xrefsTo = []
+        xrefsFrom = []
+        warnings = []
+        flagOverride = nil
+    }
+
+    private func refreshSelectionDetails() {
+        guard let offset = selectedOffset else { return }
+        instruction = workbench.instructionAt(fileOffset: offset)
+        region = workbench.regionAt(fileOffset: offset)
+        let itemStart = instruction?.fileOffset ?? offset
+        if let address = rom.snesAddressFor(fileOffset: itemStart) {
+            label = workbench.labelAt(snesAddress: address)
+            lineComment = workbench.commentAt(snesAddress: address, kind: .line)
+            blockComment = workbench.commentAt(snesAddress: address, kind: .block)
+            xrefsTo = workbench.xrefsTo(snesAddress: address)
+        } else {
+            label = nil
+            lineComment = nil
+            blockComment = nil
+            xrefsTo = []
+        }
+        xrefsFrom = workbench.xrefsFrom(fileOffset: itemStart)
+        warnings = workbench.warningsAt(fileOffset: itemStart)
+        flagOverride = workbench.flagOverrideAt(fileOffset: itemStart)
+    }
+
+    /// The address of the selected item (instruction start or byte).
+    var selectedAddress: UInt32? {
+        guard let offset = selectedOffset else { return nil }
+        return rom.snesAddressFor(fileOffset: instruction?.fileOffset ?? offset)
     }
 
     /// Move the selection by `delta` bytes, clamped, and keep it visible.
-    func moveSelection(by delta: Int) {
+    func moveSelection(by delta: Int, extend: Bool = false) {
         let current = Int(selectedOffset ?? 0)
-        let next = min(max(current + delta, 0), Int(byteCount) - 1)
-        select(offset: UInt32(next))
-        requestScroll(toRow: UInt32(next) / 16)
+        let next = UInt32(min(max(current + delta, 0), Int(byteCount) - 1))
+        if extend { extendSelection(to: next) } else { select(offset: next) }
+        requestScroll(toOffset: next)
     }
+
+    /// Move to the previous or next content line of the disassembly.
+    func moveLine(by delta: Int, extend: Bool = false) {
+        guard asmLineCount > 0 else { return }
+        let current = selectedOffset.flatMap { workbench.lineForOffset(fileOffset: $0) } ?? 0
+        var line = Int(current)
+        var steps = abs(delta)
+        let step = delta < 0 ? -1 : 1
+        var landed: UInt32? = nil
+        while steps > 0 {
+            let next = line + step
+            guard next >= 0, next < Int(asmLineCount) else { break }
+            line = next
+            if let range = workbench.itemRange(line: UInt32(line)), range.len > 0 {
+                steps -= 1
+                landed = range.start
+            }
+        }
+        guard let target = landed else { return }
+        if extend { extendSelection(to: target) } else { select(offset: target) }
+        requestScroll(toOffset: target)
+    }
+
+    // MARK: Navigation
 
     /// Jump to a file offset: select it, centre it, remember where we were.
     func jump(to offset: UInt32, recordHistory: Bool = true) {
@@ -78,9 +264,10 @@ final class RomViewModel {
         if recordHistory, let from = selectedOffset, from != offset {
             history.append(from)
             if history.count > 100 { history.removeFirst() }
+            forwardHistory.removeAll()
         }
         select(offset: offset)
-        requestScroll(toRow: offset / 16)
+        requestScroll(toOffset: offset)
     }
 
     /// Jump to a 24-bit SNES address when it maps to ROM.
@@ -111,10 +298,106 @@ final class RomViewModel {
 
     func goBack() {
         guard let previous = history.popLast() else { return }
+        if let current = selectedOffset { forwardHistory.append(current) }
         jump(to: previous, recordHistory: false)
     }
 
-    private func requestScroll(toRow row: UInt32) {
-        scrollRequest = ScrollRequest(id: (scrollRequest?.id ?? 0) + 1, row: row)
+    func goForward() {
+        guard let next = forwardHistory.popLast() else { return }
+        if let current = selectedOffset { history.append(current) }
+        jump(to: next, recordHistory: false)
+    }
+
+    /// Follow the selected instruction's target (or a pointer's).
+    func followReference() {
+        if let target = instruction?.targetFileOffset {
+            jump(to: target)
+        } else if let p = inspection?.pointerTargetFileOffset, instruction == nil {
+            jump(to: p)
+        }
+    }
+
+    func requestScroll(toOffset offset: UInt32) {
+        scrollRequest = ScrollRequest(id: (scrollRequest?.id ?? 0) + 1, offset: offset)
+    }
+
+    // MARK: Key commands from either canvas
+
+    func perform(_ command: EditorKeyCommand, from source: EditorSource, visibleItems: Int = 20) {
+        switch command {
+        case .left: moveSelection(by: -1)
+        case .right: moveSelection(by: 1)
+        case .extendLeft: moveSelection(by: -1, extend: true)
+        case .extendRight: moveSelection(by: 1, extend: true)
+        case .up: source == .hex ? moveSelection(by: -16) : moveLine(by: -1)
+        case .down: source == .hex ? moveSelection(by: 16) : moveLine(by: 1)
+        case .extendUp: source == .hex ? moveSelection(by: -16, extend: true) : moveLine(by: -1, extend: true)
+        case .extendDown: source == .hex ? moveSelection(by: 16, extend: true) : moveLine(by: 1, extend: true)
+        case .pageUp: source == .hex ? moveSelection(by: -16 * max(1, visibleItems)) : moveLine(by: -max(1, visibleItems))
+        case .pageDown: source == .hex ? moveSelection(by: 16 * max(1, visibleItems)) : moveLine(by: max(1, visibleItems))
+        case .home: jump(to: 0)
+        case .end: jump(to: byteCount - 1)
+        case .back: goBack()
+        case .follow: followReference()
+        case .rename: if selectedOffset != nil { activeSheet = .renameLabel }
+        case .comment: if selectedOffset != nil { activeSheet = .comment }
+        case .markCode: mark(.code)
+        case .markData: mark(.data)
+        case .markUnknown: mark(.unknown)
+        }
+    }
+
+    // MARK: Editing
+
+    /// Mark the highlighted range (or the selected item) with a kind.
+    func mark(_ kind: OverrideKind, dataKind: DataKind = .byte) {
+        guard let range = highlightedRange else { return }
+        try? session.mark(start: range.lowerBound, len: UInt32(range.count), kind: kind, dataKind: kind == .data ? dataKind : nil)
+        refreshSelectionDetails()
+    }
+
+    func clearMark() {
+        guard let range = highlightedRange else { return }
+        try? session.clearMark(start: range.lowerBound, len: UInt32(range.count))
+        refreshSelectionDetails()
+    }
+
+    func setLabel(name: String?) throws {
+        guard let address = selectedAddress else { return }
+        try session.setLabel(address: address, name: name)
+        refreshSelectionDetails()
+    }
+
+    func setComment(kind: CommentKind, text: String?) throws {
+        guard let address = selectedAddress else { return }
+        try session.setComment(address: address, kind: kind, text: text)
+        refreshSelectionDetails()
+    }
+
+    func setFlagOverride(_ flags: FlagOverride?) throws {
+        guard let offset = instruction?.fileOffset ?? selectedOffset else { return }
+        try session.setFlagOverride(offset: offset, flags: flags)
+        refreshSelectionDetails()
+    }
+
+    func undo() {
+        session.undo()
+        refreshSelectionDetails()
+    }
+
+    func redo() {
+        session.redo()
+        refreshSelectionDetails()
+    }
+
+    /// The selected address as text, for Copy Address.
+    var selectedAddressText: String? {
+        selectedAddress.map { formatSnesAddress(address: $0) }
+    }
+
+    /// The selected line as text, for Copy Line.
+    var selectedLineText: String? {
+        guard let offset = selectedOffset, let line = workbench.lineForOffset(fileOffset: offset) else { return nil }
+        return workbench.asmLinesText(startLine: line, count: 1, style: .both).trimmingCharacters(in: .newlines)
     }
 }
