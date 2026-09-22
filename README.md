@@ -7,12 +7,16 @@ pairs the student with an AI tutor that works only through the app's own
 tools. Over time it grows into a decompiler and an educational visualization
 tool in the spirit of 3Blue1Brown.
 
-Status: **Phase 0 ("open and see") implemented**, 21 September 2026. The
-Rust core, FFI crate, generated Swift package, CLI and the macOS shell exist;
-the app opens an `.sfc`/`.smc`, shows the structured hex view with the dual
-address column, header and vector overlays, the byte inspector and jump to
-address. `spikes/` holds the FFI measurement that shaped the API. Start with
-the docs, then `docs/14-phase0-plan.md` for what was built and why. Romlens is a study and visualization tool
+Status: **Phase 1 ("Disassemble") implemented**, 21 September 2026, after
+Phase 0 ("open and see") the same day. The Rust core decodes the full 65816
+with M/X width tracking, walks the ROM from its vectors, names what it finds
+and stores annotations in a `.romlens` package; the CLI exposes every step;
+the macOS app shows the hex view, the disassembly and both in lockstep, with
+a navigator, an inspector, label/comment/region editing with undo, project
+documents and asar-syntax export. The tutor's Ask mode is the next plan.
+`spikes/` holds the FFI measurement that shaped the API. Start with the
+docs, then `docs/14-phase0-plan.md` and `docs/15-conformance-checklist.md`
+for what was built and how it is checked. Romlens is a study and visualization tool
 first: it needs no commercial ROM, works on homebrew builds, and its dynamic
 views come from recordings in our own format. A debugger visualizer with an
 embedded core is the planned next step after that, feeding the same views.
@@ -45,8 +49,11 @@ published as a Claude artifact: https://claude.ai/artifact/FPovXe1FGDZNPvcQidxtB
 
 ## Building
 
-Toolchain: Rust stable via rustup (`rust-toolchain.toml`), Xcode 27 / Swift
-6.4, XcodeGen (`brew install xcodegen`). `make help` lists every target.
+Toolchain: Rust stable via rustup (`rust-toolchain.toml`; the crates need
+1.88 or newer for let chains), Xcode 27 / Swift 6.4, XcodeGen
+(`brew install xcodegen`). WLA-DX (`brew install wla-dx`) is optional: when
+`wla-65816` is on the path, a test assembles all 256 opcodes with it and
+checks the decoder against the result. `make help` lists every target.
 
 ```
 make test        # cargo fmt --check, clippy -D warnings, cargo test --workspace
@@ -72,11 +79,32 @@ scripts/                      build-xcframework.sh, check-cross.sh
 The CLI mirrors the shell so every feature has a scriptable twin:
 
 ```
-cargo run -p romlens-cli -- info roms/SuperMetroid.F8DF.sfc
-cargo run -p romlens-cli -- hex roms/SuperMetroid.F8DF.sfc --from '$80:841C' --rows 4
-cargo run -p romlens-cli -- resolve roms/SuperMetroid.F8DF.sfc '$80:841C'
-cargo run -p romlens-cli -- testrom --out /tmp/t.sfc --mapping lorom
+R=roms/SuperMetroid.F8DF.sfc
+cargo run -p romlens-cli -- info $R
+cargo run -p romlens-cli -- hex $R --from '$80:841C' --rows 4
+cargo run -p romlens-cli -- resolve $R '$80:841C'
+cargo run -p romlens-cli -- disasm $R --from '$80:841C' --count 30 --address snes --verbose
+cargo run -p romlens-cli -- disasm $R --from '$80:8423' --count 8 --flags m0x0e0   # raw decode, no analysis
+cargo run -p romlens-cli -- analyze $R --stats
+cargo run -p romlens-cli -- labels $R --count 40
+cargo run -p romlens-cli -- xrefs $R '$80:8573'
+cargo run -p romlens-cli -- inspect $R '$80:8427'
+cargo run -p romlens-cli -- search $R "78 18 FB 5C"
+cargo run -p romlens-cli -- registers '$420D'
+cargo run -p romlens-cli -- export asm $R --out boot.asm --range '$80:841C..$80:8460'
+cargo run -p romlens-cli -- export sym $R --out boot.sym --include-auto
+cargo run -p romlens-cli -- project Metroid.romlens init --rom $R
+cargo run -p romlens-cli -- project Metroid.romlens label '$80:841C' Boot        # `-` removes
+cargo run -p romlens-cli -- project Metroid.romlens comment '$80:841C' 'disable IRQ' --line
+cargo run -p romlens-cli -- project Metroid.romlens mark '$80:9000' 512 byte
+cargo run -p romlens-cli -- project Metroid.romlens flags '$80:9C41' --m 1
+cargo run -p romlens-cli -- disasm $R --project Metroid.romlens --from '$80:841C' --count 8
+cargo run -p romlens-cli -- testrom --out /tmp/t.sfc --mapping lorom             # or --all-opcodes
 ```
+
+Project commands find the ROM beside the package by hash; pass `--rom` when
+it lives elsewhere. Every read command takes `--project <pkg>` to apply the
+package's labels, comments, marks and flag pins.
 
 If a `cargo` from Homebrew is also installed, the scripts and Makefile put
 rustup's `~/.cargo/bin` first on `PATH`: cargo invokes `rustc` from `PATH`,

@@ -75,6 +75,30 @@ A page of fresh rows costs about a quarter of a frame in a debug build,
 before AppKit's own work; cached rows cost only the draw. The Instruments
 pass (Animation Hitches over a full trackpad scroll) is still a manual step.
 
+## Phase 1 measurements (21 September 2026)
+
+Core, release build, development ROM (3 MB), M5 Pro:
+
+| Quantity | Value |
+|---|---|
+| Full analysis (descent + sweep + labels) | 19 ms |
+| Static reach from the twelve vectors | 2,756 instructions, 6,245 code bytes, 221 labels, 1,400 xrefs, 13 warnings |
+| Why so little | the main loop dispatches through `JSR ($xxxx,X)` tables; jump tables are Phase 2 |
+
+Shell, debug build, `RomlensTests` on a 3 MB padded fixture:
+
+| Quantity | Value |
+|---|---|
+| Asm canvas: 196,819 lines drawn in 40-line frames, cold cache | 5.0 s (25.6 µs per line), worst frame 2.5 ms, 769 batch misses |
+| Asm live page-by-page scroll | 7,790 pages, worst step 2.5 ms, 0 subviews |
+| `lineForOffset` (FFI round trip, main actor) | 0.7 µs per call (budget 50 µs) |
+| Navigator filter, 20,000 labels, three passes | 14 ms |
+| Hex canvas (unchanged path) | worst 40-row frame 1.2 ms, live scroll worst step 13 ms |
+
+The async `analyze()` future and the `WorkbenchListener` callback were not
+timed separately: progress events are coalesced to one main-actor hop per
+batch, and the whole analysis is shorter than a frame budget on this ROM.
+
 ## Not measured, still to check in Phase 0
 
 - Async call and callback-interface overhead (event delivery from the core's

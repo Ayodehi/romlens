@@ -118,7 +118,10 @@ final class ProjectDocument: NSDocument {
     override func fileWrapper(ofType typeName: String) throws -> FileWrapper {
         guard let workbench else { throw CocoaError(.fileWriteUnknown) }
         let wrapper = lastWrapper ?? FileWrapper(directoryWithFileWrappers: [:])
-        if wrapper.preferredFilename == nil { wrapper.preferredFilename = fileURL?.lastPathComponent }
+        // An untitled project has no name yet; NSDocument assigns it on save.
+        if wrapper.preferredFilename == nil, let name = fileURL?.lastPathComponent, !name.isEmpty {
+            wrapper.preferredFilename = name
+        }
         let files = workbench.projectFiles()
         for (name, data) in files {
             if let old = wrapper.fileWrappers?[name] { wrapper.removeFileWrapper(old) }

@@ -31,7 +31,10 @@ Vectors (native / emulation), all in bank `$80` after the boot jump:
 | RESET | — | `$841C` |
 | IRQ/BRK | `$986A` | `$8573` |
 
-`$8573` is the "should never happen" handler; five of the vectors point at it.
+`$8573` is the "should never happen" handler: seven of the ten used vectors
+point at it, and so do the two slots the CPU never fetches (native RESET,
+emulation BRK), which is why `romlens xrefs … '$80:8573'` lists nine vector
+references.
 
 ## Address translation
 
@@ -163,3 +166,9 @@ The disassembler should render well-known hardware addresses symbolically:
 `$2100–$213F` PPU, `$2140–$2143` APU ports, `$4200–$421F` CPU/joypad, `$4300–
 $437F` DMA channels, `$420D` MEMSEL. A built-in symbol table for these makes
 even unlabeled code readable.
+
+Phase 1 ships this table in `model/hardware.rs` (`romlens registers`), with
+two additions beyond the list above: the WRAM port `$2180–$2183`
+(`WMDATA`, `WMADDL/M/H`) and the joypad serial ports `$4016/$4017`. The
+operand stays numeric (`STA $420D`) and the register name is an automatic
+comment (`; MEMSEL`), so exports have no define-table dependency.
