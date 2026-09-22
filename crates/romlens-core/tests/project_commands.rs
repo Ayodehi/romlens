@@ -3,7 +3,8 @@
 
 use romlens_core::fixtures;
 use romlens_core::model::{
-    Command, CommentKind, DataKind, FlagOverride, OverrideKind, Project, RegionOverride, UndoStack,
+    Command, CommentKind, DataKind, FlagOverride, Origin, OverrideKind, Project, RegionOverride,
+    UndoStack,
 };
 use romlens_core::{FileOffset, ProjectError, RomImage, SnesAddress};
 
@@ -15,10 +16,18 @@ fn a(bank: u8, off: u16) -> SnesAddress {
     SnesAddress::new(bank, off)
 }
 
+fn mark(start: u32, len: u32, kind: OverrideKind) -> Command {
+    Command::MarkRegion {
+        start: FileOffset(start),
+        len,
+        kind,
+    }
+}
+
 fn check_inverse(rom: &RomImage, project: &mut Project, cmd: Command) {
     let before = project.clone();
     let entry = project.apply(rom, cmd.clone()).unwrap();
-    assert_eq!(entry.done, cmd);
+    assert_eq!(entry.done, vec![cmd.clone()]);
     for inv in &entry.inverse {
         project.apply(rom, inv.clone()).unwrap();
     }
@@ -147,11 +156,6 @@ fn labels_and_comments() {
 fn region_marks_split_and_merge() {
     let rom = rom();
     let mut p = Project::new(&rom);
-    let mark = |start: u32, len: u32, kind: OverrideKind| Command::MarkRegion {
-        start: FileOffset(start),
-        len,
-        kind,
-    };
     check_inverse(&rom, &mut p, mark(0x100, 0x100, OverrideKind::Code));
     check_inverse(
         &rom,
@@ -333,5 +337,123 @@ fn undo_stack_round_trips() {
             len: 1
         }
         .affects_analysis()
+    );
+}
+
+/// A batch is one undoable step: one title, one inverse, and an inverse that
+/// unwinds in the reverse of the order the commands were applied.
+#[test]
+fn batches_are_one_undo_step() {
+    let rom = rom();
+    let mut p = Project::new(&rom);
+    let before = p.clone();
+    let commands = vec![
+        Command::SetLabel {
+            address: a(0x00, 0x8000),
+            name: Some("Boot".into()),
+        },
+        Command::SetLabel {
+            address: a(0x00, 0x800E),
+            name: Some("Idle".into()),
+        },
+        mark(0x20, 8, OverrideKind::Data(DataKind::Word)),
+        // Overlaps the mark above, so unwinding in the wrong order would leave
+        // the first mark's split halves behind.
+        mark(0x22, 2, OverrideKind::Code),
+    ];
+    let entry = p
+        .apply_batch(&rom, commands.clone(), Origin::Import("boot.sym".into()))
+        .unwrap();
+    assert_eq!(entry.done, commands);
+    assert_eq!(entry.title, "Import from boot.sym");
+    assert_eq!(entry.origin, Origin::Import("boot.sym".into()));
+    assert!(entry.affects_analysis());
+    assert_eq!(p.labels.len(), 2);
+
+    for inv in &entry.inverse {
+        p.apply(&rom, inv.clone()).unwrap();
+    }
+    assert_eq!(p, before, "the batch's inverse did not restore the project");
+}
+
+/// All or nothing: one refused command leaves no trace of the ones before it.
+#[test]
+fn a_refused_command_rolls_the_whole_batch_back() {
+    let rom = rom();
+    let mut p = Project::new(&rom);
+    p.apply(
+        &rom,
+        Command::SetLabel {
+            address: a(0x00, 0x8000),
+            name: Some("Existing".into()),
+        },
+    )
+    .unwrap();
+    let before = p.clone();
+
+    let err = p
+        .apply_batch(
+            &rom,
+            vec![
+                Command::SetLabel {
+                    address: a(0x00, 0x8000),
+                    name: Some("Renamed".into()),
+                },
+                mark(0x20, 4, OverrideKind::Data(DataKind::Word)),
+                // Past the end of the fixture.
+                mark(0x7FFF, 2, OverrideKind::Code),
+            ],
+            Origin::Import("bad.sym".into()),
+        )
+        .unwrap_err();
+    assert!(matches!(err, ProjectError::BadRange(_)));
+    assert_eq!(p, before, "a failed batch left the project half-edited");
+}
+
+/// Undo and redo treat a batch as a unit, and redo replays it under the same
+/// origin so the Edit menu keeps its wording.
+#[test]
+fn undo_and_redo_a_batch() {
+    let rom = rom();
+    let mut p = Project::new(&rom);
+    let empty = p.clone();
+    let mut stack = UndoStack::default();
+    stack.push(
+        p.apply_batch(
+            &rom,
+            vec![
+                mark(0x20, 4, OverrideKind::Data(DataKind::Word)),
+                mark(0x30, 4, OverrideKind::Code),
+            ],
+            Origin::User,
+        )
+        .unwrap(),
+    );
+    assert_eq!(stack.undo_title(), Some("2 Changes"));
+    assert!(stack.undo(&mut p, &rom).unwrap());
+    assert_eq!(p, empty);
+    assert_eq!(stack.redo_title(), Some("2 Changes"));
+    assert!(stack.redo(&mut p, &rom).unwrap());
+    assert_eq!(p.region_overrides.len(), 2);
+    assert_eq!(stack.undo_title(), Some("2 Changes"));
+}
+
+/// A one-command batch keeps the Phase 1 wording, so nothing in a shell's
+/// Edit menu reads differently now that every edit goes through a batch.
+#[test]
+fn origin_titles() {
+    let one = vec![Command::ClearRegionOverride {
+        start: FileOffset(0),
+        len: 1,
+    }];
+    assert_eq!(Origin::User.title(&one), "Clear Mark");
+    assert_eq!(Origin::User.title(&[]), "0 Changes");
+    assert_eq!(
+        Origin::Import("m.cdl".into()).title(&one),
+        "Import from m.cdl"
+    );
+    assert_eq!(
+        Origin::Accepted("the tutor".into()).title(&one),
+        "Accept the tutor"
     );
 }

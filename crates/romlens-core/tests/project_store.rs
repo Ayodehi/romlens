@@ -6,7 +6,8 @@ use std::path::{Path, PathBuf};
 
 use romlens_core::fixtures;
 use romlens_core::io::{
-    PROJECT_FILES, from_files, locate_rom, read_identity, read_package, to_files, write_package,
+    PROJECT_FILES, PROJECT_VERSION, from_files, locate_rom, read_identity, read_package, to_files,
+    write_package,
 };
 use romlens_core::model::{
     Command, CommentKind, DataKind, FlagOverride, Label, LabelSource, OverrideKind, Project,
@@ -168,10 +169,14 @@ fn errors() {
     let mut files = to_files(&rom, &sample(&rom));
     let mut newer = files.clone();
     let text = String::from_utf8(files["project.json"].clone()).unwrap();
+    let current = format!("\"version\": {PROJECT_VERSION}");
+    assert!(
+        text.contains(&current),
+        "project.json stopped carrying a version"
+    );
     newer.insert(
         "project.json".into(),
-        text.replace("\"version\": 1", "\"version\": 99")
-            .into_bytes(),
+        text.replace(&current, "\"version\": 99").into_bytes(),
     );
     assert_eq!(
         from_files(&rom, &newer).unwrap_err(),
@@ -258,5 +263,49 @@ fn package_write_read_and_locate() {
         read_package(&base.join("missing")).unwrap_err(),
         ProjectError::Io(_)
     ));
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+/// A package written by 0.2.0 still opens. The fixture is a byte-for-byte copy
+/// of the v1 goldens, kept frozen: regenerating the goldens with
+/// `UPDATE_GOLDEN=1` must never touch it, or the guarantee tests nothing.
+#[test]
+fn v1_package_still_opens() {
+    let rom = rom();
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/project-v1");
+    let files = read_package(&dir).unwrap();
+    let text = String::from_utf8(files["project.json"].clone()).unwrap();
+    assert!(
+        text.contains("\"version\": 1"),
+        "the v1 fixture was regenerated and is no longer v1"
+    );
+    assert_eq!(from_files(&rom, &files).unwrap(), sample(&rom));
+    assert_eq!(read_identity(&files).unwrap(), RomIdentity::of(&rom));
+}
+
+/// Traces and imports live in subdirectories of the package (2A.3), so the
+/// writer creates them and the reader walks into them, keying files by a
+/// `/`-separated path on every platform.
+#[test]
+fn packages_carry_subdirectories() {
+    let rom = rom();
+    let base = std::env::temp_dir().join(format!("romlens-subdirs-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let package = base.join("Test.romlens");
+    let mut files = to_files(&rom, &sample(&rom));
+    files.insert("traces/play.cdl".to_owned(), vec![1, 2, 3, 4]);
+    files.insert("imports/boot.sym".to_owned(), b"00:8000 Boot\n".to_vec());
+    write_package(&package, &files).unwrap();
+    assert!(package.join("traces").join("play.cdl").is_file());
+    assert!(!package.join("traces").join("play.cdl.tmp").exists());
+    assert_eq!(read_package(&package).unwrap(), files);
+    // Rewriting replaces in place and leaves no stray directories behind.
+    write_package(&package, &files).unwrap();
+    assert_eq!(read_package(&package).unwrap(), files);
+    // A name may not climb out of the package.
+    let mut escaping = files.clone();
+    escaping.insert("../escaped.json".to_owned(), b"no".to_vec());
+    assert!(write_package(&package, &escaping).is_err());
+    assert!(!base.join("escaped.json").exists());
     let _ = std::fs::remove_dir_all(&base);
 }

@@ -71,10 +71,54 @@ impl Command {
     }
 }
 
-/// A command that was applied and how to take it back.
+/// Who asked for a batch of commands. The undo stack is a *user's* history, so
+/// twenty thousand labels arriving from a symbol file have to be one entry, not
+/// twenty thousand; the origin is what supplies that entry's title.
+///
+/// `Accepted` is unused in Phase 2 and exists because the tutor's Fix mode is
+/// the same call with a different origin (`16-phase2-plan.md`, 2A.4). Keeping
+/// the variant now means the command model, the undo stack and the project
+/// store need no rework when it lands.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Origin {
+    /// A direct edit: a menu item, a sheet, a CLI subcommand.
+    User,
+    /// An importer, named by the file it read.
+    Import(String),
+    /// A proposal the user accepted, named by what proposed it.
+    Accepted(String),
+}
+
+impl Origin {
+    /// The Edit menu's "Undo …" text. A single user command keeps the wording
+    /// Phase 1 shipped, so nothing in the shell reads differently.
+    pub fn title(&self, commands: &[Command]) -> String {
+        match self {
+            Origin::User => match commands {
+                [one] => one.menu_title().to_owned(),
+                other => format!("{} Changes", other.len()),
+            },
+            Origin::Import(source) => format!("Import from {source}"),
+            Origin::Accepted(source) => format!("Accept {source}"),
+        }
+    }
+}
+
+/// Commands that were applied together and how to take them back. `inverse`
+/// is already in undo order: the last command's inverse comes first, because
+/// commands overlap (two marks over the same bytes) and the second can only be
+/// unwound while the first is still in place.
 #[derive(Debug, Clone, PartialEq)]
 pub struct UndoEntry {
-    pub done: Command,
+    pub done: Vec<Command>,
     pub inverse: Vec<Command>,
     pub title: String,
+    pub origin: Origin,
+}
+
+impl UndoEntry {
+    /// Whether the analyzer must run again after this entry.
+    pub fn affects_analysis(&self) -> bool {
+        self.done.iter().any(Command::affects_analysis)
+    }
 }

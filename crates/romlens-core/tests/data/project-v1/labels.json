@@ -1,0 +1,12 @@
+[
+  {
+    "address": "$00:8000",
+    "name": "Boot",
+    "source": "user"
+  },
+  {
+    "address": "$7E:0A1C",
+    "name": "SamusPose",
+    "source": "imported:pjboy"
+  }
+]

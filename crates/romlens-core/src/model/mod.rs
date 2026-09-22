@@ -11,7 +11,7 @@ pub mod symbols;
 pub mod undo;
 pub mod xref;
 
-pub use command::{Command, UndoEntry};
+pub use command::{Command, Origin, UndoEntry};
 pub use comment::{Comment, CommentKind};
 pub use hardware::{
     Access, HardwareRegister, all_hardware_registers, hardware_register, is_system_bank,

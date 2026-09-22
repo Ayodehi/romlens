@@ -18,7 +18,7 @@ use std::collections::BTreeMap;
 use std::time::Instant;
 
 pub use control::{AnalysisControl, AnalysisPhase, Cancelled, Progress};
-pub use snapshot::{AnalysisSnapshot, AnalysisStats, InsnRecord, Warning, WarningKind};
+pub use snapshot::{AnalysisSnapshot, AnalysisStats, InsnRecord, Severity, Warning, WarningKind};
 
 use crate::analysis::descent::{KIND_NONE, SeedSource, Walk};
 use crate::cpu65816::ASSUMED_WIDTHS;
@@ -41,6 +41,70 @@ const TAG_INLINE: u8 = 7;
 /// one pass makes its callers skip the inline arguments in the next, which
 /// can uncover the next such callee. Each pass is a few milliseconds.
 const MAX_PASSES: u32 = 6;
+
+/// The per-byte lanes the classifier paints, then collapses into regions.
+///
+/// They are one struct rather than four vectors because every stage has to
+/// write all of them: paint `cls` and forget `hid` and the byte keeps whatever
+/// evidence the stage before it left there.
+///
+/// `hid` indexes `evidence`, with 0 meaning "the tag says it all". It exists
+/// because the evidence that matters in Phase 2 varies *per span*, not per tag:
+/// "jump table, 14 entries, dispatched from $80:9C15" names a specific
+/// dispatcher and cannot be derived from `TAG_TABLE` alone. Regions then break
+/// on a change of id, so two adjacent tables do not merge into one region that
+/// claims both dispatchers.
+struct Paint {
+    cls: Vec<u8>,
+    conf: Vec<u8>,
+    tag: Vec<u8>,
+    hid: Vec<u32>,
+    /// Indexed from 1; slot 0 is the empty placeholder for `hid == 0`.
+    evidence: Vec<Vec<Evidence>>,
+}
+
+impl Paint {
+    fn new(n: usize) -> Self {
+        Self {
+            cls: vec![0; n],
+            conf: vec![0; n],
+            tag: vec![TAG_NONE; n],
+            // u32, not u16: window-aligned heuristics over a 3 MB ROM can
+            // produce more than 64K spans, and a lane that silently wrapped
+            // would attach one region's evidence to another's bytes.
+            hid: vec![0; n],
+            evidence: vec![Vec::new()],
+        }
+    }
+
+    /// Record evidence belonging to one span and return the id to paint with.
+    // Jump tables (2A.1) are the first producer; every stage today has evidence
+    // that follows from its tag, so nothing calls this yet.
+    #[allow(dead_code)]
+    fn intern(&mut self, evidence: Vec<Evidence>) -> u32 {
+        self.evidence.push(evidence);
+        (self.evidence.len() - 1) as u32
+    }
+
+    fn set(&mut self, b: usize, cls: u8, conf: u8, tag: u8, hid: u32) {
+        self.cls[b] = cls;
+        self.conf[b] = conf;
+        self.tag[b] = tag;
+        self.hid[b] = hid;
+    }
+
+    /// Whether two bytes belong to the same region.
+    fn same(&self, a: usize, b: usize) -> bool {
+        self.cls[a] == self.cls[b]
+            && self.conf[a] == self.conf[b]
+            && self.tag[a] == self.tag[b]
+            && self.hid[a] == self.hid[b]
+    }
+
+    fn span_evidence(&self, b: usize) -> &[Evidence] {
+        &self.evidence[self.hid[b] as usize]
+    }
+}
 
 /// Run the analyzer over a ROM under a project's overrides.
 pub fn analyze(
@@ -70,9 +134,7 @@ pub fn analyze(
     control.report(AnalysisPhase::Labels, 0, 1);
 
     let n = rom.len();
-    let mut cls = vec![0u8; n];
-    let mut conf = vec![0u8; n];
-    let mut tag = vec![TAG_NONE; n];
+    let mut paint = Paint::new(n);
 
     // Internal header (plus the extended header when present).
     let h = rom.header_offset().0 as usize;
@@ -81,10 +143,9 @@ pub fn analyze(
     } else {
         h
     };
+    let header_code = RegionKind::Data(DataKind::Struct).code();
     for b in hstart..(h + HEADER_LEN).min(n) {
-        cls[b] = RegionKind::Data(DataKind::Struct).code();
-        conf[b] = 100;
-        tag[b] = TAG_HEADER;
+        paint.set(b, header_code, 100, TAG_HEADER, 0);
     }
     // Code from the descent.
     let mut records: Vec<(InsnRecord, u16)> = std::mem::take(&mut walk.records);
@@ -95,21 +156,18 @@ pub fn analyze(
             90
         };
         for b in r.offset..r.end() {
-            cls[b as usize] = 1;
-            conf[b as usize] = c;
-            tag[b as usize] = TAG_VECTOR;
+            paint.set(b as usize, 1, c, TAG_VECTOR, 0);
         }
     }
     for &off in &walk.conflicts {
-        if cls[off as usize] == 1 {
-            conf[off as usize] = conf[off as usize].saturating_sub(30).max(10);
+        let off = off as usize;
+        if paint.cls[off] == 1 {
+            paint.conf[off] = paint.conf[off].saturating_sub(30).max(10);
         }
     }
     for r in &swept {
         for b in r.offset..r.end() {
-            cls[b as usize] = 1;
-            conf[b as usize] = 30;
-            tag[b as usize] = TAG_SWEEP;
+            paint.set(b as usize, 1, 30, TAG_SWEEP, 0);
         }
         records.push((*r, u16::MAX));
     }
@@ -118,18 +176,19 @@ pub fn analyze(
     for s in &walk.seeds {
         let end = (s.offset + s.len).min(n as u32);
         let jump_pointer = s.source == SeedSource::JumpPointer;
+        let code = RegionKind::Data(s.kind).code();
+        let conf = (s.confidence * 100.0) as u8;
+        let tag = match s.source {
+            SeedSource::Operand => TAG_OPERAND,
+            SeedSource::JumpPointer => TAG_POINTER,
+            SeedSource::InlineArgument => TAG_INLINE,
+        };
         for b in s.offset..end {
             let b = b as usize;
-            if cls[b] != 0 && !(tag[b] == TAG_OPERAND && jump_pointer) {
+            if paint.cls[b] != 0 && !(paint.tag[b] == TAG_OPERAND && jump_pointer) {
                 continue;
             }
-            cls[b] = RegionKind::Data(s.kind).code();
-            conf[b] = (s.confidence * 100.0) as u8;
-            tag[b] = match s.source {
-                SeedSource::Operand => TAG_OPERAND,
-                SeedSource::JumpPointer => TAG_POINTER,
-                SeedSource::InlineArgument => TAG_INLINE,
-            };
+            paint.set(b, code, conf, tag, 0);
         }
     }
     // The user's word is final.
@@ -137,9 +196,7 @@ pub fn analyze(
         let end = (r.end() as usize).min(n);
         let code = r.kind.region_kind().code();
         for b in r.start.0 as usize..end {
-            cls[b] = code;
-            conf[b] = 100;
-            tag[b] = TAG_USER;
+            paint.set(b, code, 100, TAG_USER, 0);
         }
     }
 
@@ -148,22 +205,21 @@ pub fn analyze(
     let mut start = 0usize;
     while start < n {
         let mut end = start + 1;
-        while end < n
-            && cls[end] == cls[start]
-            && conf[end] == conf[start]
-            && tag[end] == tag[start]
-        {
+        while end < n && paint.same(end, start) {
             end += 1;
         }
-        let kind = if tag[start] == TAG_USER {
+        let kind = if paint.tag[start] == TAG_USER {
             project
                 .override_kind_at(start as u32)
                 .map(OverrideKind::region_kind)
-                .unwrap_or_else(|| kind_from_code(cls[start]))
+                .unwrap_or_else(|| kind_from_code(paint.cls[start]))
         } else {
-            kind_from_code(cls[start])
+            kind_from_code(paint.cls[start])
         };
-        let evidence = match tag[start] {
+        // Span evidence comes first: it names the specific thing that decided
+        // these bytes, which is what the inspector's popover leads with.
+        let mut evidence = paint.span_evidence(start).to_vec();
+        evidence.extend(match paint.tag[start] {
             TAG_VECTOR => {
                 let first = records.partition_point(|(r, _)| (r.offset as usize) < start);
                 let depth = records[first..]
@@ -199,12 +255,12 @@ pub fn analyze(
             }],
             TAG_USER => vec![Evidence::User],
             _ => Vec::new(),
-        };
+        });
         regions.push(Region {
             start: FileOffset(start as u32),
             len: (end - start) as u32,
             kind,
-            confidence: conf[start] as f32 / 100.0,
+            confidence: paint.conf[start] as f32 / 100.0,
             evidence,
         });
         start = end;

@@ -1,0 +1,32 @@
+[
+  {
+    "start": "$00:9000",
+    "length": 512,
+    "kind": "data",
+    "dataKind": "byte"
+  },
+  {
+    "start": "$00:9400",
+    "length": 64,
+    "kind": "data",
+    "dataKind": "table",
+    "stride": 4
+  },
+  {
+    "start": "$00:9800",
+    "length": 16,
+    "kind": "data",
+    "dataKind": "graphics",
+    "bpp": 4
+  },
+  {
+    "start": "$00:A000",
+    "length": 32,
+    "kind": "unknown"
+  },
+  {
+    "start": "$00:B000",
+    "length": 1,
+    "kind": "code"
+  }
+]

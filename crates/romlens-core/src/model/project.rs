@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use crate::error::ProjectError;
 use crate::memory::address::{FileOffset, SnesAddress};
 use crate::memory::map::MappingMode;
-use crate::model::command::{Command, UndoEntry};
+use crate::model::command::{Command, Origin, UndoEntry};
 use crate::model::comment::{Comment, CommentKind};
 use crate::model::label::{Label, LabelSource, validate_label_name};
 use crate::model::region::{OverrideKind, RegionOverride};
@@ -110,10 +110,17 @@ impl Project {
         self.comments.get(&(addr, kind))
     }
 
+    /// The overrides are sorted and non-overlapping, so the only candidate is
+    /// the last one starting at or before `off`. `analyze` calls this once per
+    /// region and an import can add thousands of overrides at a stroke (2A.4),
+    /// so the scan this replaced would have gone quadratic.
     pub fn region_override_at(&self, off: FileOffset) -> Option<&RegionOverride> {
+        let i = self
+            .region_overrides
+            .partition_point(|r| r.start.0 <= off.0);
         self.region_overrides
-            .iter()
-            .find(|r| off.0 >= r.start.0 && off.0 < r.end())
+            .get(i.checked_sub(1)?)
+            .filter(|r| off.0 < r.end())
     }
 
     /// Overrides intersecting `[start, start + len)`.
@@ -173,10 +180,11 @@ impl Project {
         self.region_overrides.insert(i, r);
     }
 
-    /// Apply a command and return how to undo it.
-    pub fn apply(&mut self, rom: &RomImage, cmd: Command) -> Result<UndoEntry, ProjectError> {
-        let title = cmd.menu_title().to_owned();
-        let inverse = match &cmd {
+    /// Apply one command and return the commands that take it back. Nothing
+    /// outside this file calls it: an edit is always a batch, even of one, so
+    /// there is a single place where a failure half-way is rolled back.
+    fn apply_one(&mut self, rom: &RomImage, cmd: &Command) -> Result<Vec<Command>, ProjectError> {
+        let inverse = match cmd {
             Command::SetLabel { address, name } => {
                 let address = Self::canonical(rom, *address);
                 if let Some(name) = name {
@@ -280,10 +288,50 @@ impl Project {
                 }]
             }
         };
+        Ok(inverse)
+    }
+
+    /// Apply a command and return how to undo it.
+    pub fn apply(&mut self, rom: &RomImage, cmd: Command) -> Result<UndoEntry, ProjectError> {
+        self.apply_batch(rom, vec![cmd], Origin::User)
+    }
+
+    /// Apply commands as one undoable step.
+    ///
+    /// The batch is all-or-nothing: if any command is refused, the ones already
+    /// applied are rolled back before the error is returned, so a symbol file
+    /// with one bad entry cannot leave a project half-imported. Rolling back
+    /// uses the inverses just computed, which is the same path undo takes.
+    pub fn apply_batch(
+        &mut self,
+        rom: &RomImage,
+        commands: Vec<Command>,
+        origin: Origin,
+    ) -> Result<UndoEntry, ProjectError> {
+        let title = origin.title(&commands);
+        let mut inverse: Vec<Command> = Vec::with_capacity(commands.len());
+        for cmd in &commands {
+            match self.apply_one(rom, cmd) {
+                // Prepending keeps `inverse` in undo order: last done, first
+                // undone.
+                Ok(inv) => {
+                    inverse.splice(0..0, inv);
+                }
+                Err(e) => {
+                    // Unwinding cannot fail: every inverse was produced by a
+                    // command this project just accepted.
+                    for undo in std::mem::take(&mut inverse) {
+                        let _ = self.apply_one(rom, &undo);
+                    }
+                    return Err(e);
+                }
+            }
+        }
         Ok(UndoEntry {
-            done: cmd,
+            done: commands,
             inverse,
             title,
+            origin,
         })
     }
 

@@ -73,7 +73,44 @@ pub enum WarningKind {
     WalkedIntoUserData,
 }
 
+/// How a warning should read. The map is never perfect, so the list is long;
+/// without this every entry shouts equally and the ones that mark a *hole* in
+/// the map are lost among the ones that record a decision the analyzer made on
+/// purpose.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Severity {
+    /// The analyzer did what it was asked and is saying so. Nothing to fix.
+    Info,
+    /// The walk stopped, guessed, or found two answers. Somewhere a byte is
+    /// unclassified or may be wrong.
+    Warning,
+}
+
+impl Severity {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Severity::Info => "info",
+            Severity::Warning => "warning",
+        }
+    }
+}
+
 impl WarningKind {
+    /// `WalkedIntoUserData` is the only informational kind today: the user drew
+    /// a data wall and the descent respected it, which is the feature working.
+    /// Every other kind marks something the analyzer could not settle.
+    pub const fn severity(self) -> Severity {
+        match self {
+            WarningKind::WalkedIntoUserData => Severity::Info,
+            WarningKind::ComputedJump
+            | WarningKind::FlagConflict
+            | WarningKind::UnknownCarryXce
+            | WarningKind::SuspiciousEntry
+            | WarningKind::SuspiciousFallthrough
+            | WarningKind::BankWrap => Severity::Warning,
+        }
+    }
+
     pub const fn name(self) -> &'static str {
         match self {
             WarningKind::ComputedJump => "computed jump",

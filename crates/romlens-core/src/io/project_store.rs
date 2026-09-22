@@ -21,7 +21,12 @@ use crate::rom::image::RomImage;
 use crate::viewmodel::hex_rows::AddressStyle;
 
 pub const PROJECT_FORMAT: &str = "romlens-project";
-pub const PROJECT_VERSION: u32 = 1;
+/// 2 since Phase 2: a package may now hold subdirectories (`traces/`,
+/// `imports/`) and `project.json` gains arrays describing them. Every added
+/// field is `#[serde(default)]` and unknown files are ignored, so a v1 package
+/// still opens — `v1_package_still_opens` in `tests/project_store.rs` pins that
+/// against a literal v1 package rather than one this code wrote.
+pub const PROJECT_VERSION: u32 = 2;
 pub const PROJECT_FILES: [&str; 5] = [
     "project.json",
     "labels.json",
@@ -398,34 +403,77 @@ pub fn from_files(
     Ok(project)
 }
 
+/// A package name is always `/`-separated and always relative, on every
+/// platform, so the same key round-trips through a project written on macOS
+/// and read on Windows. Nothing may climb out of the package directory.
+fn package_path(dir: &Path, name: &str) -> Result<std::path::PathBuf, ProjectError> {
+    let mut path = dir.to_path_buf();
+    let mut any = false;
+    for part in name.split('/') {
+        if part.is_empty() || part == "." || part == ".." || part.contains('\\') {
+            return Err(ProjectError::MissingFile(name.to_owned()));
+        }
+        path.push(part);
+        any = true;
+    }
+    if !any {
+        return Err(ProjectError::MissingFile(name.to_owned()));
+    }
+    Ok(path)
+}
+
+fn package_leaf(name: &str) -> &str {
+    name.rsplit('/').next().unwrap_or(name)
+}
+
 /// Write the files into `dir` (created if needed), each through a temporary
 /// file and a rename so a crash never leaves a half-written file.
+///
+/// A name may carry one or more `/` segments: traces and imports live in
+/// subdirectories of the package (`16-phase2-plan.md`, 2A.3), so the parent is
+/// created before the temporary file is written rather than assuming `dir`
+/// itself is where every file lands.
 pub fn write_package(dir: &Path, files: &BTreeMap<String, Vec<u8>>) -> Result<(), ProjectError> {
     std::fs::create_dir_all(dir)?;
     for (name, bytes) in files {
-        let tmp = dir.join(format!("{name}.tmp"));
+        let path = package_path(dir, name)?;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let tmp = path.with_file_name(format!("{}.tmp", package_leaf(name)));
         std::fs::write(&tmp, bytes)?;
-        std::fs::rename(&tmp, dir.join(name))?;
+        std::fs::rename(&tmp, &path)?;
     }
     Ok(())
 }
 
-/// Read every regular file in a package directory.
+/// Read every regular file in a package directory, including subdirectories.
+/// Keys are `/`-separated paths relative to `dir`, so `traces/play.cdl` reads
+/// back under that name on Windows too.
 pub fn read_package(dir: &Path) -> Result<BTreeMap<String, Vec<u8>>, ProjectError> {
     let mut files = BTreeMap::new();
-    for entry in std::fs::read_dir(dir)? {
-        let entry = entry?;
-        if !entry.file_type()?.is_file() {
-            continue;
-        }
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if name.ends_with(".tmp") {
-            continue;
-        }
-        files.insert(name, std::fs::read(entry.path())?);
-    }
+    read_into(dir, "", &mut files)?;
     if !files.contains_key("project.json") {
         return Err(ProjectError::MissingFile("project.json".into()));
     }
     Ok(files)
+}
+
+fn read_into(
+    dir: &Path,
+    prefix: &str,
+    files: &mut BTreeMap<String, Vec<u8>>,
+) -> Result<(), ProjectError> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let key = format!("{prefix}{name}");
+        let kind = entry.file_type()?;
+        if kind.is_dir() {
+            read_into(&entry.path(), &format!("{key}/"), files)?;
+        } else if kind.is_file() && !name.ends_with(".tmp") {
+            files.insert(key, std::fs::read(entry.path())?);
+        }
+    }
+    Ok(())
 }

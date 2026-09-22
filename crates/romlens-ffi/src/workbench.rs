@@ -543,7 +543,7 @@ impl Workbench {
                 .undo
                 .entries()
                 .last()
-                .is_some_and(|e| e.done.affects_analysis());
+                .is_some_and(model::UndoEntry::affects_analysis);
             let Inner { project, undo, .. } = &mut *inner;
             let done = undo.undo(project, &self.rom.image)?;
             if !done {

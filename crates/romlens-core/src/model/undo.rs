@@ -56,14 +56,14 @@ impl UndoStack {
         let Some(entry) = self.redo.pop() else {
             return Ok(false);
         };
-        let redone = project.apply(rom, entry.done.clone())?;
+        let redone = project.apply_batch(rom, entry.done.clone(), entry.origin.clone())?;
         self.undo.push(redone);
         Ok(true)
     }
 
     /// The last undoable command, for `affects_analysis` checks.
     pub fn last_undone_affects_analysis(&self) -> bool {
-        self.redo.last().is_some_and(|e| e.done.affects_analysis())
+        self.redo.last().is_some_and(UndoEntry::affects_analysis)
     }
 
     pub fn entries(&self) -> &[UndoEntry] {
