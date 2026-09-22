@@ -53,6 +53,22 @@ pub fn build(mode: MappingMode, len: usize, fast_rom: bool) -> Vec<u8> {
     build_with_code(mode, len, fast_rom, &BOOT_CODE, FIXTURE_TITLE)
 }
 
+/// The default vector table: everything at the catch-all, RESET at `$8000`.
+pub const DEFAULT_VECTORS: [u16; 12] = [
+    CATCH_ALL,
+    CATCH_ALL,
+    CATCH_ALL,
+    CATCH_ALL,
+    CATCH_ALL,
+    CATCH_ALL, // native COP BRK ABORT NMI (RESET) IRQ
+    CATCH_ALL,
+    CATCH_ALL,
+    CATCH_ALL,
+    CATCH_ALL,
+    RESET_TARGET,
+    CATCH_ALL, // emulation COP (BRK) ABORT NMI RESET IRQ
+];
+
 /// Build a fixture with `code` at `$00:8000` and the given title.
 pub fn build_with_code(
     mode: MappingMode,
@@ -60,6 +76,19 @@ pub fn build_with_code(
     fast_rom: bool,
     code: &[u8],
     title_text: &str,
+) -> Vec<u8> {
+    build_custom(mode, len, fast_rom, code, title_text, DEFAULT_VECTORS)
+}
+
+/// Build a fixture with `code` at `$00:8000`, a title and a full vector
+/// table (native COP BRK ABORT NMI RESET IRQ, then emulation likewise).
+pub fn build_custom(
+    mode: MappingMode,
+    len: usize,
+    fast_rom: bool,
+    code: &[u8],
+    title_text: &str,
+    vectors: [u16; 12],
 ) -> Vec<u8> {
     let mut rom = vec![0x00u8; len];
     let boot = boot_file_offset(mode);
@@ -77,20 +106,6 @@ pub fn build_with_code(
     rom[h + 0x1A] = 0x00;
     rom[h + 0x1B] = 0x00;
 
-    let vectors: [u16; 12] = [
-        CATCH_ALL,
-        CATCH_ALL,
-        CATCH_ALL,
-        CATCH_ALL,
-        CATCH_ALL,
-        CATCH_ALL, // native
-        CATCH_ALL,
-        CATCH_ALL,
-        CATCH_ALL,
-        CATCH_ALL,
-        RESET_TARGET,
-        CATCH_ALL, // emulation
-    ];
     for (i, v) in vectors.iter().enumerate() {
         let at = h + 0x24 + i * 2 + if i >= 6 { 4 } else { 0 };
         rom[at..at + 2].copy_from_slice(&v.to_le_bytes());
