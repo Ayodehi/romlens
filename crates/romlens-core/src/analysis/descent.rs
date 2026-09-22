@@ -288,8 +288,18 @@ impl<'a> Walk<'a> {
             Some(Resolution::Unresolved(why)) => {
                 self.warn(off, WarningKind::ComputedJump, format!("{addr}: {why}"));
             }
-            // First pass to reach this dispatcher: the resolver runs next.
-            None => {}
+            // No resolution: either this pass is the first to reach the
+            // dispatcher, or resolution is switched off. Only the final walk's
+            // warnings are kept, so reporting here is what keeps `analyze
+            // --no-tables` saying what it used to.
+            None => self.warn(
+                off,
+                WarningKind::ComputedJump,
+                format!(
+                    "{addr}: {} through a table at {base}; targets not followed",
+                    if call { "JSR" } else { "jump" }
+                ),
+            ),
         }
     }
 

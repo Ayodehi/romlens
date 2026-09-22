@@ -197,6 +197,7 @@ final class WorkbenchSession {
         case .descent: "walking code"
         case .tables: "resolving jump tables"
         case .sweep: "sweeping gaps"
+        case .heuristics: "scoring the rest"
         case .labels: "naming"
         case .lines: "building lines"
         }

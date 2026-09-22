@@ -3,6 +3,7 @@
 pub mod analyze;
 pub mod disasm;
 pub mod export;
+pub mod heuristics;
 pub mod inspect;
 pub mod labels;
 pub mod project;

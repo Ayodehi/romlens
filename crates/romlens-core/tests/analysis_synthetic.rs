@@ -139,11 +139,12 @@ fn walker_follows_every_static_edge() {
     );
     assert_eq!(at(0x24).unwrap().len, 3);
     assert_eq!(at(0x27).unwrap().opcode, 0x60);
-    // ... and the zeros after it (BRK) are rejected.
-    assert_eq!(
-        snap.region_at(FileOffset(0x28)).unwrap().kind,
-        RegionKind::Unknown
-    );
+    // ... and the zeros after it (BRK) are rejected as code. Since Phase 2 the
+    // entropy heuristic claims them as data instead, which it may only do
+    // because the sweep left them unclaimed.
+    let after = snap.region_at(FileOffset(0x28)).unwrap();
+    assert_eq!(after.kind, RegionKind::Data(DataKind::Byte));
+    assert!(after.confidence <= 0.55);
     assert!(
         !snap.auto_labels.contains_key(&a(0x8024)),
         "sweeps never label"

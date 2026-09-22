@@ -8,6 +8,7 @@
 pub mod control;
 pub mod descent;
 pub mod flow;
+pub mod heuristics;
 pub mod inline;
 pub mod jumptable;
 pub mod labels;
@@ -23,6 +24,7 @@ pub use jumptable::{JumpTable, StopReason};
 pub use snapshot::{AnalysisSnapshot, AnalysisStats, InsnRecord, Severity, Warning, WarningKind};
 
 use crate::analysis::descent::{KIND_NONE, SeedSource, Walk};
+use crate::analysis::heuristics::{EntropyProfile, HeuristicHit};
 use crate::analysis::jumptable::Resolution;
 use crate::cpu65816::ASSUMED_WIDTHS;
 use crate::memory::address::FileOffset;
@@ -40,6 +42,7 @@ const TAG_HEADER: u8 = 5;
 const TAG_USER: u8 = 6;
 const TAG_INLINE: u8 = 7;
 const TAG_TABLE: u8 = 8;
+const TAG_HEURISTIC: u8 = 9;
 
 /// Passes of the descent. A callee found adjusting its return address in one
 /// pass makes its callers skip the inline arguments in the next, which can
@@ -117,11 +120,16 @@ impl Paint {
 pub struct AnalysisOptions {
     /// Resolve `JMP`/`JSR (abs,X)` dispatch tables (`jumptable`).
     pub jump_tables: bool,
+    /// Score unclassified bytes (`heuristics`).
+    pub heuristics: bool,
 }
 
 impl Default for AnalysisOptions {
     fn default() -> Self {
-        Self { jump_tables: true }
+        Self {
+            jump_tables: true,
+            heuristics: true,
+        }
     }
 }
 
@@ -140,6 +148,22 @@ pub fn analyze_with(
     project: &Project,
     control: &AnalysisControl,
     options: AnalysisOptions,
+) -> Result<AnalysisSnapshot, Cancelled> {
+    analyze_cached(rom, project, control, options, None)
+}
+
+/// [`analyze_with`], reusing an entropy profile.
+///
+/// The profile is derived from the ROM alone, so it survives every edit; a
+/// caller that re-analyzes on each command (every shell does) should build it
+/// once and pass it here rather than putting a linear pass over the image
+/// inside the edit loop.
+pub fn analyze_cached(
+    rom: &RomImage,
+    project: &Project,
+    control: &AnalysisControl,
+    options: AnalysisOptions,
+    entropy: Option<&EntropyProfile>,
 ) -> Result<AnalysisSnapshot, Cancelled> {
     let started = Instant::now();
     let mut inline_args: BTreeMap<u32, u16> = BTreeMap::new();
@@ -256,6 +280,46 @@ pub fn analyze_with(
             paint.set(b, code, conf, TAG_TABLE, hid);
         }
     }
+    // Heuristics, strongest first. Two rules, both asserted in
+    // `tests/heuristics.rs`: a heuristic only fills a byte nothing else
+    // claimed, and the first hit to reach a byte keeps it. Together they mean
+    // a guess can never argue with the disassembler, a table, or the user.
+    let mut heuristic_hits: Vec<HeuristicHit> = Vec::new();
+    if options.heuristics {
+        control.report(AnalysisPhase::Heuristics, 0, 1);
+        let owned;
+        let profile = match entropy {
+            Some(p) => p,
+            None => {
+                owned = EntropyProfile::build(rom);
+                &owned
+            }
+        };
+        control.check()?;
+        heuristic_hits = heuristics::run(rom, profile);
+        for hit in &heuristic_hits {
+            if !hit.classifies {
+                continue;
+            }
+            let code = hit.kind.code();
+            let conf = hit.confidence();
+            let mut id = None;
+            for b in hit.start..hit.end().min(n as u32) {
+                let b = b as usize;
+                if paint.cls[b] != 0 {
+                    continue;
+                }
+                let id = *id.get_or_insert_with(|| {
+                    paint.intern(vec![Evidence::Heuristic {
+                        name: format!("{}: {}", hit.name, hit.detail),
+                        score: hit.score,
+                    }])
+                });
+                paint.set(b, code, conf, TAG_HEURISTIC, id);
+            }
+        }
+        control.report(AnalysisPhase::Heuristics, 1, 1);
+    }
     // The user's word is final.
     for r in &project.region_overrides {
         let end = (r.end() as usize).min(n);
@@ -362,6 +426,7 @@ pub fn analyze_with(
             .iter()
             .filter(|r| r.kind == RegionKind::Code)
             .count() as u64,
+        regions: regions.len() as u64,
         labels: auto_labels.len() as u64,
         xrefs: xrefs_by_target.len() as u64,
         conflicts: warnings
@@ -390,6 +455,7 @@ pub fn analyze_with(
     tables.sort_by_key(|t| (t.base, t.site));
     Ok(AnalysisSnapshot {
         instructions,
+        heuristic_hits,
         jump_tables: tables,
         regions,
         auto_labels,

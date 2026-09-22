@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 
+use crate::analysis::heuristics::HeuristicHit;
 use crate::analysis::jumptable::JumpTable;
 use crate::cpu65816::{FlagState, Instruction, decode};
 use crate::memory::address::{FileOffset, SnesAddress};
@@ -144,6 +145,9 @@ pub struct AnalysisStats {
     pub unknown_bytes: u64,
     pub instructions: u64,
     pub blocks: u64,
+    /// Every region, not just the code blocks. Watched because a heuristic
+    /// that scored per byte instead of per span would show up here first.
+    pub regions: u64,
     pub labels: u64,
     pub xrefs: u64,
     pub conflicts: u64,
@@ -159,6 +163,9 @@ pub struct AnalysisSnapshot {
     pub regions: Vec<Region>,
     pub auto_labels: BTreeMap<SnesAddress, Label>,
     /// Sorted by target then source.
+    /// Every heuristic hit, strongest first — including the ones that only
+    /// annotate, which is why this is not derivable from `regions`.
+    pub heuristic_hits: Vec<HeuristicHit>,
     /// Resolved dispatch tables, by base then dispatcher.
     pub jump_tables: Vec<JumpTable>,
     pub xrefs_by_target: Vec<XRef>,

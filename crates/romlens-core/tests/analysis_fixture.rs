@@ -21,10 +21,13 @@ fn boot_code_is_walked_and_labelled() {
     assert_eq!(code.kind, RegionKind::Code);
     assert_eq!((code.start, code.len), (FileOffset(0), 12));
     assert!((code.confidence - 0.9).abs() < 1e-6);
-    assert_eq!(
-        snap.region_at(FileOffset(12)).unwrap().kind,
-        RegionKind::Unknown
-    );
+    // The two `NOP`s between the spin and the `RTI` are not reached, and since
+    // Phase 2 the entropy heuristic claims the near-empty window around them
+    // as data rather than leaving it unknown. It is only allowed to because
+    // nothing else claimed those bytes.
+    let filler = snap.region_at(FileOffset(12)).unwrap();
+    assert_eq!(filler.kind, RegionKind::Data(DataKind::Byte));
+    assert!(filler.confidence <= 0.55, "a guess must not look certain");
     assert_eq!(
         snap.region_at(FileOffset(14)).unwrap().kind,
         RegionKind::Code

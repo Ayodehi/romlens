@@ -12,7 +12,8 @@ that tracks against it.
 | Housekeeping 4 (the shell job's `continue-on-error`) | done, `9c35b73`: the flag moved to the `xcodebuild` step so the rest of the job is enforced. The same commit fixed a Windows golden failure the first CI run found |
 | 2A T1 foundations | done, `f213d16` |
 | 2A T2 jump tables | done, `0935cfe`: 34 tables on the development ROM, code 0.2% → 2.1% |
-| 2A T3 measure and record | done |
+| 2A T3 measure and record | done, `739964c` |
+| 2A T4 heuristics | done: unknown 97.9% → 82.9%, region count 1,012 → 1,672 |
 | Housekeeping 2 (the Phase 1 manual pass) | **still to run**, and it needs a person at the app |
 | Everything from 2A T4 (heuristics) on | not started |
 

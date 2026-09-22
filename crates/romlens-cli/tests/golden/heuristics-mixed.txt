@@ -1,0 +1,31 @@
+ascii           1 span         256 bytes
+entropy         7 spans      64512 bytes
+graphics        3 spans        768 bytes   (annotates only)
+palette         1 span         512 bytes
+pointers        1 span         256 bytes
+
+0x001000       512 bytes  palette    palette    0.80  BGR15 signature 0.80
+0x001300       256 bytes  graphics   graphics   0.80  4bpp tile signature 0.82  (annotates only)
+0x000000       256 bytes  graphics   graphics   0.60  4bpp tile signature 0.60  (annotates only)
+0x001200       256 bytes  ascii      string     0.60  100% printable
+0x001400       256 bytes  graphics   graphics   0.60  4bpp tile signature 0.58  (annotates only)
+0x001400       256 bytes  pointers   pointer    0.55  128 consecutive addresses resolve
+0x000000      4096 bytes  entropy    byte       0.50  0.0 bits per byte
+0x001300       256 bytes  entropy    byte       0.50  0.1 bits per byte
+0x001500       256 bytes  entropy    byte       0.50  constant fill
+0x001600       256 bytes  entropy    compressed 0.50  7.2 bits per byte
+0x001700     26624 bytes  entropy    byte       0.50  constant fill
+0x008000     32768 bytes  entropy    byte       0.50  constant fill
+0x007F00       256 bytes  entropy    byte       0.45  1.4 bits per byte
+{
+  "hits": [
+    {"start": 4096, "len": 512, "kind": "palette", "name": "palette", "score": 0.80, "confidence": 55, "classifies": true, "detail": "BGR15 signature 0.80"}
+  ]
+}
+Code:          13 bytes (0.0%) in 2 blocks, 8 instructions
+Data:          65523 bytes (100.0%)
+Unknown:       0 bytes (0.0%)
+Regions:       14
+Labels:        3
+Xrefs:         14
+Warnings:      0 (0 flag conflicts)

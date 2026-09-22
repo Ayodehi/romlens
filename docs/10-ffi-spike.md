@@ -129,6 +129,46 @@ The analyzer runs the descent up to eight times now instead of six, and a pass
 costs about 1.5 ms, which is where the 5 ms → 12 ms goes. Still two orders of
 magnitude inside the 2 s budget.
 
+### Scored heuristics
+
+Added the same day, over the bytes the walk and the sweep leave unclassified.
+
+| Quantity | With jump tables | With heuristics too |
+|---|---|---|
+| Full analysis | 12 ms | 46 ms |
+| Data bytes | 1,625 (0.1%) | 473,012 (15.0%) |
+| Unknown bytes | 3,078,608 (97.9%) | 2,607,221 (82.9%) |
+| Regions | 1,012 | 1,672 |
+
+Code is untouched, by construction: a heuristic only fills a byte nothing else
+claimed.
+
+The region count is the number to watch. Scoring per byte would have turned a
+thousand regions into millions; scoring per 256-byte window and merging
+neighbours that agree to within a 5% step turns it into 1,672, and
+`tests/heuristics.rs` bounds it so a future heuristic cannot quietly regress
+that. Of the 46 ms, the entropy profile is a single pass over the image and is
+cached on the `Workbench`, so the edit loop pays about 34 ms, not 46.
+
+What each guess claimed on the development ROM:
+
+| Heuristic | Spans | Bytes | |
+|---|---|---|---|
+| entropy | 333 | 440,576 | mostly constant fill and one high-entropy band |
+| pointers | 94 | 324,352 | |
+| palette | 54 | 20,992 | |
+| ascii | 2 | 1,536 | |
+| graphics | 778 | 263,424 | annotates only; sets no region's kind |
+
+The sums exceed the 473,012 bytes actually painted because the guesses overlap
+and the strongest one on a byte wins.
+
+Two known false positives, both left standing until the accuracy harness can
+price them rather than tuned away by eye: a block of Super Metroid tilemap
+entries at `0x052100` is 75% printable and reads as a string, and constant
+fill is claimed as byte data at 50% — defensible, since padding is certainly
+not code, but it is the reason "unknown" fell as far as it did.
+
 ## Not measured, still to check in Phase 0
 
 - Async call and callback-interface overhead (event delivery from the core's

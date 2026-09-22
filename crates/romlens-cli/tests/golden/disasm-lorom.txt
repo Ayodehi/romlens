@@ -9,7 +9,7 @@ RESET_008000:
 CODE_00800A:
 0x00000A  $00:800A  80 FE        m1x1e0 $00:$0000  BRA CODE_00800A
 
-; ---- unknown (0%) ----
+; ---- byte (50%) ----
 0x00000C  $00:800C  EA EA                          db $EA,$EA
 
 ; ---- code (90%) ----

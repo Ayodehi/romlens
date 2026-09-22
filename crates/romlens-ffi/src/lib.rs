@@ -512,7 +512,13 @@ mod tests {
         let hex = wb.hex_rows(0, 1);
         assert_eq!(hex[8 + 28] & 0xF0, 0x90, "code lane: 0x80 | 1 << 4");
         assert_eq!(hex[8 + 28] & 0x0F, 14, "0.9 confidence → 14/15");
-        assert_eq!(hex[8 + 28 + 12] & 0x80, 0, "unknown bytes stay 0");
+        // Offset 12 is the unreached filler after the spin: not code, and
+        // since Phase 2 the entropy heuristic calls it byte data at a
+        // deliberately modest confidence.
+        let filler = hex[8 + 28 + 12];
+        assert_eq!(filler & 0x80, 0x80, "the lane is populated");
+        assert_eq!((filler >> 4) & 0x07, 2, "data lane: byte");
+        assert!(filler & 0x0F <= 8, "a guess never looks certain");
         let sei = wb.instruction_at(0).unwrap();
         assert_eq!((sei.mnemonic.as_str(), sei.len), ("SEI", 1));
         let sta = wb.instruction_at(8).unwrap();

@@ -9,6 +9,8 @@ pub enum AnalysisPhase {
     /// Resolving jump tables between descent passes.
     Tables,
     Sweep,
+    /// Scoring whatever the walk and the sweep left unclassified.
+    Heuristics,
     Labels,
     /// Building the line index (done by the caller after `analyze`).
     Lines,
@@ -19,6 +21,7 @@ impl AnalysisPhase {
         match self {
             AnalysisPhase::Descent => "descent",
             AnalysisPhase::Tables => "tables",
+            AnalysisPhase::Heuristics => "heuristics",
             AnalysisPhase::Sweep => "sweep",
             AnalysisPhase::Labels => "labels",
             AnalysisPhase::Lines => "lines",

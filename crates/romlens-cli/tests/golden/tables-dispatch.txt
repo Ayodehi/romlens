@@ -21,8 +21,9 @@
   "unresolved": 0
 }
 Code:          23 bytes (0.1%) in 6 blocks, 14 instructions
-Data:          84 bytes (0.3%)
-Unknown:       32661 bytes (99.7%)
+Data:          32745 bytes (99.9%)
+Unknown:       0 bytes (0.0%)
+Regions:       18
 Labels:        8
 Xrefs:         24
 Warnings:      2 (0 flag conflicts)

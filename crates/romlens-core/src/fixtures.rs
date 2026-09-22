@@ -199,6 +199,55 @@ pub fn dispatch_lorom() -> Vec<u8> {
     build_with_code(MappingMode::LoRom, 0x8000, false, &code, DISPATCH_TITLE)
 }
 
+pub const MIXED_DATA_TITLE: &str = "ROMLENS DATA";
+
+/// 64 KB LoROM holding one recognisable block per data heuristic, so the
+/// classifier and `romlens heuristics` have a golden that needs no commercial
+/// ROM (`12-content-policy.md` rule 1).
+///
+/// | File offset | Contents |
+/// |---|---|
+/// | `0x1000` | 512 bytes of BGR15 colours: sixteen distinct, two rows |
+/// | `0x1200` | printable ASCII, repeated to fill a window |
+/// | `0x1400` | 128 in-bank 16-bit addresses |
+/// | `0x1600` | 256 bytes from a linear congruential generator, the shape of compressed data |
+///
+/// Everything else is zero, which is what filler looks like.
+pub fn mixed_data_lorom() -> Vec<u8> {
+    let mut rom = build_with_code(
+        MappingMode::LoRom,
+        0x1_0000,
+        false,
+        &BOOT_CODE,
+        MIXED_DATA_TITLE,
+    );
+    for i in 0..0x100usize {
+        let colour = ((i as u16 % 16) * 0x0421 + 0x0400).to_le_bytes();
+        rom[0x1000 + i * 2..0x1002 + i * 2].copy_from_slice(&colour);
+    }
+    let text = b"ROMLENS TEST STRING DATA FOR THE ASCII HEURISTIC TO FIND HERE OK ";
+    for i in 0..4 {
+        rom[0x1200 + i * text.len()..0x1200 + (i + 1) * text.len()].copy_from_slice(text);
+    }
+    for i in 0..128usize {
+        let target = 0x8000u16 + (i as u16 * 8);
+        rom[0x1400 + i * 2..0x1402 + i * 2].copy_from_slice(&target.to_le_bytes());
+    }
+    let mut state = 0x1234_5678u32;
+    for b in &mut rom[0x1600..0x1700] {
+        state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        *b = (state >> 24) as u8;
+    }
+    // The header's checksum covers the payload, so it is recomputed last.
+    let h = MappingMode::LoRom.header_offset().as_usize();
+    rom[h + 0x1C..h + 0x1E].copy_from_slice(&0x0000u16.to_le_bytes());
+    rom[h + 0x1E..h + 0x20].copy_from_slice(&0xFFFFu16.to_le_bytes());
+    let sum = crate::rom::checksum::compute_checksum(&rom);
+    rom[h + 0x1C..h + 0x1E].copy_from_slice(&(!sum).to_le_bytes());
+    rom[h + 0x1E..h + 0x20].copy_from_slice(&sum.to_le_bytes());
+    rom
+}
+
 /// The fixture for a mapping, by name.
 pub fn for_mapping(mode: MappingMode) -> Vec<u8> {
     match mode {

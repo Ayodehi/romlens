@@ -11,6 +11,7 @@ pub mod analysis;
 pub mod cpu65816;
 pub mod error;
 pub mod fixtures;
+pub mod graphics;
 pub mod io;
 pub mod memory;
 pub mod model;

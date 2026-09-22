@@ -166,6 +166,23 @@ fn lorom_analysis_commands() {
         "tables-none",
         &run(&["tables", rom, "--entries", "--unresolved"]),
     );
+    // Scored guesses, likewise on a fixture.
+    let mixed = dir.join("mixed.sfc");
+    std::fs::write(&mixed, fixtures::mixed_data_lorom()).unwrap();
+    let mixed = mixed.to_str().unwrap();
+    check(
+        "heuristics-mixed",
+        &format!(
+            "{}{}{}",
+            run(&["heuristics", mixed]),
+            run(&["heuristics", mixed, "--kind", "palette", "--json"]),
+            run(&["analyze", mixed, "--stats"]),
+        ),
+    );
+    check(
+        "heuristics-mixed-off",
+        &run(&["analyze", mixed, "--stats", "--no-heuristics"]),
+    );
     check("labels-lorom", &run(&["labels", rom]));
     check(
         "xrefs-lorom",

@@ -5,9 +5,10 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
-use romlens_core::analysis::{AnalysisControl, AnalysisSnapshot, analyze};
+use romlens_core::analysis::heuristics::EntropyProfile;
+use romlens_core::analysis::{AnalysisControl, AnalysisOptions, AnalysisSnapshot, analyze_cached};
 use romlens_core::cpu65816::{self, NoSymbols};
 use romlens_core::io;
 use romlens_core::model::{self, Project, Symbols, UndoStack};
@@ -40,6 +41,12 @@ struct Inner {
 #[derive(uniffi::Object)]
 pub struct Workbench {
     rom: Arc<Rom>,
+    /// Built once and shared with every analysis. It is derived from the ROM
+    /// alone, so it survives every edit; rebuilding it per command would put a
+    /// linear pass over the image inside the edit loop (`16-phase2-plan.md`
+    /// 2A.2). Built lazily so opening a ROM stays instant and the cost lands
+    /// on the background thread with the rest of the analysis.
+    entropy: OnceLock<Arc<EntropyProfile>>,
     inner: Mutex<Inner>,
     listener: Mutex<Option<Arc<dyn WorkbenchListener>>>,
     cancel: Arc<AtomicBool>,
@@ -64,6 +71,7 @@ impl Workbench {
     fn make(rom: Arc<Rom>, project: Project) -> Arc<Self> {
         Arc::new(Self {
             rom,
+            entropy: OnceLock::new(),
             inner: Mutex::new(Inner {
                 project,
                 snapshot: Arc::new(AnalysisSnapshot::default()),
@@ -123,6 +131,10 @@ impl Workbench {
     + 'static {
         let image = self.rom.image.clone();
         let project = self.lock().project.clone();
+        let entropy = Arc::clone(
+            self.entropy
+                .get_or_init(|| Arc::new(EntropyProfile::build(&self.rom.image))),
+        );
         self.cancel.store(false, Ordering::Relaxed);
         let cancel = Arc::clone(&self.cancel);
         let listener = self
@@ -143,7 +155,13 @@ impl Workbench {
                     }
                 }),
             };
-            let snapshot = analyze(&image, &project, &control)?;
+            let snapshot = analyze_cached(
+                &image,
+                &project,
+                &control,
+                AnalysisOptions::default(),
+                Some(&entropy),
+            )?;
             control.report(romlens_core::analysis::AnalysisPhase::Lines, 0, 1);
             let lines = LineIndex::build(&image, &snapshot, &project);
             control.report(romlens_core::analysis::AnalysisPhase::Lines, 1, 1);

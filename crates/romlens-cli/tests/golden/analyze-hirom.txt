@@ -1,16 +1,18 @@
 Code:          13 bytes (0.0%) in 2 blocks, 8 instructions
-Data:          64 bytes (0.1%)
-Unknown:       65459 bytes (99.9%)
+Data:          65523 bytes (100.0%)
+Unknown:       0 bytes (0.0%)
+Regions:       6
 Labels:        3
 Xrefs:         14
 Warnings:      0 (0 flag conflicts)
 {
   "bytes": 65536,
   "codeBytes": 13,
-  "dataBytes": 64,
-  "unknownBytes": 65459,
+  "dataBytes": 65523,
+  "unknownBytes": 0,
   "instructions": 8,
   "blocks": 2,
+  "regions": 6,
   "labels": 3,
   "xrefs": 14,
   "warnings": 0,

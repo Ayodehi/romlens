@@ -106,6 +106,25 @@ enum Command {
         /// what resolving them is worth.
         #[arg(long)]
         no_tables: bool,
+        /// Leave unclassified bytes unscored, likewise.
+        #[arg(long)]
+        no_heuristics: bool,
+    },
+    /// List the analyzer's scored guesses about unclassified bytes.
+    Heuristics {
+        rom: PathBuf,
+        #[arg(long)]
+        project: Option<PathBuf>,
+        /// Only this heuristic (`entropy`, `pointers`, `ascii`, `palette`,
+        /// `graphics`).
+        #[arg(long)]
+        kind: Option<String>,
+        #[arg(long)]
+        from: Option<String>,
+        #[arg(long)]
+        to: Option<String>,
+        #[arg(long)]
+        json: bool,
     },
     /// List the dispatch tables the analyzer resolved.
     Tables {
@@ -361,6 +380,7 @@ fn main() -> Result<()> {
             progress,
             warnings,
             no_tables,
+            no_heuristics,
         } => commands::analyze::run(
             &rom,
             project.as_deref(),
@@ -369,7 +389,23 @@ fn main() -> Result<()> {
             warnings,
             AnalysisOptions {
                 jump_tables: !no_tables,
+                heuristics: !no_heuristics,
             },
+        ),
+        Command::Heuristics {
+            rom,
+            project,
+            kind,
+            from,
+            to,
+            json,
+        } => commands::heuristics::run(
+            &rom,
+            project.as_deref(),
+            kind.as_deref(),
+            from.as_deref(),
+            to.as_deref(),
+            json,
         ),
         Command::Tables {
             rom,

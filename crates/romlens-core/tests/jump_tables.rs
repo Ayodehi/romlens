@@ -276,5 +276,11 @@ fn filler_is_not_a_table() {
         "unexpected text: {}",
         w.text
     );
-    assert_eq!(region_at(&s, 0x20).kind, RegionKind::Unknown);
+    // Whatever else claims those bytes, no jump table did: the resolver
+    // produced no table at all.
+    assert!(s.jump_tables.is_empty());
+    assert_ne!(
+        region_at(&s, 0x20).kind,
+        RegionKind::Data(DataKind::Table { stride: 2 })
+    );
 }

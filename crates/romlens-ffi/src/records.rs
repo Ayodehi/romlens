@@ -501,6 +501,7 @@ pub struct AnalysisStats {
     pub unknown_bytes: u64,
     pub instructions: u64,
     pub blocks: u64,
+    pub regions: u64,
     pub labels: u64,
     pub xrefs: u64,
     pub conflicts: u64,
@@ -516,6 +517,7 @@ impl From<snapshot::AnalysisStats> for AnalysisStats {
             unknown_bytes: s.unknown_bytes,
             instructions: s.instructions,
             blocks: s.blocks,
+            regions: s.regions,
             labels: s.labels,
             xrefs: s.xrefs,
             conflicts: s.conflicts,
@@ -731,6 +733,7 @@ pub enum AnalysisPhase {
     Descent,
     Tables,
     Sweep,
+    Heuristics,
     Labels,
     Lines,
 }
@@ -740,6 +743,7 @@ impl From<analysis::AnalysisPhase> for AnalysisPhase {
         match p {
             analysis::AnalysisPhase::Descent => AnalysisPhase::Descent,
             analysis::AnalysisPhase::Tables => AnalysisPhase::Tables,
+            analysis::AnalysisPhase::Heuristics => AnalysisPhase::Heuristics,
             analysis::AnalysisPhase::Sweep => AnalysisPhase::Sweep,
             analysis::AnalysisPhase::Labels => AnalysisPhase::Labels,
             analysis::AnalysisPhase::Lines => AnalysisPhase::Lines,

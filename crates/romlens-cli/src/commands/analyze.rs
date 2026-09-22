@@ -85,6 +85,7 @@ pub fn stats_text(st: &AnalysisStats, total: u64) -> String {
         "Code:          {} bytes ({:.1}%) in {} blocks, {} instructions\n\
 Data:          {} bytes ({:.1}%)\n\
 Unknown:       {} bytes ({:.1}%)\n\
+Regions:       {}\n\
 Labels:        {}\n\
 Xrefs:         {}\n\
 Warnings:      {} ({} flag conflicts)\n",
@@ -96,6 +97,7 @@ Warnings:      {} ({} flag conflicts)\n",
         pct(st.data_bytes, total),
         st.unknown_bytes,
         pct(st.unknown_bytes, total),
+        st.regions,
         st.labels,
         st.xrefs,
         st.warnings,
@@ -105,12 +107,13 @@ Warnings:      {} ({} flag conflicts)\n",
 
 pub fn stats_json(st: &AnalysisStats, total: u64) -> String {
     format!(
-        "{{\n  \"bytes\": {total},\n  \"codeBytes\": {},\n  \"dataBytes\": {},\n  \"unknownBytes\": {},\n  \"instructions\": {},\n  \"blocks\": {},\n  \"labels\": {},\n  \"xrefs\": {},\n  \"warnings\": {},\n  \"conflicts\": {}\n}}\n",
+        "{{\n  \"bytes\": {total},\n  \"codeBytes\": {},\n  \"dataBytes\": {},\n  \"unknownBytes\": {},\n  \"instructions\": {},\n  \"blocks\": {},\n  \"regions\": {},\n  \"labels\": {},\n  \"xrefs\": {},\n  \"warnings\": {},\n  \"conflicts\": {}\n}}\n",
         st.code_bytes,
         st.data_bytes,
         st.unknown_bytes,
         st.instructions,
         st.blocks,
+        st.regions,
         st.labels,
         st.xrefs,
         st.warnings,

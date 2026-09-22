@@ -274,7 +274,8 @@ fn text_formatter_shape() {
         "0x00000A  $00:800A  80 FE        m1x1e0 $00:$0000  BRA CODE_00800A"
     );
     assert_eq!(lines[12], "");
-    assert_eq!(lines[13], "; ---- unknown (0%) ----");
+    // Since Phase 2 the entropy heuristic claims the unreached filler.
+    assert_eq!(lines[13], "; ---- byte (50%) ----");
     assert_eq!(
         lines[14],
         "0x00000C  $00:800C  EA EA                          db $EA,$EA"
