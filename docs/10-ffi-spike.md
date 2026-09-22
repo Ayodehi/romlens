@@ -185,6 +185,26 @@ The development-ROM target (code precision ≥ 0.98, recall ≥ 50%) is unmeasur
 until someone records a CDL from their own play session: truth for a commercial
 ROM is derived from it and never ships (`12-content-policy.md`).
 
+## Track 2B measurements (22 September 2026)
+
+Release build, the development machine, wall time of the whole CLI process
+(which is most of it: `romlens --version` alone is about 15–20 ms warm).
+
+| What | Result |
+|---|---|
+| Decompress `$95:80D8` (Super Metroid LZ, 9,481 → 16,384 bytes) | 27 ms |
+| A 1,024-tile 4 bpp sheet from the dev ROM, rendered and hashed | 23 ms |
+| `testrec`, 600 frames of the graphics fixture's machine, written | 89 ms; 346,902 bytes |
+| Keyframes / deltas in that file | 5,567 bytes / 468 bytes on average, compressed |
+| Render BG1 at frame 599 (a keyframe at 540, then 59 deltas) | 19 ms |
+| Render BG1 at frame 0 | 18 ms |
+
+The recording numbers are the synthetic machine's, whose deltas are a few
+bytes of OAM, a scroll register and a colour; real play is docs/13's estimate
+until the Mesen2 recorder exists. The decompressor's two dev-ROM streams come
+out at exactly 16 KB and 12 KB, which is the evidence that its reading of the
+format matches the game (`tests/graphics_sm_lz.rs`, opt-in).
+
 ## Not measured, still to check in Phase 0## Not measured, still to check in Phase 0
 
 - Async call and callback-interface overhead (event delivery from the core's

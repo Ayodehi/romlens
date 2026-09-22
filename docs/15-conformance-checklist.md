@@ -13,7 +13,8 @@ Phase 1. The macOS Phase 0 manual pass was completed on 21 September 2026
 missing app delegate and the sideways-scroll bug; the Instruments pass is
 still open. The Phase 1 rows were implemented the same day; their manual
 pass is listed below and still to run. The Phase 2 rows were written from
-`16-phase2-plan.md` on 22 September 2026 and none is implemented.
+`16-phase2-plan.md` on 22 September 2026; tracks 2A and 2B are built (🧪)
+and track 2C is started, with the details under Phase 2.
 
 ## Phase 0
 
@@ -72,7 +73,15 @@ needs ground truth that never ships, so it stays a CLI capability.
 
 2.3's DiztinGUIsh column is dropped rather than deferred: the format was never
 verified, and a Diz user can export a bsnes usage map or a WLA `.sym`, both of
-which are read. Nothing in 2B or 2C is started.
+which are read.
+
+Track 2B (graphics) landed the same day, with the part of 2C the plan pulled
+forward so the views had a machine to draw: the `.romrec` reader and writer,
+`testrec`, `rec info`, `rec extract`, `rec import-raw`, and File › Open
+Recording… with a frame field. Its rows are 🧪. Of 2C's rows, those halves are
+marked where they landed; the validator, the change index, the Mesen2 recorder,
+savestate import, attaching recordings to a project and Export Frame Region…
+are not started.
 
 ### 2A — classification
 
@@ -91,28 +100,28 @@ which are read. Nothing in 2B or 2C is started.
 
 | # | Capability | Shell must expose | CLI scenario | macOS | Win | Linux |
 |---|---|---|---|---|---|---|
-| 2.20 | Tile decoder on raw ROM bytes | Tile decoder tab; 2/4/8 bpp; a palette picker; bytes, the bitplane grids, the index grid and the zoomed tile side by side; hovering a pixel lights its bit in each plane and its byte in the strip | `romlens tiles <rom> --from <expr> --bpp 4 --text` prints the 8×8 index grid; `--json` adds the per-plane bytes | ⬜ | ⬜ | ⬜ |
-| 2.21 | Tile sheet browsing | A scrolling sheet at the chosen bpp and column count; clicking a tile selects its bytes in the hex view | `romlens tiles <rom> --from <expr> --count 64 --columns 16 --text` | ⬜ | ⬜ | ⬜ |
-| 2.22 | Palette view | 16×16 swatches; the entry detail shows the raw `$7FFF`, the 5-bit B/G/R fields and the 8-bit RGB; clicking a swatch selects its two bytes | `romlens palette <rom> --from <expr> [--count 256] [--json]` | ⬜ | ⬜ | ⬜ |
-| 2.23 | OAM table | 128 rows with index, x, y, tile, palette, priority, flips, size in pixels from OBSEL and name table; sortable by table order, screen position or priority; selecting a row selects its low- and high-table bytes | `romlens oam <rom> --from <expr> [--obsel 0x30] [--sort table\|screen\|priority] [--json]` | ⬜ | ⬜ | ⬜ |
-| 2.24 | Tilemap view | Entries decoded as `vhopppcc cccccccc`, overlaid as a grid on the rendered layer; clicking a cell selects its two bytes and reveals its tile | `romlens tilemap <rom> --from <expr> --size 32x32\|64x32\|32x64\|64x64 [--json]` | ⬜ | ⬜ | ⬜ |
-| 2.25 | Previews for typed ranges | A range typed `graphics(bpp)`, `palette`, `tilemap` or `compressed` previews in the inspector with an "Open in …" button | `romlens inspect <rom> <expr> --project P` prints the preview summary | ⬜ | ⬜ | ⬜ |
-| 2.26 | Reference BG layer render | The Tilemap tab renders one BG layer from VRAM, CGRAM and the PPU registers (no priority, windows or colour math in Phase 2) | `romlens render bg --rec R --frame N --bg 1 [--ascii] [--digest]` | ⬜ | ⬜ | ⬜ |
-| 2.27 | Super Metroid decompression | Marking a range `compressed` offers "Decompress and preview", opening the tile decoder on the output | `romlens decompress <rom> --from <expr> --format sm [--stats] [--out F]` | ⬜ | ⬜ | ⬜ |
+| 2.20 | Tile decoder on raw ROM bytes | Tile decoder tab; 2/4/8 bpp; a palette picker; bytes, the bitplane grids, the index grid and the zoomed tile side by side; hovering a pixel lights its bit in each plane and its byte in the strip | `romlens tiles <rom> --from <expr> --bpp 4 --text` prints the 8×8 index grid; `--json` adds the per-plane bytes | 🧪 | ⬜ | ⬜ |
+| 2.21 | Tile sheet browsing | A scrolling sheet at the chosen bpp and column count; clicking a tile selects its bytes in the hex view | `romlens tiles <rom> --from <expr> --count 64 --columns 16 --text` | 🧪 | ⬜ | ⬜ |
+| 2.22 | Palette view | 16×16 swatches; the entry detail shows the raw `$7FFF`, the 5-bit B/G/R fields and the 8-bit RGB; clicking a swatch selects its two bytes | `romlens palette <rom> --from <expr> [--count 256] [--json]` | 🧪 | ⬜ | ⬜ |
+| 2.23 | OAM table | 128 rows with index, x, y, tile, palette, priority, flips, size in pixels from OBSEL and name table; sortable by table order, screen position or priority; selecting a row selects its low- and high-table bytes | `romlens oam <rom> --from <expr> [--obsel 0x30] [--sort table\|screen\|priority] [--json]` | 🧪 | ⬜ | ⬜ |
+| 2.24 | Tilemap view | Entries decoded as `vhopppcc cccccccc`, overlaid as a grid on the rendered layer; clicking a cell selects its two bytes and reveals its tile | `romlens tilemap <rom> --from <expr> --size 32x32\|64x32\|32x64\|64x64 [--json]` | 🧪 | ⬜ | ⬜ |
+| 2.25 | Previews for typed ranges | A range typed `graphics(bpp)`, `palette`, `tilemap` or `compressed` previews in the inspector with an "Open in …" button; Options… sets the palette, tiles across, and a tilemap's size and tile source on the mark | `romlens inspect <rom> <expr> --project P` prints the preview summary; `romlens project <P> preview <expr> [--palette A] [--columns N] [--size S] [--tiles A]` | 🧪 | ⬜ | ⬜ |
+| 2.26 | Reference BG layer render | The Tilemap tab renders one BG layer from VRAM, CGRAM and the PPU registers (no priority, windows or colour math in Phase 2) | `romlens render bg --rec R --frame N --bg 1 [--ascii] [--digest]`, `romlens render sprite --rec R --frame N --index I` | 🧪 | ⬜ | ⬜ |
+| 2.27 | Super Metroid decompression | Marking a range `compressed` offers "Decompress and preview", opening the tile decoder on the output | `romlens decompress <rom> --from <expr> --format sm [--stats] [--out F]` | 🧪 | ⬜ | ⬜ |
 
 ### 2C — recordings
 
 | # | Capability | Shell must expose | CLI scenario | macOS | Win | Linux |
 |---|---|---|---|---|---|---|
-| 2.28 | Open a recording | File › Open Recording…; a frame field with prev/next appears and the graphics tabs read the recording's state | `romlens rec info R` | ⬜ | ⬜ | ⬜ |
+| 2.28 | Open a recording | File › Open Recording…; a frame field with prev/next appears and the graphics tabs read the recording's state | `romlens rec info R` | 🧪 | ⬜ | ⬜ |
 | 2.29 | Validate a recording | The open path shows the validator's diagnostics verbatim and refuses a recording whose ROM hash differs | `romlens rec validate R [--rom <rom>] [--sample N] [--strict] [--recover]` | ⬜ | ⬜ | ⬜ |
-| 2.30 | Extract a frame region | Export Frame Region… writes VRAM, CGRAM, OAM, WRAM or the register blocks | `romlens rec extract R --frame N --region vram [--out F] [--hex]` | ⬜ | ⬜ | ⬜ |
+| 2.30 | Extract a frame region (CLI done in 2B; the shell's Export Frame Region… is not) | Export Frame Region… writes VRAM, CGRAM, OAM, WRAM or the register blocks | `romlens rec extract R --frame N --region vram [--out F] [--hex]` | ⬜ | ⬜ | ⬜ |
 | 2.31 | What changed between frames | The graphics views badge entries that changed since the previous frame | `romlens rec changes R --from A --to B --region vram` | ⬜ | ⬜ | ⬜ |
 | 2.32 | When did this byte change | The inspector on a VRAM/CGRAM/OAM byte reads "changed at frame N, next at M" with Go | `romlens rec when R --region vram --offset 0x4000 [--len 2] [--after N] [--backward]`, `romlens rec index R [--rebuild]` | ⬜ | ⬜ | ⬜ |
-| 2.33 | Snapshot import | File › Import Snapshot… accepts loose VRAM/CGRAM/OAM dumps and a Mesen2 savestate, producing a one-frame recording | `romlens rec import-raw --vram f --cgram f --oam f --out r.romrec`, `romlens rec import-savestate s.mss --out r.romrec` | ⬜ | ⬜ | ⬜ |
+| 2.33 | Snapshot import (`rec import-raw` done in 2B; the shell item and `.mss` are not) | File › Import Snapshot… accepts loose VRAM/CGRAM/OAM dumps and a Mesen2 savestate, producing a one-frame recording | `romlens rec import-raw --vram f --cgram f --oam f --out r.romrec`, `romlens rec import-savestate s.mss --out r.romrec` | ⬜ | ⬜ | ⬜ |
 | 2.34 | Ship the recorder script | Help › Save Mesen2 Recorder Script… writes the .lua and shows the three-step instructions | `romlens rec script --out mesen_recorder.lua` | ⬜ | ⬜ | ⬜ |
 | 2.35 | Recordings referenced, never copied | Attaching one stores path and hash in the project; Save shows the docs/12 notice; a shareable export omits recordings | `romlens project <P> recordings [add R \| list \| remove R]` | ⬜ | ⬜ | ⬜ |
-| 2.36 | Synthetic recording fixture | (n/a) | `romlens testrec --out r.romrec [--frames N]`, then every row above against it | n/a | ⬜ | ⬜ |
+| 2.36 | Synthetic recording fixture (done in 2B, with `--keyframe-interval`) | (n/a) | `romlens testrec --out r.romrec [--frames N]`, then every row above against it | n/a | ⬜ | ⬜ |
 
 
 ## Manual pass, macOS (to repeat before each release)
@@ -184,3 +193,43 @@ Phase 2 additions (still to run):
     it: code precision is at least 0.98. Record the number in
     `10-ffi-spike.md`; it is the phase's pass mark and nothing in CI can
     check it, because truth for a commercial ROM never ships.
+
+Phase 2B additions (still to run). Write the fixtures first:
+`romlens testrom --fixture graphics --out g.sfc` and
+`romlens testrec --out g.romrec --frames 90`.
+
+21. Open `g.sfc`. ⌘L `$00:9000`, then ⌥⌘4: the Graphics picker reads "Tile
+    Decoder", no Hex / Disassembly / Both segment is highlighted, and the
+    header says `ROM $00:9000 · 0x001000`. The sheet shows shapes and a lens
+    in grayscale. Click the lens's top-left quarter (tile 8): the decoder
+    shows a ring, its planes and its bytes, and ⌥⌘1 shows `0x001100`–
+    `0x00111F` selected in the hex view.
+22. Back in the decoder, hover a pixel of the ring: its square is outlined,
+    the same square is outlined in all four plane grids, its index cell
+    lights, and exactly the bytes holding its bits light in the byte list —
+    two in rows 0–7 of planes 0/1 and two further down for planes 2/3.
+    Switch to 2 bpp and 8 bpp: the planes grid shows two and eight planes.
+23. Palette menu › Colours at Tile Start is garbage on tiles, as it should
+    be; ⌘L `$00:9800`, ⌥⌘5: sixteen rows of swatches, row 0 a gray ramp
+    ending at white. Click a swatch: the detail gives the raw word, the
+    `0 bbbbb ggggg rrrrr` bits and `#RRGGBB`, and two bytes are selected in
+    the hex view.
+24. ⌘L `$00:9A00`, ⌥⌘6: four sprites on screen; untick On screen only for
+    128. Order by Priority puts sprite 3 first. Selecting a row selects its
+    four low-table bytes.
+25. File › Open Recording… with `g.romrec`: the view switches to Tilemap,
+    the source reads `g.romrec, frame 0 of 90`, and BG1 is drawn — the lens
+    framed by a checker field — with the grid over it. BG3 shows `ROMLENS`
+    at the top; BG4 says mode 1 has none. Step to frame 30 and back: sprite
+    0 in the OAM view moves a pixel a frame. Open the same recording on the
+    `romlens testrom` minimal ROM: it is refused, naming both hashes.
+26. Mark `0x2000` + 2048 as Tilemap, open the inspector's Preview, Options…,
+    Tiles at `$00:9000`, Set: the preview draws the map with its tiles, ⌘Z
+    takes it back to "set a tile address", and the analysis did not re-run.
+27. Mark `0x3000` + 433 as Compressed: the preview reads "Super Metroid LZ:
+    1024 bytes from 433"; Decompress and Open in Tile Decoder shows the same
+    sheet as `$00:9000`, with the source reading "Decompressed, 1024 bytes".
+28. On the development ROM, ⌘L `$95:80D8`, mark 9481 bytes as Compressed:
+    the preview decompresses 16384 bytes. Browse them in the decoder; there
+    is no way to export the image, which is deliberate (`12-content-policy.md`
+    rule 5).

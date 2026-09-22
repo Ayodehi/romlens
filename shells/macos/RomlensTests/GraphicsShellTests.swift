@@ -181,6 +181,20 @@ import Testing
         #expect(m.workbench.regionParamsAt(fileOffset: 0x2000)?.tiles == nil)
     }
 
+    @Test func previewOptionsDrawATilemapWithItsTiles() async throws {
+        let m = try await model()
+        m.jump(to: 0x2000)
+        m.extendSelection(to: 0x27FF)
+        m.mark(.data, dataKind: .tilemap)
+        try await Fixture.settle { m.preview?.kind == "tilemap" }
+        #expect(m.preview?.bitmap == nil, "no tiles named yet")
+        #expect(m.markedRangeForPreview?.start == 0x2000)
+        let tiles = try #require(m.rom.snesAddressFor(fileOffset: 0x1000))
+        try m.setPreviewOptions(RegionParamsInfo(palette: nil, columns: nil, screenSize: .s32x32, tiles: tiles))
+        #expect(m.preview?.bitmap?.width == 256, "drawn once the tiles are named")
+        #expect(m.session.analysis.isRunning == false, "options never re-analyze")
+    }
+
     // MARK: Views render
 
     @Test func everyViewLaysOutInAWindow() async throws {

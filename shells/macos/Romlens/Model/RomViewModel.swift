@@ -456,6 +456,21 @@ final class RomViewModel {
         jump(to: hit.fileOffset)
     }
 
+    /// The marked range the selection is in, whose preview options can be
+    /// set. `nil` for a range only the analyzer typed: options live on a
+    /// user's mark, so there has to be one.
+    var markedRangeForPreview: ByteRange? {
+        guard let offset = selectedOffset else { return nil }
+        return workbench.regionOverrideAt(fileOffset: offset)
+    }
+
+    /// Set how the marked range previews; undoable, and never re-analyzes.
+    func setPreviewOptions(_ params: RegionParamsInfo) throws {
+        guard let range = markedRangeForPreview else { return }
+        try session.setRegionParams(start: range.start, params: params)
+        refreshSelectionDetails()
+    }
+
     func clearMark() {
         guard let range = highlightedRange else { return }
         try? session.clearMark(start: range.lowerBound, len: UInt32(range.count))

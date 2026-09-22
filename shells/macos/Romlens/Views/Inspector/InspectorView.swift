@@ -536,11 +536,23 @@ struct PreviewSection: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Button(openTitle) { model.open(preview: preview) }
-                .controlSize(.small)
-                .disabled(preview.kind == "compressed" && preview.decompressed == nil)
+            HStack {
+                Button(openTitle) { model.open(preview: preview) }
+                    .disabled(preview.kind == "compressed" && preview.decompressed == nil)
+                Button("Options…") { showingOptions = true }
+                    .disabled(model.markedRangeForPreview == nil)
+                    .help(model.markedRangeForPreview == nil
+                        ? "Mark the range first; preview options belong to a mark"
+                        : "Palette, tiles across, and a tilemap's size and tiles")
+                    .popover(isPresented: $showingOptions, arrowEdge: .leading) {
+                        PreviewOptionsForm(model: model, preview: preview)
+                    }
+            }
+            .controlSize(.small)
         }
     }
+
+    @State private var showingOptions = false
 
     private var openTitle: String {
         let view = switch preview.view {
@@ -556,5 +568,74 @@ struct PreviewSection: View {
     private func scale(for bitmap: BitmapInfo) -> CGFloat {
         let fit = 256 / CGFloat(max(bitmap.width, 1))
         return max(1, min(8, fit.rounded(.down)))
+    }
+}
+
+/// The marked range's preview options. Addresses are typed the way the jump
+/// sheet takes them and resolved by the core; an empty field is the default.
+struct PreviewOptionsForm: View {
+    let model: RomViewModel
+    let preview: PreviewInfo
+    @State private var palette = ""
+    @State private var tiles = ""
+    @State private var columns = 16
+    @State private var size: ScreenSize = .s32x32
+    @State private var error: String?
+
+    var body: some View {
+        Form {
+            TextField("Palette at", text: $palette, prompt: Text("grayscale"))
+            if preview.kind == "tilemap" {
+                TextField("Tiles at", text: $tiles, prompt: Text("none"))
+                Picker("Size", selection: $size) {
+                    ForEach([ScreenSize.s32x32, .s64x32, .s32x64, .s64x64], id: \.self) { Text($0.title).tag($0) }
+                }
+            } else {
+                Stepper("\(columns) tiles across", value: $columns, in: 1...64)
+            }
+            if let error {
+                Text(error).font(.caption).foregroundStyle(.red)
+            }
+            HStack {
+                Spacer()
+                Button("Set") { apply() }.keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding()
+        .frame(width: 280)
+        .onAppear(perform: load)
+    }
+
+    private func load() {
+        guard let range = model.markedRangeForPreview,
+              let p = model.workbench.regionParamsAt(fileOffset: range.start) else { return }
+        palette = p.palette.map { formatSnesAddress(address: $0) } ?? ""
+        tiles = p.tiles.map { formatSnesAddress(address: $0) } ?? ""
+        columns = Int(p.columns ?? 16)
+        size = p.screenSize ?? .s32x32
+    }
+
+    private func address(_ text: String) throws -> UInt32? {
+        let t = text.trimmingCharacters(in: .whitespaces)
+        guard !t.isEmpty else { return nil }
+        let r = try model.rom.resolve(text: t)
+        return r.snesAddress ?? model.rom.snesAddressFor(fileOffset: r.fileOffset)
+    }
+
+    private func apply() {
+        do {
+            let isMap = preview.kind == "tilemap"
+            try model.setPreviewOptions(RegionParamsInfo(
+                palette: try address(palette),
+                columns: isMap ? nil : UInt16(columns),
+                screenSize: isMap ? size : nil,
+                tiles: isMap ? try address(tiles) : nil
+            ))
+            error = nil
+        } catch let e as RomlensError {
+            error = "\(e)"
+        } catch {
+            self.error = error.localizedDescription
+        }
     }
 }

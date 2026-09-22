@@ -1,6 +1,6 @@
 wrote <tmp>/t.romrec synthetic recording, 90 frames, of the graphics test ROM
 Format:       1.0
-Producer:     romlens testrec 0.2.0
+Producer:     romlens testrec 0.4.0
 ROM SHA-256:  cfd385e8107dc5977e88d9b3f4b4b9ce866c707732e4fb7fef36ba5687b20f77
               matches romlens-graphics.sfc
 Frames:       90 (2 keyframes, every 60 frames)
@@ -9,7 +9,7 @@ Storage:      54474 bytes, zstd
 Regions:      cpu 16, ppu 256, io 128, wram 131072, vram 65536, cgram 512, oam 544, timing 16
 Layers:       none
 Format:       1.0
-Producer:     romlens testrec 0.2.0
+Producer:     romlens testrec 0.4.0
 ROM SHA-256:  cfd385e8107dc5977e88d9b3f4b4b9ce866c707732e4fb7fef36ba5687b20f77
               the recording was made from a different ROM (expected SHA-256 cfd385e8107dc5977e88d9b3f4b4b9ce866c707732e4fb7fef36ba5687b20f77, found a2462f1d74f993d0b3e10ae9425cd9b48253ac82c99913f07ef704d9c85dc6ee)
 Frames:       90 (2 keyframes, every 60 frames)
@@ -87,7 +87,7 @@ wrote 544 bytes of oam at frame 0 to <tmp>/oam.bin
 wrote 256 bytes of ppu at frame 0 to <tmp>/ppu.bin
 wrote <tmp>/raw.romrec: one frame with ppu, vram, cgram, oam
 Format:       1.0
-Producer:     romlens import-raw 0.2.0
+Producer:     romlens import-raw 0.4.0
 ROM SHA-256:  cfd385e8107dc5977e88d9b3f4b4b9ce866c707732e4fb7fef36ba5687b20f77
 Frames:       1 (1 keyframe, every 60 frames)
 Storage:      5572 bytes, zstd

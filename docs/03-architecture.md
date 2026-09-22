@@ -195,6 +195,26 @@ Deltas from Phase 1 ("Disassemble", 21 September 2026):
   `regions.json` entry writes `elem` and `bank` only when they are not the
   default, so a plain table's JSON is exactly what v1 wrote.
 
+- Graphics (Phase 2B, 22 September 2026). `graphics/` decodes bytes, never a
+  machine: tiles (2/4/8 bpp and Mode 7, one rule for the bitplanes),
+  palettes through `PaletteRef` (CGRAM, raw bytes, or grayscale so unknown
+  bytes are viewable), OAM with all eight OBSEL pairs and nibble-wrapping
+  large sprites, tilemaps with sub-maps and 16×16 cells, the 256-byte
+  `PpuState`, and a renderer that draws one BG layer or one sprite and stops.
+  The Super Metroid decompressor was verified against the game's routine at
+  `$80:B119`. Nothing writes an image file.
+- Preview options (`RegionParams`) live on the region override, set by
+  `SetRegionParams`, which never re-runs the analysis. The plan sketched a
+  VRAM character base as the tilemap option; a range of ROM bytes has no VRAM
+  behind it, so the field is `tiles`, the ROM address of the tile data, and
+  the recording views take their character base from the registers.
+- The FFI crosses the decoders as free functions over bytes, so ROM bytes
+  and a recording's VRAM take one path, and images as one RGBA buffer. The
+  pixel-to-bit table is fetched once per format, so hovering costs no call.
+- The shell's graphics selection needed no widened selection enum: every
+  graphics case that has ROM bytes selects its byte range, which is the join
+  key the plan named, and a selection inside a recording's memory stays in
+  the graphics model.
 - The overview strip (Phase 2, 22 September 2026) is reduced in the core.
   `viewmodel::region_summary::summarize` takes the strip's width in pixels and
   returns one bucket per column, carrying the kind that covers most of it, the
@@ -360,6 +380,25 @@ types across the boundary.
   core; shells only provide the entry UI.
 
 ## Recording module boundaries
+
+As built in track 2B (22 September 2026), ahead of the rest of 2C:
+
+- `recording/` holds the frozen `MachineStateSource` trait, `MemorySource`
+  and a `conformance::check` both implementations pass, the delta encoder,
+  the writer, the reader (`RomrecSource`, chunks read on demand, the last
+  frame cached so stepping forward costs one delta), `import-raw`, and the
+  synthetic recording. The byte layout is in `13-recording-format.md`.
+- Payloads are zstd frames, written and read by **ruzstd**, pure Rust. The
+  `zstd` crate's C build needed a cross-compiler for every target and broke
+  `make cross`; the plan had named ruzstd as the fallback.
+- Every frame's run table sits ahead of its payloads, so `changes()` reads a
+  few hundred bytes a frame and decompresses nothing. A keyframe stores each
+  region whole but records what changed separately, so "what changed" stays
+  exact across keyframes.
+- A file without a footer is in progress, not corrupt; recovery walks the
+  chunks from the header and keeps every whole frame.
+
+The plan as written:
 
 - `.romrec` is a single chunked file: header, frame index, keyframes every
   60 frames and sparse deltas in between, all zstd-compressed, plus
