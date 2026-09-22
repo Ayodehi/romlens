@@ -12,7 +12,8 @@ Phase 1. The macOS Phase 0 manual pass was completed on 21 September 2026
 (items 0.1–0.11), which also caught the NSTableView row-view leak, the
 missing app delegate and the sideways-scroll bug; the Instruments pass is
 still open. The Phase 1 rows were implemented the same day; their manual
-pass is listed below and still to run.
+pass is listed below and still to run. The Phase 2 rows were written from
+`16-phase2-plan.md` on 22 September 2026 and none is implemented.
 
 ## Phase 0
 
@@ -35,7 +36,7 @@ pass is listed below and still to run.
 
 | # | Capability | Shell must expose | CLI scenario | macOS | Win | Linux |
 |---|---|---|---|---|---|---|
-| 1.1 | Analysis runs on open, off the main thread | Progress and phase in the toolbar with ⌘. to cancel; the hex view is usable meanwhile; percentages when done; tap to re-run | `romlens analyze <rom> --stats [--progress]` | 🧪 | ⬜ | ⬜ |
+| 1.1 | Analysis runs on open, off the main thread | Progress and phase in the toolbar with ⌘. to cancel; the hex view is usable meanwhile; percentages when done; tap to re-run | `romlens analyze <rom> --stats [--progress] [--warnings]` | 🧪 | ⬜ | ⬜ |
 | 1.2 | Disassembly view, virtualized | One line per instruction or data row; section, label, comment and blank lines; tokens coloured by kind, auto labels dimmer than user labels; region gutter and tint by confidence | `romlens disasm <rom> --from <expr> --count N [--verbose]` | 🧪 | ⬜ | ⬜ |
 | 1.3 | Raw decode under chosen flags | (inspector shows the analyzer's flags; a raw decode is a tutor tool) | `romlens disasm <rom> --flags m1x0e0` | n/a | ⬜ | ⬜ |
 | 1.4 | Hex ↔ asm lockstep | Both tab: scrolling either side keeps the other aligned; the highlighted bytes and their line are joined by a bracket; selecting in one selects in the other | `romlens disasm --from <expr>` shows the line the bytes belong to | 🧪 | ⬜ | ⬜ |
@@ -53,6 +54,54 @@ pass is listed below and still to run.
 | 1.16 | Hardware registers | `STA $420D` carries `; MEMSEL`; the inspector shows the register's access and description | `romlens registers [address]` | 🧪 | ⬜ | ⬜ |
 | 1.17 | Hex region tint | Hex rows tint code and data bytes by confidence after analysis without a refetch | (the hex-row batch's span lane) | 🧪 | ⬜ | ⬜ |
 | 1.18 | Range selection | Shift+arrows and shift-click extend the highlighted range in either canvas; mouse-drag and cross-canvas drag are not in Phase 1 | n/a (interaction) | 🧪 | ⬜ | ⬜ |
+
+## Phase 2
+
+Planned in `16-phase2-plan.md`; no row is implemented yet. Track 2A
+(classification) owns 2.1–2.8, track 2B (graphics) 2.20–2.27 and track 2C
+(recordings) 2.28–2.36. The numbering leaves a gap after 2.8 so 2A can grow
+without renumbering the other tracks.
+
+### 2A — classification
+
+| # | Capability | Shell must expose | CLI scenario | macOS | Win | Linux |
+|---|---|---|---|---|---|---|
+| 2.1 | Jump tables resolved | Table rows render `dw CODE_…` with a "jump table" region badge; the evidence popover names the dispatching instruction and links to it; the `computed jump` warning becomes informational | `romlens tables <rom> [--json]` | ⬜ | ⬜ | ⬜ |
+| 2.2 | Heuristic scores visible | The evidence popover lists every heuristic with its score, sorted descending, with the detail string ("entropy 7.4 bits/byte over `$96:0000`–`$96:8000`") | `romlens heuristics <rom> [--kind …] [--from --to] [--json]` | ⬜ | ⬜ | ⬜ |
+| 2.3 | Trace and coverage import | File › Import ▸ Execution Trace…; a coverage lane in the overview strip; the analysis status reports traced bytes | `romlens import trace <P> --rom R <file> [--kind auto\|cdl\|usage\|dizraw]` | ⬜ | ⬜ | ⬜ |
+| 2.4 | Symbol import | File › Import ▸ Symbols…; imported labels visibly distinct from auto; collisions and rewritten names reported, never silently dropped | `romlens import symbols <P> --rom R <file> [--format auto\|wla\|nocash\|lbl] [--source NAME]` | ⬜ | ⬜ | ⬜ |
+| 2.5 | Data typing with parameters | Mark as ▸ submenu covering every data kind, with a sheet for stride, bank rule, element kind and bpp; a pointer table renders as labelled targets with xrefs | `romlens project <P> mark <expr> <len> table --stride 2 --elem code\|pointer\|raw --bank same\|$C0\|entry` | ⬜ | ⬜ | ⬜ |
+| 2.6 | Region overview strip | A minimap under the editor coloured by kind and confidence, hatched where a bucket is mixed, with the visible range as a playhead; click and drag to scroll | `romlens map <rom> [--buckets N] [--json]` | ⬜ | ⬜ | ⬜ |
+| 2.7 | Byte and text search | ⌘F sheet validating the pattern live against the core's message; a results list in the right pane; ⌘G / ⇧⌘G for next and previous; Return jumps and centres | `romlens search <rom> "78 18 ?? 5C"`, `romlens search <rom> --text "Nintendo" [--ignore-case]` | ⬜ | ⬜ | ⬜ |
+| 2.8 | Classifier accuracy | A line at the end of analysis reporting the classified percentage | `romlens accuracy <rom> --truth F [--project P] [--json] [--min-f1 X]`, `romlens truth from-cdl <cdl> --rom R --out F` | ⬜ | ⬜ | ⬜ |
+
+### 2B — graphics
+
+| # | Capability | Shell must expose | CLI scenario | macOS | Win | Linux |
+|---|---|---|---|---|---|---|
+| 2.20 | Tile decoder on raw ROM bytes | Tile decoder tab; 2/4/8 bpp; a palette picker; bytes, the bitplane grids, the index grid and the zoomed tile side by side; hovering a pixel lights its bit in each plane and its byte in the strip | `romlens tiles <rom> --from <expr> --bpp 4 --text` prints the 8×8 index grid; `--json` adds the per-plane bytes | ⬜ | ⬜ | ⬜ |
+| 2.21 | Tile sheet browsing | A scrolling sheet at the chosen bpp and column count; clicking a tile selects its bytes in the hex view | `romlens tiles <rom> --from <expr> --count 64 --columns 16 --text` | ⬜ | ⬜ | ⬜ |
+| 2.22 | Palette view | 16×16 swatches; the entry detail shows the raw `$7FFF`, the 5-bit B/G/R fields and the 8-bit RGB; clicking a swatch selects its two bytes | `romlens palette <rom> --from <expr> [--count 256] [--json]` | ⬜ | ⬜ | ⬜ |
+| 2.23 | OAM table | 128 rows with index, x, y, tile, palette, priority, flips, size in pixels from OBSEL and name table; sortable by table order, screen position or priority; selecting a row selects its low- and high-table bytes | `romlens oam <rom> --from <expr> [--obsel 0x30] [--sort table\|screen\|priority] [--json]` | ⬜ | ⬜ | ⬜ |
+| 2.24 | Tilemap view | Entries decoded as `vhopppcc cccccccc`, overlaid as a grid on the rendered layer; clicking a cell selects its two bytes and reveals its tile | `romlens tilemap <rom> --from <expr> --size 32x32\|64x32\|32x64\|64x64 [--json]` | ⬜ | ⬜ | ⬜ |
+| 2.25 | Previews for typed ranges | A range typed `graphics(bpp)`, `palette`, `tilemap` or `compressed` previews in the inspector with an "Open in …" button | `romlens inspect <rom> <expr> --project P` prints the preview summary | ⬜ | ⬜ | ⬜ |
+| 2.26 | Reference BG layer render | The Tilemap tab renders one BG layer from VRAM, CGRAM and the PPU registers (no priority, windows or colour math in Phase 2) | `romlens render bg --rec R --frame N --bg 1 [--ascii] [--digest]` | ⬜ | ⬜ | ⬜ |
+| 2.27 | Super Metroid decompression | Marking a range `compressed` offers "Decompress and preview", opening the tile decoder on the output | `romlens decompress <rom> --from <expr> --format sm [--stats] [--out F]` | ⬜ | ⬜ | ⬜ |
+
+### 2C — recordings
+
+| # | Capability | Shell must expose | CLI scenario | macOS | Win | Linux |
+|---|---|---|---|---|---|---|
+| 2.28 | Open a recording | File › Open Recording…; a frame field with prev/next appears and the graphics tabs read the recording's state | `romlens rec info R` | ⬜ | ⬜ | ⬜ |
+| 2.29 | Validate a recording | The open path shows the validator's diagnostics verbatim and refuses a recording whose ROM hash differs | `romlens rec validate R [--rom <rom>] [--sample N] [--strict] [--recover]` | ⬜ | ⬜ | ⬜ |
+| 2.30 | Extract a frame region | Export Frame Region… writes VRAM, CGRAM, OAM, WRAM or the register blocks | `romlens rec extract R --frame N --region vram [--out F] [--hex]` | ⬜ | ⬜ | ⬜ |
+| 2.31 | What changed between frames | The graphics views badge entries that changed since the previous frame | `romlens rec changes R --from A --to B --region vram` | ⬜ | ⬜ | ⬜ |
+| 2.32 | When did this byte change | The inspector on a VRAM/CGRAM/OAM byte reads "changed at frame N, next at M" with Go | `romlens rec when R --region vram --offset 0x4000 [--len 2] [--after N] [--backward]`, `romlens rec index R [--rebuild]` | ⬜ | ⬜ | ⬜ |
+| 2.33 | Snapshot import | File › Import Snapshot… accepts loose VRAM/CGRAM/OAM dumps and a Mesen2 savestate, producing a one-frame recording | `romlens rec import-raw --vram f --cgram f --oam f --out r.romrec`, `romlens rec import-savestate s.mss --out r.romrec` | ⬜ | ⬜ | ⬜ |
+| 2.34 | Ship the recorder script | Help › Save Mesen2 Recorder Script… writes the .lua and shows the three-step instructions | `romlens rec script --out mesen_recorder.lua` | ⬜ | ⬜ | ⬜ |
+| 2.35 | Recordings referenced, never copied | Attaching one stores path and hash in the project; Save shows the docs/12 notice; a shareable export omits recordings | `romlens project <P> recordings [add R \| list \| remove R]` | ⬜ | ⬜ | ⬜ |
+| 2.36 | Synthetic recording fixture | (n/a) | `romlens testrec --out r.romrec [--frames N]`, then every row above against it | n/a | ⬜ | ⬜ |
+
 
 ## Manual pass, macOS (to repeat before each release)
 

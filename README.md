@@ -13,7 +13,9 @@ with M/X width tracking, walks the ROM from its vectors, names what it finds
 and stores annotations in a `.romlens` package; the CLI exposes every step;
 the macOS app shows the hex view, the disassembly and both in lockstep, with
 a navigator, an inspector, label/comment/region editing with undo, project
-documents and asar-syntax export. The tutor's Ask mode is the next plan.
+documents and asar-syntax export. Phase 2 ("Discover code vs data") is
+planned in `docs/16-phase2-plan.md`: jump tables first, because static
+descent alone reaches 0.2% of Super Metroid. The tutor stays deferred.
 `spikes/` holds the FFI measurement that shaped the API. Start with the
 docs, then `docs/14-phase0-plan.md` and `docs/15-conformance-checklist.md`
 for what was built and how it is checked. Romlens is a study and visualization tool
@@ -31,13 +33,14 @@ embedded core is the planned next step after that, feeding the same views.
 | [docs/06-ai-tutor.md](docs/06-ai-tutor.md) | The AI tutor: modes, tool surface, grounding rules, evaluation |
 | [docs/07-memory-to-screen.md](docs/07-memory-to-screen.md) | Sprites and backgrounds as a walkable chain from ROM bytes to pixels |
 | [docs/08-cross-platform.md](docs/08-cross-platform.md) | One Rust core, native shells for macOS, Windows and Linux; boundary, bindings, sequencing |
-| [docs/09-emulator-core-licensing.md](docs/09-emulator-core-licensing.md) | Which emulator cores we may embed (permissive only), project license MIT OR Apache-2.0 |
+| [docs/09-emulator-core-licensing.md](docs/09-emulator-core-licensing.md) | Which emulator cores we may embed (permissive only), project license 0BSD |
 | [docs/10-ffi-spike.md](docs/10-ffi-spike.md) | Measured UniFFI vs C ABI numbers; decision to use UniFFI with flat buffers on hot paths |
 | [docs/11-naming.md](docs/11-naming.md) | Why "Romlens" should be replaced, identifier scheme without a domain, shortlist |
 | [docs/12-content-policy.md](docs/12-content-policy.md) | ROM handling, third-party disassemblies, Nintendo posture, signing and distribution logistics |
 | [docs/13-recording-format.md](docs/13-recording-format.md) | The .romrec format: frame-by-frame CPU and PPU memory snapshots, deltas, optional layers, producers |
 | [docs/14-phase0-plan.md](docs/14-phase0-plan.md) | Phase 0 implementation plan: layout, work breakdown, tests, CI, verification |
 | [docs/15-conformance-checklist.md](docs/15-conformance-checklist.md) | Frontend conformance checklist: what every shell must expose, with the CLI scenario for each item |
+| [docs/16-phase2-plan.md](docs/16-phase2-plan.md) | Phase 2 implementation plan: jump tables, scored heuristics, trace and symbol imports, graphics decoders, the .romrec format |
 
 Decisions so far are listed at the end of the interactive proposal and in
 `docs/01-vision-and-roadmap.md` (Phase 0 acceptance criteria and working

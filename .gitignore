@@ -64,3 +64,6 @@ build/
 
 # Crash reports dropped into the tree while debugging
 docs/crash_dump*.txt
+
+# Editor-local vault config (docs/ opens as an Obsidian vault)
+.obsidian/

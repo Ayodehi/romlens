@@ -115,6 +115,7 @@ and a saved project file.
 - Export: plain `.asm` in asar-compatible syntax, and a symbol file.
 - **Tutor, Ask mode:** questions about the current selection answered
   through read-only tools with address citations (see `06-ai-tutor.md`).
+  *Extracted and not built; deferred again past Phase 2.*
 
 ### Phase 2 — Discover code vs data (4–8 weeks)
 
@@ -143,6 +144,14 @@ one click away.
   on recording snapshots (see `07-memory-to-screen.md`).
 - **Tutor, Fix mode:** reclassification, flag-override and data-type
   proposals rendered as cards the user accepts or rejects.
+
+Scope decisions (22 September 2026), recorded in `16-phase2-plan.md`:
+the tutor is deferred out of Phase 2 entirely, so Ask mode (carried over
+from Phase 1) and Fix mode both move to Phase 3; the Atlas is reduced to the
+overview strip, with the zoomable map joining Phase 3's CFG work; the
+Windows and Linux shells stay unstarted. Phase 2 is sequenced as three
+independently shippable tracks — 2A classification, 2B graphics, 2C
+recordings — and only 2A fits the four-to-eight-week estimate above.
 
 ### Phase 3 — Recover structure (8–12 weeks)
 
