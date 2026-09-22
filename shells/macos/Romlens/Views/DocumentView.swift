@@ -67,8 +67,11 @@ struct DocumentView: View {
                 .inspectorColumnWidth(min: 280, ideal: 320, max: 420)
         }
         .toolbar {
-            // Leading: where macOS puts back and forward, beside the sidebar
-            // toggle.
+            // Leading: back and forward, the pair macOS puts here, and only
+            // that pair. The titlebar shares this space, so a third button
+            // truncated the document's name — and "Jump to Address" was the
+            // odd one out anyway: the others move through history, it opens a
+            // sheet, and it is ⌘L and a Go menu item already.
             ToolbarItemGroup(placement: .navigation) {
                 Button {
                     model.goBack()
@@ -84,12 +87,6 @@ struct DocumentView: View {
                 }
                 .disabled(!model.canGoForward)
                 .help("Forward (⌘])")
-                Button {
-                    model.activeSheet = .jump
-                } label: {
-                    Label("Jump to Address", systemImage: "arrow.right.to.line")
-                }
-                .help("Jump to a file offset or SNES address (⌘L)")
             }
             ToolbarItem(placement: .principal) {
                 Picker("Editor", selection: $model.editorTab) {
