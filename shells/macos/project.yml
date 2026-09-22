@@ -2,7 +2,7 @@
 # writes Romlens.xcodeproj, which is git-ignored.
 name: Romlens
 options:
-  bundleIdPrefix: io.github.placeholder
+  bundleIdPrefix: io.github.ayodehi
   deploymentTarget:
     macOS: "27.0"
   createIntermediateGroups: true
@@ -30,7 +30,7 @@ targets:
       - package: RomlensKit
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: io.github.placeholder.Romlens
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.ayodehi.Romlens
         PRODUCT_NAME: Romlens
         ENABLE_HARDENED_RUNTIME: YES
         GENERATE_INFOPLIST_FILE: NO
@@ -50,20 +50,20 @@ targets:
             CFBundleTypeRole: Editor
             LSHandlerRank: Owner
             LSTypeIsPackage: true
-            LSItemContentTypes: [io.github.placeholder.romlens.project]
+            LSItemContentTypes: [io.github.ayodehi.romlens.project]
             NSDocumentClass: $(PRODUCT_MODULE_NAME).ProjectDocument
           - CFBundleTypeName: SNES ROM image
             CFBundleTypeRole: Viewer
             LSHandlerRank: Alternate
-            LSItemContentTypes: [io.github.placeholder.romlens.sfc]
+            LSItemContentTypes: [io.github.ayodehi.romlens.sfc]
             NSDocumentClass: $(PRODUCT_MODULE_NAME).ProjectDocument
         UTExportedTypeDeclarations:
-          - UTTypeIdentifier: io.github.placeholder.romlens.project
+          - UTTypeIdentifier: io.github.ayodehi.romlens.project
             UTTypeDescription: Romlens Project
             UTTypeConformsTo: [com.apple.package]
             UTTypeTagSpecification:
               public.filename-extension: [romlens]
-          - UTTypeIdentifier: io.github.placeholder.romlens.sfc
+          - UTTypeIdentifier: io.github.ayodehi.romlens.sfc
             UTTypeDescription: SNES ROM image
             UTTypeConformsTo: [public.data]
             UTTypeTagSpecification:
@@ -83,7 +83,7 @@ targets:
       - target: Romlens
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: io.github.placeholder.RomlensTests
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.ayodehi.RomlensTests
         GENERATE_INFOPLIST_FILE: YES
 schemes:
   Romlens:

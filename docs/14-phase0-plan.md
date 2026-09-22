@@ -24,7 +24,9 @@ Acceptance criteria (docs/01, agreed 2026-09-21):
 Binding decisions: Rust core + UniFFI (docs/10 measured: flat buffers on hot
 paths), Swift 6 shell, macOS 27 minimum, 0BSD, ROMs only in git-ignored
 `roms/`, direct commits to `main`, GitHub account not yet chosen
-(`io.github.placeholder` prefix until then).
+(`io.github.placeholder` prefix until then; the account was chosen on
+22 September 2026 and the prefix is now `io.github.ayodehi`, see
+`11-naming.md`).
 
 Facts to pin tests to (docs/04, re-verified from the file): 3,145,728 bytes,
 no copier header, LoROM header at `0x7FC0`, map mode `$30`, cart `$02`, ROM

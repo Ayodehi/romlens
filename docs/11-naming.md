@@ -2,11 +2,33 @@
 
 **Decided 21 September 2026: the project is Romlens.** "Cartograph" was the
 working name in revisions 1 to 3 of the proposal and appears below only as
-the name that was researched and rejected. Identifiers: `io.github.<user>.Romlens`,
-crates `romlens-core`, `romlens-ffi`, `romlens-cli`, CLI `romlens`, project
-package `.romlens`, recording `.romrec`. The GitHub account is not chosen
-yet, so `<user>` is the literal `placeholder` in code until it is; it is
-replaced once before the first public release.
+the name that was researched and rejected. Identifiers:
+`io.github.ayodehi.Romlens`, crates `romlens-core`, `romlens-ffi`,
+`romlens-cli`, CLI `romlens`, project package `.romlens`, recording
+`.romrec`.
+
+**GitHub account chosen 22 September 2026: `Ayodehi`**, repository
+<https://github.com/Ayodehi/romlens>. The literal `placeholder` that stood in
+for `<user>` is gone from the code: the bundle identifier is
+`io.github.ayodehi.Romlens`, the document UTIs are
+`io.github.ayodehi.romlens.project` and `io.github.ayodehi.romlens.sfc`, and
+`Cargo.toml`'s `repository` points at the new URL.
+
+**The username segment is lower-cased, and that is load-bearing.** The
+account is spelled `Ayodehi`, but substituting it verbatim broke
+`controllerRoutesRomsAndDeduplicates`: LaunchServices normalises a declared
+UTI to lower case, so `NSDocumentController.typeForContentsOfURL` handed
+back `io.github.Ayodehi.romlens.sfc` as `io.github.ayodehi.romlens.sfc`,
+which no longer matched `ProjectDocument.romType`'s exact string comparison,
+so a second open of the same ROM made a second document instead of reusing
+the first. GitHub URLs are case-insensitive, so nothing is lost, and
+lower case is also what Flathub's `io.github.<user>.<App>` convention
+expects. The *app name* segment keeps its capital (`…ayodehi.Romlens`),
+because bundle identifiers are compared case-sensitively and never pass
+through the UTI normaliser.
+
+Still to verify before a public release: that `romlens` is free on
+crates.io.
 
 Researched 21 September 2026. The project is free, open source, has no
 domain, no store listing and no support channel. That changes what a name

@@ -9,14 +9,14 @@ final class ProjectDocumentController: NSDocumentController {
     }
 
     override func makeDocument(withContentsOf url: URL, ofType typeName: String) throws -> NSDocument {
-        if typeName == ProjectDocument.romType {
+        if ProjectDocument.isType(typeName, ProjectDocument.romType) {
             return try documentForRom(at: url)
         }
         return try super.makeDocument(withContentsOf: url, ofType: typeName)
     }
 
     override func makeDocument(for urlOrNil: URL?, withContentsOf contentsURL: URL, ofType typeName: String) throws -> NSDocument {
-        if typeName == ProjectDocument.romType {
+        if ProjectDocument.isType(typeName, ProjectDocument.romType) {
             return try documentForRom(at: contentsURL)
         }
         return try super.makeDocument(for: urlOrNil, withContentsOf: contentsURL, ofType: typeName)

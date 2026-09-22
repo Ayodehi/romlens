@@ -17,7 +17,7 @@
 			<string>Owner</string>
 			<key>LSItemContentTypes</key>
 			<array>
-				<string>io.github.placeholder.romlens.project</string>
+				<string>io.github.ayodehi.romlens.project</string>
 			</array>
 			<key>LSTypeIsPackage</key>
 			<true/>
@@ -33,7 +33,7 @@
 			<string>Alternate</string>
 			<key>LSItemContentTypes</key>
 			<array>
-				<string>io.github.placeholder.romlens.sfc</string>
+				<string>io.github.ayodehi.romlens.sfc</string>
 			</array>
 			<key>NSDocumentClass</key>
 			<string>$(PRODUCT_MODULE_NAME).ProjectDocument</string>
@@ -69,7 +69,7 @@
 			<key>UTTypeDescription</key>
 			<string>Romlens Project</string>
 			<key>UTTypeIdentifier</key>
-			<string>io.github.placeholder.romlens.project</string>
+			<string>io.github.ayodehi.romlens.project</string>
 			<key>UTTypeTagSpecification</key>
 			<dict>
 				<key>public.filename-extension</key>
@@ -86,7 +86,7 @@
 			<key>UTTypeDescription</key>
 			<string>SNES ROM image</string>
 			<key>UTTypeIdentifier</key>
-			<string>io.github.placeholder.romlens.sfc</string>
+			<string>io.github.ayodehi.romlens.sfc</string>
 			<key>UTTypeTagSpecification</key>
 			<dict>
 				<key>public.filename-extension</key>

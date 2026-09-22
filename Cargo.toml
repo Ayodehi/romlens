@@ -10,7 +10,7 @@ version = "0.1.0"
 edition = "2024"
 license = "0BSD"
 rust-version = "1.88"
-repository = "https://github.com/placeholder/romlens"
+repository = "https://github.com/Ayodehi/romlens"
 
 [workspace.dependencies]
 thiserror = "2"

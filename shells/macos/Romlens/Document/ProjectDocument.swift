@@ -7,9 +7,16 @@ import UniformTypeIdentifiers
 /// creates an untitled project; Save As chooses where it lives. The ROM is
 /// never copied into the package.
 final class ProjectDocument: NSDocument {
-    static let projectType = "io.github.placeholder.romlens.project"
-    static let romType = "io.github.placeholder.romlens.sfc"
+    static let projectType = "io.github.ayodehi.romlens.project"
+    static let romType = "io.github.ayodehi.romlens.sfc"
     static let localFileName = "local.json"
+
+    /// AppKit hands back the type name LaunchServices resolved, and
+    /// LaunchServices lower-cases a declared UTI (`11-naming.md`). UTIs are
+    /// case-insensitive, so type names are never compared with `==`.
+    static func isType(_ name: String, _ expected: String) -> Bool {
+        name.compare(expected, options: .caseInsensitive) == .orderedSame
+    }
     static let coreFiles = ["project.json", "labels.json", "comments.json", "regions.json", "flags.json"]
 
     /// Injected for tests; the app uses the bookmark-based default.
@@ -31,7 +38,7 @@ final class ProjectDocument: NSDocument {
     override class func canConcurrentlyReadDocuments(ofType typeName: String) -> Bool { false }
     override class var readableTypes: [String] { [projectType, romType] }
     override class var writableTypes: [String] { [projectType] }
-    override class func isNativeType(_ type: String) -> Bool { type == projectType }
+    override class func isNativeType(_ type: String) -> Bool { isType(type, projectType) }
 
     /// Untitled projects are named after their ROM.
     var draftName: String {
@@ -88,7 +95,7 @@ final class ProjectDocument: NSDocument {
     }
 
     override func read(from fileWrapper: FileWrapper, ofType typeName: String) throws {
-        if typeName == Self.romType || fileWrapper.isRegularFile {
+        if Self.isType(typeName, Self.romType) || fileWrapper.isRegularFile {
             guard let data = fileWrapper.regularFileContents else {
                 throw CocoaError(.fileReadCorruptFile)
             }

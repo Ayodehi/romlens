@@ -7,8 +7,8 @@ import Testing
 /// Shared fixtures: ROMs, analyzed view models and off-screen windows.
 @MainActor
 enum Fixture {
-    static let romType = "io.github.placeholder.romlens.sfc"
-    static let projectType = "io.github.placeholder.romlens.project"
+    static let romType = "io.github.ayodehi.romlens.sfc"
+    static let projectType = "io.github.ayodehi.romlens.project"
 
     static func rom(megabytes: Int = 1) throws -> Rom {
         if let dir = ProcessInfo.processInfo.environment["ROMLENS_ROM_DIR"] {
