@@ -1,5 +1,6 @@
-//! CLI output pinned per fixture. Line endings are normalised so the same
-//! files pass on Windows. `UPDATE_GOLDEN=1` rewrites them.
+//! CLI output pinned per fixture. Line endings and the separator after a
+//! redacted temporary path are normalised so the same files pass on
+//! Windows. `UPDATE_GOLDEN=1` rewrites them.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -60,6 +61,15 @@ fn check(name: &str, actual: &str) {
         actual, expected,
         "golden {name} differs (UPDATE_GOLDEN=1 to accept)"
     );
+}
+
+/// Replaces the scratch directory with `<tmp>` and normalises the separator
+/// that follows it, so Windows' `<tmp>\\Test.romlens` matches a golden written
+/// on macOS. Only the separator directly after the marker is rewritten; the
+/// rest of the output is left exactly as the CLI printed it.
+fn redact_tmp(dir: &Path, text: &str) -> String {
+    text.replace(&*dir.to_string_lossy(), "<tmp>")
+        .replace("<tmp>\\", "<tmp>/")
 }
 
 fn slug(mode: MappingMode) -> &'static str {
@@ -254,10 +264,8 @@ fn project_scenario() {
     let pkg = dir.join("Test.romlens");
     let pkg = pkg.to_str().unwrap();
     let mut log = String::new();
-    log += &run(&["project", pkg, "init", "--rom", rom])
-        .replace(&dir.to_string_lossy().to_string(), "<tmp>");
-    log += &run(&["project", pkg, "init", "--rom", rom])
-        .replace(&dir.to_string_lossy().to_string(), "<tmp>");
+    log += &redact_tmp(&dir, &run(&["project", pkg, "init", "--rom", rom]));
+    log += &redact_tmp(&dir, &run(&["project", pkg, "init", "--rom", rom]));
     log += &run(&["project", pkg, "label", "$00:8000", "Boot"]);
     log += &run(&["project", pkg, "label", "$80:800E", "Idle"]);
     log += &run(&["project", pkg, "label", "$7E:0A1C", "SamusPose"]);
@@ -282,7 +290,7 @@ fn project_scenario() {
     log += &run(&["project", pkg, "mark", "0x22", "2", "code"]);
     log += &run(&["project", pkg, "mark", "0x100", "0", "byte"]);
     log += &run(&["project", pkg, "flags", "0x5", "--m", "0", "--dbr", "$7E"]);
-    log += &run(&["project", pkg, "history"]).replace(&dir.to_string_lossy().to_string(), "<tmp>");
+    log += &redact_tmp(&dir, &run(&["project", pkg, "history"]));
     log += &run(&["disasm", rom, "--project", pkg, "--count", "24"]);
     log += &run(&["labels", rom, "--project", pkg, "--source", "user"]);
     log += &run(&["export", "sym", rom, "--project", pkg, "--out", "-"]);
@@ -293,7 +301,7 @@ fn project_scenario() {
     log += &run(&["project", pkg, "comment", "$00:8007", "-", "--block"]);
     log += &run(&["project", pkg, "clear", "0x20", "6"]);
     log += &run(&["project", pkg, "flags", "0x5", "--remove"]);
-    log += &run(&["project", pkg, "history"]).replace(&dir.to_string_lossy().to_string(), "<tmp>");
+    log += &redact_tmp(&dir, &run(&["project", pkg, "history"]));
     check("project-lorom", &log);
     // The package is the same five files an empty project writes.
     let empty = romlens_core::io::to_files(

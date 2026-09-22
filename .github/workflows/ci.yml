@@ -30,8 +30,6 @@ jobs:
   macos-shell:
     name: macOS shell
     runs-on: macos-latest
-    # Advisory until the runner images carry Xcode 27 and the macOS 27 SDK.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -44,8 +42,13 @@ jobs:
         working-directory: bindings/swift/RomlensKit
       - run: xcodegen generate
         working-directory: shells/macos
+      # Advisory only: the runners carry Xcode 26.6 / MacOSX26.5.sdk and the
+      # app targets macOS 27, so this cannot link until the images catch up.
+      # The steps above need no macOS 27 SDK, so they stay enforced — that is
+      # why the flag sits on the step and not on the job.
       - run: >
           xcodebuild build test
           -project shells/macos/Romlens.xcodeproj -scheme Romlens
           -destination 'platform=macOS'
           CODE_SIGNING_ALLOWED=NO
+        continue-on-error: true
