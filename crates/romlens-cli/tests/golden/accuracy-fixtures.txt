@@ -1,0 +1,26 @@
+Labelled:      77 bytes
+Correct:       77 bytes (100.0% by class, 100.0% by exact kind)
+
+class         truth    claimed  precision     recall         f1
+code             13         13      1.000      1.000      1.000
+data             64         64      1.000      1.000      1.000
+unknown           0          0      0.000      0.000      0.000
+Labelled:      1357 bytes
+Correct:       1357 bytes (100.0% by class, 100.0% by exact kind)
+
+class         truth    claimed  precision     recall         f1
+code             13         13      1.000      1.000      1.000
+data           1344       1344      1.000      1.000      1.000
+unknown           0          0      0.000      0.000      0.000
+{
+  "labelledBytes": 95,
+  "correctBytes": 95,
+  "exactBytes": 95,
+  "overall": 1.0000,
+  "classes": [
+    {"class": "code", "truthBytes": 11, "claimedBytes": 11, "correctBytes": 11, "precision": 1.0000, "recall": 1.0000, "f1": 1.0000},
+    {"class": "data", "truthBytes": 84, "claimedBytes": 84, "correctBytes": 84, "precision": 1.0000, "recall": 1.0000, "f1": 1.0000},
+    {"class": "unknown", "truthBytes": 0, "claimedBytes": 0, "correctBytes": 0, "precision": 0.0000, "recall": 0.0000, "f1": 0.0000}
+  ],
+  "disagreements": []
+}

@@ -183,6 +183,17 @@ fn lorom_analysis_commands() {
         "heuristics-mixed-off",
         &run(&["analyze", mixed, "--stats", "--no-heuristics"]),
     );
+    // Accuracy against the truth the fixture builder states, which is the one
+    // ground truth CI can hold (`12-content-policy.md`).
+    check(
+        "accuracy-fixtures",
+        &format!(
+            "{}{}{}",
+            run(&["accuracy", rom, "--fixture"]),
+            run(&["accuracy", mixed, "--fixture"]),
+            run(&["accuracy", dispatch, "--fixture", "--json"]),
+        ),
+    );
     check("labels-lorom", &run(&["labels", rom]));
     check(
         "xrefs-lorom",

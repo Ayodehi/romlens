@@ -1,5 +1,6 @@
 //! One module per command group; `session` is what they share.
 
+pub mod accuracy;
 pub mod analyze;
 pub mod disasm;
 pub mod export;

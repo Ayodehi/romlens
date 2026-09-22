@@ -16,7 +16,9 @@
 //! $00:800E  40            RTI          ; catch-all vector target
 //! ```
 
+use crate::analysis::accuracy::TruthRange;
 use crate::memory::map::MappingMode;
+use crate::model::region::{DataKind, RegionKind};
 use crate::rom::checksum::compute_checksum;
 use crate::rom::header::TITLE_LEN;
 
@@ -168,7 +170,6 @@ pub const DISPATCH_TITLE: &str = "ROMLENS DISPATCH";
 /// $00:8000  18 FB E2 30   CLC; XCE; SEP #$30    ; native, 8-bit A and X
 /// $00:8004  FC 20 80      JSR ($8020,X)         ; dispatch, eight entries
 /// $00:8007  7C 60 80      JMP ($8060,X)         ; dispatch, two entries
-/// $00:800A  60            RTS
 /// $00:800E  40            RTI                   ; the catch-all vector target
 /// $00:8020  eight entries over $8030 $8038 $8040 $8048
 /// $00:8060  two entries   → $8030 $8038, then filler
@@ -184,7 +185,6 @@ pub fn dispatch_lorom() -> Vec<u8> {
     put(0x00, &[0x18, 0xFB, 0xE2, 0x30]);
     put(0x04, &[0xFC, 0x20, 0x80]);
     put(0x07, &[0x7C, 0x60, 0x80]);
-    put(0x0A, &[0x60]);
     put(0x0E, &[0x40]);
     let routines = [0x8030u16, 0x8038, 0x8040, 0x8048];
     for i in 0..8 {
@@ -246,6 +246,119 @@ pub fn mixed_data_lorom() -> Vec<u8> {
     rom[h + 0x1C..h + 0x1E].copy_from_slice(&(!sum).to_le_bytes());
     rom[h + 0x1E..h + 0x20].copy_from_slice(&sum.to_le_bytes());
     rom
+}
+
+/// What the builder knows it wrote into [`build`]'s image, as ground truth.
+///
+/// This is the only ground truth the repository can hold. Truth for a
+/// commercial ROM is derived from that ROM and never ships
+/// (`12-content-policy.md`); truth for a fixture we assembled ourselves is
+/// ours to state, which is what lets CI print an accuracy number at all.
+///
+/// Only ranges the builder wrote on purpose are named. The filler between them
+/// is left unlabelled and scores nothing either way: a byte nobody has an
+/// opinion about is not evidence that the classifier is right or wrong.
+pub fn truth_for(mode: MappingMode) -> Vec<TruthRange> {
+    let boot = boot_file_offset(mode) as u32;
+    let h = mode.header_offset().as_usize() as u32;
+    vec![
+        // SEI CLC XCE SEP LDA STA BRA: reached from RESET.
+        TruthRange {
+            start: boot,
+            end: boot + 12,
+            kind: RegionKind::Code,
+        },
+        // The two NOPs are filler nothing reaches; left unlabelled.
+        TruthRange {
+            start: boot + 14,
+            end: boot + 15,
+            kind: RegionKind::Code,
+        },
+        TruthRange {
+            start: h,
+            end: h + 0x40,
+            kind: RegionKind::Data(DataKind::Struct),
+        },
+    ]
+}
+
+/// Ground truth for [`dispatch_lorom`]: the two dispatchers are code and the
+/// two tables they read are data.
+pub fn truth_for_dispatch() -> Vec<TruthRange> {
+    vec![
+        // CLC, XCE, SEP, then the two dispatchers. `JMP (abs,X)` does not fall
+        // through, so nothing after $00:800A is reachable.
+        TruthRange {
+            start: 0x00,
+            end: 0x0A,
+            kind: RegionKind::Code,
+        },
+        TruthRange {
+            start: 0x0E,
+            end: 0x0F,
+            kind: RegionKind::Code,
+        },
+        TruthRange {
+            start: 0x20,
+            end: 0x30,
+            kind: RegionKind::Data(DataKind::Table { stride: 2 }),
+        },
+        TruthRange {
+            start: 0x60,
+            end: 0x64,
+            kind: RegionKind::Data(DataKind::Table { stride: 2 }),
+        },
+        TruthRange {
+            start: MappingMode::LoRom.header_offset().as_usize() as u32,
+            end: MappingMode::LoRom.header_offset().as_usize() as u32 + 0x40,
+            kind: RegionKind::Data(DataKind::Struct),
+        },
+    ]
+}
+
+/// Ground truth for [`mixed_data_lorom`], which is where the data heuristics
+/// are actually measured: every block in it was written to be a specific kind.
+pub fn truth_for_mixed_data() -> Vec<TruthRange> {
+    let mut ranges = truth_for(MappingMode::LoRom);
+    ranges.extend([
+        TruthRange {
+            start: 0x1000,
+            end: 0x1200,
+            kind: RegionKind::Data(DataKind::Palette),
+        },
+        TruthRange {
+            start: 0x1200,
+            end: 0x1300,
+            kind: RegionKind::Data(DataKind::String),
+        },
+        TruthRange {
+            start: 0x1400,
+            end: 0x1500,
+            kind: RegionKind::Data(DataKind::Pointer),
+        },
+        TruthRange {
+            start: 0x1600,
+            end: 0x1700,
+            kind: RegionKind::Data(DataKind::Compressed),
+        },
+    ]);
+    ranges.sort_by_key(|r| r.start);
+    ranges
+}
+
+/// The built-in ground truth for a fixture, chosen by its title.
+///
+/// `None` for anything else, including the all-opcodes ROM: that one holds
+/// every opcode in order with no control flow, so there is no honest answer to
+/// what is code in it. A caller must not fall back to a *different* fixture's
+/// truth — scoring against the wrong answers is worse than not scoring.
+pub fn truth_for_title(title: &str, mode: MappingMode) -> Option<Vec<TruthRange>> {
+    match title.trim() {
+        MIXED_DATA_TITLE => Some(truth_for_mixed_data()),
+        DISPATCH_TITLE => Some(truth_for_dispatch()),
+        FIXTURE_TITLE => Some(truth_for(mode)),
+        _ => None,
+    }
 }
 
 /// The fixture for a mapping, by name.

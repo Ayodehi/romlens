@@ -61,7 +61,11 @@ enum Command {
         out: PathBuf,
         #[arg(long, value_enum, default_value_t = MappingArg::Lorom)]
         mapping: MappingArg,
-        /// The 32 KB LoROM holding all 256 opcodes in order.
+        /// Which fixture; the default is the minimal ROM for `--mapping`.
+        #[arg(long, value_enum, default_value_t = FixtureArg::Minimal)]
+        fixture: FixtureArg,
+        /// The 32 KB LoROM holding all 256 opcodes in order (`--fixture
+        /// all-opcodes`).
         #[arg(long)]
         all_opcodes: bool,
     },
@@ -109,6 +113,21 @@ enum Command {
         /// Leave unclassified bytes unscored, likewise.
         #[arg(long)]
         no_heuristics: bool,
+    },
+    /// Score the classifier against ground truth.
+    Accuracy {
+        rom: PathBuf,
+        #[arg(long)]
+        project: Option<PathBuf>,
+        /// A ground-truth file: `start<TAB>end<TAB>kind`, offsets hex, end
+        /// exclusive, with an optional `sha256=` line.
+        #[arg(long)]
+        truth: Option<PathBuf>,
+        /// Use the truth built into the fixture builder instead of a file.
+        #[arg(long)]
+        fixture: bool,
+        #[arg(long)]
+        json: bool,
     },
     /// List the analyzer's scored guesses about unclassified bytes.
     Heuristics {
@@ -304,6 +323,30 @@ impl From<AddressArg> for AddressStyle {
     }
 }
 
+/// Which homebrew fixture `testrom` writes.
+#[derive(Clone, Copy, ValueEnum)]
+enum FixtureArg {
+    /// The minimal ROM for `--mapping`.
+    Minimal,
+    /// 32 KB LoROM with the 256 opcodes in order.
+    AllOpcodes,
+    /// 32 KB LoROM whose boot dispatches through two jump tables.
+    Dispatch,
+    /// 64 KB LoROM with one block per data heuristic.
+    MixedData,
+}
+
+impl From<FixtureArg> for commands::rom::Fixture {
+    fn from(f: FixtureArg) -> Self {
+        match f {
+            FixtureArg::Minimal => commands::rom::Fixture::Minimal,
+            FixtureArg::AllOpcodes => commands::rom::Fixture::AllOpcodes,
+            FixtureArg::Dispatch => commands::rom::Fixture::Dispatch,
+            FixtureArg::MixedData => commands::rom::Fixture::MixedData,
+        }
+    }
+}
+
 #[derive(Clone, Copy, ValueEnum)]
 enum MappingArg {
     Lorom,
@@ -353,8 +396,17 @@ fn main() -> Result<()> {
         Command::Testrom {
             out,
             mapping,
+            fixture,
             all_opcodes,
-        } => commands::rom::testrom(&out, mapping.into(), all_opcodes),
+        } => commands::rom::testrom(
+            &out,
+            mapping.into(),
+            if all_opcodes {
+                commands::rom::Fixture::AllOpcodes
+            } else {
+                fixture.into()
+            },
+        ),
         Command::Disasm {
             rom,
             from,
@@ -392,6 +444,13 @@ fn main() -> Result<()> {
                 heuristics: !no_heuristics,
             },
         ),
+        Command::Accuracy {
+            rom,
+            project,
+            truth,
+            fixture,
+            json,
+        } => commands::accuracy::run(&rom, project.as_deref(), truth.as_ref(), fixture, json),
         Command::Heuristics {
             rom,
             project,

@@ -51,21 +51,44 @@ pub fn resolve(rom: &Path, expr: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn testrom(out: &Path, mode: MappingMode, all_opcodes: bool) -> Result<()> {
-    let bytes = if all_opcodes {
-        fixtures::all_opcodes_lorom()
-    } else {
-        fixtures::for_mapping(mode)
-    };
-    std::fs::write(out, bytes).with_context(|| format!("writing {}", out.display()))?;
+/// The homebrew fixtures `testrom` can write. Every one of them exists so a
+/// golden, a test or an accuracy run needs no commercial ROM
+/// (`12-content-policy.md` rule 1).
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub enum Fixture {
+    Minimal,
+    AllOpcodes,
+    Dispatch,
+    MixedData,
+}
+
+impl Fixture {
+    fn bytes(self, mode: MappingMode) -> Vec<u8> {
+        match self {
+            Fixture::Minimal => fixtures::for_mapping(mode),
+            Fixture::AllOpcodes => fixtures::all_opcodes_lorom(),
+            Fixture::Dispatch => fixtures::dispatch_lorom(),
+            Fixture::MixedData => fixtures::mixed_data_lorom(),
+        }
+    }
+
+    fn describe(self, mode: MappingMode) -> String {
+        match self {
+            Fixture::Minimal => mode.to_string(),
+            Fixture::AllOpcodes => "all-opcodes LoROM".to_owned(),
+            Fixture::Dispatch => "dispatch-table LoROM".to_owned(),
+            Fixture::MixedData => "mixed-data LoROM".to_owned(),
+        }
+    }
+}
+
+pub fn testrom(out: &Path, mode: MappingMode, fixture: Fixture) -> Result<()> {
+    std::fs::write(out, fixture.bytes(mode))
+        .with_context(|| format!("writing {}", out.display()))?;
     println!(
         "wrote {} {} test ROM",
         out.display(),
-        if all_opcodes {
-            "all-opcodes LoROM".to_owned()
-        } else {
-            mode.to_string()
-        }
+        fixture.describe(mode)
     );
     Ok(())
 }

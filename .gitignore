@@ -67,3 +67,8 @@ docs/crash_dump*.txt
 
 # Editor-local vault config (docs/ opens as an Obsidian vault)
 .obsidian/
+
+# Ground truth is derived from a commercial ROM, so it never ships
+# (12-content-policy.md); the repository holds the schema and the converter.
+crates/romlens-core/tests/ground_truth/
+*.tsv

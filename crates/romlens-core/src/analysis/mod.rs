@@ -5,6 +5,7 @@
 //! far inside the 2 s budget, so incremental invalidation is not worth its
 //! bugs yet (docs/03 delta).
 
+pub mod accuracy;
 pub mod control;
 pub mod descent;
 pub mod flow;
