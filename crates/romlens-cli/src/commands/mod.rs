@@ -11,6 +11,7 @@ pub mod inspect;
 pub mod labels;
 pub mod map;
 pub mod project;
+pub mod rec;
 pub mod registers;
 pub mod rom;
 pub mod search;

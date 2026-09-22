@@ -15,6 +15,7 @@ pub mod graphics;
 pub mod io;
 pub mod memory;
 pub mod model;
+pub mod recording;
 pub mod rom;
 pub mod viewmodel;
 

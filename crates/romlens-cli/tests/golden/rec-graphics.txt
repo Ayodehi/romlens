@@ -1,0 +1,97 @@
+wrote <tmp>/t.romrec synthetic recording, 90 frames, of the graphics test ROM
+Format:       1.0
+Producer:     romlens testrec 0.2.0
+ROM SHA-256:  cfd385e8107dc5977e88d9b3f4b4b9ce866c707732e4fb7fef36ba5687b20f77
+              matches romlens-graphics.sfc
+Frames:       90 (2 keyframes, every 60 frames)
+Storage:      54474 bytes, zstd
+              keyframes 5535 bytes each on average, deltas 464
+Regions:      cpu 16, ppu 256, io 128, wram 131072, vram 65536, cgram 512, oam 544, timing 16
+Layers:       none
+Format:       1.0
+Producer:     romlens testrec 0.2.0
+ROM SHA-256:  cfd385e8107dc5977e88d9b3f4b4b9ce866c707732e4fb7fef36ba5687b20f77
+              the recording was made from a different ROM (expected SHA-256 cfd385e8107dc5977e88d9b3f4b4b9ce866c707732e4fb7fef36ba5687b20f77, found a2462f1d74f993d0b3e10ae9425cd9b48253ac82c99913f07ef704d9c85dc6ee)
+Frames:       90 (2 keyframes, every 60 frames)
+Storage:      54474 bytes, zstd
+              keyframes 5535 bytes each on average, deltas 464
+Regions:      cpu 16, ppu 256, io 128, wram 131072, vram 65536, cgram 512, oam 544, timing 16
+Layers:       none
+00000  68 30 08 20 58 34 05 2A 70 30 08 64 90 30 08 F6
+00010  00 F0 00 00 00 F0 00 00 00 F0 00 00 00 F0 00 00
+00020  00 F0 00 00 00 F0 00 00 00 F0 00 00 00 F0 00 00
+00030  00 F0 00 00 00 F0 00 00 00 F0 00 00 00 F0 00 00
+00040  00 F0 00 00 00 F0 00 00 00 F0 00 00 00 F0 00 00
+00050  00 F0 00 00 00 F0 00 00 00 F0 00 00 00 F0 00 00
+00060  00 F0 00 00 00 F0 00 00 00 F0 00 00 00 F0 00 00
+00070  00 F0 00 00 00 F0 00 00 00 F0 00 00 00 F0 00 00
+00080  00 F0 00 00 00 F0 00 00 00 F0 00 00 00 F0 00 00
+00090  00 F0 00 00 00 F0 00 00 00 F0 00 00 00 F0 00 00
+000A0  00 F0 00 00 00 F0 00 00 00 F0 00 00 00 F0 00 00
+000B0  00 F0 00 00 00 F0 00 00 00 F0 00 00 00 F0 00 00
+000C0  00 F0 00 00 00 F0 00 00 00 F0 00 00 00 F0 00 00
+000D0  00 F0 00 00 00 F0 00 00 00 F0 00 00 00 F0 00 00
+000E0  00 F0 00 00 00 F0 00 00 00 F0 00 00 00 F0 00 00
+000F0  00 F0 00 00 00 F0 00 00 00 F0 00 00 00 F0 00 00
+00100  00 F0 00 00 00 F0 00 00 00 F0 00 00 00 F0 00 00
+00110  00 F0 00 00 00 F0 00 00 00 F0 00 00 00 F0 00 00
+00120  00 F0 00 00 00 F0 00 00 00 F0 00 00 00 F0 00 00
+00130  00 F0 00 00 00 F0 00 00 00 F0 00 00 00 F0 00 00
+00140  00 F0 00 00 00 F0 00 00 00 F0 00 00 00 F0 00 00
+00150  00 F0 00 00 00 F0 00 00 00 F0 00 00 00 F0 00 00
+00160  00 F0 00 00 00 F0 00 00 00 F0 00 00 00 F0 00 00
+00170  00 F0 00 00 00 F0 00 00 00 F0 00 00 00 F0 00 00
+00180  00 F0 00 00 00 F0 00 00 00 F0 00 00 00 F0 00 00
+00190  00 F0 00 00 00 F0 00 00 00 F0 00 00 00 F0 00 00
+001A0  00 F0 00 00 00 F0 00 00 00 F0 00 00 00 F0 00 00
+001B0  00 F0 00 00 00 F0 00 00 00 F0 00 00 00 F0 00 00
+001C0  00 F0 00 00 00 F0 00 00 00 F0 00 00 00 F0 00 00
+001D0  00 F0 00 00 00 F0 00 00 00 F0 00 00 00 F0 00 00
+001E0  00 F0 00 00 00 F0 00 00 00 F0 00 00 00 F0 00 00
+001F0  00 F0 00 00 00 F0 00 00 00 F0 00 00 00 F0 00 00
+00200  A2 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+[exit code 1]
+Error: frame 90 is past the end of the recording (90 frames)
+[exit code 1]
+Error: --region is one of cpu, ppu, io, wram, vram, cgram, oam, timing
+frame 0: BG1, mode 1, 4bpp 32x32, map at word $1000, tiles at $0000
+256x256 sha256=70a8e82dd859ec92ce3c2a4da7faf1a738da9a868e98eb62f3c874e6527f567b
+frame 30: BG1, mode 1, 4bpp 32x32, map at word $1000, tiles at $0000
+256x256 sha256=8e31eeefdedc5dc9c0f4dc68e282b734558773098ffe674d69acfd330e8e9baf
+frame 0: BG3, mode 1, 2bpp 32x32, map at word $1400, tiles at $2000
+256x256 sha256=a7adaad2e7af982e71fcb03f4adc45af9c52090ff8436db82dfada111474ee25
+[exit code 1]
+Error: mode 1 has no BG4
+frame 0: sprite 0 at (64, 48), tile $008, palette 0
+                
+    ::::::::    
+   ::::::::::   
+  :::--:::::::  
+ :::---:::::::: 
+ ::----:::::::: 
+ ::----:::::::: 
+ :::::::::::::: 
+ :::::::::::::: 
+ :::::::::::::: 
+ :::::::::::::: 
+ :::::::::::::: 
+  ::::::::::::  
+   ::::::::::   
+    ::::::::    
+                
+frame 8: sprite 3 at (144, 48), tile $008, palette 3
+16x16 sha256=03b5c213877d357eccf7b3371ade70e2eac4df5e8366fbda1547f413de0eb1b5
+wrote 65536 bytes of vram at frame 0 to <tmp>/vram.bin
+wrote 512 bytes of cgram at frame 0 to <tmp>/cgram.bin
+wrote 544 bytes of oam at frame 0 to <tmp>/oam.bin
+wrote 256 bytes of ppu at frame 0 to <tmp>/ppu.bin
+wrote <tmp>/raw.romrec: one frame with ppu, vram, cgram, oam
+Format:       1.0
+Producer:     romlens import-raw 0.2.0
+ROM SHA-256:  cfd385e8107dc5977e88d9b3f4b4b9ce866c707732e4fb7fef36ba5687b20f77
+Frames:       1 (1 keyframe, every 60 frames)
+Storage:      5572 bytes, zstd
+Regions:      ppu 256, vram 65536, cgram 512, oam 544
+Layers:       none
+frame 0: BG1, mode 1, 4bpp 32x32, map at word $1000, tiles at $0000
+256x256 sha256=70a8e82dd859ec92ce3c2a4da7faf1a738da9a868e98eb62f3c874e6527f567b

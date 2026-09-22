@@ -12,3 +12,9 @@ thiserror.workspace = true
 sha2.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+ruzstd = { workspace = true, optional = true }
+
+[features]
+default = ["recording"]
+# `.romrec` recordings, compressed with zstd frames by the pure-Rust ruzstd.
+recording = ["dep:ruzstd"]

@@ -89,6 +89,104 @@ romrec file
   access to them must be instant.
 - **Endianness:** little-endian throughout, matching the machine.
 
+## Byte layout, version 1.0
+
+Implemented 22 September 2026 (`romlens-core/src/recording/format.rs`) and
+the contract for every producer. Little-endian throughout; offsets are
+bytes from the start of the structure.
+
+**Header**, 128 bytes, then a region table and a string area:
+
+| Offset | Size | Field |
+|---|---|---|
+| 0 | 8 | magic `ROMREC\0\0` |
+| 8 | 2 + 2 | format version, major then minor (1.0). A reader refuses a newer major |
+| 12 | 4 | header length, including the table and strings |
+| 16 | 32 | SHA-256 of the ROM, without any copier header — a reader refuses a recording of another ROM |
+| 48 | 1 | mapping: 0 LoROM, 1 HiROM, 2 ExHiROM, `$FF` unknown |
+| 49 | 1 | flags: bit 0, WRAM is stored in keyframes only |
+| 50 | 2 | keyframe interval |
+| 52 | 4 | region count |
+| 56 | 8 | frame count; `$FFFFFFFFFFFFFFFF` while the file is being written |
+| 64 | 8 | created, Unix seconds (0 when the producer does not say) |
+| 72 | 4 | layers present: bit 0 framebuffer, 1 write log, 2 trace, 3 read log |
+| 76 | 4 | compression: 0 none, 1 zstd (one frame per payload) |
+| 80 | 4 + 4 | producer name: offset into the string area, length |
+| 88 | 4 + 4 | producer version, likewise |
+| 96 | 32 | reserved, zero |
+
+Region table entries are 16 bytes: id, size, name offset, name length.
+Sizes are fixed by the id; a mismatch is an error, not a variant.
+
+| Id | Name | Size | Contents |
+|---|---|---|---|
+| 0 | `cpu` | 16 | A, X, Y, S, D (u16 each), DB, PB (u8), PC (u16), P (u8), E (0 native, 1 emulation) |
+| 1 | `ppu` | 256 | the PPU state block below |
+| 2 | `io` | 128 | reserved for NMITIMEN, HDMAEN, the DMA channels and the rest; Phase 2 writes zeroes |
+| 3 | `wram` | 131072 | `$7E:0000`–`$7F:FFFF` |
+| 4 | `vram` | 65536 | byte-addressed: word *w* is bytes 2*w*, 2*w*+1 |
+| 5 | `cgram` | 512 | 256 BGR15 colours |
+| 6 | `oam` | 544 | low table then high table |
+| 7 | `timing` | 16 | frame index (u64), then reserved |
+
+A recording may carry any subset; one made from loose dumps typically has
+`ppu`, `vram`, `cgram` and `oam` only, and a view that needs an absent
+region says so rather than drawing zeroes.
+
+**PPU state block**, 256 bytes. The CPU cannot read these registers back,
+so the recorder exports them from emulator state:
+
+| Offset | Size | Contents |
+|---|---|---|
+| `$00`–`$33` | 1 each | `$2100`–`$2133` at offset `address − $2100`, the last byte written. The one-write registers (`INIDISP`, `OBSEL`, `BGMODE`, `MOSAIC`, `BGnSC`, `BGnNBA`, `VMAIN`, `M7SEL`, the window and colour-math registers, `TM`/`TS`/`TMW`/`TSW`, `SETINI`) are read from here |
+| `$40`–`$4F` | 2 each | `BG1HOFS`, `BG1VOFS` … `BG4VOFS`: the value both writes built |
+| `$50`–`$5B` | 2 each | `M7A` `M7B` `M7C` `M7D` `M7X` `M7Y`, signed |
+| `$5C` | 2 | `OAMADDL` \| `OAMADDH` << 8 |
+| `$5E` | 2 | `VMADDL` \| `VMADDH` << 8 |
+| `$60` | 1 | `CGADD` |
+| `$62` | 2 | the fixed colour `COLDATA` built, BGR15 |
+| the rest | | reserved, zero; readers ignore it |
+
+The names are the core's hardware register table's (`model/hardware.rs`),
+so there is one list of PPU registers, not two.
+
+**Frame chunk**, one per frame in frame order:
+
+| Offset | Size | Field |
+|---|---|---|
+| 0 | 4 | `FRM\0` |
+| 4 | 4 | length of everything after this field |
+| 8 | 8 | frame index, counting from 0 |
+| 16 | 1 | 0 keyframe, 1 delta; then 3 reserved |
+| 20 | 4 | directory entries |
+| 24 | 4 | run area length |
+| 28 | 20 each | directory: region id, data-run count, change-run count, stored length, raw length |
+| … | | run area, uncompressed: per entry, its data runs then its change runs, 8 bytes each (offset, length) |
+| … | | payloads, one per entry: the data runs' bytes concatenated, compressed |
+
+A keyframe stores every region whole, as one data run, and lists what
+changed since the previous frame as change runs. A delta frame lists only
+regions that changed, and their data runs *are* the changes; a region
+absent from a delta frame's directory did not change. The small regions
+(`cpu`, `ppu`, `io`, `timing`) are stored whole in every frame. Changed
+bytes fewer than 16 apart share one run.
+
+Putting the run tables before the payloads is the layout choice that
+matters: saying what changed in a frame reads a few hundred bytes of the
+file and decompresses nothing.
+
+**Other chunks.** `FBUF`, `WLOG`, `TRCE` and `RLOG` are reserved for the
+optional layers, with the same magic-and-length framing; readers skip them.
+
+**Index**, `IDX\0`, a length, then 24 bytes per frame: frame (u64), file
+offset of its chunk (u64), chunk length (u32), kind (u8), 3 reserved.
+
+**Footer**, the last 32 bytes: index offset (u64), frame count (u64),
+CRC-32 of the header (u32), CRC-32 of the index entries (u32), 4 reserved,
+`ROMR`. A file whose last four bytes are not `ROMR` is still being written
+or was cut short; `romlens rec info --recover` rebuilds the index by
+walking the chunks from the end of the header and keeping every whole frame.
+
 ## Size estimates (to verify with a real capture)
 
 | Scenario | Per frame compressed | Per minute at 60 fps |

@@ -309,6 +309,28 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Write the synthetic recording: the graphics test ROM's machine,
+    /// animated, so every recording command works with no emulator.
+    Testrec {
+        #[arg(long)]
+        out: PathBuf,
+        #[arg(long, default_value_t = 60)]
+        frames: u32,
+        /// Frames between keyframes.
+        #[arg(long, default_value_t = 60)]
+        keyframe_interval: u16,
+    },
+    /// Read a `.romrec` recording.
+    Rec {
+        #[command(subcommand)]
+        what: RecCommand,
+    },
+    /// Draw from a recording with the bounded reference renderer: one BG
+    /// layer, or one sprite.
+    Render {
+        #[command(subcommand)]
+        what: RenderCommand,
+    },
     /// Decompress a block.
     Decompress {
         rom: PathBuf,
@@ -354,6 +376,87 @@ enum ImportCommand {
         /// The name the labels are attributed to; the file name by default.
         #[arg(long)]
         source: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum RecCommand {
+    /// What a recording holds.
+    Info {
+        rec: PathBuf,
+        /// Check it against this ROM.
+        #[arg(long)]
+        rom: Option<PathBuf>,
+        /// Rebuild the index by scanning, for a file with no footer.
+        #[arg(long)]
+        recover: bool,
+    },
+    /// One region at one frame.
+    Extract {
+        rec: PathBuf,
+        #[arg(long)]
+        frame: u64,
+        /// cpu, ppu, io, wram, vram, cgram, oam or timing.
+        #[arg(long)]
+        region: String,
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// Print the bytes, leaving out all-zero rows of a large region.
+        #[arg(long)]
+        hex: bool,
+    },
+    /// A one-frame recording from loose memory dumps.
+    ImportRaw {
+        /// The ROM the dumps were taken while running.
+        #[arg(long)]
+        rom: PathBuf,
+        #[arg(long)]
+        vram: Option<PathBuf>,
+        #[arg(long)]
+        cgram: Option<PathBuf>,
+        /// 544 bytes, or the 512-byte low table alone.
+        #[arg(long)]
+        oam: Option<PathBuf>,
+        #[arg(long)]
+        wram: Option<PathBuf>,
+        /// A 256-byte PPU register block in the docs/13 layout.
+        #[arg(long)]
+        ppu: Option<PathBuf>,
+        #[arg(long)]
+        out: PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
+enum RenderCommand {
+    /// One background layer's whole map.
+    Bg {
+        #[arg(long)]
+        rec: PathBuf,
+        #[arg(long, default_value_t = 0)]
+        frame: u64,
+        /// 1 to 4.
+        #[arg(long)]
+        bg: u8,
+        #[arg(long)]
+        ascii: bool,
+        /// The SHA-256 of the image (the default).
+        #[arg(long)]
+        digest: bool,
+    },
+    /// One sprite at its own size.
+    Sprite {
+        #[arg(long)]
+        rec: PathBuf,
+        #[arg(long, default_value_t = 0)]
+        frame: u64,
+        /// 0 to 127.
+        #[arg(long)]
+        index: u8,
+        #[arg(long)]
+        ascii: bool,
+        #[arg(long)]
+        digest: bool,
     },
 }
 
@@ -844,6 +947,69 @@ fn main() -> Result<()> {
             size,
             json,
         } => commands::graphics::tilemap(&rom, &from, &size, json),
+        Command::Testrec {
+            out,
+            frames,
+            keyframe_interval,
+        } => commands::rec::testrec(&out, frames, keyframe_interval),
+        Command::Rec { what } => match what {
+            RecCommand::Info { rec, rom, recover } => {
+                commands::rec::info(&rec, rom.as_deref(), recover)
+            }
+            RecCommand::Extract {
+                rec,
+                frame,
+                region,
+                out,
+                hex,
+            } => commands::rec::extract(&rec, frame, &region, out.as_deref(), hex),
+            RecCommand::ImportRaw {
+                rom,
+                vram,
+                cgram,
+                oam,
+                wram,
+                ppu,
+                out,
+            } => commands::rec::import_raw(commands::rec::ImportRaw {
+                rom: &rom,
+                vram: vram.as_deref(),
+                cgram: cgram.as_deref(),
+                oam: oam.as_deref(),
+                wram: wram.as_deref(),
+                ppu: ppu.as_deref(),
+                out: &out,
+            }),
+        },
+        Command::Render { what } => {
+            let (rec, frame, bg, sprite, ascii) = match what {
+                RenderCommand::Bg {
+                    rec,
+                    frame,
+                    bg,
+                    ascii,
+                    digest: _,
+                } => (rec, frame, Some(bg), None, ascii),
+                RenderCommand::Sprite {
+                    rec,
+                    frame,
+                    index,
+                    ascii,
+                    digest: _,
+                } => (rec, frame, None, Some(index), ascii),
+            };
+            commands::rec::render(commands::rec::RenderArgs {
+                rec: &rec,
+                frame,
+                bg,
+                sprite,
+                output: if ascii {
+                    commands::graphics::Output::Ascii
+                } else {
+                    commands::graphics::Output::Digest
+                },
+            })
+        }
         Command::Decompress {
             rom,
             from,

@@ -576,6 +576,78 @@ fn graphics_commands() {
 }
 
 #[test]
+fn recording_commands() {
+    let dir = temp_dir("recording");
+    let rom = dir.join("romlens-graphics.sfc");
+    std::fs::write(&rom, fixtures::graphics_lorom()).unwrap();
+    let rom = rom.to_str().unwrap();
+    let rec = dir.join("t.romrec");
+    let rec = rec.to_str().unwrap();
+    let other = write_fixture(&dir, MappingMode::LoRom);
+    let other = other.to_str().unwrap();
+    let mut out = run(&["testrec", "--out", rec, "--frames", "90"]);
+    out += &run(&["rec", "info", rec, "--rom", rom]);
+    out += &run(&["rec", "info", rec, "--rom", other]);
+    out += &run_with(
+        &["rec", "extract", rec],
+        &["--frame", "40", "--region", "oam", "--hex"],
+    );
+    out += &run_with(
+        &["rec", "extract", rec],
+        &["--frame", "90", "--region", "oam", "--hex"],
+    );
+    out += &run_with(
+        &["rec", "extract", rec],
+        &["--frame", "0", "--region", "sram"],
+    );
+    out += &run_with(&["render", "bg", "--rec", rec], &["--bg", "1"]);
+    out += &run_with(
+        &["render", "bg", "--rec", rec],
+        &["--bg", "1", "--frame", "30"],
+    );
+    out += &run_with(&["render", "bg", "--rec", rec], &["--bg", "3"]);
+    out += &run_with(&["render", "bg", "--rec", rec], &["--bg", "4"]);
+    out += &run_with(
+        &["render", "sprite", "--rec", rec],
+        &["--index", "0", "--ascii"],
+    );
+    out += &run_with(
+        &["render", "sprite", "--rec", rec],
+        &["--index", "3", "--frame", "8"],
+    );
+    // Dump frame 0, import the dumps as a one-frame recording, and draw the
+    // same picture from it.
+    for region in ["vram", "cgram", "oam", "ppu"] {
+        let f = dir.join(format!("{region}.bin"));
+        out += &run_with(
+            &["rec", "extract", rec, "--frame", "0", "--region", region],
+            &["--out", f.to_str().unwrap()],
+        );
+    }
+    let raw = dir.join("raw.romrec");
+    let raw = raw.to_str().unwrap();
+    let arg = |r: &str| dir.join(format!("{r}.bin")).to_string_lossy().into_owned();
+    let (vram, cgram, oam, ppu) = (arg("vram"), arg("cgram"), arg("oam"), arg("ppu"));
+    out += &run_with(
+        &[
+            "rec",
+            "import-raw",
+            "--rom",
+            rom,
+            "--vram",
+            &vram,
+            "--cgram",
+            &cgram,
+        ],
+        &["--oam", &oam, "--ppu", &ppu, "--out", raw],
+    );
+    out += &run(&["rec", "info", raw]);
+    out += &run_with(&["render", "bg", "--rec", raw], &["--bg", "1"]);
+    check("rec-graphics", &redact_tmp(&dir, &out));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn testrom_round_trips() {
     let dir = temp_dir("testrom");
     let out = dir.join("t.sfc");
