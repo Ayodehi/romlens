@@ -37,18 +37,33 @@ below are therefore the plan for Phase 5, not near-term work. Items 1, 4 and
 
 ## Decision
 
-1. **Recordings (Phase 2 and 3) stay out of process.** Mesen2 runs as a
+1. **Recordings (Phase 2 and 3) stay out of process.** Mesen runs as a
    separate program with our Lua recorder script. No linking, so GPL does not
-   reach us. Confirmed from Mesen2's own Lua documentation: memory
-   callbacks (`read`, `write`, `exec`) accept SNES memory types including
-   `snesVideoRam`, `snesSpriteRam` and `snesCgRam`, so VRAM, OAM and CGRAM
-   writes can be logged at the PPU-memory level, plus CPU-address callbacks
-   for `$2118`–`$2122` and `$420B`. `getScreenBuffer`, `getState`,
-   `read` with a memory type and `createSavestate` (inside an exec callback)
-   are available. There is no DMA channel query, so the recorder
-   reconstructs channel state by reading `$43x0`–`$43x7` when `$420B` is
-   written, and attributes VRAM writes that occur during that instruction
-   to the transfer. This closes the Phase 2 verification item.
+   reach us. Mesen2 itself was archived in June 2026; its community
+   continuation, MesenCE (nesdev-org), is what "Mesen 2.2.1" is today.
+   **Measured in 2C (22 September 2026), correcting what this item first
+   said from the documentation alone:**
+   - Write callbacks on `snesVideoRam`, `snesSpriteRam` and `snesCgRam` are
+     accepted but **never fire** in 2.2.1: an address-matching bug in
+     `ScriptingContext`, still on upstream `master`. It is fixed in our
+     fork, github.com/Ayodehi/MesenCE (`8a14f67`), and not upstream. The
+     recorder therefore does not depend on them: it compares memory in
+     256-byte blocks each frame, which measured fast enough (about 6 ms a
+     frame with everything read, over twice real time).
+   - CPU-address callbacks match the exact bank: Super Metroid writes
+     `$420B` through `$80`, which a callback on `$00:420B` never sees. A
+     callback on the `snesRegister` memory type sees a register write
+     through any mirror bank, DMA's B-bus writes included, so the recorder
+     needs two callbacks rather than one per bank (verified identical to
+     the per-bank version on 2.2.1; Mesen logs every registration, so 256
+     of them filled its script window).
+   - There **is** DMA channel state: `getState()` exports
+     `dmaController.channel[n]`, and `$43x0`–`$43xB` read without side
+     effects through `emu.memType.snesDebug`. The recorder reads the
+     registers when `$420B` is written.
+   - `getState()` exports every PPU register decoded except the window
+     mask logic and two `CGWSEL` fields, so `rec pack` rebuilds the
+     write-only registers from it (docs/13, "The Mesen stream").
 2. **The embedded core (Phase 5, debugger visualizer) is a permissive
    dependency, not a GPL one.** First candidate: fork `super-sabicom` into the workspace
    (Rust, MIT, near-complete), add per-instruction hooks and write

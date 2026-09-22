@@ -33,7 +33,9 @@ that tracks against it.
 | 2B pulled forward from 2C | done: the frozen `MachineStateSource` trait, `MemorySource` and the shared conformance check, the `.romrec` writer and reader (keyframes, sparse deltas, run tables ahead of the payloads, footer recovery), `rec import-raw`, `testrec`, `rec info`, `rec extract`, and `render bg` / `render sprite` from a recording. The byte layout is in docs/13. **zstd became `ruzstd`**: the C build broke `make cross` on all three targets, as the risk list predicted |
 | 2B docs and API | done: `API_VERSION` 0.4.0 (2A had not bumped it to 0.3.0, so it moves once), docs/15 rows and manual-pass steps 21–28, docs/03 deltas, docs/10 measurements, and an opt-in dev-ROM test of the decompressor |
 | **Track 2B complete** | 22 September 2026. Its checklist rows are 🧪, awaiting the manual pass. Not done, by decision: the hex span lane's wider data-kind encoding, because per-data-kind tinting did not land with it; the palette heuristic still refuses a row that is all red or all green (a precision-first rule from 2A, and why the graphics fixture's palette is not classified) |
-| Track 2C (recordings) | the rest not started: validator, `ChangeIndex`, the Mesen2 recorder, `.mss` import, FFI `RecordingSession`, the recording UI |
+| 2C week-one measurement | done, 22 September 2026, on Mesen 2.2.1 (MesenCE): throughput is not a problem (about 6 ms a frame reading everything, twice real time); PPU-memory write callbacks never fire (a Mesen bug, fixed in our fork github.com/Ayodehi/MesenCE and not upstream), so dirty ranges come from comparing 256-byte blocks; CPU-address callbacks are bank-exact; `getState()` does export DMA channel state and decoded PPU registers. docs/09 is corrected |
+| 2C recorder | done: `mesen_recorder.lua` writes a raw stream and `romlens rec pack` makes the `.romrec`, so compression, hashing and the register layouts live in Rust. The `io` block and the `WLOG` DMA record are now defined (docs/13). `romlens rec script` writes the script. Verified against direct dumps: VRAM, CGRAM, OAM and WRAM identical at every frame checked, through boot and 3,406 frames of gameplay replayed from a movie; every rebuilt PPU register agrees with the byte the game wrote |
+| Track 2C (recordings) | the rest not started: headless `rec from-movie` (needs a zip reader for `.mmo`), validator, `ChangeIndex`, `.mss` import, `recordings.json`, the recording UI and Help › Save Mesen Recorder Script… |
 
 ## Context
 
@@ -524,7 +526,8 @@ frames. "Recording — the game will run slowly" is acceptable for a study
 tool.
 
 Two choices make it fast anyway. **Dirty-range narrowing**: write callbacks
-on `snesVideoRam`, `snesCgRam` and `snesSpriteRam` (verified available, per
+on `snesVideoRam`, `snesCgRam` and `snesSpriteRam` (documented, but measured
+in 2C never to fire; the recorder compares 256-byte blocks instead, see
 docs/09) accumulate touched ranges, and `endFrame` reads only those, plus a
 full read every 60 frames for the keyframe — steady-state volume is about
 2 KB per frame, not 197 KB. **WRAM keyframe-only** (`--wram
@@ -541,9 +544,9 @@ to `--every N` and window mode, then opaque savestate blobs, then a
 different producer.
 
 **Capture DMA events now**, even though the Provenance view is Phase 3.
-docs/09 records that Mesen2 has no DMA channel query, so the recorder
-reconstructs channel state by reading `$43x0`–`$437F` when `$420B` is
-written and attributes VRAM writes during that instruction to the transfer.
+The recorder reads the channel registers `$43x0`–`$43xB` when `$420B` is
+written (Mesen does export DMA state, contrary to what docs/09 first said)
+and stores each transfer as a `WLOG` DMA record (docs/13).
 It is free at record time and **impossible to add retroactively** to
 recordings already made.
 

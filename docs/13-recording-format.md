@@ -122,7 +122,7 @@ Sizes are fixed by the id; a mismatch is an error, not a variant.
 |---|---|---|---|
 | 0 | `cpu` | 16 | A, X, Y, S, D (u16 each), DB, PB (u8), PC (u16), P (u8), E (0 native, 1 emulation) |
 | 1 | `ppu` | 256 | the PPU state block below |
-| 2 | `io` | 128 | reserved for NMITIMEN, HDMAEN, the DMA channels and the rest; Phase 2 writes zeroes |
+| 2 | `io` | 128 | the I/O state block below |
 | 3 | `wram` | 131072 | `$7E:0000`–`$7F:FFFF` |
 | 4 | `vram` | 65536 | byte-addressed: word *w* is bytes 2*w*, 2*w*+1 |
 | 5 | `cgram` | 512 | 256 BGR15 colours |
@@ -149,6 +149,32 @@ so the recorder exports them from emulator state:
 
 The names are the core's hardware register table's (`model/hardware.rs`),
 so there is one list of PPU registers, not two.
+
+A producer that holds the PPU's decoded state rather than the bytes
+written (Mesen does) re-encodes each one-write register from it; see "The
+Mesen stream" for which registers that leaves unknown until written.
+
+**I/O state block**, 128 bytes (`recording/io_state.rs`). Defined in
+September 2026 in the space 1.0 reserved; a file written before then
+carries zeroes throughout, which readers treat as unknown.
+
+| Offset | Size | Contents |
+|---|---|---|
+| `$00` | 1 | `NMITIMEN` (`$4200`) |
+| `$01` | 1 | `HDMAEN` (`$420C`) |
+| `$02` | 1 | `MEMSEL` (`$420D`) |
+| `$03` | 1 | `WRIO` (`$4201`) |
+| `$04` | 2 | `HTIME` (`$4207`/`$4208`) |
+| `$06` | 2 | `VTIME` (`$4209`/`$420A`) |
+| `$08` | 1 | `WRMPYA` (`$4202`) |
+| `$09` | 1 | `WRMPYB` (`$4203`) |
+| `$0A` | 2 | `WRDIVL`/`WRDIVH` (`$4204`/`$4205`) |
+| `$0C` | 1 | `WRDIVB` (`$4206`) |
+| `$0E` | 2 | the H counter |
+| `$10` | 2 | the V counter |
+| `$12` | 8 | `JOY1`–`JOY4` (`$4218`–`$421F`) |
+| `$20` | 96 | the eight DMA channels, 12 bytes each: `$43x0`–`$43xB` |
+| the rest | | reserved, zero |
 
 **Frame chunk**, one per frame in frame order:
 
@@ -177,6 +203,22 @@ file and decompresses nothing.
 
 **Other chunks.** `FBUF`, `WLOG`, `TRCE` and `RLOG` are reserved for the
 optional layers, with the same magic-and-length framing; readers skip them.
+A layer chunk follows the frame chunk it belongs to.
+
+**`WLOG`, the write log.** Phase 2 writes only its DMA subset, and sets
+header layer bit 1 when it does. The body is the frame (u64), a record
+count (u32), then 104 bytes a record:
+
+| Offset | Size | Field |
+|---|---|---|
+| 0 | 1 | kind: 1, general DMA started by a write to `MDMAEN` |
+| 1 | 1 | the value written to `MDMAEN` (`$420B`), the channels started |
+| 2 | 2 | the scanline |
+| 4 | 4 | reserved |
+| 8 | 96 | the eight channels' `$43x0`–`$43xB` at the moment of the write |
+
+Later kinds (per-byte writes with the writing PC) take new kind numbers;
+a reader skips kinds it does not know by their fixed length.
 
 **Index**, `IDX\0`, a length, then 24 bytes per frame: frame (u64), file
 offset of its chunk (u64), chunk length (u32), kind (u8), 3 reserved.
@@ -187,7 +229,7 @@ CRC-32 of the header (u32), CRC-32 of the index entries (u32), 4 reserved,
 or was cut short; `romlens rec info --recover` rebuilds the index by
 walking the chunks from the end of the header and keeping every whole frame.
 
-## Size estimates (to verify with a real capture)
+## Size estimates
 
 | Scenario | Per frame compressed | Per minute at 60 fps |
 |---|---|---|
@@ -196,6 +238,14 @@ walking the chunks from the end of the header and keeping every whole frame.
 | Door transition, heavy VRAM DMA | 40–120 KB for a few frames | small overall effect |
 | Keyframes | 60–120 KB each, once per second | 4–7 MB |
 | Framebuffer layer | 20–60 KB | 70–220 MB |
+
+**Measured**, 22 September 2026: 3,406 frames (57 seconds) of Super Metroid
+gameplay, recorded with `mesen_recorder.lua` and packed by `rec pack`, came
+to 8.4 MB, about 9 MB a minute. Keyframes averaged 94 KB and deltas 516
+bytes with WRAM in keyframes only, 765 bytes with every frame's WRAM; the
+DMA write log (11,394 transfers, stored uncompressed at 104 bytes each) was
+1.2 MB of the total. That is at the low end of the estimates above, and
+keeping every frame's WRAM adds under 1 MB a minute.
 
 A ten-minute session without framebuffers lands around 100–400 MB; with
 framebuffers, one to two gigabytes. The framebuffer layer is therefore off by
@@ -206,18 +256,17 @@ support a "window" mode that keeps full detail only between user marks.
 
 Romlens ships:
 
-1. **A Mesen2 Lua recorder script.** Mesen2's Lua API (verified from its own
-   documentation) provides typed memory reads for `snesWorkRam`,
-   `snesVideoRam`, `snesSpriteRam` and `snesCgRam`, `getState()` for CPU and
-   PPU registers, `getScreenBuffer()`, and `endFrame` events. Two capture
-   strategies to measure in the first week of Phase 2: (a) read every
-   region byte by byte each frame from Lua, which is simple but may be slow
-   at 197 KB per frame; (b) take `createSavestate()` per frame and let the
-   Romlens importer parse Mesen2's savestate format, which is fast but ties
-   the importer to Mesen2's internal layout and version. A hybrid, typed
-   reads for registers plus savestate blobs for memory, is the likely answer.
-   Write callbacks on the PPU memories can mark dirty ranges so (a) only
-   reads what changed.
+1. **A Mesen Lua recorder script** (`recording/mesen/mesen_recorder.lua`,
+   written by `romlens rec script`). It needs Mesen's "Allow access to I/O
+   and OS functions" option, captures every frame end to a raw stream, and
+   leaves everything else to `romlens rec pack <stream> --rom <rom> --out
+   <rec>`: compression, the ROM hash, and the register layouts. Measured on
+   Mesen 2.2.1 with Super Metroid, 22 September 2026: about 6 ms a frame
+   with every region compared, over twice real time; 3,406 frames of
+   gameplay make an 8.6 MB stream and an 8.4 MB recording (WRAM in
+   keyframes only). The recorded VRAM, CGRAM, OAM and WRAM match direct
+   dumps byte for byte at every frame checked. Strategy (a) of the Phase 2
+   plan won outright; savestate blobs were never needed.
 2. **A format specification and a validator** (`romlens rec validate`,
    `romlens rec info`, `romlens rec extract --frame N`) so anyone can write
    a producer: a bsnes-plus script, a libretro frontend, a hardware capture
@@ -225,6 +274,44 @@ Romlens ships:
    their build.
 3. **Savestate import** as a one-frame recording without deltas, for people
    who just want to look at a moment.
+
+## The Mesen stream
+
+What `mesen_recorder.lua` writes and only `rec pack` reads
+(`recording/mesen/stream.rs`). It is not a recording and has no stability
+promise beyond its version number, since Romlens ships both ends.
+Little-endian; `s1`/`s2` are strings with a u8/u16 length.
+
+- **Header:** `RLSTREAM`, version (u16, now 1), producer (`s2`), Mesen's
+  ROM SHA-1 (`s2`, informational), start time (i64 Unix seconds), PRG ROM
+  size (u32), 64 samples of 16 bytes taken at `size / 64 × i`, and the
+  field names (u16 count, `s1` each): every numeric or boolean
+  `emu.getState()` key under `cpu.`, `ppu.`, `internalRegisters.` and
+  `dmaController.`, plus `frameCount`, `masterClock` and
+  `memoryManager.hClock`.
+- **`F`, a frame end:** frame (u32); the fields that changed (u16 count,
+  then u16 index and i64 value each); 52 bytes, the last byte written to
+  each of `$2100`–`$2133`; 52 bytes, whether each has been written; the 128
+  bytes `$4300`–`$437F`; then for VRAM, CGRAM, OAM and WRAM in that order,
+  the 256-byte blocks that changed (u16 count, then u16 block number and
+  the block each; OAM's last block is 32 bytes).
+- **`D`, a DMA start:** frame (u32), the byte written to `$420B`, the
+  scanline (u16), and `$4300`–`$437F` at that moment.
+- **`L`:** frame (u32); a savestate was loaded before it.
+- **`E`:** frames written (u32), the clean end. A stream without it was
+  cut short; `rec pack` keeps every whole frame and says so.
+
+The ROM check is the size and samples, because Mesen offers only SHA-1 and
+Romlens hashes with SHA-256. `rec pack` builds the PPU state block from the
+decoded fields, re-encoding each one-write register the way the game would
+have written it, so a recording that starts from a savestate is right from
+its first frame. Mesen does not export the window mask logic or `CGWSEL`'s
+two window fields, so `WBGLOG`, `WOBJLOG` and `CGWSEL` come from the last
+byte written and read as zero until the game writes them; `rec pack` names
+them. Wherever both exist, it also checks each rebuilt register against the
+byte the game last wrote and warns on any disagreement: none in 17,850
+comparisons over Super Metroid's boot, nor in the 3,406-frame gameplay
+recording.
 
 ## One interface, two sources
 

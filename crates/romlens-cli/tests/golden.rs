@@ -681,6 +681,45 @@ fn recording_commands() {
 }
 
 #[test]
+fn mesen_recorder_commands() {
+    use romlens_core::recording::mesen::{RECORDER_SCRIPT, stream::encode};
+    let dir = temp_dir("mesen");
+    let rom = write_fixture(&dir, MappingMode::LoRom);
+    let bytes = std::fs::read(&rom).unwrap();
+    let rom = rom.to_str().unwrap();
+    let other = write_fixture(&dir, MappingMode::HiRom);
+    let other = other.to_str().unwrap();
+    let path = |name: &str| dir.join(name).to_string_lossy().into_owned();
+    let (clean, cut, rec) = (
+        path("clean.rlstream"),
+        path("cut.rlstream"),
+        path("r.romrec"),
+    );
+    std::fs::write(&clean, encode::fixture(&bytes, 12, true)).unwrap();
+    let mut short = encode::fixture(&bytes, 12, false);
+    short.truncate(short.len() - 100);
+    std::fs::write(&cut, short).unwrap();
+
+    let mut out = run_with(&["rec", "pack", &clean, "--rom", rom], &["--out", &rec]);
+    out += &run(&["rec", "info", &rec, "--rom", rom]);
+    out += &run_with(
+        &["rec", "extract", &rec, "--frame", "11", "--region", "cpu"],
+        &["--hex"],
+    );
+    out += &run_with(
+        &["rec", "pack", &cut, "--rom", rom, "--out", &rec],
+        &["--wram", "off"],
+    );
+    out += &run(&["rec", "info", &rec]);
+    out += &run_with(&["rec", "pack", &clean, "--rom", other], &["--out", &rec]);
+    let script = path("mesen_recorder.lua");
+    out += &run(&["rec", "script", "--out", &script]);
+    assert_eq!(std::fs::read_to_string(&script).unwrap(), RECORDER_SCRIPT);
+    check("rec-mesen", &redact_tmp(&dir, &out));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn testrom_round_trips() {
     let dir = temp_dir("testrom");
     let out = dir.join("t.sfc");

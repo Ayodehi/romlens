@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
 use romlens_core::analysis::AnalysisOptions;
+use romlens_core::recording::mesen::{PackOptions, WramMode};
 use romlens_core::{AddressStyle, MappingMode};
 
 use commands::labels::SourceFilter;
@@ -425,6 +426,45 @@ enum RecCommand {
         #[arg(long)]
         out: PathBuf,
     },
+    /// A recording from the stream the Mesen recorder script wrote.
+    Pack {
+        stream: PathBuf,
+        /// The ROM that was running; the stream is checked against it.
+        #[arg(long)]
+        rom: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+        /// How much WRAM to keep.
+        #[arg(long, value_enum, default_value = "keyframe")]
+        wram: WramArg,
+        #[arg(long, default_value_t = 60)]
+        keyframe_interval: u16,
+        /// Store payloads uncompressed.
+        #[arg(long)]
+        no_compress: bool,
+    },
+    /// Write the Mesen recorder script.
+    Script {
+        #[arg(long)]
+        out: PathBuf,
+    },
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum WramArg {
+    Full,
+    Keyframe,
+    Off,
+}
+
+impl From<WramArg> for WramMode {
+    fn from(a: WramArg) -> Self {
+        match a {
+            WramArg::Full => WramMode::Full,
+            WramArg::Keyframe => WramMode::Keyframe,
+            WramArg::Off => WramMode::Off,
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -1015,6 +1055,24 @@ fn main() -> Result<()> {
                 ppu: ppu.as_deref(),
                 out: &out,
             }),
+            RecCommand::Pack {
+                stream,
+                rom,
+                out,
+                wram,
+                keyframe_interval,
+                no_compress,
+            } => commands::rec::pack(
+                &stream,
+                &rom,
+                &out,
+                PackOptions {
+                    wram: wram.into(),
+                    keyframe_interval,
+                    compress: !no_compress,
+                },
+            ),
+            RecCommand::Script { out } => commands::rec::script(&out),
         },
         Command::Render { what } => {
             let (rec, frame, bg, sprite, ascii) = match what {

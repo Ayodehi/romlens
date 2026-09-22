@@ -1,6 +1,7 @@
 //! Recordings from the command line (checklist 2.28–2.36, the part pulled
 //! forward into 2B): `testrec`, `rec info`, `rec extract`, `rec import-raw`,
-//! and `render`, which draws from one.
+//! `rec pack` and `rec script` for recording from Mesen, and `render`, which
+//! draws from one.
 
 use std::path::Path;
 
@@ -8,6 +9,7 @@ use anyhow::{Context, Result, anyhow};
 use romlens_core::graphics::render::{BgConfig, render_bg_layer, render_sprite};
 use romlens_core::recording::format::{COMPRESSION_ZSTD, FLAG_WRAM_KEYFRAME_ONLY, KIND_KEY};
 use romlens_core::recording::import::state_from_dumps;
+use romlens_core::recording::mesen::{PackOptions, RECORDER_SCRIPT, pack as pack_stream};
 use romlens_core::recording::writer::WriterOptions;
 use romlens_core::recording::{
     MachineStateSource, RecordingIdentity, RomrecSource, RomrecWriter, StateRegion, fixtures,
@@ -231,6 +233,85 @@ pub fn import_raw(a: ImportRaw<'_>) -> Result<()> {
         "wrote {}: one frame with {}",
         a.out.display(),
         names.join(", ")
+    );
+    Ok(())
+}
+
+pub fn pack(stream: &Path, rom: &Path, out: &Path, options: PackOptions) -> Result<()> {
+    let rom = load_rom(rom)?;
+    let input = std::io::BufReader::new(
+        std::fs::File::open(stream).with_context(|| format!("opening {}", stream.display()))?,
+    );
+    let report = pack_stream(input, &rom, create(out)?, options)
+        .with_context(|| format!("packing {}", stream.display()))?;
+    println!(
+        "wrote {}: {} frames from {}, {} DMA transfers",
+        out.display(),
+        report.frames,
+        report.producer,
+        report.dma_events
+    );
+    if report.truncated {
+        println!(
+            "the stream ends mid-recording (the emulator closed first); every whole frame was kept"
+        );
+    }
+    if report.state_loads > 0 {
+        println!(
+            "{} savestate loads during the recording: frames either side are not continuous",
+            report.state_loads
+        );
+    }
+    let missing = &report.missing_fields;
+    if !missing.is_empty() {
+        let names = if missing.len() <= 5 {
+            missing.join(", ")
+        } else {
+            format!(
+                "{} fields, among them {}",
+                missing.len(),
+                missing[..3].join(", ")
+            )
+        };
+        println!("this Mesen does not export {names}; their bits are zero");
+    }
+    if report.disagreements > 0 {
+        println!(
+            "warning: {} times a rebuilt PPU register disagreed with the byte the game wrote; please report this",
+            report.disagreements
+        );
+        for (port, frame, rebuilt, written) in &report.first_disagreements {
+            println!(
+                "  ${port:04X} at frame {frame}: rebuilt {rebuilt:02X}, written {written:02X}"
+            );
+        }
+    }
+    if !report.unknown_registers.is_empty() {
+        let regs: Vec<String> = report
+            .unknown_registers
+            .iter()
+            .map(|r| format!("${r:04X}"))
+            .collect();
+        println!(
+            "Mesen does not export {}, so they read as zero until the game writes them",
+            regs.join(", ")
+        );
+    }
+    Ok(())
+}
+
+pub fn script(out: &Path) -> Result<()> {
+    std::fs::write(out, RECORDER_SCRIPT).with_context(|| format!("writing {}", out.display()))?;
+    println!("wrote {}", out.display());
+    println!("1. In Mesen, open Debug > Script Window and load the script.");
+    println!(
+        "2. In the script window's settings, allow access to I/O and OS functions, then run it."
+    );
+    println!(
+        "3. Play, then stop the script and run: romlens rec pack <stream> --rom <rom> --out <recording>.romrec"
+    );
+    println!(
+        "   The stream goes to Mesen's script data folder unless ROMLENS_REC_OUT names a file."
     );
     Ok(())
 }

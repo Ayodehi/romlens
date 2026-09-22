@@ -22,6 +22,8 @@ pub struct WriterOptions {
     pub wram_keyframe_only: bool,
     /// 0 LoROM, 1 HiROM, 2 ExHiROM, `0xFF` unknown.
     pub mapping: u8,
+    /// The optional layers the file will carry, declared in the header.
+    pub layers: Layers,
 }
 
 impl Default for WriterOptions {
@@ -31,6 +33,7 @@ impl Default for WriterOptions {
             compress: true,
             wram_keyframe_only: false,
             mapping: 0xFF,
+            layers: Layers::default(),
         }
     }
 }
@@ -76,7 +79,7 @@ impl<W: Write + Seek> RomrecWriter<W> {
             regions: regions.clone(),
             frame_count: IN_PROGRESS,
             created,
-            layers: Layers::default(),
+            layers: options.layers,
             compression,
             producer: identity.producer.clone(),
             producer_version: identity.producer_version.clone(),
@@ -172,6 +175,23 @@ impl<W: Write + Seek> RomrecWriter<W> {
         });
         self.at += chunk.len() as u64;
         self.previous = Some(state.regions.clone());
+        Ok(())
+    }
+
+    /// Append a layer chunk (`WLOG`, `FBUF`, …) after the frame it belongs
+    /// to. Readers skip layer chunks they do not use, and recovery walks
+    /// past them.
+    pub fn write_layer(&mut self, magic: &[u8; 4], body: &[u8]) -> Result<(), RecordingError> {
+        if !LAYER_MAGICS.contains(&magic) {
+            return Err(RecordingError::BadFormat(format!(
+                "{} is not a layer chunk",
+                String::from_utf8_lossy(magic)
+            )));
+        }
+        self.out.write_all(magic)?;
+        self.out.write_all(&(body.len() as u32).to_le_bytes())?;
+        self.out.write_all(body)?;
+        self.at += 8 + body.len() as u64;
         Ok(())
     }
 

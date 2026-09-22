@@ -119,7 +119,7 @@ are not started.
 | 2.31 | What changed between frames | The graphics views badge entries that changed since the previous frame | `romlens rec changes R --from A --to B --region vram` | ⬜ | ⬜ | ⬜ |
 | 2.32 | When did this byte change | The inspector on a VRAM/CGRAM/OAM byte reads "changed at frame N, next at M" with Go | `romlens rec when R --region vram --offset 0x4000 [--len 2] [--after N] [--backward]`, `romlens rec index R [--rebuild]` | ⬜ | ⬜ | ⬜ |
 | 2.33 | Snapshot import (`rec import-raw` done in 2B; the shell item and `.mss` are not) | File › Import Snapshot… accepts loose VRAM/CGRAM/OAM dumps and a Mesen2 savestate, producing a one-frame recording | `romlens rec import-raw --vram f --cgram f --oam f --out r.romrec`, `romlens rec import-savestate s.mss --out r.romrec` | ⬜ | ⬜ | ⬜ |
-| 2.34 | Ship the recorder script | Help › Save Mesen2 Recorder Script… writes the .lua and shows the three-step instructions | `romlens rec script --out mesen_recorder.lua` | ⬜ | ⬜ | ⬜ |
+| 2.34 | Ship the recorder script (CLI done; the shell item is not) | Help › Save Mesen Recorder Script… writes the .lua and shows the three-step instructions | `romlens rec script --out mesen_recorder.lua`, then `romlens rec pack <stream> --rom <rom> --out r.romrec [--wram full\|keyframe\|off]` | ⬜ | ⬜ | ⬜ |
 | 2.35 | Recordings referenced, never copied | Attaching one stores path and hash in the project; Save shows the docs/12 notice; a shareable export omits recordings | `romlens project <P> recordings [add R \| list \| remove R]` | ⬜ | ⬜ | ⬜ |
 | 2.36 | Synthetic recording fixture (done in 2B, with `--keyframe-interval`) | (n/a) | `romlens testrec --out r.romrec [--frames N]`, then every row above against it | n/a | ⬜ | ⬜ |
 

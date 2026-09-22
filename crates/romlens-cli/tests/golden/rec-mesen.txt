@@ -1,0 +1,35 @@
+wrote <tmp>/r.romrec: 12 frames from Mesen, 1 DMA transfers
+this Mesen does not export 65 fields, among them cpu.a, cpu.x, cpu.y; their bits are zero
+Mesen does not export $212A, $212B, $2130, so they read as zero until the game writes them
+Format:       1.0
+Producer:     Mesen recorder stream 1
+ROM SHA-256:  a2462f1d74f993d0b3e10ae9425cd9b48253ac82c99913f07ef704d9c85dc6ee
+              matches romlens-test-lorom.sfc
+Frames:       12 (1 keyframe, every 60 frames)
+Storage:      5461 bytes, zstd, WRAM in keyframes only
+              keyframes 613 bytes each on average, deltas 371
+Regions:      cpu 16, ppu 256, io 128, wram 131072, vram 65536, cgram 512, oam 544, timing 16
+Layers:       write log
+00000  00 00 00 00 00 00 00 00 00 00 00 00 0B 80 00 00
+wrote <tmp>/r.romrec: 11 frames from Mesen, 1 DMA transfers
+the stream ends mid-recording (the emulator closed first); every whole frame was kept
+this Mesen does not export 65 fields, among them cpu.a, cpu.x, cpu.y; their bits are zero
+Mesen does not export $212A, $212B, $2130, so they read as zero until the game writes them
+Format:       1.0
+Producer:     Mesen recorder stream 1
+ROM SHA-256:  a2462f1d74f993d0b3e10ae9425cd9b48253ac82c99913f07ef704d9c85dc6ee
+Frames:       11 (1 keyframe, every 60 frames)
+Storage:      4992 bytes, zstd
+              keyframes 560 bytes each on average, deltas 371
+Regions:      cpu 16, ppu 256, io 128, vram 65536, cgram 512, oam 544, timing 16
+Layers:       write log
+[exit code 1]
+Error: packing <tmp>/clean.rlstream
+
+Caused by:
+    the stream was not recorded from this ROM: the stream was recorded from a 32768-byte ROM; this one is 65536 bytes
+wrote <tmp>/mesen_recorder.lua
+1. In Mesen, open Debug > Script Window and load the script.
+2. In the script window's settings, allow access to I/O and OS functions, then run it.
+3. Play, then stop the script and run: romlens rec pack <stream> --rom <rom> --out <recording>.romrec
+   The stream goes to Mesen's script data folder unless ROMLENS_REC_OUT names a file.

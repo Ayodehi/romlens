@@ -47,10 +47,13 @@ several are community sites that move.
 
 - **DiztinGUIsh (Diz)** — SNES-specific interactive disassembler; its project
   format is a natural import source. https://github.com/IsoFrieze/DiztinGUIsh
-- **Mesen2** — emulator with a debugger, trace logger and CDL (code/data log)
-  export, plus a Lua scripting API with memory callbacks that our recorder
-  script will use. Verify the callback surface for PPU ports and DMA before
-  Phase 2. https://github.com/SourMesen/Mesen2
+- **Mesen** — emulator with a debugger, trace logger and CDL (code/data log)
+  export, plus the Lua scripting API our recorder script uses (docs/09 has
+  what was measured). The original, https://github.com/SourMesen/Mesen2, was
+  archived in June 2026; development continues as MesenCE,
+  https://github.com/nesdev-org/MesenCE, whose 2.2.1 release is the version
+  Romlens is tested against. Our fork, https://github.com/Ayodehi/MesenCE,
+  carries fixes we need before they are upstream.
 - **bsnes-plus** — debugger-oriented bsnes fork with usage maps and a trace
   logger. https://github.com/devinacker/bsnes-plus
 - **bsnes / higan** — accuracy reference; bsnes can be built as a library for
@@ -96,8 +99,8 @@ several are community sites that move.
 ## Licensing, policy and distribution (researched 2026-09-21)
 
 - ares LICENSE (ISC): https://github.com/ares-emulator/ares/blob/master/LICENSE
-- Mesen2 (GPLv3) and its Lua documentation:
-  https://github.com/SourMesen/Mesen2/blob/master/UI/Debugger/Documentation/LuaDocumentation.json
+- MesenCE (GPLv3) and its Lua documentation:
+  https://github.com/nesdev-org/MesenCE/blob/master/UI/Debugger/Documentation/LuaDocumentation.json
 - LakeSnes (MIT): https://github.com/angelo-wf/LakeSnes
 - super-sabicom (MIT, Rust): https://github.com/tanakh/super-sabicom
 - r-snes (MIT, Rust, active): https://github.com/r-snes/r-snes
