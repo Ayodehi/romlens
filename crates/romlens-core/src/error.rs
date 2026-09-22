@@ -40,3 +40,30 @@ pub enum AddressError {
     #[error("file offset 0x{0:06X} is past the end of the ROM ({1} bytes)")]
     PastEnd(u32, usize),
 }
+
+/// Failures while editing or storing a project.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ProjectError {
+    #[error("could not access project: {0}")]
+    Io(String),
+    #[error("{file}: {msg}")]
+    Json { file: String, msg: String },
+    #[error("project is missing {0}")]
+    MissingFile(String),
+    #[error("not a Romlens project ({0})")]
+    BadFormat(String),
+    #[error("project was written by a newer Romlens (format version {0})")]
+    NewerVersion(u32),
+    #[error("project belongs to a different ROM (expected SHA-256 {expected}, found {found})")]
+    RomMismatch { expected: String, found: String },
+    #[error("{0}")]
+    InvalidLabelName(String),
+    #[error("range {0} is outside the ROM or empty")]
+    BadRange(String),
+}
+
+impl From<io::Error> for ProjectError {
+    fn from(e: io::Error) -> Self {
+        ProjectError::Io(e.to_string())
+    }
+}

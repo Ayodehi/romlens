@@ -1,0 +1,14 @@
+[
+  {
+    "address": "$00:9C41",
+    "m": true
+  },
+  {
+    "address": "$00:A100",
+    "m": false,
+    "x": false,
+    "e": false,
+    "dbr": "$80",
+    "dp": "$0000"
+  }
+]

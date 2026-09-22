@@ -1,0 +1,337 @@
+//! Every command's inverse restores equality; mirrors canonicalise; labels
+//! validate; region marks split and merge.
+
+use romlens_core::fixtures;
+use romlens_core::model::{
+    Command, CommentKind, DataKind, FlagOverride, OverrideKind, Project, RegionOverride, UndoStack,
+};
+use romlens_core::{FileOffset, ProjectError, RomImage, SnesAddress};
+
+fn rom() -> RomImage {
+    RomImage::from_bytes(fixtures::minimal_lorom(), "t.sfc").unwrap()
+}
+
+fn a(bank: u8, off: u16) -> SnesAddress {
+    SnesAddress::new(bank, off)
+}
+
+fn check_inverse(rom: &RomImage, project: &mut Project, cmd: Command) {
+    let before = project.clone();
+    let entry = project.apply(rom, cmd.clone()).unwrap();
+    assert_eq!(entry.done, cmd);
+    for inv in &entry.inverse {
+        project.apply(rom, inv.clone()).unwrap();
+    }
+    assert_eq!(
+        *project, before,
+        "inverse of {cmd:?} did not restore the project"
+    );
+    // Re-apply so later steps build on it.
+    project.apply(rom, cmd).unwrap();
+}
+
+#[test]
+fn labels_and_comments() {
+    let rom = rom();
+    let mut p = Project::new(&rom);
+    check_inverse(
+        &rom,
+        &mut p,
+        Command::SetLabel {
+            address: a(0x80, 0x8000),
+            name: Some("Boot".into()),
+        },
+    );
+    // Mirrors collapse onto the canonical (slow, since the fixture is SlowROM) address.
+    assert_eq!(p.labels.len(), 1);
+    assert_eq!(p.label_at(a(0x00, 0x8000)).unwrap().name, "Boot");
+    check_inverse(
+        &rom,
+        &mut p,
+        Command::SetLabel {
+            address: a(0x00, 0x8000),
+            name: Some("Reset".into()),
+        },
+    );
+    assert_eq!(p.labels.len(), 1);
+    assert_eq!(p.label_at(a(0x00, 0x8000)).unwrap().name, "Reset");
+    check_inverse(
+        &rom,
+        &mut p,
+        Command::SetLabel {
+            address: a(0x00, 0x8000),
+            name: None,
+        },
+    );
+    assert!(p.labels.is_empty());
+    // RAM labels keep their address as written.
+    check_inverse(
+        &rom,
+        &mut p,
+        Command::SetLabel {
+            address: a(0x7E, 0x0A1C),
+            name: Some("SamusPose".into()),
+        },
+    );
+    assert_eq!(p.label_at(a(0x7E, 0x0A1C)).unwrap().name, "SamusPose");
+    // Validation.
+    assert!(matches!(
+        p.apply(
+            &rom,
+            Command::SetLabel {
+                address: a(0x00, 0x8000),
+                name: Some("bad name".into())
+            }
+        ),
+        Err(ProjectError::InvalidLabelName(_))
+    ));
+    assert!(matches!(
+        p.apply(
+            &rom,
+            Command::SetLabel {
+                address: a(0x00, 0x8000),
+                name: Some("SUB_00800E".into())
+            }
+        ),
+        Err(ProjectError::InvalidLabelName(_))
+    ));
+    assert!(
+        p.apply(
+            &rom,
+            Command::SetLabel {
+                address: a(0x00, 0x8000),
+                name: Some("SUB_008000".into())
+            }
+        )
+        .is_ok()
+    );
+    // Comments.
+    check_inverse(
+        &rom,
+        &mut p,
+        Command::SetComment {
+            address: a(0x80, 0x8000),
+            kind: CommentKind::Line,
+            text: Some("disable IRQ".into()),
+        },
+    );
+    check_inverse(
+        &rom,
+        &mut p,
+        Command::SetComment {
+            address: a(0x00, 0x8000),
+            kind: CommentKind::Block,
+            text: Some("Boot\nsequence".into()),
+        },
+    );
+    assert_eq!(p.comments.len(), 2);
+    assert_eq!(
+        p.comment_at(a(0x00, 0x8000), CommentKind::Line)
+            .unwrap()
+            .text,
+        "disable IRQ"
+    );
+    check_inverse(
+        &rom,
+        &mut p,
+        Command::SetComment {
+            address: a(0x00, 0x8000),
+            kind: CommentKind::Line,
+            text: Some("   ".into()),
+        },
+    );
+    assert_eq!(p.comments.len(), 1, "blank text removes");
+}
+
+#[test]
+fn region_marks_split_and_merge() {
+    let rom = rom();
+    let mut p = Project::new(&rom);
+    let mark = |start: u32, len: u32, kind: OverrideKind| Command::MarkRegion {
+        start: FileOffset(start),
+        len,
+        kind,
+    };
+    check_inverse(&rom, &mut p, mark(0x100, 0x100, OverrideKind::Code));
+    check_inverse(
+        &rom,
+        &mut p,
+        mark(0x300, 0x100, OverrideKind::Data(DataKind::Word)),
+    );
+    // A mark spanning both existing ones and the gap replaces them.
+    check_inverse(
+        &rom,
+        &mut p,
+        mark(
+            0x180,
+            0x200,
+            OverrideKind::Data(DataKind::Table { stride: 4 }),
+        ),
+    );
+    assert_eq!(
+        p.region_overrides,
+        vec![
+            RegionOverride {
+                start: FileOffset(0x100),
+                len: 0x80,
+                kind: OverrideKind::Code
+            },
+            RegionOverride {
+                start: FileOffset(0x180),
+                len: 0x200,
+                kind: OverrideKind::Data(DataKind::Table { stride: 4 })
+            },
+            RegionOverride {
+                start: FileOffset(0x380),
+                len: 0x80,
+                kind: OverrideKind::Data(DataKind::Word)
+            },
+        ]
+    );
+    // A mark inside one override splits it.
+    check_inverse(&rom, &mut p, mark(0x200, 0x10, OverrideKind::Unknown));
+    assert_eq!(p.region_overrides.len(), 5);
+    assert_eq!(p.override_kind_at(0x205), Some(OverrideKind::Unknown));
+    assert_eq!(
+        p.override_kind_at(0x210),
+        Some(OverrideKind::Data(DataKind::Table { stride: 4 }))
+    );
+    // Clearing part of the list.
+    check_inverse(
+        &rom,
+        &mut p,
+        Command::ClearRegionOverride {
+            start: FileOffset(0x000),
+            len: 0x210,
+        },
+    );
+    assert_eq!(p.override_kind_at(0x100), None);
+    assert_eq!(
+        p.override_kind_at(0x210),
+        Some(OverrideKind::Data(DataKind::Table { stride: 4 }))
+    );
+    // Ranges are checked.
+    assert!(matches!(
+        p.apply(&rom, mark(0x7FFF, 2, OverrideKind::Code)),
+        Err(ProjectError::BadRange(_))
+    ));
+    assert!(matches!(
+        p.apply(&rom, mark(0, 0, OverrideKind::Code)),
+        Err(ProjectError::BadRange(_))
+    ));
+}
+
+#[test]
+fn flag_overrides() {
+    let rom = rom();
+    let mut p = Project::new(&rom);
+    let f = FlagOverride {
+        m: Some(true),
+        dbr: Some(0x80),
+        ..Default::default()
+    };
+    check_inverse(
+        &rom,
+        &mut p,
+        Command::SetFlagOverride {
+            offset: FileOffset(0x41C),
+            flags: Some(f),
+        },
+    );
+    assert_eq!(p.flag_overrides[&FileOffset(0x41C)], f);
+    check_inverse(
+        &rom,
+        &mut p,
+        Command::SetFlagOverride {
+            offset: FileOffset(0x41C),
+            flags: Some(FlagOverride::default()),
+        },
+    );
+    assert!(p.flag_overrides.is_empty(), "an empty override removes");
+    assert!(
+        p.apply(
+            &rom,
+            Command::SetFlagOverride {
+                offset: FileOffset(0x8000),
+                flags: Some(f)
+            }
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn undo_stack_round_trips() {
+    let rom = rom();
+    let mut p = Project::new(&rom);
+    let mut stack = UndoStack::default();
+    let start = p.clone();
+    let cmds = [
+        Command::SetLabel {
+            address: a(0x00, 0x8000),
+            name: Some("Boot".into()),
+        },
+        Command::MarkRegion {
+            start: FileOffset(0x100),
+            len: 0x100,
+            kind: OverrideKind::Code,
+        },
+        Command::MarkRegion {
+            start: FileOffset(0x180),
+            len: 0x10,
+            kind: OverrideKind::Unknown,
+        },
+        Command::SetComment {
+            address: a(0x00, 0x8007),
+            kind: CommentKind::Line,
+            text: Some("force blank".into()),
+        },
+    ];
+    let mut states = vec![start.clone()];
+    for c in cmds {
+        let entry = p.apply(&rom, c).unwrap();
+        stack.push(entry);
+        states.push(p.clone());
+    }
+    assert_eq!(stack.undo_title(), Some("Set Comment"));
+    assert!(!stack.can_redo());
+    for i in (0..4).rev() {
+        assert!(stack.undo(&mut p, &rom).unwrap());
+        assert_eq!(p, states[i], "after undo to state {i}");
+    }
+    assert!(!stack.undo(&mut p, &rom).unwrap());
+    assert!(!stack.can_undo());
+    assert_eq!(stack.redo_title(), Some("Rename Label"));
+    for (i, state) in states.iter().enumerate().skip(1) {
+        assert!(stack.redo(&mut p, &rom).unwrap());
+        assert_eq!(p, *state, "after redo to state {i}");
+    }
+    assert!(!stack.redo(&mut p, &rom).unwrap());
+    // A new command after an undo drops the redo branch.
+    stack.undo(&mut p, &rom).unwrap();
+    stack.push(
+        p.apply(
+            &rom,
+            Command::SetLabel {
+                address: a(0x00, 0x800E),
+                name: Some("Idle".into()),
+            },
+        )
+        .unwrap(),
+    );
+    assert!(!stack.can_redo());
+    assert!(
+        !Command::SetLabel {
+            address: a(0, 0),
+            name: None
+        }
+        .affects_analysis()
+    );
+    assert!(
+        Command::ClearRegionOverride {
+            start: FileOffset(0),
+            len: 1
+        }
+        .affects_analysis()
+    );
+}

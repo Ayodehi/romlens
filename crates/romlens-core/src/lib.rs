@@ -17,7 +17,7 @@ pub mod model;
 pub mod rom;
 pub mod viewmodel;
 
-pub use error::{AddressError, RomError};
+pub use error::{AddressError, ProjectError, RomError};
 pub use memory::address::{FileOffset, SnesAddress};
 pub use memory::map::{AddressMap, MappingMode, MemoryClass, mirror_offset};
 pub use memory::parse::{AddressExpr, parse_address_expr};
