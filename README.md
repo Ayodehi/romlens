@@ -15,7 +15,8 @@ the macOS app shows the hex view, the disassembly and both in lockstep, with
 a navigator, an inspector, label/comment/region editing with undo, project
 documents and asar-syntax export. Phase 2 ("Discover code vs data") is
 planned in `docs/16-phase2-plan.md`: jump tables first, because static
-descent alone reaches 0.2% of Super Metroid. The tutor stays deferred.
+descent alone reached 0.2% of Super Metroid. They are now resolved, which
+takes that to 2.1%. The tutor stays deferred.
 `spikes/` holds the FFI measurement that shaped the API. Start with the
 docs, then `docs/14-phase0-plan.md` and `docs/15-conformance-checklist.md`
 for what was built and how it is checked. Romlens is a study and visualization tool

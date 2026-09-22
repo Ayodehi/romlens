@@ -99,6 +99,36 @@ The async `analyze()` future and the `WorkbenchListener` callback were not
 timed separately: progress events are coalesced to one main-actor hop per
 batch, and the whole analysis is shorter than a frame budget on this ROM.
 
+## Phase 2 measurements (22 September 2026)
+
+Core, release build, development ROM (3 MB), M5 Pro. Jump tables only; the
+heuristics, trace import and graphics work is not in these numbers.
+
+| Quantity | Phase 1 | With jump tables |
+|---|---|---|
+| Full analysis | 5 ms | 12 ms |
+| Instructions | 3,029 | 28,320 |
+| Code bytes | 6,872 (0.2%) | 65,495 (2.1%) |
+| Code blocks | 76 | 485 |
+| Auto labels | 256 | 2,998 |
+| Xrefs | 1,554 | 14,722 |
+| Warnings | 15 | 137 (34 informational jump tables) |
+
+`romlens analyze --no-tables` reproduces the Phase 1 column exactly, which is
+what makes the gain attributable rather than merely coincident. The Phase 1
+figure above is 5 ms rather than the 7 ms recorded below because the pass loop
+now exits as soon as a pass adds nothing.
+
+Tables resolved: 34, holding 521 entries over 1,042 bytes. The largest has 45
+entries. 28 were bounded by the first routine they point at and 6 by code the
+descent had already claimed, so no table on this ROM fell back to a weak stop
+reason. 54 dispatch sites remain unresolved and every one of them builds its
+table in RAM.
+
+The analyzer runs the descent up to eight times now instead of six, and a pass
+costs about 1.5 ms, which is where the 5 ms → 12 ms goes. Still two orders of
+magnitude inside the 2 s budget.
+
 ## Not measured, still to check in Phase 0
 
 - Async call and callback-interface overhead (event delivery from the core's

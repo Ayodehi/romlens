@@ -1,5 +1,21 @@
 # Romlens Phase 2 implementation plan
 
+## Progress
+
+Written 22 September 2026 and kept as written; this section is the only part
+that tracks against it.
+
+| Task | State |
+|---|---|
+| Housekeeping 1 (commit the dirty tree) | done, `78e037f` |
+| Housekeeping 3 (checklist 0.12, API version in the About box) | done, `10eb4ae` |
+| Housekeeping 4 (the shell job's `continue-on-error`) | done, `9c35b73`: the flag moved to the `xcodebuild` step so the rest of the job is enforced. The same commit fixed a Windows golden failure the first CI run found |
+| 2A T1 foundations | done, `f213d16` |
+| 2A T2 jump tables | done, `0935cfe`: 34 tables on the development ROM, code 0.2% → 2.1% |
+| 2A T3 measure and record | done |
+| Housekeeping 2 (the Phase 1 manual pass) | **still to run**, and it needs a person at the app |
+| Everything from 2A T4 (heuristics) on | not started |
+
 ## Context
 
 Phase 0 ("Open and see") and Phase 1 ("Disassemble") are implemented and

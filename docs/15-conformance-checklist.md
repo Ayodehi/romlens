@@ -57,10 +57,16 @@ pass is listed below and still to run. The Phase 2 rows were written from
 
 ## Phase 2
 
-Planned in `16-phase2-plan.md`; no row is implemented yet. Track 2A
-(classification) owns 2.1–2.8, track 2B (graphics) 2.20–2.27 and track 2C
-(recordings) 2.28–2.36. The numbering leaves a gap after 2.8 so 2A can grow
-without renumbering the other tracks.
+Planned in `16-phase2-plan.md`. Track 2A (classification) owns 2.1–2.8,
+track 2B (graphics) 2.20–2.27 and track 2C (recordings) 2.28–2.36. The
+numbering leaves a gap after 2.8 so 2A can grow without renumbering the other
+tracks.
+
+A row is marked here only when the *shell* exposes it, so 2.1 is still ⬜
+although its core and CLI landed on 22 September 2026: tables resolve, the
+warning is informational, and `romlens tables` ships with goldens, but the
+`dw CODE_…` rendering and the evidence popover's link to the dispatcher are
+task T8 and T10. Nothing else in Phase 2 is started.
 
 ### 2A — classification
 

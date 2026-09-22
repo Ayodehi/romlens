@@ -83,15 +83,39 @@ Deltas from Phase 1 ("Disassemble", 21 September 2026):
   `InsnRecord` (about 6 MB for a fully coded 3 MB image), not a lazy
   per-bank cache: re-decoding from the record is exact and the memory is
   cheap. The whole pipeline (descent, sweep, labels) re-runs on every
-  analysis-affecting command; it takes under 10 ms on the development ROM in
+  analysis-affecting command; it takes about 12 ms on the development ROM in
   release, far under the 2 s budget, so incremental invalidation is deferred.
 - Only static edges are followed: branches, `JSR`/`JSL`, `JMP`/`JML`, and
-  `JMP (abs)`/`JML [abs]` through a pointer slot in ROM. `JMP (abs,X)`,
-  `JSR (abs,X)` and pointers in RAM produce a `ComputedJump` warning and
-  stop; jump tables are Phase 2. The linear sweep only accepts a gap directly
-  after code that decodes to at least two instructions ending exactly on a
-  block end with no `BRK`/`WDM`/`STP`/`COP` and every branch target in ROM;
-  it never seeds entries or labels.
+  `JMP (abs)`/`JML [abs]` through a pointer slot in ROM. A pointer in RAM
+  still produces a `ComputedJump` warning and stops. The linear sweep only
+  accepts a gap directly after code that decodes to at least two instructions
+  ending exactly on a block end with no `BRK`/`WDM`/`STP`/`COP` and every
+  branch target in ROM; it never seeds entries or labels.
+- Jump tables (Phase 2, 22 September 2026): `JMP (abs,X)` and `JSR (abs,X)`
+  dispatch through a table of 16-bit addresses in the program bank.
+  `analysis::jumptable` reads it and the walk follows every entry. A table
+  ends at the first of: the lowest routine it points at, code the descent
+  already claimed, a user data mark, an entry that is not the address of a
+  routine, an entry inside the table, the bank edge, 256 entries. The first
+  of those carries the weight — a dispatch table is nearly always followed by
+  its own targets — and the stop reason sets the confidence, 0.60 to 0.85.
+  An entry is judged by the sweep's bar but decoded under the dispatcher's
+  own M/X, which is precisely what the sweep has to guess.
+
+  Resolution runs *between* descent passes, not inside the walk, for the
+  reason the bound gives away: it asks which bytes are already code, and
+  mid-walk that depends on the order the worklist was drained in. The extents
+  become `Data(Table)` with evidence naming the dispatcher; the base takes a
+  `JTBL_` label and each entry an uncertain xref. A resolved site reports the
+  informational `JumpTable` warning in place of `ComputedJump`.
+
+  On the development ROM this is the difference between a map that is 99.8%
+  unknown and one worth reading: 34 tables, 521 entries, and code from 0.2%
+  to 2.1% of the image. `romlens analyze --no-tables` reproduces the Phase 1
+  numbers exactly, so the gain is attributable. The 54 sites still
+  unresolved all build their table in RAM, which needs value tracking along
+  control flow (Phase 3); the warning names the address so the manual fix is
+  one mark.
 - Inline arguments (the Phase 1 test pass, 21 September 2026): a callee that
   adds a constant to its stacked return address (`LDA $01,S … ADC #n …
   STA $01,S`, also behind `PHP; PHB` at `$03,S` and through `TAY`/`TYA`)
