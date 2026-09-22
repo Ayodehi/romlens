@@ -178,8 +178,8 @@ fn compute_target(insn: &Instruction, assumptions: &mut u8) -> Option<Target> {
     let flags = insn.flags_before;
     let m = insn.mnemonic;
     let val = insn.operand.value();
-    // Pushes are not memory accesses at the operand address.
-    if matches!(m, PEA | PER) {
+    // PEA pushes a constant, not an address it accesses.
+    if m == PEA {
         return None;
     }
     let code = matches!(m, JMP | JML | JSR | JSL | BRA | BRL) || m.is_branch();
@@ -196,7 +196,12 @@ fn compute_target(insn: &Instruction, assumptions: &mut u8) -> Option<Target> {
             let off = (next.offset() as i32 + insn.displacement()) as u16;
             Some(Target {
                 address: SnesAddress::new(pb, off),
-                kind: TargetKind::Code,
+                // PER pushes the address it names; everything else jumps there.
+                kind: if m == PER {
+                    TargetKind::Data
+                } else {
+                    TargetKind::Code
+                },
                 certain: true,
             })
         }
