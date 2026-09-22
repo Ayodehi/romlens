@@ -24,7 +24,11 @@ fn the_games_streams_decompress_whole() {
         assert_eq!(d.consumed, consumed, "{expr}");
         // Every command but the one reachable only in the long form is used
         // by real data, so none of them is untested against the game.
-        assert!(d.commands[..7].iter().all(|n| *n > 0), "{expr}: {:?}", d.commands);
+        assert!(
+            d.commands[..7].iter().all(|n| *n > 0),
+            "{expr}: {:?}",
+            d.commands
+        );
     }
 }
 

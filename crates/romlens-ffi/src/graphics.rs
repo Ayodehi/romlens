@@ -663,13 +663,22 @@ mod tests {
         assert_eq!(info.regions.len(), 8);
         let rom = Rom::from_bytes(make_graphics_test_rom(), "g.sfc".to_owned()).unwrap();
         rec.check_rom(rom.clone()).unwrap();
-        let other = Rom::from_bytes(crate::make_test_rom(crate::Mapping::LoRom), "t.sfc".to_owned())
-            .unwrap();
-        assert!(matches!(rec.check_rom(other), Err(RomlensError::RomMismatch { .. })));
+        let other = Rom::from_bytes(
+            crate::make_test_rom(crate::Mapping::LoRom),
+            "t.sfc".to_owned(),
+        )
+        .unwrap();
+        assert!(matches!(
+            rec.check_rom(other),
+            Err(RomlensError::RomMismatch { .. })
+        ));
         let bg = rec.render_bg(0, 1).unwrap();
         assert_eq!((bg.width, bg.height), (256, 256));
         assert_eq!(bg.rgba.len(), 256 * 256 * 4);
-        assert!(matches!(rec.render_bg(0, 4), Err(RomlensError::Recording { .. })));
+        assert!(matches!(
+            rec.render_bg(0, 4),
+            Err(RomlensError::Recording { .. })
+        ));
         let summary = rec.ppu_summary(3).unwrap();
         assert_eq!(summary.bg_mode, 1);
         assert_eq!(summary.layers[0].hscroll, 3);
@@ -683,7 +692,12 @@ mod tests {
 
     #[test]
     fn the_bit_table_matches_the_decoder() {
-        for format in [TileFormat::Bpp2, TileFormat::Bpp4, TileFormat::Bpp8, TileFormat::Mode7] {
+        for format in [
+            TileFormat::Bpp2,
+            TileFormat::Bpp4,
+            TileFormat::Bpp8,
+            TileFormat::Mode7,
+        ] {
             let bpp = CoreFormat::from(format).bpp() as usize;
             let table = tile_bit_sources(format);
             assert_eq!(table.len(), 64 * bpp);
@@ -703,7 +717,13 @@ mod tests {
         let tiles = rom.bytes(0x1000, 1024);
         assert_eq!(tiles.len(), 1024);
         assert_eq!(rom.bytes(0xFFFF, 16).len(), 1, "cut short at the end");
-        let sheet = tile_sheet(tiles.clone(), TileFormat::Bpp4, 32, 16, PaletteSource::Grayscale);
+        let sheet = tile_sheet(
+            tiles.clone(),
+            TileFormat::Bpp4,
+            32,
+            16,
+            PaletteSource::Grayscale,
+        );
         assert_eq!((sheet.width, sheet.height), (128, 16));
         let lens = decode_tile(tiles[8 * 32..9 * 32].to_vec(), TileFormat::Bpp4);
         assert_eq!(lens.planes.len(), 32);
