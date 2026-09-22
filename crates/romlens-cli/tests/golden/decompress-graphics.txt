@@ -1,0 +1,13 @@
+0x003000 = $00:B000: 1024 bytes from 433 (2.36:1), ending at 0x0031B1
+  direct copy                50
+  byte fill                  61
+  long headers               0
+000000  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+000010  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+000020  FF 00 FF 00 FF 00 FF 00 FF 00 FF 00 FF 00 FF 00
+000030  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+… 960 more bytes; --out writes them all
+0x003000 = $00:B000: 1024 bytes from 433 (2.36:1), ending at 0x0031B1
+wrote 1024 bytes to <tmp>/tiles.bin
+0x001000 = $00:9000: 16 bytes from 33 (0.48:1), ending at 0x001021
+000000  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00

@@ -22,6 +22,10 @@ use crate::model::region::{BankRule, DataKind, RegionKind, TableElem};
 use crate::rom::checksum::compute_checksum;
 use crate::rom::header::TITLE_LEN;
 
+pub mod graphics;
+
+pub use graphics::{GRAPHICS_TITLE, graphics_lorom, truth_for_graphics};
+
 pub const FIXTURE_TITLE: &str = "ROMLENS TEST";
 
 /// Bytes of the boot routine, placed at `$00:8000`.
@@ -238,14 +242,19 @@ pub fn mixed_data_lorom() -> Vec<u8> {
         state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
         *b = (state >> 24) as u8;
     }
-    // The header's checksum covers the payload, so it is recomputed last.
-    let h = MappingMode::LoRom.header_offset().as_usize();
+    fix_checksum(&mut rom, MappingMode::LoRom);
+    rom
+}
+
+/// Recompute the header checksum after writing a payload: it covers every
+/// byte, so it is always the last thing a builder does.
+fn fix_checksum(rom: &mut [u8], mode: MappingMode) {
+    let h = mode.header_offset().as_usize();
     rom[h + 0x1C..h + 0x1E].copy_from_slice(&0x0000u16.to_le_bytes());
     rom[h + 0x1E..h + 0x20].copy_from_slice(&0xFFFFu16.to_le_bytes());
-    let sum = crate::rom::checksum::compute_checksum(&rom);
+    let sum = crate::rom::checksum::compute_checksum(rom);
     rom[h + 0x1C..h + 0x1E].copy_from_slice(&(!sum).to_le_bytes());
     rom[h + 0x1E..h + 0x20].copy_from_slice(&sum.to_le_bytes());
-    rom
 }
 
 /// What the builder knows it wrote into [`build`]'s image, as ground truth.
@@ -363,6 +372,7 @@ pub fn truth_for_mixed_data() -> Vec<TruthRange> {
 pub fn truth_for_title(title: &str, mode: MappingMode) -> Option<Vec<TruthRange>> {
     match title.trim() {
         MIXED_DATA_TITLE => Some(truth_for_mixed_data()),
+        GRAPHICS_TITLE => Some(truth_for_graphics()),
         DISPATCH_TITLE => Some(truth_for_dispatch()),
         FIXTURE_TITLE => Some(truth_for(mode)),
         _ => None,

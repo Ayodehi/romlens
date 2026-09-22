@@ -60,6 +60,7 @@ pub enum Fixture {
     AllOpcodes,
     Dispatch,
     MixedData,
+    Graphics,
 }
 
 impl Fixture {
@@ -69,6 +70,7 @@ impl Fixture {
             Fixture::AllOpcodes => fixtures::all_opcodes_lorom(),
             Fixture::Dispatch => fixtures::dispatch_lorom(),
             Fixture::MixedData => fixtures::mixed_data_lorom(),
+            Fixture::Graphics => fixtures::graphics_lorom(),
         }
     }
 
@@ -78,6 +80,7 @@ impl Fixture {
             Fixture::AllOpcodes => "all-opcodes LoROM".to_owned(),
             Fixture::Dispatch => "dispatch-table LoROM".to_owned(),
             Fixture::MixedData => "mixed-data LoROM".to_owned(),
+            Fixture::Graphics => "graphics LoROM".to_owned(),
         }
     }
 }

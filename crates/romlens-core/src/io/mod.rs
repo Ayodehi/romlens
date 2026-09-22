@@ -1,6 +1,7 @@
 //! Project package store, ROM locating and the exporters.
 
 pub mod asar_export;
+pub mod crc32;
 pub mod import;
 pub mod locate;
 pub mod project_store;

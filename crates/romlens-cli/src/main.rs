@@ -242,6 +242,88 @@ enum Command {
     },
     /// The built-in hardware register names.
     Registers { address: Option<String> },
+    /// Decode bytes as 8×8 tiles: the index grid, the planes, or a picture.
+    Tiles {
+        rom: PathBuf,
+        #[arg(long)]
+        from: String,
+        /// 2, 4 or 8, or 7 for Mode 7's one byte per pixel.
+        #[arg(long, default_value_t = 4)]
+        bpp: u8,
+        #[arg(long, default_value_t = 1)]
+        count: u32,
+        /// Tiles per row.
+        #[arg(long, default_value_t = 16)]
+        columns: u32,
+        /// Colours from BGR15 entries at this address (for --ascii and
+        /// --digest); grayscale when absent.
+        #[arg(long)]
+        palette: Option<String>,
+        /// The index grid, and the planes for a single tile (the default).
+        #[arg(long, conflicts_with_all = ["json", "ascii", "digest"])]
+        text: bool,
+        #[arg(long, conflicts_with_all = ["ascii", "digest"])]
+        json: bool,
+        /// The coloured sheet as characters, darkest to brightest.
+        #[arg(long, conflicts_with = "digest")]
+        ascii: bool,
+        /// The SHA-256 of the coloured sheet: what a golden pins.
+        #[arg(long)]
+        digest: bool,
+    },
+    /// Decode BGR15 colours.
+    Palette {
+        rom: PathBuf,
+        #[arg(long)]
+        from: String,
+        #[arg(long, default_value_t = 16)]
+        count: u16,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Decode a 544-byte sprite table.
+    Oam {
+        rom: PathBuf,
+        #[arg(long)]
+        from: String,
+        /// The OBSEL value that sizes the sprites, e.g. $60.
+        #[arg(long, default_value = "0")]
+        obsel: String,
+        /// table, screen or priority.
+        #[arg(long, default_value = "table")]
+        sort: String,
+        /// Leave out sprites parked off screen.
+        #[arg(long)]
+        visible: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Decode a BG tilemap.
+    Tilemap {
+        rom: PathBuf,
+        #[arg(long)]
+        from: String,
+        /// 32x32, 64x32, 32x64 or 64x64.
+        #[arg(long, default_value = "32x32")]
+        size: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Decompress a block.
+    Decompress {
+        rom: PathBuf,
+        #[arg(long)]
+        from: String,
+        /// `sm`: Super Metroid's format.
+        #[arg(long, default_value = "sm")]
+        format: String,
+        /// Count the chunks by command.
+        #[arg(long)]
+        stats: bool,
+        /// Write the decompressed bytes to this file.
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -420,6 +502,8 @@ enum FixtureArg {
     Dispatch,
     /// 64 KB LoROM with one block per data heuristic.
     MixedData,
+    /// 64 KB LoROM with tiles, a palette, OAM, a tilemap and a compressed block.
+    Graphics,
 }
 
 impl From<FixtureArg> for commands::rom::Fixture {
@@ -429,6 +513,7 @@ impl From<FixtureArg> for commands::rom::Fixture {
             FixtureArg::AllOpcodes => commands::rom::Fixture::AllOpcodes,
             FixtureArg::Dispatch => commands::rom::Fixture::Dispatch,
             FixtureArg::MixedData => commands::rom::Fixture::MixedData,
+            FixtureArg::Graphics => commands::rom::Fixture::Graphics,
         }
     }
 }
@@ -704,5 +789,67 @@ fn main() -> Result<()> {
             ProjectCommand::History { rom } => commands::project::history(&path, rom.as_deref()),
         },
         Command::Registers { address } => commands::registers::run(address.as_deref()),
+        Command::Tiles {
+            rom,
+            from,
+            bpp,
+            count,
+            columns,
+            palette,
+            text: _,
+            json,
+            ascii,
+            digest,
+        } => commands::graphics::tiles(commands::graphics::TilesArgs {
+            rom: &rom,
+            from: &from,
+            bpp,
+            count,
+            columns,
+            palette: palette.as_deref(),
+            output: if json {
+                commands::graphics::Output::Json
+            } else if ascii {
+                commands::graphics::Output::Ascii
+            } else if digest {
+                commands::graphics::Output::Digest
+            } else {
+                commands::graphics::Output::Text
+            },
+        }),
+        Command::Palette {
+            rom,
+            from,
+            count,
+            json,
+        } => commands::graphics::palette(&rom, &from, count, json),
+        Command::Oam {
+            rom,
+            from,
+            obsel,
+            sort,
+            visible,
+            json,
+        } => commands::graphics::oam(commands::graphics::OamArgs {
+            rom: &rom,
+            from: &from,
+            obsel: commands::graphics::parse_hex_u8(&obsel)?,
+            sort: &sort,
+            visible,
+            json,
+        }),
+        Command::Tilemap {
+            rom,
+            from,
+            size,
+            json,
+        } => commands::graphics::tilemap(&rom, &from, &size, json),
+        Command::Decompress {
+            rom,
+            from,
+            format,
+            stats,
+            out,
+        } => commands::graphics::decompress(&rom, &from, &format, stats, out.as_deref()),
     }
 }

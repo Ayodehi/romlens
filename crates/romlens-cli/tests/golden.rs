@@ -484,6 +484,98 @@ nonsense\n\
 }
 
 #[test]
+fn graphics_commands() {
+    let dir = temp_dir("graphics");
+    let rom = dir.join("romlens-graphics.sfc");
+    std::fs::write(&rom, fixtures::graphics_lorom()).unwrap();
+    let rom = rom.to_str().unwrap();
+    // One tile with its planes, then the whole 4 bpp block as a grid, the
+    // 2 bpp letters, and the sheet in a real palette as characters and as a
+    // digest.
+    check(
+        "tiles-graphics",
+        &[
+            run(&["tiles", rom, "--from", "0x10A0"]),
+            run_with(
+                &["tiles", rom, "--from", "0x1000"],
+                &["--count", "32", "--columns", "8"],
+            ),
+            run_with(
+                &["tiles", rom, "--from", "0x1400"],
+                &["--bpp", "2", "--count", "8"],
+            ),
+            run_with(
+                &["tiles", rom, "--from", "0x1000", "--count", "32"],
+                &["--ascii"],
+            ),
+            run_with(
+                &["tiles", rom, "--from", "0x1000", "--count", "32"],
+                &["--digest", "--palette", "0x1820"],
+            ),
+            run_with(&["tiles", rom, "--from", "0x1000"], &["--bpp", "3"]),
+        ]
+        .concat(),
+    );
+    check(
+        "tiles-json-graphics",
+        &run_with(
+            &["tiles", rom, "--from", "0x1000"],
+            &["--count", "2", "--json"],
+        ),
+    );
+    check(
+        "palette-graphics",
+        &[
+            run_with(&["palette", rom, "--from", "0x1800"], &["--count", "32"]),
+            run_with(
+                &["palette", rom, "--from", "0x1800"],
+                &["--count", "2", "--json"],
+            ),
+        ]
+        .concat(),
+    );
+    check(
+        "oam-graphics",
+        &[
+            run(&["oam", rom, "--from", "0x1A00", "--visible"]),
+            run_with(
+                &["oam", rom, "--from", "0x1A00"],
+                &["--obsel", "$60", "--sort", "priority", "--visible"],
+            ),
+            run_with(&["oam", rom, "--from", "0x1A00"], &["--sort", "screen"]),
+        ]
+        .concat(),
+    );
+    check(
+        "tilemap-graphics",
+        &[
+            run(&["tilemap", rom, "--from", "0x2000"]),
+            run_with(&["tilemap", rom, "--from", "0x2000"], &["--size", "65x65"]),
+        ]
+        .concat(),
+    );
+    let out = dir.join("tiles.bin");
+    let out = out.to_str().unwrap();
+    check(
+        "decompress-graphics",
+        &redact_tmp(
+            &dir,
+            &[
+                run_with(&["decompress", rom, "--from", "0x3000"], &["--stats"]),
+                run_with(&["decompress", rom, "--from", "0x3000"], &["--out", out]),
+                run_with(&["decompress", rom, "--from", "0x1000"], &[]),
+            ]
+            .concat(),
+        ),
+    );
+    assert_eq!(
+        std::fs::read(out).unwrap(),
+        &fixtures::graphics_lorom()[0x1000..0x1400]
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn testrom_round_trips() {
     let dir = temp_dir("testrom");
     let out = dir.join("t.sfc");

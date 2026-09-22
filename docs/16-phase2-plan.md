@@ -23,7 +23,10 @@ that tracks against it.
 | 2A T10 macOS shell | done: Find with a results list, Mark as ▸ with a parameter sheet, File › Import, the overview strip, and an evidence popover that sorts by strength and links to the dispatcher |
 | 2A T11 docs | done: measurements in docs/10, the design in docs/03, the rows and a Phase 2 manual pass in docs/15 |
 | **Track 2A complete** | 22 September 2026. Its checklist rows are 🧪: built and covered by the app test bundle, awaiting the manual pass |
-| Track 2B (graphics) | not started; `graphics::palette` and `graphics::tile` exist because 2A's heuristics needed their scoring |
+| 2B T1 skeleton and the 2A signatures | done: `Bitmap` with a SHA-256 digest and an ASCII form, `io::crc32`, `sm_lz::try_decompress` |
+| 2B T2–T7 decoders | done: tiles (2/4/8 bpp and Mode 7, with `tile_bit_source`), palettes (`PaletteRef`), OAM (all eight OBSEL pairs, nibble-wrapping large sprites), tilemaps (sub-maps, 16×16 cells), `PpuState`'s 256-byte layout, and the bounded renderer (`render_bg_layer`, `render_sprite`, `render_tile_sheet`) |
+| 2B T13 Super Metroid decompressor | done early: verified against the game's routine at `$80:B119` and SnesLab's LZ5 page; a compressor in the test module round-trips data that exercises all eight commands |
+| 2B T8–T10 view models, fixture, CLI | done for the ROM-only views: `viewmodel::graphics`, `fixtures::graphics_lorom` (our own art) with `machine()` for VRAM/CGRAM/OAM, and `tiles`, `palette`, `oam`, `tilemap`, `decompress` with goldens. `render bg` waits on the pulled-forward recording slice |
 | Track 2C (recordings) | not started |
 
 ## Context

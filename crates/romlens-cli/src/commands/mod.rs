@@ -4,6 +4,7 @@ pub mod accuracy;
 pub mod analyze;
 pub mod disasm;
 pub mod export;
+pub mod graphics;
 pub mod heuristics;
 pub mod import;
 pub mod inspect;
