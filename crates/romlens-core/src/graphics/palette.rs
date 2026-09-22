@@ -42,15 +42,17 @@ pub fn palette_score(bytes: &[u8]) -> f32 {
         return 0.0;
     }
     let colours: Vec<u16> = bytes
-        .chunks_exact(COLOUR_LEN)
-        .map(|c| u16::from_le_bytes([c[0], c[1]]))
+        .as_chunks::<COLOUR_LEN>()
+        .0
+        .iter()
+        .map(|c| u16::from_le_bytes(*c))
         .collect();
     if colours.iter().any(|c| c & 0x8000 != 0) {
         return 0.0;
     }
     let mut rows = 0usize;
     let mut total = 0.0f32;
-    for row in colours.chunks_exact(ROW_LEN) {
+    for row in colours.as_chunks::<ROW_LEN>().0 {
         let mut distinct: Vec<u16> = row.to_vec();
         distinct.sort_unstable();
         distinct.dedup();

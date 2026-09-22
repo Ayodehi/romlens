@@ -17,7 +17,7 @@ pub const MIN_RUN: usize = 8;
 fn word_run(rom: &RomImage, bytes: &[u8], bank: u8) -> usize {
     let mut best = 0;
     let mut run = 0;
-    for pair in bytes.chunks_exact(2) {
+    for pair in bytes.as_chunks::<2>().0 {
         let value = u16::from_le_bytes([pair[0], pair[1]]);
         if rom.file_offset_for(SnesAddress::new(bank, value)).is_some() {
             run += 1;
@@ -33,7 +33,7 @@ fn word_run(rom: &RomImage, bytes: &[u8], bank: u8) -> usize {
 fn long_run(rom: &RomImage, bytes: &[u8]) -> usize {
     let mut best = 0;
     let mut run = 0;
-    for triple in bytes.chunks_exact(3) {
+    for triple in bytes.as_chunks::<3>().0 {
         let value = u32::from_le_bytes([triple[0], triple[1], triple[2], 0]);
         if rom.file_offset_for(SnesAddress::from_u24(value)).is_some() {
             run += 1;
