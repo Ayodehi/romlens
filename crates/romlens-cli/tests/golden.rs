@@ -43,6 +43,15 @@ fn run(args: &[&str]) -> String {
     )
 }
 
+/// `run`, with the arguments in two parts.
+///
+/// A command long enough to need a wrapped array literal is formatted
+/// differently by different rustfmt versions, and a test harness is not worth
+/// a toolchain argument. Two short slices are unambiguous to all of them.
+fn run_with(head: &[&str], tail: &[&str]) -> String {
+    run(&[head, tail].concat())
+}
+
 fn check(name: &str, actual: &str) {
     let path = golden_dir().join(format!("{name}.txt"));
     if std::env::var_os("UPDATE_GOLDEN").is_some() {
@@ -342,25 +351,19 @@ fn project_scenario() {
     log += &run(&["project", pkg, "mark", "0x20", "6", "word"]);
     // The vector table is a table of code pointers, so typing it that way
     // renders it as the routines it names.
-    log += &run(&[
-        "project", pkg, "mark", "0x7FFC", "4", "table", "--stride", "2", "--elem", "code",
-        "--bank", "same",
-    ]);
+    log += &run_with(
+        &["project", pkg, "mark", "0x7FFC", "4", "table"],
+        &["--stride", "2", "--elem", "code", "--bank", "same"],
+    );
     log += &run(&["project", pkg, "mark", "0x22", "2", "code"]);
     log += &run(&["project", pkg, "mark", "0x100", "0", "byte"]);
     log += &run(&["project", pkg, "flags", "0x5", "--m", "0", "--dbr", "$7E"]);
     log += &redact_tmp(&dir, &run(&["project", pkg, "history"]));
     log += &run(&["disasm", rom, "--project", pkg, "--count", "24"]);
-    log += &run(&[
-        "disasm",
-        rom,
-        "--project",
-        pkg,
-        "--from",
-        "0x7FFC",
-        "--count",
-        "3",
-    ]);
+    log += &run_with(
+        &["disasm", rom, "--project", pkg],
+        &["--from", "0x7FFC", "--count", "3"],
+    );
     log += &run(&["labels", rom, "--project", pkg, "--source", "user"]);
     log += &run(&["export", "sym", rom, "--project", pkg, "--out", "-"]);
     log += &run(&["project", pkg, "label", "$00:8000", "-"]);
@@ -415,14 +418,10 @@ fn project_scenario() {
             truth_path.to_str().unwrap(),
         ]),
     );
-    trace_log += &run(&[
-        "accuracy",
-        rom,
-        "--project",
-        traced,
-        "--truth",
-        truth_path.to_str().unwrap(),
-    ]);
+    trace_log += &run_with(
+        &["accuracy", rom, "--project", traced],
+        &["--truth", truth_path.to_str().unwrap()],
+    );
     check("trace-lorom", &trace_log);
 
     // Symbol import: a user name survives, others are rewritten and reported,
