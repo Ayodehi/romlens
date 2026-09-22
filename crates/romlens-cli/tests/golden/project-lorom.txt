@@ -9,11 +9,12 @@ Error: label "bad name" contains ' '; use letters, digits and underscores
 Set Comment
 Set Comment
 Mark as Data
+Mark as Data
 Mark as Code
 [exit code 1]
 Error: range 0x000100+0 is outside the ROM or empty
 Set Flags
-<tmp>/Test.romlens for "ROMLENS TEST" (a2462f1d74f993d0): 3 labels, 2 comments, 3 region marks, 1 flag overrides
+<tmp>/Test.romlens for "ROMLENS TEST" (a2462f1d74f993d0): 3 labels, 2 comments, 4 region marks, 1 flag overrides
   label    $00:8000  Boot  (user)
   label    $00:800E  Idle  (user)
   label    $7E:0A1C  SamusPose  (user)
@@ -22,6 +23,7 @@ Set Flags
   mark     0x000020  2 bytes  word
   mark     0x000022  2 bytes  code
   mark     0x000024  2 bytes  word
+  mark     0x007FFC  4 bytes  table
   flags    0x000005  FlagOverride { m: Some(false), x: None, e: None, dbr: Some(126), dp: None }
 ; ==== bank $00 ====
 Boot:
@@ -47,6 +49,8 @@ Idle:
 0x000020  $00:8020  00 00        dw $0000
 
 ; ---- code (100%) ----
+; ---- table (100%) ----
+0x007FFC  $00:FFFC  00 80 0E 80  dw Boot,Idle
 0x000000  $00:8000  Boot                     user
 0x00000E  $00:800E  Idle                     user
           $7E:0A1C  SamusPose                user
@@ -64,6 +68,7 @@ Remove Label
 Remove Label
 Remove Comment
 Remove Comment
+Clear Mark
 Clear Mark
 Remove Flags
 <tmp>/Test.romlens for "ROMLENS TEST" (a2462f1d74f993d0): 0 labels, 0 comments, 0 region marks, 0 flag overrides

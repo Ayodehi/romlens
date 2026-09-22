@@ -114,8 +114,23 @@ final class WorkbenchSession {
         try execute(.setComment(address: address, kind: kind, text: text))
     }
 
-    func mark(start: UInt32, len: UInt32, kind: OverrideKind, dataKind: DataKind? = nil) throws {
-        try execute(.markRegion(start: start, len: len, kind: kind, dataKind: dataKind, stride: nil, bpp: nil))
+    /// `stride`, `bpp`, `elem` and `bank` are the data-kind parameters; the
+    /// defaults are a two-byte raw table of same-bank entries, which is what
+    /// the View menu's plain "Mark as Data" means.
+    func mark(
+        start: UInt32,
+        len: UInt32,
+        kind: OverrideKind,
+        dataKind: DataKind? = nil,
+        stride: UInt8? = nil,
+        bpp: UInt8? = nil,
+        elem: TableElem? = nil,
+        bank: BankRule? = nil
+    ) throws {
+        try execute(.markRegion(
+            start: start, len: len, kind: kind, dataKind: dataKind,
+            stride: stride, bpp: bpp, elem: elem, bank: bank
+        ))
     }
 
     func clearMark(start: UInt32, len: UInt32) throws {

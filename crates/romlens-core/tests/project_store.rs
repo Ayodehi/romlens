@@ -11,7 +11,7 @@ use romlens_core::io::{
 };
 use romlens_core::model::{
     Command, CommentKind, DataKind, FlagOverride, Label, LabelSource, OverrideKind, Project,
-    RomIdentity,
+    RomIdentity, TableElem,
 };
 use romlens_core::{AddressStyle, FileOffset, ProjectError, RomImage, SnesAddress};
 
@@ -70,7 +70,10 @@ fn sample(rom: &RomImage) -> Project {
         Command::MarkRegion {
             start: FileOffset(0x1400),
             len: 64,
-            kind: OverrideKind::Data(DataKind::Table { stride: 4 }),
+            kind: OverrideKind::Data(DataKind::Table {
+                stride: 4,
+                elem: TableElem::Raw,
+            }),
         },
     )
     .unwrap();

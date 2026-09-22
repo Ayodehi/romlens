@@ -332,11 +332,20 @@ fn project_scenario() {
         "--block",
     ]);
     log += &run(&["project", pkg, "mark", "0x20", "6", "word"]);
+    // The vector table is a table of code pointers, so typing it that way
+    // renders it as the routines it names.
+    log += &run(&[
+        "project", pkg, "mark", "0x7FFC", "4", "table", "--stride", "2", "--elem", "code",
+        "--bank", "same",
+    ]);
     log += &run(&["project", pkg, "mark", "0x22", "2", "code"]);
     log += &run(&["project", pkg, "mark", "0x100", "0", "byte"]);
     log += &run(&["project", pkg, "flags", "0x5", "--m", "0", "--dbr", "$7E"]);
     log += &redact_tmp(&dir, &run(&["project", pkg, "history"]));
     log += &run(&["disasm", rom, "--project", pkg, "--count", "24"]);
+    log += &run(&[
+        "disasm", rom, "--project", pkg, "--from", "0x7FFC", "--count", "3",
+    ]);
     log += &run(&["labels", rom, "--project", pkg, "--source", "user"]);
     log += &run(&["export", "sym", rom, "--project", pkg, "--out", "-"]);
     log += &run(&["project", pkg, "label", "$00:8000", "-"]);
@@ -345,6 +354,7 @@ fn project_scenario() {
     log += &run(&["project", pkg, "comment", "$00:8000", "-", "--line"]);
     log += &run(&["project", pkg, "comment", "$00:8007", "-", "--block"]);
     log += &run(&["project", pkg, "clear", "0x20", "6"]);
+    log += &run(&["project", pkg, "clear", "0x7FFC", "4"]);
     log += &run(&["project", pkg, "flags", "0x5", "--remove"]);
     log += &redact_tmp(&dir, &run(&["project", pkg, "history"]));
     check("project-lorom", &log);

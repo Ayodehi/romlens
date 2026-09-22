@@ -63,9 +63,9 @@ numbering leaves a gap after 2.8 so 2A can grow without renumbering the other
 tracks.
 
 A row is marked here only when the *shell* exposes it, so every Phase 2 row is
-still ⬜. The core and CLI behind 2.1, 2.2, 2.3, 2.4 and 2.8 landed on 22 September
-2026 — jump tables, scored heuristics, trace and symbol import, and the
-accuracy harness,
+still ⬜. The core and CLI behind 2.1, 2.2, 2.3, 2.4, 2.5 and 2.8 landed on 22 September
+2026 — jump tables, scored heuristics, trace and symbol import, typed data
+and the accuracy harness,
 each with goldens that need no commercial ROM — and what those rows still want
 is the shell work in tasks T8 and T10. 2.3's DiztinGUIsh column is dropped
 rather than deferred: the format was never verified, and a Diz user can export

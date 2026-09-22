@@ -570,6 +570,8 @@ mod tests {
             data_kind: Some(DataKind::Byte),
             stride: None,
             bpp: None,
+            elem: None,
+            bank: None,
         })
         .unwrap();
         assert!(wb.needs_analysis());

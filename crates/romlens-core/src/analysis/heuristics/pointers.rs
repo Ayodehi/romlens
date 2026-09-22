@@ -6,7 +6,7 @@
 
 use crate::analysis::heuristics::{Heuristic, WindowHit};
 use crate::memory::address::SnesAddress;
-use crate::model::region::{DataKind, RegionKind};
+use crate::model::region::{BankRule, DataKind, RegionKind};
 use crate::rom::image::RomImage;
 
 /// Entries that must resolve in a row before a window counts.
@@ -74,7 +74,15 @@ impl Heuristic for Pointers {
         let (entries, kind, elements) = if longs * 3 >= words * 2 {
             (longs, DataKind::Long, longs)
         } else {
-            (words, DataKind::Pointer, words)
+            (
+                words,
+                // The run was found by resolving each entry in the table's own
+                // bank, so that is the rule it was proved under.
+                DataKind::Pointer {
+                    bank: BankRule::SameBank,
+                },
+                words,
+            )
         };
         if entries < MIN_RUN {
             return None;

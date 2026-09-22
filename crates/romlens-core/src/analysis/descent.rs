@@ -21,7 +21,7 @@ use crate::cpu65816::{
 };
 use crate::memory::address::{FileOffset, SnesAddress};
 use crate::model::project::{FlagOverride, Project};
-use crate::model::region::{DataKind, OverrideKind};
+use crate::model::region::{BankRule, DataKind, OverrideKind, RegionOverride, TableElem};
 use crate::model::xref::{XRef, XRefKind};
 use crate::rom::image::RomImage;
 
@@ -418,6 +418,26 @@ impl<'a> Walk<'a> {
                 self.push_entry(addr, flags, 0, true, true, WidthTrust::default());
             }
         }
+        // A user-marked table of addresses. This is the correction path the
+        // resolver's failures point at: when a dispatch table is built in RAM,
+        // or a pointer table is only reachable through one, marking it by hand
+        // is what makes the map right — so a marked table's entries have to be
+        // followed exactly as a resolved one's are.
+        let tables: Vec<RegionOverride> = self
+            .project
+            .region_overrides
+            .iter()
+            .filter(|r| {
+                matches!(
+                    r.kind,
+                    OverrideKind::Data(DataKind::Table { .. } | DataKind::Pointer { .. })
+                )
+            })
+            .copied()
+            .collect();
+        for r in tables {
+            self.seed_table(r);
+        }
         // Every opcode an emulator actually fetched, with the widths it had at
         // the time. These are seeded rather than merely painted so the
         // disassembler *decodes* them: a byte the classifier calls code but
@@ -435,6 +455,77 @@ impl<'a> Walk<'a> {
                     self.push_entry(addr, flags, 0, true, true, WidthTrust::default());
                 }
             }
+        }
+    }
+
+    /// Follow the entries of a user-marked table of addresses.
+    ///
+    /// A `Code` element is walked and gets a code xref, so its targets become
+    /// real instructions with real labels. A `Pointer` element only gets a data
+    /// xref: it names data, and walking it would invent code. Both are marked
+    /// uncertain, because the user asserted the *shape* of the table, not that
+    /// any one entry is ever used.
+    fn seed_table(&mut self, r: RegionOverride) {
+        let (width, bank, code) = match r.kind {
+            OverrideKind::Data(DataKind::Pointer { bank }) => (
+                if bank == BankRule::FromEntry { 3u32 } else { 2 },
+                bank,
+                false,
+            ),
+            OverrideKind::Data(DataKind::Table { stride, elem }) => match elem {
+                TableElem::Raw => return,
+                TableElem::Pointer(bank) => (stride as u32, bank, false),
+                TableElem::Code(bank) => (stride as u32, bank, true),
+            },
+            _ => return,
+        };
+        if width < 2 {
+            return;
+        }
+        let Some(table_bank) = self.rom.snes_address_for(r.start).map(|a| a.bank()) else {
+            return;
+        };
+        let bytes = self.rom.bytes();
+        let end = r.end().min(bytes.len() as u32);
+        let mut slot = r.start.0;
+        while slot + width <= end {
+            let s = slot as usize;
+            let target = match (bank, width) {
+                (BankRule::FromEntry, 3..) => SnesAddress::from_u24(u32::from_le_bytes([
+                    bytes[s],
+                    bytes[s + 1],
+                    bytes[s + 2],
+                    0,
+                ])),
+                (BankRule::FromEntry, _) => break,
+                (rule, _) => SnesAddress::new(
+                    rule.bank_for(table_bank),
+                    u16::from_le_bytes([bytes[s], bytes[s + 1]]),
+                ),
+            };
+            if let Some(to) = self.rom.file_offset_for(target) {
+                self.xrefs.push((
+                    XRef {
+                        from: FileOffset(slot),
+                        to: Project::canonical(self.rom, target),
+                        to_offset: Some(to),
+                        kind: if code { XRefKind::Jump } else { XRefKind::Read },
+                        certain: false,
+                    },
+                    true,
+                ));
+                if code {
+                    self.push_entry(
+                        target,
+                        FlagState::NATIVE_VECTOR,
+                        0,
+                        true,
+                        true,
+                        WidthTrust::default(),
+                    );
+                }
+            }
+            slot += width;
         }
     }
 
@@ -711,7 +802,16 @@ impl<'a> Walk<'a> {
                                 self.seeds.push(DataSeed {
                                     offset: slot.0,
                                     len: if long { 3 } else { 2 },
-                                    kind: DataKind::Pointer,
+                                    // A `JMP (abs)` slot: a 16-bit entry is
+                                    // read in the program bank, a 24-bit one
+                                    // carries its own.
+                                    kind: DataKind::Pointer {
+                                        bank: if long {
+                                            BankRule::FromEntry
+                                        } else {
+                                            BankRule::SameBank
+                                        },
+                                    },
                                     confidence: 0.9,
                                     source: SeedSource::JumpPointer,
                                 });

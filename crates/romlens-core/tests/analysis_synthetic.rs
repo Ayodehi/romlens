@@ -3,7 +3,8 @@
 use romlens_core::analysis::{AnalysisControl, WarningKind, analyze};
 use romlens_core::fixtures;
 use romlens_core::model::{
-    Command, DataKind, Evidence, FlagOverride, OverrideKind, Project, RegionKind, XRefKind,
+    BankRule, Command, DataKind, Evidence, FlagOverride, OverrideKind, Project, RegionKind,
+    TableElem, XRefKind,
 };
 use romlens_core::{FileOffset, MappingMode, RomImage, SnesAddress};
 
@@ -91,7 +92,12 @@ fn walker_follows_every_static_edge() {
     assert!(at(0x14).is_some() && at(0x15).is_some());
     // JMP (abs): the slot is a pointer region with a PTR label; the pointee was walked.
     let slot = snap.region_at(FileOffset(0x60)).unwrap();
-    assert_eq!(slot.kind, RegionKind::Data(DataKind::Pointer));
+    assert_eq!(
+        slot.kind,
+        RegionKind::Data(DataKind::Pointer {
+            bank: BankRule::SameBank,
+        })
+    );
     assert_eq!(slot.len, 2);
     assert!((slot.confidence - 0.9).abs() < 1e-6);
     assert_eq!(snap.auto_labels[&a(0x8060)].name, "PTR_008060");
@@ -239,14 +245,20 @@ fn user_marks_and_flag_overrides_steer_the_walk() {
             Command::MarkRegion {
                 start: FileOffset(0x1100),
                 len: 8,
-                kind: OverrideKind::Data(DataKind::Table { stride: 4 }),
+                kind: OverrideKind::Data(DataKind::Table {
+                    stride: 4,
+                    elem: TableElem::Raw,
+                }),
             },
         )
         .unwrap();
     let snap = analyze(&rom, &project, &AnalysisControl::silent()).unwrap();
     assert_eq!(
         snap.region_at(FileOffset(0x1102)).unwrap().kind,
-        RegionKind::Data(DataKind::Table { stride: 4 })
+        RegionKind::Data(DataKind::Table {
+            stride: 4,
+            elem: TableElem::Raw,
+        })
     );
 }
 

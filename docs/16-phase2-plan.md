@@ -16,6 +16,7 @@ that tracks against it.
 | 2A T4 heuristics | done, `5537be5`: unknown 97.9% → 82.9%, region count 1,012 → 1,672 |
 | 2A T6 trace import | done: Mesen2 CDL and bsnes-plus usage map, with the observed M/X widths seeded into the walk. DiztinGUIsh dropped, not deferred |
 | 2A T7 symbol import | done: WLA, no$sns and VICE, with the user's names never overwritten and every rewrite reported. ca65 `.dbg` stays in Phase 3 as planned |
+| 2A T8 data typing | done: `BankRule` and `TableElem`, and a table of addresses reads as the labels it names |
 | 2A T5 accuracy harness | done, except `romlens truth from-cdl`, now shipped with T6. The fixtures score 1.000 precision and recall in CI; the development-ROM target is unmeasured until someone records a CDL from their own play session |
 | Housekeeping 2 (the Phase 1 manual pass) | **still to run**, and it needs a person at the app |
 | Everything from 2A T4 (heuristics) on | not started |

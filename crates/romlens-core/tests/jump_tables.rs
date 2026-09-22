@@ -4,7 +4,7 @@
 use romlens_core::analysis::jumptable::StopReason;
 use romlens_core::analysis::{AnalysisControl, AnalysisSnapshot, WarningKind, analyze};
 use romlens_core::fixtures;
-use romlens_core::model::{DataKind, Evidence, Project, RegionKind, XRefKind};
+use romlens_core::model::{BankRule, DataKind, Evidence, Project, RegionKind, TableElem, XRefKind};
 use romlens_core::{FileOffset, MappingMode, RomImage, SnesAddress};
 
 /// A LoROM whose reset routine dispatches through a table. Everything is at a
@@ -102,7 +102,15 @@ fn a_table_is_bounded_by_the_first_routine_it_points_at() {
     let region = region_at(&s, 0x20);
     assert_eq!(region.start, FileOffset(0x20));
     assert_eq!(region.len, 16, "eight two-byte entries, not ten");
-    assert_eq!(region.kind, RegionKind::Data(DataKind::Table { stride: 2 }));
+    // Its entries are code in the program bank, which is what makes the
+    // listing read `dw SUB_…` rather than a row of numbers.
+    assert_eq!(
+        region.kind,
+        RegionKind::Data(DataKind::Table {
+            stride: 2,
+            elem: TableElem::Code(BankRule::SameBank),
+        })
+    );
     assert_eq!(region.confidence, StopReason::TargetFloor.confidence());
     assert_eq!(
         region.evidence,
@@ -279,8 +287,11 @@ fn filler_is_not_a_table() {
     // Whatever else claims those bytes, no jump table did: the resolver
     // produced no table at all.
     assert!(s.jump_tables.is_empty());
-    assert_ne!(
-        region_at(&s, 0x20).kind,
-        RegionKind::Data(DataKind::Table { stride: 2 })
+    assert!(
+        !matches!(
+            region_at(&s, 0x20).kind,
+            RegionKind::Data(DataKind::Table { .. })
+        ),
+        "no table was resolved, so nothing may be typed as one"
     );
 }

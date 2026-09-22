@@ -30,7 +30,9 @@ use crate::analysis::jumptable::Resolution;
 use crate::cpu65816::ASSUMED_WIDTHS;
 use crate::memory::address::FileOffset;
 use crate::model::project::Project;
-use crate::model::region::{DataKind, Evidence, OverrideKind, Region, RegionKind};
+use crate::model::region::{
+    BankRule, DataKind, Evidence, OverrideKind, Region, RegionKind, TableElem,
+};
 use crate::rom::header::{EXTENDED_HEADER_LEN, HEADER_LEN};
 use crate::rom::image::RomImage;
 
@@ -46,6 +48,13 @@ const TAG_TABLE: u8 = 8;
 const TAG_HEURISTIC: u8 = 9;
 const TAG_TRACE_CODE: u8 = 10;
 const TAG_TRACE_DATA: u8 = 11;
+
+/// What a resolved `JMP`/`JSR (abs,X)` table is: two-byte entries pointing at
+/// code in the table's own bank.
+const JUMP_TABLE_KIND: RegionKind = RegionKind::Data(DataKind::Table {
+    stride: jumptable::ENTRY_LEN as u8,
+    elem: TableElem::Code(BankRule::SameBank),
+});
 
 /// Passes of the descent. A callee found adjusting its return address in one
 /// pass makes its callers skip the inline arguments in the next, which can
@@ -305,7 +314,9 @@ pub fn analyze_cached(
             name: table.description(),
             score: table.confidence(),
         }]);
-        let code = RegionKind::Data(DataKind::Table { stride: 2 }).code();
+        // A dispatch table's entries are code, read in the program bank —
+        // which is what `JMP (abs,X)` does and why the rule has a name.
+        let code = JUMP_TABLE_KIND.code();
         for b in table.base..table.end().min(n as u32) {
             let b = b as usize;
             if paint.cls[b] != 0 && paint.tag[b] != TAG_SWEEP {
@@ -385,7 +396,14 @@ pub fn analyze_cached(
         while end < n && paint.same(end, start) {
             end += 1;
         }
-        let kind = if paint.tag[start] == TAG_USER {
+        // The class lane is one byte, so it carries a kind but not its
+        // parameters. Two stages know more than the lane can hold and say so
+        // here: the user's own mark, and a resolved dispatch table, whose
+        // entries are code in the program bank. Without this the table would
+        // read back as `Table { elem: Raw }` and render as bytes.
+        let kind = if paint.tag[start] == TAG_TABLE {
+            JUMP_TABLE_KIND
+        } else if paint.tag[start] == TAG_USER {
             project
                 .override_kind_at(start as u32)
                 .map(OverrideKind::region_kind)
@@ -534,8 +552,16 @@ fn kind_from_code(code: u8) -> RegionKind {
         2 => RegionKind::Data(DataKind::Byte),
         3 => RegionKind::Data(DataKind::Word),
         4 => RegionKind::Data(DataKind::Long),
-        5 => RegionKind::Data(DataKind::Pointer),
-        6 => RegionKind::Data(DataKind::Table { stride: 2 }),
+        // The lane encoding carries the kind but not its parameters, so
+        // these are the defaults; a caller that needs the real ones reads the
+        // region.
+        5 => RegionKind::Data(DataKind::Pointer {
+            bank: BankRule::SameBank,
+        }),
+        6 => RegionKind::Data(DataKind::Table {
+            stride: 2,
+            elem: TableElem::Raw,
+        }),
         7 => RegionKind::Data(DataKind::String),
         8 => RegionKind::Data(DataKind::Graphics { bpp: 4 }),
         9 => RegionKind::Data(DataKind::Tilemap),

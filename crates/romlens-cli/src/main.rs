@@ -326,6 +326,19 @@ enum ProjectCommand {
         kind: String,
         #[arg(long)]
         rom: Option<PathBuf>,
+        /// For `table`: bytes per entry.
+        #[arg(long)]
+        stride: Option<u8>,
+        /// For `graphics`: bitplanes.
+        #[arg(long)]
+        bpp: Option<u8>,
+        /// For `table`: what one entry is — `raw`, `pointer` or `code`.
+        #[arg(long)]
+        elem: Option<String>,
+        /// For `table` and `pointer`: which bank an entry's target is in —
+        /// `same` (the default), `entry`, or a bank such as `$C0`.
+        #[arg(long)]
+        bank: Option<String>,
     },
     /// Remove marks from a range.
     Clear {
@@ -611,7 +624,21 @@ fn main() -> Result<()> {
                 len,
                 kind,
                 rom,
-            } => commands::project::mark(&path, rom.as_deref(), &expr, len, &kind),
+                stride,
+                bpp,
+                elem,
+                bank,
+            } => commands::project::mark(commands::project::MarkArgs {
+                dir: &path,
+                rom: rom.as_deref(),
+                expr: &expr,
+                len,
+                kind: &kind,
+                stride,
+                bpp,
+                elem: elem.as_deref(),
+                bank: bank.as_deref(),
+            }),
             ProjectCommand::Clear { expr, len, rom } => {
                 commands::project::clear(&path, rom.as_deref(), &expr, len)
             }

@@ -18,7 +18,7 @@ use crate::model::label::{Label, LabelSource};
 use crate::model::project::{
     FlagOverride, ImportRecord, Project, RomIdentity, Settings, TraceRecord,
 };
-use crate::model::region::{DataKind, OverrideKind, RegionOverride};
+use crate::model::region::{BankRule, DataKind, OverrideKind, RegionOverride, TableElem};
 use crate::rom::image::RomImage;
 use crate::viewmodel::hex_rows::AddressStyle;
 
@@ -127,6 +127,13 @@ struct RegionDto {
     stride: Option<u8>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     bpp: Option<u8>,
+    /// For `table`: `raw`, `pointer` or `code`. `default` so a v1 package,
+    /// which had neither field, still opens as `raw` in the same bank.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    elem: Option<String>,
+    /// For `table` and `pointer`: `same`, `entry` or a bank such as `$C0`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    bank: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -256,20 +263,38 @@ pub fn to_files(rom: &RomImage, project: &Project) -> BTreeMap<String, Vec<u8>> 
         .region_overrides
         .iter()
         .map(|r| {
-            let (kind, data_kind, stride, bpp) = match r.kind {
-                OverrideKind::Code => ("code", None, None, None),
-                OverrideKind::Unknown => ("unknown", None, None, None),
+            let (kind, data_kind, stride, bpp, elem, bank) = match r.kind {
+                OverrideKind::Code => ("code", None, None, None, None, None),
+                OverrideKind::Unknown => ("unknown", None, None, None, None, None),
                 OverrideKind::Data(d) => (
                     "data",
                     Some(d.name().to_owned()),
                     match d {
-                        DataKind::Table { stride } => Some(stride),
+                        DataKind::Table { stride, .. } => Some(stride),
                         _ => None,
                     },
                     match d {
                         DataKind::Graphics { bpp } => Some(bpp),
                         _ => None,
                     },
+                    // Both parameters are written only when they are not
+                    // the default, so a plain `dw` table's JSON is exactly
+                    // what v1 wrote.
+                    match d {
+                        DataKind::Table { elem, .. } => Some(elem),
+                        _ => None,
+                    }
+                    .filter(|e| *e != TableElem::Raw)
+                    .map(|e| e.name().to_owned()),
+                    // Written only when it is not the default, so a plain
+                    // `dw` table's JSON stays as short as it was in v1.
+                    match d {
+                        DataKind::Pointer { bank } => Some(bank),
+                        DataKind::Table { elem, .. } => elem.bank(),
+                        _ => None,
+                    }
+                    .filter(|b| *b != BankRule::SameBank)
+                    .map(BankRule::name),
                 ),
             };
             RegionDto {
@@ -279,6 +304,8 @@ pub fn to_files(rom: &RomImage, project: &Project) -> BTreeMap<String, Vec<u8>> 
                 data_kind,
                 stride,
                 bpp,
+                elem,
+                bank,
             }
         })
         .collect();
@@ -417,15 +444,32 @@ pub fn from_files(
         let kind = match r.kind.as_str() {
             "code" => OverrideKind::Code,
             "unknown" => OverrideKind::Unknown,
-            "data" => OverrideKind::Data(
-                DataKind::parse(r.data_kind.as_deref().unwrap_or("byte"), r.stride, r.bpp)
+            "data" => {
+                let bank = match r.bank.as_deref() {
+                    Some(text) => Some(BankRule::parse(text).ok_or_else(|| {
+                        json("regions.json", format!("unknown bank rule {text:?}"))
+                    })?),
+                    None => None,
+                };
+                OverrideKind::Data(
+                    DataKind::parse_with(
+                        r.data_kind.as_deref().unwrap_or("byte"),
+                        r.stride,
+                        r.bpp,
+                        r.elem.as_deref(),
+                        bank,
+                    )
                     .ok_or_else(|| {
                         json(
                             "regions.json",
-                            format!("unknown data kind {:?}", r.data_kind),
+                            format!(
+                                "unknown data kind {:?} or element {:?}",
+                                r.data_kind, r.elem
+                            ),
                         )
                     })?,
-            ),
+                )
+            }
             other => {
                 return Err(json(
                     "regions.json",

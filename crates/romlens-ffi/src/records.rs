@@ -178,13 +178,62 @@ pub enum DataKind {
     Struct,
 }
 
+/// Which bank a 16-bit pointer's target is in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum BankRule {
+    /// The bank the table itself is in.
+    SameBank,
+    /// One bank for every entry.
+    Fixed { bank: u8 },
+    /// The entry carries its own bank.
+    FromEntry,
+}
+
+impl From<model::BankRule> for BankRule {
+    fn from(b: model::BankRule) -> Self {
+        match b {
+            model::BankRule::SameBank => BankRule::SameBank,
+            model::BankRule::Fixed(bank) => BankRule::Fixed { bank },
+            model::BankRule::FromEntry => BankRule::FromEntry,
+        }
+    }
+}
+
+impl From<BankRule> for model::BankRule {
+    fn from(b: BankRule) -> Self {
+        match b {
+            BankRule::SameBank => model::BankRule::SameBank,
+            BankRule::Fixed { bank } => model::BankRule::Fixed(bank),
+            BankRule::FromEntry => model::BankRule::FromEntry,
+        }
+    }
+}
+
+/// What one element of a table is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum TableElem {
+    Raw,
+    Pointer,
+    Code,
+}
+
+impl From<model::TableElem> for TableElem {
+    fn from(e: model::TableElem) -> Self {
+        match e {
+            model::TableElem::Raw => TableElem::Raw,
+            model::TableElem::Pointer(_) => TableElem::Pointer,
+            model::TableElem::Code(_) => TableElem::Code,
+        }
+    }
+}
+
 impl From<model::DataKind> for DataKind {
     fn from(d: model::DataKind) -> Self {
         match d {
             model::DataKind::Byte => DataKind::Byte,
             model::DataKind::Word => DataKind::Word,
             model::DataKind::Long => DataKind::Long,
-            model::DataKind::Pointer => DataKind::Pointer,
+            model::DataKind::Pointer { .. } => DataKind::Pointer,
             model::DataKind::Table { .. } => DataKind::Table,
             model::DataKind::String => DataKind::String,
             model::DataKind::Graphics { .. } => DataKind::Graphics,
@@ -196,14 +245,26 @@ impl From<model::DataKind> for DataKind {
     }
 }
 
-pub fn core_data_kind(d: DataKind, stride: Option<u8>, bpp: Option<u8>) -> model::DataKind {
+pub fn core_data_kind(
+    d: DataKind,
+    stride: Option<u8>,
+    bpp: Option<u8>,
+    elem: Option<TableElem>,
+    bank: Option<BankRule>,
+) -> model::DataKind {
+    let bank = bank.map_or(model::BankRule::SameBank, Into::into);
     match d {
         DataKind::Byte => model::DataKind::Byte,
         DataKind::Word => model::DataKind::Word,
         DataKind::Long => model::DataKind::Long,
-        DataKind::Pointer => model::DataKind::Pointer,
+        DataKind::Pointer => model::DataKind::Pointer { bank },
         DataKind::Table => model::DataKind::Table {
             stride: stride.unwrap_or(2),
+            elem: match elem.unwrap_or(TableElem::Raw) {
+                TableElem::Raw => model::TableElem::Raw,
+                TableElem::Pointer => model::TableElem::Pointer(bank),
+                TableElem::Code => model::TableElem::Code(bank),
+            },
         },
         DataKind::String => model::DataKind::String,
         DataKind::Graphics => model::DataKind::Graphics {
@@ -272,6 +333,10 @@ pub struct RegionInfo {
     pub data_kind: Option<DataKind>,
     pub bpp: Option<u8>,
     pub stride: Option<u8>,
+    /// For `Table`: what one element is.
+    pub elem: Option<TableElem>,
+    /// For `Table` and `Pointer`: which bank an entry's target is in.
+    pub bank: Option<BankRule>,
     pub confidence: f32,
     pub evidence: Vec<EvidenceInfo>,
     /// The batch encoding of the kind (0 unknown, 1 code, 2.. data kinds).
@@ -281,9 +346,9 @@ pub struct RegionInfo {
 
 impl From<&model::Region> for RegionInfo {
     fn from(r: &model::Region) -> Self {
-        let (kind, data_kind, bpp, stride) = match r.kind {
-            model::RegionKind::Unknown => (RegionKind::Unknown, None, None, None),
-            model::RegionKind::Code => (RegionKind::Code, None, None, None),
+        let (kind, data_kind, bpp, stride, elem, bank) = match r.kind {
+            model::RegionKind::Unknown => (RegionKind::Unknown, None, None, None, None, None),
+            model::RegionKind::Code => (RegionKind::Code, None, None, None, None, None),
             model::RegionKind::Data(d) => (
                 RegionKind::Data,
                 Some(d.into()),
@@ -292,7 +357,16 @@ impl From<&model::Region> for RegionInfo {
                     _ => None,
                 },
                 match d {
-                    model::DataKind::Table { stride } => Some(stride),
+                    model::DataKind::Table { stride, .. } => Some(stride),
+                    _ => None,
+                },
+                match d {
+                    model::DataKind::Table { elem, .. } => Some(elem.into()),
+                    _ => None,
+                },
+                match d {
+                    model::DataKind::Pointer { bank } => Some(bank.into()),
+                    model::DataKind::Table { elem, .. } => elem.bank().map(Into::into),
                     _ => None,
                 },
             ),
@@ -304,6 +378,8 @@ impl From<&model::Region> for RegionInfo {
             data_kind,
             bpp,
             stride,
+            elem,
+            bank,
             confidence: r.confidence,
             evidence: r.evidence.iter().map(EvidenceInfo::from).collect(),
             kind_code: r.kind.code(),
@@ -669,6 +745,11 @@ pub enum Command {
         data_kind: Option<DataKind>,
         stride: Option<u8>,
         bpp: Option<u8>,
+        /// For `Table`: what one element is. `Raw` when omitted.
+        elem: Option<TableElem>,
+        /// For `Table` and `Pointer`: which bank an entry's target is in.
+        /// `SameBank` when omitted.
+        bank: Option<BankRule>,
     },
     ClearRegionOverride {
         start: u32,
@@ -703,6 +784,8 @@ impl From<Command> for model::Command {
                 data_kind,
                 stride,
                 bpp,
+                elem,
+                bank,
             } => model::Command::MarkRegion {
                 start: FileOffset(start),
                 len,
@@ -713,6 +796,8 @@ impl From<Command> for model::Command {
                         data_kind.unwrap_or(DataKind::Byte),
                         stride,
                         bpp,
+                        elem,
+                        bank,
                     )),
                 },
             },

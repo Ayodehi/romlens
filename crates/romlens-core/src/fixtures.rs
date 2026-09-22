@@ -18,7 +18,7 @@
 
 use crate::analysis::accuracy::TruthRange;
 use crate::memory::map::MappingMode;
-use crate::model::region::{DataKind, RegionKind};
+use crate::model::region::{BankRule, DataKind, RegionKind, TableElem};
 use crate::rom::checksum::compute_checksum;
 use crate::rom::header::TITLE_LEN;
 
@@ -301,12 +301,18 @@ pub fn truth_for_dispatch() -> Vec<TruthRange> {
         TruthRange {
             start: 0x20,
             end: 0x30,
-            kind: RegionKind::Data(DataKind::Table { stride: 2 }),
+            kind: RegionKind::Data(DataKind::Table {
+                stride: 2,
+                elem: TableElem::Code(BankRule::SameBank),
+            }),
         },
         TruthRange {
             start: 0x60,
             end: 0x64,
-            kind: RegionKind::Data(DataKind::Table { stride: 2 }),
+            kind: RegionKind::Data(DataKind::Table {
+                stride: 2,
+                elem: TableElem::Code(BankRule::SameBank),
+            }),
         },
         TruthRange {
             start: MappingMode::LoRom.header_offset().as_usize() as u32,
@@ -334,7 +340,9 @@ pub fn truth_for_mixed_data() -> Vec<TruthRange> {
         TruthRange {
             start: 0x1400,
             end: 0x1500,
-            kind: RegionKind::Data(DataKind::Pointer),
+            kind: RegionKind::Data(DataKind::Pointer {
+                bank: BankRule::SameBank,
+            }),
         },
         TruthRange {
             start: 0x1600,

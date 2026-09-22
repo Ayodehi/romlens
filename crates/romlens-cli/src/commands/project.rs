@@ -5,7 +5,7 @@ use std::path::Path;
 use anyhow::{Result, anyhow};
 use romlens_core::io::{to_files, write_package};
 use romlens_core::model::{
-    Command, CommentKind, DataKind, FlagOverride, LabelSource, OverrideKind, Project,
+    BankRule, Command, CommentKind, DataKind, FlagOverride, LabelSource, OverrideKind, Project,
 };
 use romlens_core::{AddressExpr, FileOffset, RomImage, SnesAddress};
 
@@ -80,19 +80,37 @@ pub fn comment(dir: &Path, rom: Option<&Path>, expr: &str, block: bool, text: &s
     })
 }
 
-pub fn mark(dir: &Path, rom: Option<&Path>, expr: &str, len: u32, kind: &str) -> Result<()> {
-    apply(dir, rom, |r| {
-        let kind = match kind {
+pub struct MarkArgs<'a> {
+    pub dir: &'a Path,
+    pub rom: Option<&'a Path>,
+    pub expr: &'a str,
+    pub len: u32,
+    pub kind: &'a str,
+    pub stride: Option<u8>,
+    pub bpp: Option<u8>,
+    pub elem: Option<&'a str>,
+    pub bank: Option<&'a str>,
+}
+
+pub fn mark(args: MarkArgs<'_>) -> Result<()> {
+    apply(args.dir, args.rom, |r| {
+        let bank = match args.bank {
+            Some(text) => Some(BankRule::parse(text).ok_or_else(|| {
+                anyhow!("unknown bank rule {text:?}; use same, entry or a bank such as $C0")
+            })?),
+            None => None,
+        };
+        let kind = match args.kind {
             "code" => OverrideKind::Code,
             "unknown" => OverrideKind::Unknown,
             other => OverrideKind::Data(
-                DataKind::parse(other, None, None)
-                    .ok_or_else(|| anyhow!("unknown kind {other:?}; use code, byte, word, long, pointer, table, string, graphics, tilemap, palette, compressed, struct or unknown"))?,
+                DataKind::parse_with(other, args.stride, args.bpp, args.elem, bank)
+                    .ok_or_else(|| anyhow!("unknown kind {other:?} or element {:?}; kinds are code, byte, word, long, pointer, table, string, graphics, tilemap, palette, compressed, struct and unknown; elements are raw, pointer and code", args.elem))?,
             ),
         };
         Ok(Command::MarkRegion {
-            start: FileOffset(rom_offset(r, expr)?),
-            len,
+            start: FileOffset(rom_offset(r, args.expr)?),
+            len: args.len,
             kind,
         })
     })

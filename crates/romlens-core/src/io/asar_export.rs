@@ -101,10 +101,12 @@ fn data_directive(kind: RegionKind, len: u32) -> (&'static str, u32) {
     match kind {
         RegionKind::Data(DataKind::Word | DataKind::Palette | DataKind::Tilemap) => ("dw", 2),
         RegionKind::Data(DataKind::Long) => ("dl", 3),
-        RegionKind::Data(DataKind::Pointer) if len.is_multiple_of(3) && !len.is_multiple_of(2) => {
+        RegionKind::Data(DataKind::Pointer { .. })
+            if len.is_multiple_of(3) && !len.is_multiple_of(2) =>
+        {
             ("dl", 3)
         }
-        RegionKind::Data(DataKind::Pointer) => ("dw", 2),
+        RegionKind::Data(DataKind::Pointer { .. }) => ("dw", 2),
         _ => ("db", 1),
     }
 }
@@ -272,15 +274,37 @@ pub fn export_asar(
             }
         }
         let bytes = &rom.bytes()[pos as usize..row_end as usize];
+        // A table of addresses exports as the labels it names. asar resolves
+        // them on reassembly exactly as it resolves a branch target, so this
+        // is both more readable and no less exact than the numbers.
+        let entries = match region.map(|r| r.kind) {
+            Some(RegionKind::Data(d)) => d.entry_rule().filter(|(w, ..)| (2..=4).contains(w)),
+            _ => None,
+        };
+        let (directive, width) = match entries {
+            Some((w, ..)) => (if w == 3 { "dl" } else { "dw" }, w),
+            None => (directive, width),
+        };
         let whole = bytes.len() / width as usize * width as usize;
         if whole > 0 {
             let _ = write!(out, "  {directive} ");
+            let table_bank = rom
+                .snes_address_for(FileOffset(pos))
+                .map_or(0, |a| a.bank());
             let mut i = 0;
             while i < whole {
                 if i > 0 {
                     out.push(',');
                 }
                 let w = width as usize;
+                if let Some((_, bank, _)) = entries
+                    && let Some(target) = bank.target(&bytes[i..], width, table_bank)
+                    && let Some(label) = symbols.label_at(target)
+                {
+                    out.push_str(&label.name);
+                    i += w;
+                    continue;
+                }
                 let mut v = 0u32;
                 for k in (0..w).rev() {
                     v = (v << 8) | bytes[i + k] as u32;

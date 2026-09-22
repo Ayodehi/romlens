@@ -175,6 +175,26 @@ Deltas from Phase 1 ("Disassemble", 21 September 2026):
   file's leading comment block is kept in `project.json`'s `imports[].notice`,
   so a licence travels with what it covers.
 
+- Typed data (Phase 2, 22 September 2026). `DataKind::Pointer` and
+  `DataKind::Table` carry a `BankRule` and, for a table, a `TableElem`. A
+  16-bit entry names an offset and not an address, so something has to supply
+  the bank: `SameBank` is what a program-bank dispatch does and the default,
+  `Fixed` names one bank for the whole table, and `FromEntry` means the entry
+  is at least three bytes and carries its own.
+
+  The payoff is that a table of addresses reads as the routines it names —
+  `dw SUB_808423` rather than `dw $8423` — in the disassembly, in the asar
+  export, and with an xref per entry so the jump is navigable both ways. A
+  user-marked `Code` table is also *walked*, which is the correction path the
+  resolver's failures point at: when a dispatch table is built in RAM, marking
+  it by hand is the one gesture that makes the map right.
+
+  The per-byte class lane is one byte, so it carries a kind but not its
+  parameters. Two stages know more than the lane can hold and say so when
+  regions are built: the user's own mark, and a resolved dispatch table. A
+  `regions.json` entry writes `elem` and `bank` only when they are not the
+  default, so a plain table's JSON is exactly what v1 wrote.
+
 - Inline arguments (the Phase 1 test pass, 21 September 2026): a callee that
   adds a constant to its stacked return address (`LDA $01,S … ADC #n …
   STA $01,S`, also behind `PHP; PHB` at `$03,S` and through `TAY`/`TYA`)

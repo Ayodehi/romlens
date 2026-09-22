@@ -20,7 +20,9 @@ pub use hardware::{
 };
 pub use label::{Label, LabelSource, validate_label_name};
 pub use project::{FlagOverride, ImportRecord, Project, RomIdentity, Settings, TraceRecord};
-pub use region::{DataKind, Evidence, OverrideKind, Region, RegionKind, RegionOverride};
+pub use region::{
+    BankRule, DataKind, Evidence, OverrideKind, Region, RegionKind, RegionOverride, TableElem,
+};
 pub use symbols::Symbols;
 pub use undo::{UNDO_CAP, UndoStack};
 pub use xref::{XRef, XRefKind};

@@ -42,7 +42,7 @@ use crate::memory::map::MappingMode;
 use crate::model::comment::CommentKind;
 use crate::model::label::LabelSource;
 use crate::model::project::Project;
-use crate::model::region::{DataKind, Region, RegionKind};
+use crate::model::region::{BankRule, DataKind, Region, RegionKind};
 use crate::model::symbols::Symbols;
 use crate::model::xref::XRefKind;
 use crate::rom::image::RomImage;
@@ -347,7 +347,7 @@ fn data_directive(kind: RegionKind, len: u32) -> (&'static str, u32) {
     match kind {
         RegionKind::Data(DataKind::Word | DataKind::Palette | DataKind::Tilemap) => ("dw", 2),
         RegionKind::Data(DataKind::Long) => ("dl", 3),
-        RegionKind::Data(DataKind::Pointer) => {
+        RegionKind::Data(DataKind::Pointer { .. }) => {
             if len.is_multiple_of(3) && !len.is_multiple_of(2) {
                 ("dl", 3)
             } else {
@@ -358,7 +358,113 @@ fn data_directive(kind: RegionKind, len: u32) -> (&'static str, u32) {
     }
 }
 
-fn data_text(bytes: &[u8], region: &Region, out: &mut LineText) {
+fn entry_kind(kind: RegionKind) -> Option<(u32, BankRule, bool)> {
+    match kind {
+        RegionKind::Data(d) => d.entry_rule(),
+        _ => None,
+    }
+}
+
+/// A table of addresses, rendered as the labels it points at.
+///
+/// This is the most legible single result of Phase 2: `dw CODE_808423` instead
+/// of `dw $8423`. The reader can see what a dispatch table dispatches to
+/// without leaving the line, and the label carries the xref that makes the
+/// jump navigable both ways.
+fn entry_text(
+    rom: &RomImage,
+    symbols: &Symbols<'_>,
+    offset: u32,
+    bytes: &[u8],
+    width: u32,
+    bank: BankRule,
+    out: &mut LineText,
+) {
+    let table_bank = rom
+        .snes_address_for(FileOffset(offset))
+        .map_or(0, |a| a.bank());
+    let mut i = 0usize;
+    let mut first = true;
+    while i + width as usize <= bytes.len() {
+        if !first {
+            out.text.push(',');
+        }
+        first = false;
+        let start = out.text.len();
+        let target = bank.target(&bytes[i..], width, table_bank);
+        match target.and_then(|t| symbols.label_at(t).map(|l| (t, l))) {
+            Some((_, label)) => {
+                out.text.push_str(&label.name);
+                push_token(
+                    &mut out.tokens,
+                    if label.source == LabelSource::Auto {
+                        TokenKind::AutoLabel
+                    } else {
+                        TokenKind::UserLabel
+                    },
+                    start,
+                    label.name.len(),
+                );
+            }
+            None => {
+                // No label: the number, so an entry that points nowhere
+                // readable still shows what it holds.
+                let mut v = 0u32;
+                for k in (0..width as usize).rev() {
+                    v = (v << 8) | bytes[i + k] as u32;
+                }
+                let _ = write!(out.text, "${:0w$X}", v, w = width as usize * 2);
+                push_token(
+                    &mut out.tokens,
+                    TokenKind::DataValue,
+                    start,
+                    out.text.len() - start,
+                );
+            }
+        }
+        i += width as usize;
+    }
+    // Any tail too short for an entry falls back to bytes.
+    for byte in &bytes[i..] {
+        if !first {
+            out.text.push(',');
+        }
+        first = false;
+        let start = out.text.len();
+        let _ = write!(out.text, "${byte:02X}");
+        push_token(
+            &mut out.tokens,
+            TokenKind::DataValue,
+            start,
+            out.text.len() - start,
+        );
+    }
+}
+
+fn data_text(
+    rom: &RomImage,
+    symbols: &Symbols<'_>,
+    offset: u32,
+    bytes: &[u8],
+    region: &Region,
+    out: &mut LineText,
+) {
+    if let Some((width, bank, _)) = entry_kind(region.kind)
+        && (2..=4).contains(&width)
+    {
+        // The directive follows the entry width, not the region kind: a table
+        // of two-byte addresses is `dw` whatever else the region is called.
+        let directive = match width {
+            2 => "dw",
+            3 => "dl",
+            _ => "dd",
+        };
+        out.text.push_str(directive);
+        push_token(&mut out.tokens, TokenKind::Directive, 0, directive.len());
+        out.text.push(' ');
+        entry_text(rom, symbols, offset, bytes, width, bank, out);
+        return;
+    }
     let (directive, width) = data_directive(region.kind, bytes.len() as u32);
     out.text.push_str(directive);
     push_token(&mut out.tokens, TokenKind::Directive, 0, directive.len());
@@ -517,7 +623,7 @@ pub fn line_text(
             let bytes =
                 &rom.bytes()[line.offset as usize..(line.offset + line.sub as u32) as usize];
             if let Some(region) = snap.region_at(FileOffset(line.offset)) {
-                data_text(bytes, region, &mut out);
+                data_text(rom, symbols, line.offset, bytes, region, &mut out);
             }
             if let Some(a) = canonical
                 && let Some(c) = project.comment_at(a, CommentKind::Line)

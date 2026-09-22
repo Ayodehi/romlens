@@ -8,7 +8,9 @@ use romlens_core::analysis::{
     AnalysisControl, AnalysisOptions, AnalysisSnapshot, analyze, analyze_with,
 };
 use romlens_core::fixtures;
-use romlens_core::model::{Command, DataKind, Evidence, OverrideKind, Project, RegionKind};
+use romlens_core::model::{
+    BankRule, Command, DataKind, Evidence, OverrideKind, Project, RegionKind,
+};
 use romlens_core::{FileOffset, RomImage};
 
 fn rom() -> RomImage {
@@ -41,7 +43,12 @@ fn each_heuristic_finds_its_own_block() {
     };
     assert_eq!(kind_at(0x1000), RegionKind::Data(DataKind::Palette));
     assert_eq!(kind_at(0x1200), RegionKind::Data(DataKind::String));
-    assert_eq!(kind_at(0x1400), RegionKind::Data(DataKind::Pointer));
+    assert_eq!(
+        kind_at(0x1400),
+        RegionKind::Data(DataKind::Pointer {
+            bank: BankRule::SameBank,
+        })
+    );
     assert_eq!(kind_at(0x1600), RegionKind::Data(DataKind::Compressed));
 
     assert_eq!(hit_at(&s, 0x1000).unwrap().name, "palette");

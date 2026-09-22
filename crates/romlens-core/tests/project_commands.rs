@@ -4,7 +4,7 @@
 use romlens_core::fixtures;
 use romlens_core::model::{
     Command, CommentKind, DataKind, FlagOverride, Origin, OverrideKind, Project, RegionOverride,
-    UndoStack,
+    TableElem, UndoStack,
 };
 use romlens_core::{FileOffset, ProjectError, RomImage, SnesAddress};
 
@@ -169,7 +169,10 @@ fn region_marks_split_and_merge() {
         mark(
             0x180,
             0x200,
-            OverrideKind::Data(DataKind::Table { stride: 4 }),
+            OverrideKind::Data(DataKind::Table {
+                stride: 4,
+                elem: TableElem::Raw,
+            }),
         ),
     );
     assert_eq!(
@@ -183,7 +186,10 @@ fn region_marks_split_and_merge() {
             RegionOverride {
                 start: FileOffset(0x180),
                 len: 0x200,
-                kind: OverrideKind::Data(DataKind::Table { stride: 4 })
+                kind: OverrideKind::Data(DataKind::Table {
+                    stride: 4,
+                    elem: TableElem::Raw,
+                })
             },
             RegionOverride {
                 start: FileOffset(0x380),
@@ -198,7 +204,10 @@ fn region_marks_split_and_merge() {
     assert_eq!(p.override_kind_at(0x205), Some(OverrideKind::Unknown));
     assert_eq!(
         p.override_kind_at(0x210),
-        Some(OverrideKind::Data(DataKind::Table { stride: 4 }))
+        Some(OverrideKind::Data(DataKind::Table {
+            stride: 4,
+            elem: TableElem::Raw,
+        }))
     );
     // Clearing part of the list.
     check_inverse(
@@ -212,7 +221,10 @@ fn region_marks_split_and_merge() {
     assert_eq!(p.override_kind_at(0x100), None);
     assert_eq!(
         p.override_kind_at(0x210),
-        Some(OverrideKind::Data(DataKind::Table { stride: 4 }))
+        Some(OverrideKind::Data(DataKind::Table {
+            stride: 4,
+            elem: TableElem::Raw,
+        }))
     );
     // Ranges are checked.
     assert!(matches!(
