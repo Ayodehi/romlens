@@ -594,6 +594,26 @@ impl Workbench {
             })
     }
 
+    /// The preview options of the override covering `file_offset`.
+    pub fn region_params_at(&self, file_offset: u32) -> Option<RegionParamsInfo> {
+        self.lock()
+            .project
+            .region_override_at(FileOffset(file_offset))
+            .map(|r| r.params.into())
+    }
+
+    /// The preview for the typed range containing `file_offset`.
+    pub fn preview_at(&self, file_offset: u32) -> Option<crate::graphics::PreviewInfo> {
+        let inner = self.lock();
+        romlens_core::viewmodel::preview::preview_at(
+            &self.rom.image,
+            &inner.snapshot,
+            &inner.project,
+            file_offset,
+        )
+        .map(Into::into)
+    }
+
     // ---- editing -----------------------------------------------------------
 
     /// Apply a command; the inverse goes on the undo stack.

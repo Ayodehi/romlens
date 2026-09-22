@@ -4,6 +4,7 @@
 //! (docs/10); everything else returns typed records.
 
 mod future;
+pub mod graphics;
 pub mod records;
 pub mod workbench;
 
@@ -14,6 +15,7 @@ use romlens_core::{
     SpanIndex, encode_rows, fixtures, header_spans, interpret,
 };
 
+pub use graphics::*;
 pub use records::*;
 pub use workbench::{Workbench, WorkbenchListener};
 
@@ -34,6 +36,8 @@ pub enum RomlensError {
     RomMismatch { msg: String },
     #[error("{msg}")]
     InvalidLabel { msg: String },
+    #[error("{msg}")]
+    Recording { msg: String },
     #[error("analysis cancelled")]
     Cancelled,
 }
@@ -334,6 +338,14 @@ impl Rom {
     #[uniffi::constructor]
     pub fn from_bytes(bytes: Vec<u8>, name: String) -> Result<Arc<Self>, RomlensError> {
         Ok(Self::wrap(RomImage::from_bytes(bytes, name)?))
+    }
+
+    /// `len` bytes from `file_offset`, cut short at the end of the image.
+    /// What the graphics decoders read ROM through.
+    pub fn bytes(&self, file_offset: u32, len: u32) -> Vec<u8> {
+        let b = self.image.bytes();
+        let start = (file_offset as usize).min(b.len());
+        b[start..(start + len as usize).min(b.len())].to_vec()
     }
 
     pub fn info(&self) -> RomInfo {

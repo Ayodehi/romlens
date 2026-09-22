@@ -790,6 +790,38 @@ impl From<model::FlagOverride> for FlagOverride {
     }
 }
 
+/// Preview options for a marked range; `None` is the view's default.
+/// Addresses are 24-bit SNES addresses.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, uniffi::Record)]
+pub struct RegionParamsInfo {
+    pub palette: Option<u32>,
+    pub columns: Option<u16>,
+    pub screen_size: Option<crate::graphics::ScreenSize>,
+    pub tiles: Option<u32>,
+}
+
+impl From<RegionParamsInfo> for model::RegionParams {
+    fn from(p: RegionParamsInfo) -> Self {
+        model::RegionParams {
+            palette: p.palette.map(SnesAddress::from_u24),
+            columns: p.columns,
+            screen_size: p.screen_size.map(Into::into),
+            tiles: p.tiles.map(SnesAddress::from_u24),
+        }
+    }
+}
+
+impl From<model::RegionParams> for RegionParamsInfo {
+    fn from(p: model::RegionParams) -> Self {
+        RegionParamsInfo {
+            palette: p.palette.map(|a| a.as_u24()),
+            columns: p.columns,
+            screen_size: p.screen_size.map(Into::into),
+            tiles: p.tiles.map(|a| a.as_u24()),
+        }
+    }
+}
+
 /// An edit. Addresses are 24-bit SNES addresses; ranges are file offsets.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
 pub enum Command {
@@ -818,6 +850,11 @@ pub enum Command {
     ClearRegionOverride {
         start: u32,
         len: u32,
+    },
+    /// How the marked range starting at `start` previews.
+    SetRegionParams {
+        start: u32,
+        params: RegionParamsInfo,
     },
     SetFlagOverride {
         offset: u32,
@@ -868,6 +905,10 @@ impl From<Command> for model::Command {
             Command::ClearRegionOverride { start, len } => model::Command::ClearRegionOverride {
                 start: FileOffset(start),
                 len,
+            },
+            Command::SetRegionParams { start, params } => model::Command::SetRegionParams {
+                start: FileOffset(start),
+                params: params.into(),
             },
             Command::SetFlagOverride { offset, flags } => model::Command::SetFlagOverride {
                 offset: FileOffset(offset),
