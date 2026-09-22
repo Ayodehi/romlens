@@ -119,6 +119,35 @@ import Testing
         }
     }
 
+    /// Rubber-band overscroll hands the sync a negative clip origin; it must
+    /// clamp instead of trapping on the UInt32 conversion.
+    @Test func overscrollDoesNotTrap() async throws {
+        let model = try await Fixture.analyzedModel(rom: try Fixture.smallRom())
+        model.editorTab = .both
+        let controller = RomWindowController(model: model)
+        controller.window?.orderFront(nil)
+        let content = try #require(controller.window?.contentView)
+        content.layoutSubtreeIfNeeded()
+        Fixture.spin(0.1)
+        let pane = try #require(Fixture.find(content, LockstepPaneView.self))
+        let lockstep = LockstepController(model: model, hex: pane.hex, asm: pane.asm, pane: pane)
+        #expect(lockstep.asmLine(forTopRow: -1) == lockstep.asmLine(forTopRow: 0))
+        #expect(lockstep.asmLine(forTopRow: 1_000_000) != nil)
+        #expect(lockstep.hexRow(forTopLine: -5) == 0)
+        #expect(lockstep.hexRow(forTopLine: 1_000_000) != nil)
+        // Drive the real clip views past both ends.
+        for scroll in [pane.hex.scrollView, pane.asm.scrollView] {
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: -40))
+            scroll.reflectScrolledClipView(scroll.contentView)
+            Fixture.spin(0.02)
+            let height = scroll.documentView?.bounds.height ?? 0
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: height + 40))
+            scroll.reflectScrolledClipView(scroll.contentView)
+            Fixture.spin(0.02)
+        }
+        controller.window?.close()
+    }
+
     @Test func bothTabScrollsInLockstepWithABracket() async throws {
         let model = try await Fixture.analyzedModel(rom: try Fixture.rom(megabytes: 1))
         model.editorTab = .both

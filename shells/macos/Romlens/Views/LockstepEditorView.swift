@@ -106,14 +106,23 @@ final class LockstepController: NSObject {
         refreshBracket()
     }
 
-    /// The asm line that should sit at the top when hex row `row` is at the top.
+    /// The asm line that should sit at the top when hex row `row` is at the
+    /// top. Rows outside the image (rubber-band overscroll gives a negative
+    /// clip origin) are clamped.
     func asmLine(forTopRow row: Int) -> Int? {
-        model.workbench.lineForOffset(fileOffset: UInt32(row) * 16).map(Int.init)
+        let rows = Int(model.rowCount)
+        guard rows > 0 else { return nil }
+        let clamped = min(max(row, 0), rows - 1)
+        return model.workbench.lineForOffset(fileOffset: UInt32(clamped) * 16).map(Int.init)
     }
 
-    /// The hex row that should sit at the top when asm line `line` is at the top.
+    /// The hex row that should sit at the top when asm line `line` is at the
+    /// top, with the same clamping.
     func hexRow(forTopLine line: Int) -> Int? {
-        model.workbench.offsetForLine(line: UInt32(line)).map { Int($0 / 16) }
+        let lines = Int(model.asmLineCount)
+        guard lines > 0 else { return nil }
+        let clamped = min(max(line, 0), lines - 1)
+        return model.workbench.offsetForLine(line: UInt32(clamped)).map { Int($0 / 16) }
     }
 
     private func hexScrolled() {
