@@ -1,12 +1,19 @@
 # Romlens developer entry points. Scripts call rustup's cargo explicitly
 # because it owns the cross-compilation targets; day-to-day `cargo` from
 # either install (Homebrew or rustup) works for test/build.
+#
+# Keep both installs level with CI's `stable`. `cargo fmt` and `clippy` gain
+# rules between releases, so an older local toolchain passes what CI rejects —
+# `brew upgrade rust && rustup update stable`.
 CARGO ?= $(HOME)/.cargo/bin/cargo
 ifeq ($(wildcard $(CARGO)),)
 CARGO := cargo
 endif
 # cargo runs `rustc` from PATH; rustup's must win over Homebrew's.
 export PATH := $(HOME)/.cargo/bin:$(PATH)
+# The Linux image follows the local toolchain rather than a pin, for the same
+# reason: a pinned version goes stale silently.
+RUST_VERSION := $(shell $(CARGO) --version | cut -d' ' -f2)
 XCODE_PROJECT := shells/macos/Romlens.xcodeproj
 XCODE_DD := shells/macos/build/DerivedData
 XCODEBUILD := xcodebuild -project $(XCODE_PROJECT) -scheme Romlens -destination 'platform=macOS' -derivedDataPath $(XCODE_DD)
@@ -20,7 +27,7 @@ help:
 	@echo "make app         xcodegen generate + xcodebuild build (needs make swift first)"
 	@echo "make app-test    xcodebuild test for the macOS shell"
 	@echo "make cross       cargo check for Linux and Windows targets (rustup targets)"
-	@echo "make docker-test cargo test --workspace inside rust:1.95 (a real Linux run)"
+	@echo "make docker-test cargo test --workspace inside rust:$(RUST_VERSION) (a real Linux run)"
 	@echo "make ci-local    everything above, the local stand-in for CI"
 
 test:
@@ -49,7 +56,7 @@ cross:
 	CARGO=$(CARGO) scripts/check-cross.sh
 
 docker-test:
-	docker run --rm -v "$(CURDIR)":/w -w /w -e CARGO_TARGET_DIR=/w/target/docker rust:1.95 cargo test --workspace
+	docker run --rm -v "$(CURDIR)":/w -w /w -e CARGO_TARGET_DIR=/w/target/docker rust:$(RUST_VERSION) cargo test --workspace
 
 ci-local: test cross docker-test swift app-test
 
