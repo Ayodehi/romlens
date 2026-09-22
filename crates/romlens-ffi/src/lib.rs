@@ -3,12 +3,19 @@
 //! core never depends on `uniffi`. Hot paths (`hex_rows`) return flat buffers
 //! (docs/10); everything else returns typed records.
 
+mod future;
+pub mod records;
+pub mod workbench;
+
 use std::sync::Arc;
 
 use romlens_core::{
-    AddressError, FileOffset, MappingMode, RomError, RomImage, SnesAddress, SpanIndex, encode_rows,
-    fixtures, header_spans, interpret,
+    AddressError, FileOffset, MappingMode, ProjectError, RomError, RomImage, SnesAddress,
+    SpanIndex, encode_rows, fixtures, header_spans, interpret,
 };
+
+pub use records::*;
+pub use workbench::{Workbench, WorkbenchListener};
 
 uniffi::setup_scaffolding!();
 
@@ -21,6 +28,25 @@ pub enum RomlensError {
     InvalidRom { msg: String },
     #[error("{msg}")]
     BadAddress { msg: String },
+    #[error("{msg}")]
+    Project { msg: String },
+    #[error("{msg}")]
+    RomMismatch { msg: String },
+    #[error("{msg}")]
+    InvalidLabel { msg: String },
+    #[error("analysis cancelled")]
+    Cancelled,
+}
+
+impl From<ProjectError> for RomlensError {
+    fn from(e: ProjectError) -> Self {
+        match e {
+            ProjectError::InvalidLabelName(msg) => RomlensError::InvalidLabel { msg },
+            ProjectError::RomMismatch { .. } => RomlensError::RomMismatch { msg: e.to_string() },
+            ProjectError::Io(_) => RomlensError::Io { msg: e.to_string() },
+            _ => RomlensError::Project { msg: e.to_string() },
+        }
+    }
 }
 
 impl From<RomError> for RomlensError {
@@ -279,9 +305,9 @@ pub struct ResolvedAddress {
 /// between threads; the shell keeps one per document.
 #[derive(uniffi::Object)]
 pub struct Rom {
-    image: RomImage,
+    pub(crate) image: RomImage,
     spans: Vec<romlens_core::Span>,
-    index: SpanIndex,
+    pub(crate) index: SpanIndex,
 }
 
 impl Rom {
@@ -421,5 +447,169 @@ mod tests {
         assert_eq!(rom.inspect(0).unwrap().value_u8, 0x78);
         assert_eq!(format_snes_address(0x80841C), "$80:841C");
         assert_eq!(format_file_offset(0x41C), "0x00041C");
+    }
+
+    use crate::workbench::{hardware_register, validate_label_name};
+
+    struct Collect(std::sync::Mutex<Vec<WorkbenchEvent>>);
+
+    impl WorkbenchListener for Collect {
+        fn on_event(&self, event: WorkbenchEvent) {
+            self.0.lock().unwrap().push(event);
+        }
+    }
+
+    /// Poll a future to completion on this thread (no runtime needed).
+    fn block_on<F: std::future::Future>(mut fut: F) -> F::Output {
+        use std::sync::{Arc as A, Condvar, Mutex as M};
+        use std::task::{Context, Poll, Wake, Waker};
+        struct Flag(M<bool>, Condvar);
+        impl Wake for Flag {
+            fn wake(self: A<Self>) {
+                *self.0.lock().unwrap() = true;
+                self.1.notify_one();
+            }
+        }
+        let flag = A::new(Flag(M::new(false), Condvar::new()));
+        let waker = Waker::from(flag.clone());
+        let mut cx = Context::from_waker(&waker);
+        let mut fut = unsafe { std::pin::Pin::new_unchecked(&mut fut) };
+        loop {
+            if let Poll::Ready(v) = fut.as_mut().poll(&mut cx) {
+                return v;
+            }
+            let mut ready = flag.0.lock().unwrap();
+            while !*ready {
+                ready = flag.1.wait(ready).unwrap();
+            }
+            *ready = false;
+        }
+    }
+
+    #[test]
+    fn workbench_round_trip() {
+        let rom = Rom::from_bytes(make_test_rom(Mapping::LoRom), "t.sfc".into()).unwrap();
+        let wb = Workbench::new(rom.clone());
+        let events = Arc::new(Collect(std::sync::Mutex::new(Vec::new())));
+        wb.set_listener(Some(events.clone()));
+        assert!(wb.needs_analysis());
+        assert_eq!(wb.line_count(), 0);
+        let stats = block_on(wb.analyze()).unwrap();
+        assert_eq!(stats.instructions, 8);
+        assert!(!wb.needs_analysis());
+        assert_eq!(wb.analysis_generation(), 1);
+        assert!(wb.line_count() > 2000);
+        assert!(matches!(
+            events.0.lock().unwrap().last(),
+            Some(WorkbenchEvent::SnapshotChanged {
+                analysis_generation: 1
+            })
+        ));
+        let text = wb.asm_lines_text(0, 4, AddressStyle::Snes);
+        assert!(text.contains("SEI"), "{text}");
+        let batch = wb.asm_lines(0, 4);
+        assert!(batch.len() >= 16 + 4 * 96);
+        let hex = wb.hex_rows(0, 1);
+        assert_eq!(hex[8 + 28] & 0xF0, 0x90, "code lane: 0x80 | 1 << 4");
+        assert_eq!(hex[8 + 28] & 0x0F, 14, "0.9 confidence → 14/15");
+        assert_eq!(hex[8 + 28 + 12] & 0x80, 0, "unknown bytes stay 0");
+        let sei = wb.instruction_at(0).unwrap();
+        assert_eq!((sei.mnemonic.as_str(), sei.len), ("SEI", 1));
+        let sta = wb.instruction_at(8).unwrap();
+        assert_eq!(
+            sta.hardware_register.as_ref().map(|r| r.name.as_str()),
+            Some("INIDISP")
+        );
+        assert_eq!(wb.line_for_offset(8), wb.line_for_offset(7));
+        assert_eq!(wb.disassemble(0, 3, None).len(), 3);
+        assert_eq!(
+            wb.disassemble(
+                12,
+                2,
+                Some(FlagState {
+                    m: true,
+                    x: true,
+                    e: false,
+                    dbr: None,
+                    dp: None
+                })
+            )[0]
+            .mnemonic,
+            "NOP"
+        );
+
+        wb.execute(Command::SetLabel {
+            address: 0x8000,
+            name: Some("Boot".into()),
+        })
+        .unwrap();
+        assert!(wb.is_dirty());
+        assert_eq!(wb.undo_title().as_deref(), Some("Rename Label"));
+        assert_eq!(wb.label_at(0x808000).unwrap().name, "Boot");
+        assert!(
+            wb.asm_lines_text(0, 3, AddressStyle::Snes)
+                .contains("Boot:")
+        );
+        assert!(matches!(
+            wb.execute(Command::SetLabel {
+                address: 0x8000,
+                name: Some("bad name".into())
+            }),
+            Err(RomlensError::InvalidLabel { .. })
+        ));
+        wb.execute(Command::MarkRegion {
+            start: 12,
+            len: 2,
+            kind: OverrideKind::Data,
+            data_kind: Some(DataKind::Byte),
+            stride: None,
+            bpp: None,
+        })
+        .unwrap();
+        assert!(wb.needs_analysis());
+        assert!(wb.undo().unwrap());
+        assert!(wb.undo().unwrap());
+        assert!(!wb.undo().unwrap());
+        assert!(wb.can_redo());
+        assert!(wb.redo().unwrap());
+        assert_eq!(
+            wb.labels()
+                .iter()
+                .filter(|l| l.source == LabelSource::User)
+                .count(),
+            1
+        );
+        let files = wb.project_files();
+        assert_eq!(files.len(), 5);
+        let again = Workbench::with_project_files(rom.clone(), files.clone()).unwrap();
+        assert_eq!(again.label_at(0x8000).unwrap().name, "Boot");
+        let other = Rom::from_bytes(make_test_rom(Mapping::HiRom), "h.sfc".into()).unwrap();
+        assert!(matches!(
+            Workbench::with_project_files(other, files),
+            Err(RomlensError::RomMismatch { .. })
+        ));
+        wb.mark_saved();
+        assert!(!wb.is_dirty());
+        assert_eq!(wb.xrefs_to(0x2100).len(), 1);
+        assert!(wb.export_symbols(true).contains("NMI_00800E"));
+        assert!(wb.export_asar(Some(0), Some(16)).contains("STA.w $2100"));
+        assert_eq!(
+            wb.search_bytes("78 18 FB".into(), 0, 0x8000, 10).unwrap(),
+            vec![0]
+        );
+        assert_eq!(
+            wb.resolve_any("$00:2100".into())
+                .unwrap()
+                .register
+                .unwrap()
+                .name,
+            "INIDISP"
+        );
+        assert_eq!(hardware_register(0x420D).unwrap().name, "MEMSEL");
+        assert!(validate_label_name("SUB_008000".into(), Some(0x8001)).is_err());
+        // Cancellation: a dropped future raises the flag; a later run resets it.
+        let fut = wb.analyze();
+        drop(fut);
+        assert!(wb.analyze_blocking().is_ok());
     }
 }

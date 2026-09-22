@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import RomlensKit
 
@@ -41,5 +42,70 @@ import Testing
         let byte = try #require(rom.inspect(fileOffset: 0xFFFC))
         #expect(byte.valueU16Le == 0x8000)
         #expect(byte.spanName == "Emulation RESET")
+    }
+}
+
+final class EventLog: WorkbenchListener, @unchecked Sendable {
+    private let lock = NSLock()
+    private var events: [WorkbenchEvent] = []
+    func onEvent(event: WorkbenchEvent) {
+        lock.lock()
+        events.append(event)
+        lock.unlock()
+    }
+    var all: [WorkbenchEvent] {
+        lock.lock()
+        defer { lock.unlock() }
+        return events
+    }
+}
+
+@Suite struct WorkbenchTests {
+    @Test func analyzesEditsAndRoundTrips() async throws {
+        let rom = try Rom.fromBytes(bytes: makeTestRom(mapping: .loRom), name: "t.sfc")
+        let workbench = Workbench(rom: rom)
+        let log = EventLog()
+        workbench.setListener(listener: log)
+        #expect(workbench.needsAnalysis())
+        let stats = try await workbench.analyze()
+        #expect(stats.instructions == 8)
+        #expect(workbench.lineCount() > 0)
+        #expect(workbench.asmLinesText(startLine: 0, count: 4, style: .snes).contains("SEI"))
+        let batch = workbench.asmLines(startLine: 0, count: 4)
+        #expect(batch.count >= Int(asmBatchHeaderLen()) + 4 * Int(asmLineStride()))
+        #expect(log.all.contains { if case .snapshotChanged(let g) = $0 { return g == 1 } else { return false } })
+
+        try workbench.execute(command: .setLabel(address: 0x8000, name: "Boot"))
+        #expect(workbench.isDirty())
+        #expect(workbench.undoTitle() == "Rename Label")
+        #expect(workbench.labelAt(snesAddress: 0x8000)?.name == "Boot")
+        #expect(try workbench.undo())
+        #expect(workbench.labelAt(snesAddress: 0x8000)?.name == "RESET_008000")
+        #expect(try workbench.redo())
+        let files = workbench.projectFiles()
+        #expect(files.count == 5)
+        let again = try Workbench.withProjectFiles(rom: rom, files: files)
+        #expect(again.labelAt(snesAddress: 0x8000)?.name == "Boot")
+        #expect(throws: RomlensError.self) {
+            try workbench.execute(command: .setLabel(address: 0x8000, name: "bad name"))
+        }
+        #expect(workbench.instructionAt(fileOffset: 8)?.hardwareRegister?.name == "INIDISP")
+        #expect(hardwareRegister(address: 0x420D)?.name == "MEMSEL")
+        #expect(workbench.xrefsTo(snesAddress: 0x2100).count == 1)
+    }
+
+    @Test func cancellationIsAnError() async throws {
+        let rom = try Rom.fromBytes(bytes: makeTestRom(mapping: .loRom), name: "t.sfc")
+        let workbench = Workbench(rom: rom)
+        let task = Task { try await workbench.analyze() }
+        task.cancel()
+        // Either the run finished before the cancel landed or it reports cancellation.
+        do {
+            _ = try await task.value
+        } catch RomlensError.Cancelled {
+        } catch is CancellationError {
+        }
+        _ = try workbench.analyzeBlocking()
+        #expect(!workbench.needsAnalysis())
     }
 }
