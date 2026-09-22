@@ -24,7 +24,11 @@ struct HexTableView: NSViewRepresentable {
         scroll.autohidesScrollers = true
         scroll.drawsBackground = true
         scroll.backgroundColor = .textBackgroundColor
-        canvas.autoresizingMask = [.width]
+        // Sideways rubber-banding when the rows already fit is just noise.
+        scroll.horizontalScrollElasticity = .none
+        // Width is managed by HexPaneView.layout (an autoresizing mask would
+        // add the clip view's growth to the canvas and make it scrollable).
+        canvas.autoresizingMask = []
         canvas.frame = NSRect(x: 0, y: 0, width: model.layout.totalWidth, height: canvas.documentHeight)
         coordinator.canvas = canvas
         coordinator.scrollView = scroll
@@ -140,9 +144,18 @@ final class HexCanvasView: NSView {
 
     /// Address style or font changed: resize and redraw everything.
     func layoutDidChange() {
-        let width = max(model.layout.totalWidth, superview?.bounds.width ?? 0)
-        setFrameSize(NSSize(width: width, height: documentHeight))
+        fitWidth()
         needsDisplay = true
+    }
+
+    /// As wide as the text needs, or the viewport if that is wider, so the
+    /// row background fills the pane and no horizontal scrolling appears
+    /// unless the text genuinely does not fit.
+    func fitWidth() {
+        let width = max(model.layout.totalWidth, superview?.bounds.width ?? 0)
+        if frame.size.width != width || frame.size.height != documentHeight {
+            setFrameSize(NSSize(width: width, height: documentHeight))
+        }
     }
 
     func invalidate(row: Int) {

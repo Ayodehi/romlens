@@ -39,9 +39,20 @@ enum Fixture {
     @Test func windowShowsEveryRow() throws {
         let model = RomViewModel(rom: try Fixture.rom())
         let (controller, scrollView, canvas) = try Fixture.window(model)
+        let content = try #require(controller.window?.contentView)
         #expect(canvas.rowCount == Int(model.rowCount))
         #expect(canvas.bounds.height == CGFloat(model.rowCount) * model.layout.rowHeight)
         #expect(canvas.bounds.width >= model.layout.totalWidth - 1)
+        // The canvas is as wide as the text or the viewport, whichever is
+        // larger, so sideways scrolling exists only when the text does not fit.
+        let clipWidth = scrollView.contentView.bounds.width
+        #expect(canvas.bounds.width == max(model.layout.totalWidth, clipWidth))
+        #expect(scrollView.horizontalScrollElasticity == .none)
+        // Widen the window: the canvas must follow the viewport exactly.
+        controller.window?.setContentSize(NSSize(width: 1600, height: 720))
+        content.layoutSubtreeIfNeeded()
+        #expect(scrollView.contentView.bounds.width > model.layout.totalWidth)
+        #expect(canvas.bounds.width == scrollView.contentView.bounds.width)
         #expect(canvas.subviews.isEmpty)
         #expect(canvas.visibleRows.count > 10)
         #expect(canvas.visibleRows.lowerBound == 0)

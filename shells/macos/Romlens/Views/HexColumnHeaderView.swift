@@ -107,6 +107,7 @@ final class HexPaneView: NSView {
         let h = header.headerHeight
         header.frame = NSRect(x: 0, y: 0, width: bounds.width, height: h)
         scrollView.frame = NSRect(x: 0, y: h, width: bounds.width, height: max(0, bounds.height - h))
+        (scrollView.documentView as? HexCanvasView)?.fitWidth()
     }
 
     func headerHeightDidChange() {
