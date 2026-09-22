@@ -22,11 +22,22 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
         let hosting = NSHostingController(rootView: DocumentView(model: model))
         hosting.sceneBridgingOptions = [.toolbars]
         window.contentViewController = hosting
-        window.subtitle = "\(model.info.mappingName)\(model.info.fastRom ? ", FastROM" : "") · \(model.info.byteLen) bytes"
+        window.subtitle = Self.subtitle(for: model.info)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not used") }
+
+    /// The titlebar subtitle. Short enough not to truncate at the window's
+    /// minimum width, and a size in the units a person thinks in — the exact
+    /// byte count is in the inspector, where there is room for it.
+    static func subtitle(for info: RomInfo) -> String {
+        let megabytes = Double(info.byteLen) / (1024 * 1024)
+        let size = megabytes >= 1
+            ? String(format: "%.3g MB", megabytes)
+            : "\(info.byteLen / 1024) KB"
+        return "\(info.mappingName) · \(info.fastRom ? "FastROM" : "SlowROM") · \(size)"
+    }
 
     private var projectDocument: ProjectDocument? { document as? ProjectDocument }
 

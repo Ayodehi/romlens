@@ -7,17 +7,23 @@ import UniformTypeIdentifiers
 /// creates an untitled project; Save As chooses where it lives. The ROM is
 /// never copied into the package.
 final class ProjectDocument: NSDocument {
-    static let projectType = "io.github.ayodehi.romlens.project"
-    static let romType = "io.github.ayodehi.romlens.sfc"
-    static let localFileName = "local.json"
+    // Constants and a pure comparison, so `nonisolated`: AppKit calls
+    // `read(from:ofType:)` and `canConcurrentlyReadDocuments` off the main
+    // actor, and isolating these to it only produced warnings at every such
+    // call site.
+    nonisolated static let projectType = "io.github.ayodehi.romlens.project"
+    nonisolated static let romType = "io.github.ayodehi.romlens.sfc"
+    nonisolated static let localFileName = "local.json"
 
     /// AppKit hands back the type name LaunchServices resolved, and
     /// LaunchServices lower-cases a declared UTI (`11-naming.md`). UTIs are
     /// case-insensitive, so type names are never compared with `==`.
-    static func isType(_ name: String, _ expected: String) -> Bool {
+    nonisolated static func isType(_ name: String, _ expected: String) -> Bool {
         name.compare(expected, options: .caseInsensitive) == .orderedSame
     }
-    static let coreFiles = ["project.json", "labels.json", "comments.json", "regions.json", "flags.json"]
+    nonisolated static let coreFiles = [
+        "project.json", "labels.json", "comments.json", "regions.json", "flags.json",
+    ]
 
     /// Injected for tests; the app uses the bookmark-based default.
     nonisolated(unsafe) static var locatorFactory: @MainActor () -> RomLocator = { DefaultRomLocator() }
@@ -27,7 +33,13 @@ final class ProjectDocument: NSDocument {
     private var romBookmark: Data?
     private var romSha256: String?
     /// The package as last read, so unknown files survive a save.
-    private var lastWrapper: FileWrapper?
+    ///
+    /// `nonisolated(unsafe)` because `read(from:ofType:)` is a nonisolated
+    /// override and `FileWrapper` is not `Sendable`, so the assignment cannot
+    /// move inside the `assumeIsolated` block with the rest of the state. It
+    /// is safe here for one specific reason: `canConcurrentlyReadDocuments`
+    /// returns `false`, so AppKit never reads a document on two threads.
+    private nonisolated(unsafe) var lastWrapper: FileWrapper?
 
     override init() {
         super.init()

@@ -194,6 +194,27 @@ import Testing
         #expect(!m.navigator.regionsTruncated)
     }
 
+    // MARK: Toolbar and titlebar
+
+    /// The subtitle truncated at the window's minimum width, which is how a
+    /// reader lost the size entirely.
+    @Test func theSubtitleIsShortAndReadable() async throws {
+        let m = try await model()
+        let subtitle = RomWindowController.subtitle(for: m.info)
+        #expect(subtitle == "LoROM · SlowROM · 32 KB", "\(subtitle)")
+        #expect(!subtitle.contains("32768"), "a raw byte count is not a size")
+        #expect(subtitle.count < 40, "long enough to truncate again: \(subtitle)")
+    }
+
+    /// Two unrelated controls both said "Both", so the toolbar had a word that
+    /// meant one thing on the left and another on the right.
+    @Test func noTwoToolbarControlsShareALabel() {
+        let tabs = Set(RomViewModel.EditorTab.allCases.map(\.title))
+        let addresses = Set(AddressStyle.allCases.map(\.label))
+        #expect(tabs.isDisjoint(with: addresses), "shared: \(tabs.intersection(addresses))")
+        #expect(addresses.contains("File + SNES"))
+    }
+
     // MARK: Menu wiring
 
     @Test func theNewMenuItemsExist() throws {
