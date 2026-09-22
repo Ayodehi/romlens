@@ -7,15 +7,19 @@
 //! mirrored-sum checksum, file-offset ↔ SNES-address translation, hex-row
 //! batches, header spans and the byte inspector.
 
+pub mod analysis;
+pub mod cpu65816;
 pub mod error;
 pub mod fixtures;
+pub mod io;
 pub mod memory;
+pub mod model;
 pub mod rom;
 pub mod viewmodel;
 
 pub use error::{AddressError, RomError};
 pub use memory::address::{FileOffset, SnesAddress};
-pub use memory::map::{AddressMap, MappingMode, Region, mirror_offset};
+pub use memory::map::{AddressMap, MappingMode, MemoryClass, mirror_offset};
 pub use memory::parse::{AddressExpr, parse_address_expr};
 pub use rom::header::{ExtendedHeader, RomHeader, Vectors};
 pub use rom::image::{Resolved, RomImage, RomInfo};
@@ -29,4 +33,4 @@ pub use viewmodel::spans::{Span, SpanIndex, SpanKind, header_spans};
 /// Semantic version of the core's public surface. The FFI crate and the CLI
 /// both print it so a shell can pin the version it was built against
 /// (docs/08 rule 6).
-pub const API_VERSION: &str = "0.1.0";
+pub const API_VERSION: &str = "0.2.0";

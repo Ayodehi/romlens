@@ -50,13 +50,24 @@ const fn rom_size_code(len: usize) -> u8 {
 
 /// Build a fixture of `len` bytes with the given mapping.
 pub fn build(mode: MappingMode, len: usize, fast_rom: bool) -> Vec<u8> {
+    build_with_code(mode, len, fast_rom, &BOOT_CODE, FIXTURE_TITLE)
+}
+
+/// Build a fixture with `code` at `$00:8000` and the given title.
+pub fn build_with_code(
+    mode: MappingMode,
+    len: usize,
+    fast_rom: bool,
+    code: &[u8],
+    title_text: &str,
+) -> Vec<u8> {
     let mut rom = vec![0x00u8; len];
     let boot = boot_file_offset(mode);
-    rom[boot..boot + BOOT_CODE.len()].copy_from_slice(&BOOT_CODE);
+    rom[boot..boot + code.len()].copy_from_slice(code);
 
     let h = mode.header_offset().as_usize();
     let mut title = [b' '; TITLE_LEN];
-    title[..FIXTURE_TITLE.len()].copy_from_slice(FIXTURE_TITLE.as_bytes());
+    title[..title_text.len()].copy_from_slice(title_text.as_bytes());
     rom[h..h + TITLE_LEN].copy_from_slice(&title);
     rom[h + 0x15] = 0x20 | mode.map_mode_nibble() | if fast_rom { 0x10 } else { 0x00 };
     rom[h + 0x16] = 0x00; // ROM only
@@ -109,6 +120,28 @@ pub fn minimal_hirom() -> Vec<u8> {
 pub fn minimal_exhirom() -> Vec<u8> {
     build(MappingMode::ExHiRom, 0x41_0000, false)
 }
+
+/// 32 KB LoROM holding the 256 opcodes in order at `$00:8000`, each followed
+/// by operand bytes `12 34 56` truncated to its length under M = X = E = 0.
+/// Drives the CLI `disasm-allopcodes` golden and the FFI smoke test.
+pub fn all_opcodes_lorom() -> Vec<u8> {
+    use crate::cpu65816::{FlagState, OPCODES};
+    let flags = FlagState {
+        m: false,
+        x: false,
+        e: false,
+        ..FlagState::NATIVE_VECTOR
+    };
+    let mut code = Vec::with_capacity(256 * 4);
+    for (op, info) in OPCODES.iter().enumerate() {
+        code.push(op as u8);
+        let n = info.mode.operand_len(flags) as usize;
+        code.extend_from_slice(&[0x12, 0x34, 0x56][..n]);
+    }
+    build_with_code(MappingMode::LoRom, 0x8000, false, &code, ALL_OPCODES_TITLE)
+}
+
+pub const ALL_OPCODES_TITLE: &str = "ROMLENS OPCODES";
 
 /// The fixture for a mapping, by name.
 pub fn for_mapping(mode: MappingMode) -> Vec<u8> {

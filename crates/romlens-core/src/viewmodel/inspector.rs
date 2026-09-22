@@ -2,7 +2,7 @@
 //! want, computed once in the core so all shells agree.
 
 use crate::memory::address::{FileOffset, SnesAddress};
-use crate::memory::map::Region;
+use crate::memory::map::MemoryClass;
 use crate::rom::image::RomImage;
 use crate::viewmodel::spans::Span;
 
@@ -24,8 +24,8 @@ pub struct ByteInterpretation {
     pub u24_as_snes_address: Option<SnesAddress>,
     /// File offset the 24-bit value points at, when it maps to ROM.
     pub pointer_target_file_offset: Option<FileOffset>,
-    /// Region the 24-bit value points into.
-    pub pointer_target_region: Option<Region>,
+    /// Memory class the 24-bit value points into.
+    pub pointer_target_region: Option<MemoryClass>,
     pub ascii: Option<char>,
     pub span_name: Option<String>,
     pub span_value: Option<String>,

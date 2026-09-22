@@ -1,6 +1,6 @@
 //! Address translation tables per mapping, from docs/04 and public references.
 
-use romlens_core::{AddressMap, FileOffset, MappingMode, Region, SnesAddress, mirror_offset};
+use romlens_core::{AddressMap, FileOffset, MappingMode, MemoryClass, SnesAddress, mirror_offset};
 
 const MB: u32 = 1 << 20;
 
@@ -215,18 +215,18 @@ fn mirror_offset_folds_non_power_of_two_images() {
 #[test]
 fn classify_regions() {
     let m = lorom(3 * MB, true);
-    assert_eq!(m.classify(a(0x80, 0x841C)), Region::Rom);
-    assert_eq!(m.classify(a(0x7E, 0x0000)), Region::Wram);
-    assert_eq!(m.classify(a(0x00, 0x0086)), Region::LowRam);
-    assert_eq!(m.classify(a(0x00, 0x2100)), Region::Hardware);
-    assert_eq!(m.classify(a(0x80, 0x420D)), Region::Hardware);
-    assert_eq!(m.classify(a(0x70, 0x0000)), Region::Sram);
-    assert_eq!(m.classify(a(0x40, 0x0000)), Region::OpenBus);
-    assert_eq!(m.classify(a(0x00, 0x6000)), Region::OpenBus);
+    assert_eq!(m.classify(a(0x80, 0x841C)), MemoryClass::Rom);
+    assert_eq!(m.classify(a(0x7E, 0x0000)), MemoryClass::Wram);
+    assert_eq!(m.classify(a(0x00, 0x0086)), MemoryClass::LowRam);
+    assert_eq!(m.classify(a(0x00, 0x2100)), MemoryClass::Hardware);
+    assert_eq!(m.classify(a(0x80, 0x420D)), MemoryClass::Hardware);
+    assert_eq!(m.classify(a(0x70, 0x0000)), MemoryClass::Sram);
+    assert_eq!(m.classify(a(0x40, 0x0000)), MemoryClass::OpenBus);
+    assert_eq!(m.classify(a(0x00, 0x6000)), MemoryClass::OpenBus);
     let h = hirom(4 * MB, true);
-    assert_eq!(h.classify(a(0x20, 0x6000)), Region::Sram);
-    assert_eq!(h.classify(a(0x40, 0x0000)), Region::Rom);
-    assert_eq!(h.classify(a(0x00, 0x7FFF)), Region::OpenBus);
+    assert_eq!(h.classify(a(0x20, 0x6000)), MemoryClass::Sram);
+    assert_eq!(h.classify(a(0x40, 0x0000)), MemoryClass::Rom);
+    assert_eq!(h.classify(a(0x00, 0x7FFF)), MemoryClass::OpenBus);
 }
 
 #[test]

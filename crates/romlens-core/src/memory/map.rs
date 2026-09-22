@@ -71,9 +71,10 @@ impl std::fmt::Display for MappingMode {
     }
 }
 
-/// What a CPU address points at.
+/// What a CPU address points at. (Named `MemoryClass` so `Region` is free for
+/// the analysis type that classifies ROM bytes as code or data.)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Region {
+pub enum MemoryClass {
     Rom,
     /// Banks `$7E`/`$7F`.
     Wram,
@@ -240,23 +241,23 @@ impl AddressMap {
     }
 
     /// Coarse classification of a CPU address.
-    pub fn classify(&self, addr: SnesAddress) -> Region {
+    pub fn classify(&self, addr: SnesAddress) -> MemoryClass {
         let bank = addr.bank();
         let off = addr.offset();
         if bank == 0x7E || bank == 0x7F {
-            return Region::Wram;
+            return MemoryClass::Wram;
         }
         let system_bank = matches!(bank, 0x00..=0x3F | 0x80..=0xBF);
         if system_bank && off < 0x8000 {
             return match off {
-                0x0000..=0x1FFF => Region::LowRam,
-                0x2000..=0x5FFF => Region::Hardware,
+                0x0000..=0x1FFF => MemoryClass::LowRam,
+                0x2000..=0x5FFF => MemoryClass::Hardware,
                 _ => {
                     let hi_sram_bank = matches!(bank, 0x20..=0x3F | 0xA0..=0xBF);
                     if self.mode != MappingMode::LoRom && hi_sram_bank {
-                        Region::Sram
+                        MemoryClass::Sram
                     } else {
-                        Region::OpenBus
+                        MemoryClass::OpenBus
                     }
                 }
             };
@@ -265,11 +266,11 @@ impl AddressMap {
             && matches!(bank, 0x70..=0x7D | 0xF0..=0xFF)
             && off < 0x8000
         {
-            return Region::Sram;
+            return MemoryClass::Sram;
         }
         if self.file_offset(addr).is_some() {
-            return Region::Rom;
+            return MemoryClass::Rom;
         }
-        Region::OpenBus
+        MemoryClass::OpenBus
     }
 }
