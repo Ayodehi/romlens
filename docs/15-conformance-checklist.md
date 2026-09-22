@@ -30,7 +30,7 @@ pass is listed below and still to run. The Phase 2 rows were written from
 | 0.9 | Byte inspector | File offset, on-disk offset when a copier header exists, canonical SNES address, mirrors, u8/i8, u16/i16 LE, u24, ASCII, u16 in current bank and u24 as SNES address with Go, span name | `romlens resolve` gives the addresses and mirrors; readings come from the FFI `inspect` (a CLI `inspect` command is due with Phase 1) | ✅ | ⬜ | ⬜ |
 | 0.10 | Keyboard navigation | Arrows move by 1 and 16 bytes, Page Up/Down by a page, Home/End, Backspace or ⌘[ goes back in jump history | n/a (interaction) | ✅ | ⬜ | ⬜ |
 | 0.11 | Homebrew test ROM | The shell opens the fixture the CLI writes | `romlens testrom --out t.sfc --mapping lorom\|hirom\|exhirom` | ✅ | ⬜ | ⬜ |
-| 0.12 | API version visible | About box or log line shows the core API version the shell was built against | `romlens --version` | ⬜ | ⬜ | ⬜ |
+| 0.12 | API version visible | About box credits and a launch log line show the core API version the shell was built against, read from the core at runtime | `romlens --version` | 🧪 | ⬜ | ⬜ |
 
 ## Phase 1
 

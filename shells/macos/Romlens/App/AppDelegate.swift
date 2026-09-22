@@ -10,6 +10,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillFinishLaunching(_ notification: Notification) {
         documentController = ProjectDocumentController()
         NSApp.mainMenu = MainMenu.build()
+        AboutPanel.logVersions()
+    }
+
+    /// The About item targets nothing, so it walks the responder chain to the
+    /// application and on to this delegate; that is the only hook the standard
+    /// panel offers for supplying credits.
+    @objc func showAboutPanel(_ sender: Any?) {
+        AboutPanel.show()
     }
 
     func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool {

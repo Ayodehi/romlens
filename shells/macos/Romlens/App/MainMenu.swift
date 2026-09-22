@@ -35,7 +35,7 @@ enum MainMenu {
     private static func appMenu() -> NSMenuItem {
         let name = ProcessInfo.processInfo.processName
         return submenu(name, [
-            item("About \(name)", #selector(NSApplication.orderFrontStandardAboutPanel(_:))),
+            item("About \(name)", #selector(AppDelegate.showAboutPanel(_:))),
             .separator(),
             item("Hide \(name)", #selector(NSApplication.hide(_:)), "h"),
             item("Hide Others", #selector(NSApplication.hideOtherApplications(_:)), "h", modifiers: [.command, .option]),
