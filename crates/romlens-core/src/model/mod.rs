@@ -3,6 +3,7 @@
 
 pub mod command;
 pub mod comment;
+pub mod coverage;
 pub mod hardware;
 pub mod label;
 pub mod project;
@@ -13,11 +14,12 @@ pub mod xref;
 
 pub use command::{Command, Origin, UndoEntry};
 pub use comment::{Comment, CommentKind};
+pub use coverage::{BitSet, Coverage, ObservedFlags};
 pub use hardware::{
     Access, HardwareRegister, all_hardware_registers, hardware_register, is_system_bank,
 };
 pub use label::{Label, LabelSource, validate_label_name};
-pub use project::{FlagOverride, Project, RomIdentity, Settings};
+pub use project::{FlagOverride, Project, RomIdentity, Settings, TraceRecord};
 pub use region::{DataKind, Evidence, OverrideKind, Region, RegionKind, RegionOverride};
 pub use symbols::Symbols;
 pub use undo::{UNDO_CAP, UndoStack};

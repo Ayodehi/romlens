@@ -114,6 +114,16 @@ enum Command {
         #[arg(long)]
         no_heuristics: bool,
     },
+    /// Read what another tool knows about a ROM into a project.
+    Import {
+        #[command(subcommand)]
+        what: ImportCommand,
+    },
+    /// Build a ground-truth file for `romlens accuracy`.
+    Truth {
+        #[command(subcommand)]
+        what: TruthCommand,
+    },
     /// Score the classifier against ground truth.
     Accuracy {
         rom: PathBuf,
@@ -212,6 +222,34 @@ enum Command {
     },
     /// The built-in hardware register names.
     Registers { address: Option<String> },
+}
+
+#[derive(Subcommand)]
+enum ImportCommand {
+    /// A Mesen2 CDL or a bsnes-plus usage map.
+    Trace {
+        /// The `.romlens` package to import into.
+        project: PathBuf,
+        /// The ROM, when it is not beside the package.
+        #[arg(long)]
+        rom: Option<PathBuf>,
+        file: PathBuf,
+        /// `cdl` or `usage`; detected from the file when omitted.
+        #[arg(long)]
+        format: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum TruthCommand {
+    /// From a trace: executed bytes are code, bytes only ever read are data,
+    /// and bytes the session never touched stay unlabelled.
+    FromCdl {
+        rom: PathBuf,
+        file: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+    },
 }
 
 #[derive(Subcommand)]
@@ -444,6 +482,19 @@ fn main() -> Result<()> {
                 heuristics: !no_heuristics,
             },
         ),
+        Command::Import { what } => match what {
+            ImportCommand::Trace {
+                project,
+                rom,
+                file,
+                format,
+            } => commands::import::trace(&project, rom.as_deref(), &file, format.as_deref()),
+        },
+        Command::Truth { what } => match what {
+            TruthCommand::FromCdl { rom, file, out } => {
+                commands::truth::from_cdl(&rom, &file, &out)
+            }
+        },
         Command::Accuracy {
             rom,
             project,

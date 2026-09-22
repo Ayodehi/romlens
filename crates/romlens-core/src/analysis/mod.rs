@@ -44,6 +44,8 @@ const TAG_USER: u8 = 6;
 const TAG_INLINE: u8 = 7;
 const TAG_TABLE: u8 = 8;
 const TAG_HEURISTIC: u8 = 9;
+const TAG_TRACE_CODE: u8 = 10;
+const TAG_TRACE_DATA: u8 = 11;
 
 /// Passes of the descent. A callee found adjusting its return address in one
 /// pass makes its callers skip the inline arguments in the next, which can
@@ -200,6 +202,13 @@ pub fn analyze_cached(
 
     let n = rom.len();
     let mut paint = Paint::new(n);
+    // One name for however many traces were merged: they are indistinguishable
+    // once folded, and naming the first of three would be a lie.
+    let trace_name = match project.traces.as_slice() {
+        [] => String::new(),
+        [one] => one.source.clone(),
+        many => format!("{} traces", many.len()),
+    };
 
     // Internal header (plus the extended header when present).
     let h = rom.header_offset().0 as usize;
@@ -230,9 +239,33 @@ pub fn analyze_cached(
             paint.conf[off] = paint.conf[off].saturating_sub(30).max(10);
         }
     }
+    // Bytes an emulator fetched as code. Observation beats inference, so this
+    // outranks the descent's own 90 — but never the internal header, which is
+    // a fact about the image rather than a guess, and never the user, who
+    // paints last.
+    let trace_evidence = |paint: &mut Paint, hits: u64| {
+        paint.intern(vec![Evidence::Trace {
+            file: trace_name.clone(),
+            hits: hits.min(u32::MAX as u64) as u32,
+        }])
+    };
+    if let Some(coverage) = &project.coverage {
+        let hid = trace_evidence(&mut paint, coverage.executed.count());
+        for b in coverage.executed.iter() {
+            let b = b as usize;
+            if b >= n || paint.tag[b] == TAG_HEADER {
+                continue;
+            }
+            paint.set(b, 1, 95, TAG_TRACE_CODE, hid);
+        }
+    }
     for r in &swept {
         for b in r.offset..r.end() {
-            paint.set(b as usize, 1, 30, TAG_SWEEP, 0);
+            let b = b as usize;
+            if paint.tag[b] == TAG_TRACE_CODE {
+                continue;
+            }
+            paint.set(b, 1, 30, TAG_SWEEP, 0);
         }
         records.push((*r, u16::MAX));
     }
@@ -279,6 +312,20 @@ pub fn analyze_cached(
                 continue;
             }
             paint.set(b, code, conf, TAG_TABLE, hid);
+        }
+    }
+    // Bytes an emulator read but never executed. Only fills what nothing else
+    // claimed: a byte can legitimately be both read and executed, and the
+    // executed pass above has already had its say.
+    if let Some(coverage) = &project.coverage {
+        let hid = trace_evidence(&mut paint, coverage.read.count());
+        let code = RegionKind::Data(DataKind::Byte).code();
+        for b in coverage.read.iter() {
+            let b = b as usize;
+            if b >= n || paint.cls[b] != 0 {
+                continue;
+            }
+            paint.set(b, code, 85, TAG_TRACE_DATA, hid);
         }
     }
     // Heuristics, strongest first. Two rules, both asserted in
@@ -411,6 +458,19 @@ pub fn analyze_cached(
         .map(|(x, _)| (x.from.0, x.to.as_u24()))
         .collect();
     let all_xrefs: Vec<_> = walk.xrefs.iter().map(|(x, _)| *x).collect();
+    let mut vectors = vectors;
+    if let Some(coverage) = &project.coverage {
+        // A subroutine entry an emulator saw deserves the same `SUB_` name a
+        // `JSR` target gets; there is no xref to carry it, so it is offered
+        // directly. `labels::build` ranks it, so a vector name still wins.
+        vectors.extend(
+            coverage
+                .entry
+                .iter()
+                .filter_map(|off| rom.snes_address_for(FileOffset(off)))
+                .map(|a| ("SUB", Project::canonical(rom, a))),
+        );
+    }
     let auto_labels = labels::build(&vectors, &all_xrefs, |x| {
         labelable.contains(&(x.from.0, x.to.as_u24()))
     });

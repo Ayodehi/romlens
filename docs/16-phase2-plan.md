@@ -14,7 +14,8 @@ that tracks against it.
 | 2A T2 jump tables | done, `0935cfe`: 34 tables on the development ROM, code 0.2% → 2.1% |
 | 2A T3 measure and record | done, `739964c` |
 | 2A T4 heuristics | done, `5537be5`: unknown 97.9% → 82.9%, region count 1,012 → 1,672 |
-| 2A T5 accuracy harness | done, except `romlens truth from-cdl`, which needs T6's CDL reader. The fixtures score 1.000 precision and recall in CI; the development-ROM target is unmeasured until a truth file exists |
+| 2A T6 trace import | done: Mesen2 CDL and bsnes-plus usage map, with the observed M/X widths seeded into the walk. DiztinGUIsh dropped, not deferred |
+| 2A T5 accuracy harness | done, except `romlens truth from-cdl`, now shipped with T6. The fixtures score 1.000 precision and recall in CI; the development-ROM target is unmeasured until someone records a CDL from their own play session |
 | Housekeeping 2 (the Phase 1 manual pass) | **still to run**, and it needs a person at the app |
 | Everything from 2A T4 (heuristics) on | not started |
 

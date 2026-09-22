@@ -348,6 +348,57 @@ fn project_scenario() {
     log += &run(&["project", pkg, "flags", "0x5", "--remove"]);
     log += &redact_tmp(&dir, &run(&["project", pkg, "history"]));
     check("project-lorom", &log);
+
+    // Trace import, on a CDL this test writes: the format is one byte per ROM
+    // byte in file order, so a fixture needs no emulator (`16-phase2-plan.md`).
+    let mut cdl = b"CDLv2".to_vec();
+    cdl.extend_from_slice(&0u32.to_le_bytes());
+    let mut payload = vec![0u8; fixtures::minimal_lorom().len()];
+    // The two unreachable NOPs ran; a subroutine at 0x10 the walk never finds;
+    // sixteen bytes read as data.
+    payload[0x0C] = 0x01 | 0x04 | 0x20 | 0x10; // code, jump target, 8-bit M and X
+    payload[0x0D] = 0x01 | 0x20 | 0x10;
+    for b in payload.iter_mut().skip(0x10).take(3) {
+        *b = 0x01 | 0x20 | 0x10;
+    }
+    payload[0x10] |= 0x08; // subroutine entry
+    for b in payload.iter_mut().skip(0x200).take(16) {
+        *b = 0x02;
+    }
+    cdl.extend_from_slice(&payload);
+    let cdl_path = dir.join("play.cdl");
+    std::fs::write(&cdl_path, &cdl).unwrap();
+    let cdl_arg = cdl_path.to_str().unwrap();
+    let traced = dir.join("Traced.romlens");
+    let traced = traced.to_str().unwrap();
+    let truth_path = dir.join("play.tsv");
+    let mut trace_log = redact_tmp(&dir, &run(&["project", traced, "init", "--rom", rom]));
+    trace_log += &redact_tmp(
+        &dir,
+        &run(&["import", "trace", traced, "--rom", rom, cdl_arg]),
+    );
+    trace_log += &run(&["analyze", rom, "--project", traced, "--stats"]);
+    trace_log += &run(&["labels", rom, "--project", traced]);
+    trace_log += &redact_tmp(
+        &dir,
+        &run(&[
+            "truth",
+            "from-cdl",
+            rom,
+            cdl_arg,
+            "--out",
+            truth_path.to_str().unwrap(),
+        ]),
+    );
+    trace_log += &run(&[
+        "accuracy",
+        rom,
+        "--project",
+        traced,
+        "--truth",
+        truth_path.to_str().unwrap(),
+    ]);
+    check("trace-lorom", &trace_log);
     // The package is the same five files an empty project writes.
     let empty = romlens_core::io::to_files(
         &romlens_core::RomImage::load(rom).unwrap(),

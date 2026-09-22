@@ -3,12 +3,14 @@
 //! has an inverse.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use crate::error::ProjectError;
 use crate::memory::address::{FileOffset, SnesAddress};
 use crate::memory::map::MappingMode;
 use crate::model::command::{Command, Origin, UndoEntry};
 use crate::model::comment::{Comment, CommentKind};
+use crate::model::coverage::Coverage;
 use crate::model::label::{Label, LabelSource, validate_label_name};
 use crate::model::region::{OverrideKind, RegionOverride};
 use crate::rom::image::RomImage;
@@ -70,6 +72,24 @@ impl Default for Settings {
     }
 }
 
+/// One imported trace, as `project.json` records it.
+///
+/// This is provenance only. The coverage itself is stored once, merged, under
+/// `traces/` — merging is a union and the split is not recoverable, so keeping
+/// one file per import would mean either storing several megabytes per trace
+/// or writing one import's name against all of it. What a reader needs is the
+/// list of what went in, and that is this.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TraceRecord {
+    /// The file it was read from, which is also the identity for re-import.
+    pub source: String,
+    /// `cdl` or `usage`.
+    pub format: String,
+    /// What this trace contributed, before merging.
+    pub executed_bytes: u64,
+    pub read_bytes: u64,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Project {
     pub rom: RomIdentity,
@@ -79,6 +99,15 @@ pub struct Project {
     /// Sorted, non-overlapping.
     pub region_overrides: Vec<RegionOverride>,
     pub flag_overrides: BTreeMap<FileOffset, FlagOverride>,
+    /// Every imported trace, merged.
+    ///
+    /// Not a `Command`, and deliberately so: an import is not an edit with an
+    /// inverse but a body of observation, and putting two megabytes of bitsets
+    /// on the undo stack would be absurd. `Arc` because the analyzer clones the
+    /// project on every run.
+    pub coverage: Option<Arc<Coverage>>,
+    /// What was imported, in import order.
+    pub traces: Vec<TraceRecord>,
     pub settings: Settings,
 }
 
@@ -90,8 +119,20 @@ impl Project {
             comments: BTreeMap::new(),
             region_overrides: Vec::new(),
             flag_overrides: BTreeMap::new(),
+            coverage: None,
+            traces: Vec::new(),
             settings: Settings::default(),
         }
+    }
+
+    /// Merge a trace in and record where it came from.
+    pub fn add_trace(&mut self, record: TraceRecord, coverage: Coverage) {
+        match &mut self.coverage {
+            Some(existing) => Arc::make_mut(existing).union(&coverage),
+            None => self.coverage = Some(Arc::new(coverage)),
+        }
+        self.traces.retain(|t| t.source != record.source);
+        self.traces.push(record);
     }
 
     /// The one address every mirror of a ROM byte is stored under; RAM and

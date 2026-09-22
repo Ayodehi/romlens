@@ -62,11 +62,14 @@ track 2B (graphics) 2.20–2.27 and track 2C (recordings) 2.28–2.36. The
 numbering leaves a gap after 2.8 so 2A can grow without renumbering the other
 tracks.
 
-A row is marked here only when the *shell* exposes it, so 2.1 is still ⬜
-although its core and CLI landed on 22 September 2026: tables resolve, the
-warning is informational, and `romlens tables` ships with goldens, but the
-`dw CODE_…` rendering and the evidence popover's link to the dispatcher are
-task T8 and T10. Nothing else in Phase 2 is started.
+A row is marked here only when the *shell* exposes it, so every Phase 2 row is
+still ⬜. The core and CLI behind 2.1, 2.2, 2.3 and 2.8 landed on 22 September
+2026 — jump tables, scored heuristics, trace import and the accuracy harness,
+each with goldens that need no commercial ROM — and what those rows still want
+is the shell work in tasks T8 and T10. 2.3's DiztinGUIsh column is dropped
+rather than deferred: the format was never verified, and a Diz user can export
+a bsnes usage map or a WLA `.sym`, both of which are read. Nothing in 2B or 2C
+is started.
 
 ### 2A — classification
 
@@ -74,7 +77,7 @@ task T8 and T10. Nothing else in Phase 2 is started.
 |---|---|---|---|---|---|---|
 | 2.1 | Jump tables resolved | Table rows render `dw CODE_…` with a "jump table" region badge; the evidence popover names the dispatching instruction and links to it; the `computed jump` warning becomes informational | `romlens tables <rom> [--json]` | ⬜ | ⬜ | ⬜ |
 | 2.2 | Heuristic scores visible | The evidence popover lists every heuristic with its score, sorted descending, with the detail string ("entropy 7.4 bits/byte over `$96:0000`–`$96:8000`") | `romlens heuristics <rom> [--kind …] [--from --to] [--json]` | ⬜ | ⬜ | ⬜ |
-| 2.3 | Trace and coverage import | File › Import ▸ Execution Trace…; a coverage lane in the overview strip; the analysis status reports traced bytes | `romlens import trace <P> --rom R <file> [--kind auto\|cdl\|usage\|dizraw]` | ⬜ | ⬜ | ⬜ |
+| 2.3 | Trace and coverage import | File › Import ▸ Execution Trace…; a coverage lane in the overview strip; the analysis status reports traced bytes | `romlens import trace <P> --rom R <file> [--format cdl\|usage]` | ⬜ | ⬜ | ⬜ |
 | 2.4 | Symbol import | File › Import ▸ Symbols…; imported labels visibly distinct from auto; collisions and rewritten names reported, never silently dropped | `romlens import symbols <P> --rom R <file> [--format auto\|wla\|nocash\|lbl] [--source NAME]` | ⬜ | ⬜ | ⬜ |
 | 2.5 | Data typing with parameters | Mark as ▸ submenu covering every data kind, with a sheet for stride, bank rule, element kind and bpp; a pointer table renders as labelled targets with xrefs | `romlens project <P> mark <expr> <len> table --stride 2 --elem code\|pointer\|raw --bank same\|$C0\|entry` | ⬜ | ⬜ | ⬜ |
 | 2.6 | Region overview strip | A minimap under the editor coloured by kind and confidence, hatched where a bucket is mixed, with the visible range as a playhead; click and drag to scroll | `romlens map <rom> [--buckets N] [--json]` | ⬜ | ⬜ | ⬜ |

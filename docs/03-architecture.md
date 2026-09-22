@@ -116,6 +116,35 @@ Deltas from Phase 1 ("Disassemble", 21 September 2026):
   unresolved all build their table in RAM, which needs value tracking along
   control flow (Phase 3); the warning names the address so the manual fix is
   one mark.
+- Imported coverage (Phase 2, 22 September 2026) is the one input that is not
+  inference. A Mesen2 CDL or a bsnes-plus usage map records what *did* execute
+  on the paths someone played, so it outranks the descent's own confidence —
+  observation beats inference — but never the user, and never the internal
+  header. A byte only ever read fills what nothing else claimed, since a byte
+  can legitimately be both. `io::import` detects the format: a CDL says so, a
+  usage map is the only thing 16 MB long, and a bare file the size of the ROM
+  is a header-less CDL. A usage map is indexed by 24-bit bus address, so
+  folding it iterates *our* offsets and ORs every mirror; only the folded,
+  one-byte-per-ROM-byte form is stored.
+
+  The widths matter more to the disassembler than the coverage does. Both
+  formats record M and X at every executed opcode, which is exactly what
+  static descent loses after a `PLP` or an `XCE` with unknown carry, so every
+  observed opcode start is *seeded* into the walk with its recorded widths —
+  seeded rather than merely painted, because a byte called code that nothing
+  decoded renders as `db` under a "code" heading, which is a worse listing
+  than none. They are analyzer hints and never `FlagOverride`s: they describe
+  one playthrough, not a decision the user made, and must not reach
+  `flags.json` or the undo stack.
+
+  Merging two traces is a union except for the widths, where the first trace
+  wins and a later one only fills gaps: 8-bit is recorded as a set bit and
+  16-bit as a clear one, so OR-ing two sessions that disagree would silently
+  claim 8-bit for both. A package holds one merged coverage file under
+  `traces/` and a record per import in `project.json`; DiztinGUIsh projects
+  are not read, because the format was never verified and Diz exports both of
+  the formats that are.
+
 - Inline arguments (the Phase 1 test pass, 21 September 2026): a callee that
   adds a constant to its stacked return address (`LDA $01,S … ADC #n …
   STA $01,S`, also behind `PHP; PHB` at `$03,S` and through `TAY`/`TYA`)

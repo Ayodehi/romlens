@@ -418,6 +418,47 @@ impl<'a> Walk<'a> {
                 self.push_entry(addr, flags, 0, true, true, WidthTrust::default());
             }
         }
+        // Every opcode an emulator actually fetched, with the widths it had at
+        // the time. These are seeded rather than merely painted so the
+        // disassembler *decodes* them: a byte the classifier calls code but
+        // nothing decoded renders as `db`, which would be a worse listing than
+        // before the trace was imported.
+        //
+        // Soft, like a user mark: a walk that already covered the address is
+        // the better answer, and an observation should never become a conflict
+        // report.
+        if let Some(coverage) = &self.project.coverage {
+            let starts: Vec<u32> = coverage.opcode_start.iter().collect();
+            for off in starts {
+                if let Some(addr) = self.rom.snes_address_for(FileOffset(off)) {
+                    let flags = self.observed_flags(off, FlagState::NATIVE_VECTOR);
+                    self.push_entry(addr, flags, 0, true, true, WidthTrust::default());
+                }
+            }
+        }
+    }
+
+    /// `base` with M and X replaced by what an emulator observed at this
+    /// opcode, where it observed anything.
+    ///
+    /// This is the single most valuable thing a trace gives the disassembler,
+    /// and it is worth more than the coverage: static descent loses the widths
+    /// after a `PLP` or an `XCE` with unknown carry, and a recorded width is
+    /// the answer. It is a *hint* — it never becomes a `FlagOverride`, never
+    /// reaches `flags.json` and never joins the undo stack, because it is an
+    /// observation about one playthrough rather than a decision the user made.
+    fn observed_flags(&self, off: u32, base: FlagState) -> FlagState {
+        let Some(coverage) = &self.project.coverage else {
+            return base;
+        };
+        if !coverage.flags.recorded || !coverage.opcode_start.get(off) {
+            return base;
+        }
+        FlagState {
+            m: coverage.flags.m8.get(off),
+            x: coverage.flags.x8.get(off),
+            ..base
+        }
     }
 
     /// Drain the worklist.

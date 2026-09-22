@@ -1,0 +1,21 @@
+created <tmp>/Traced.romlens for "ROMLENS TEST"
+imported play.cdl as cdl: 5 bytes executed (0.0%), 16 read (0.0%), 1 subroutine entries, with M/X widths
+Code:          18 bytes (0.1%) in 4 blocks, 11 instructions
+Data:          32750 bytes (99.9%)
+Unknown:       0 bytes (0.0%)
+Regions:       10
+Labels:        4
+Xrefs:         14
+Warnings:      1 (0 flag conflicts)
+0x000000  $00:8000  RESET_008000             auto
+0x00000A  $00:800A  CODE_00800A              auto
+0x00000E  $00:800E  NMI_00800E               auto
+0x000010  $00:8010  SUB_008010               auto
+wrote <tmp>/play.tsv from <tmp>/play.cdl (cdl): 3 ranges, 21 labelled bytes (0.1% of the image)
+Labelled:      21 bytes
+Correct:       21 bytes (100.0% by class, 100.0% by exact kind)
+
+class         truth    claimed  precision     recall         f1
+code              5          5      1.000      1.000      1.000
+data             16         16      1.000      1.000      1.000
+unknown           0          0      0.000      0.000      0.000

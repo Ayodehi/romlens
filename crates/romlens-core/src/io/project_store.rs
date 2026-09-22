@@ -15,7 +15,7 @@ use crate::memory::map::MappingMode;
 use crate::memory::parse::{AddressExpr, parse_address_expr};
 use crate::model::comment::{Comment, CommentKind};
 use crate::model::label::{Label, LabelSource};
-use crate::model::project::{FlagOverride, Project, RomIdentity, Settings};
+use crate::model::project::{FlagOverride, Project, RomIdentity, Settings, TraceRecord};
 use crate::model::region::{DataKind, OverrideKind, RegionOverride};
 use crate::rom::image::RomImage;
 use crate::viewmodel::hex_rows::AddressStyle;
@@ -27,6 +27,9 @@ pub const PROJECT_FORMAT: &str = "romlens-project";
 /// still opens — `v1_package_still_opens` in `tests/project_store.rs` pins that
 /// against a literal v1 package rather than one this code wrote.
 pub const PROJECT_VERSION: u32 = 2;
+/// Where the merged coverage lives inside a package.
+pub const COVERAGE_FILE: &str = "traces/coverage.cdl";
+
 pub const PROJECT_FILES: [&str; 5] = [
     "project.json",
     "labels.json",
@@ -45,6 +48,20 @@ struct ProjectDto {
     rom: RomDto,
     #[serde(default)]
     settings: SettingsDto,
+    /// Imported traces. `default` so a v1 package still opens.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    traces: Vec<TraceDto>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TraceDto {
+    source: String,
+    format: String,
+    #[serde(default)]
+    executed_bytes: u64,
+    #[serde(default)]
+    read_bytes: u64,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -159,6 +176,16 @@ pub fn to_files(rom: &RomImage, project: &Project) -> BTreeMap<String, Vec<u8>> 
                 fast_rom: project.rom.fast_rom,
                 title: project.rom.title.clone(),
             },
+            traces: project
+                .traces
+                .iter()
+                .map(|t| TraceDto {
+                    source: t.source.clone(),
+                    format: t.format.clone(),
+                    executed_bytes: t.executed_bytes,
+                    read_bytes: t.read_bytes,
+                })
+                .collect(),
             settings: SettingsDto {
                 address_style: Some(
                     match project.settings.address_style {
@@ -240,6 +267,17 @@ pub fn to_files(rom: &RomImage, project: &Project) -> BTreeMap<String, Vec<u8>> 
         })
         .collect();
     files.insert("flags.json".to_owned(), to_bytes(&flags));
+    // Every imported trace, merged, folded to one byte per ROM byte. A
+    // bsnes-plus usage map is 16.8 MB of mostly nothing and a package must not
+    // carry that; `project.json`'s `traces` array says what went in.
+    if let Some(coverage) = &project.coverage
+        && !project.traces.is_empty()
+    {
+        files.insert(
+            COVERAGE_FILE.to_owned(),
+            crate::io::import::to_stored(coverage),
+        );
+    }
     files
 }
 
@@ -399,6 +437,29 @@ pub fn from_files(
         if !flags.is_empty() {
             project.flag_overrides.insert(offset, flags);
         }
+    }
+    project.traces = dto
+        .traces
+        .iter()
+        .map(|t| TraceRecord {
+            source: t.source.clone(),
+            format: t.format.clone(),
+            executed_bytes: t.executed_bytes,
+            read_bytes: t.read_bytes,
+        })
+        .collect();
+    // A missing payload drops the records rather than refusing the package: a
+    // project copied without its `traces/` directory should still open, with
+    // every annotation intact and the coverage simply gone.
+    if let Some(bytes) = files.get(COVERAGE_FILE)
+        && !project.traces.is_empty()
+    {
+        project.coverage = Some(std::sync::Arc::new(crate::io::import::from_stored(
+            bytes,
+            rom.len() as u32,
+        )?));
+    } else {
+        project.traces.clear();
     }
     Ok(project)
 }

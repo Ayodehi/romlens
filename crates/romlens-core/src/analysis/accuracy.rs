@@ -145,7 +145,7 @@ impl GroundTruth {
 
     pub fn to_tsv(&self) -> String {
         let mut out = String::from(
-            "# romlens ground truth: start\\tend\\tkind, offsets hex, end exclusive\n",
+            "# romlens ground truth: start, end, kind; tab separated, offsets hex, end exclusive\n",
         );
         if let Some(sha) = &self.sha256 {
             out.push_str(&format!("sha256={sha}\n"));
