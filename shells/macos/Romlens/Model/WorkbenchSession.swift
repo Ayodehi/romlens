@@ -133,6 +133,12 @@ final class WorkbenchSession {
         ))
     }
 
+    /// How the marked range starting at `start` previews. Never re-runs the
+    /// analysis.
+    func setRegionParams(start: UInt32, params: RegionParamsInfo) throws {
+        try execute(.setRegionParams(start: start, params: params))
+    }
+
     func clearMark(start: UInt32, len: UInt32) throws {
         try execute(.clearRegionOverride(start: start, len: len))
     }
@@ -182,7 +188,7 @@ final class WorkbenchSession {
 
     static func affectsAnalysis(_ command: Command) -> Bool {
         switch command {
-        case .setLabel, .setComment: false
+        case .setLabel, .setComment, .setRegionParams: false
         case .markRegion, .clearRegionOverride, .setFlagOverride: true
         }
     }

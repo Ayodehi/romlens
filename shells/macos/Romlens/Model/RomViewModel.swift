@@ -79,10 +79,18 @@ final class RomViewModel {
     private(set) var xrefsFrom: [XRefInfo] = []
     private(set) var warnings: [WarningInfo] = []
     private(set) var flagOverride: FlagOverride?
+    private(set) var preview: PreviewInfo?
     private(set) var history: [UInt32] = []
     private(set) var forwardHistory: [UInt32] = []
     private(set) var scrollRequest: ScrollRequest?
-    var editorTab: EditorTab = .hex
+    /// Choosing a text tab closes any graphics view, which is how the
+    /// segmented control and the Graphics picker share the editor area.
+    var editorTab: EditorTab = .hex {
+        didSet { graphicsTab = nil }
+    }
+    /// The graphics view in the editor area, if one is open.
+    var graphicsTab: GraphicsModel.Tab?
+    let graphics: GraphicsModel
     var activeSheet: Sheet?
     var rightPane: RightPane = .inspector
     var isNavigatorVisible = true
@@ -112,7 +120,10 @@ final class RomViewModel {
         layout = HexRowLayout(style: .both, metrics: metrics)
         asmLayout = AsmLineLayout(style: .both, metrics: metrics)
         asmLineCount = workbench.lineCount()
+        graphics = GraphicsModel(rom: rom)
         session.onChange = { [weak self] kind in self?.handleChange(kind) }
+        graphics.selectBytes = { [weak self] range in self?.selectRange(range) }
+        graphics.revealTile = { [weak self] in self?.graphicsTab = .tiles }
         if startAnalysis {
             session.startAnalysis()
         }
@@ -174,6 +185,50 @@ final class RomViewModel {
         setSelected(offset)
     }
 
+    /// Select a byte range without scrolling or leaving the current view:
+    /// what a click in a graphics view does, so the hex view shows the same
+    /// bytes when you go back to it.
+    func selectRange(_ range: Range<UInt32>) {
+        guard range.lowerBound < byteCount, !range.isEmpty else { return }
+        select(offset: range.lowerBound)
+        if range.count > 1 {
+            extendSelection(to: min(range.upperBound, byteCount) - 1)
+        }
+    }
+
+    /// Open a graphics view on the ROM bytes at the selection.
+    func openGraphics(_ tab: GraphicsModel.Tab) {
+        if graphics.source == .rom, let range = highlightedRange {
+            graphics.romOffset = range.lowerBound
+        }
+        graphicsTab = tab
+    }
+
+    /// The inspector's "Open in …": the preview's view on the range it
+    /// previewed, or on the decompressed bytes for compressed data.
+    func open(preview: PreviewInfo) {
+        if let data = preview.decompressed {
+            graphics.source = .bytes(label: "Decompressed", data: data)
+        } else {
+            graphics.source = .rom
+            graphics.romOffset = preview.start
+        }
+        if let format = preview.format { graphics.format = format }
+        if let params = workbench.regionParamsAt(fileOffset: preview.start) {
+            if let columns = params.columns { graphics.columns = Int(columns) }
+            if let size = params.screenSize { graphics.screenSize = size }
+            if let palette = params.palette, let offset = rom.fileOffsetFor(snesAddress: palette) {
+                graphics.palette = .rom(offset)
+            }
+        }
+        graphics.selectedTile = 0
+        switch preview.view {
+        case .tileDecoder: graphicsTab = .tiles
+        case .palette: graphicsTab = .palette
+        case .tilemap: graphicsTab = .tilemap
+        }
+    }
+
     /// Extend the range from the current selection (shift-click, shift+arrows).
     func extendSelection(to offset: UInt32) {
         guard offset < byteCount else { return }
@@ -204,6 +259,7 @@ final class RomViewModel {
         xrefsFrom = []
         warnings = []
         flagOverride = nil
+        preview = nil
     }
 
     private func refreshSelectionDetails() {
@@ -225,6 +281,7 @@ final class RomViewModel {
         xrefsFrom = workbench.xrefsFrom(fileOffset: itemStart)
         warnings = workbench.warningsAt(fileOffset: itemStart)
         flagOverride = workbench.flagOverrideAt(fileOffset: itemStart)
+        preview = workbench.previewAt(fileOffset: offset)
     }
 
     /// The address of the selected item (instruction start or byte).

@@ -30,6 +30,15 @@ struct DocumentView: View {
         .transaction(Transaction())
     }
 
+    /// No segment is selected while a graphics view has the editor, so the
+    /// control never claims a tab that is not showing.
+    private var editorTab: Binding<RomViewModel.EditorTab?> {
+        Binding(
+            get: { model.graphicsTab == nil ? model.editorTab : nil },
+            set: { if let tab = $0 { model.editorTab = tab } }
+        )
+    }
+
     private var inspectorPresented: Binding<Bool> {
         $model.isInspectorVisible.transaction(Transaction())
     }
@@ -55,13 +64,16 @@ struct DocumentView: View {
         }
         .toolbar {
             ToolbarItem(placement: .principal) {
-                Picker("Editor", selection: $model.editorTab) {
+                Picker("Editor", selection: editorTab) {
                     ForEach(RomViewModel.EditorTab.allCases) { tab in
-                        Text(tab.title).tag(tab)
+                        Text(tab.title).tag(Optional(tab))
                     }
                 }
                 .pickerStyle(.segmented)
                 .help("Hex (⌥⌘1), Disassembly (⌥⌘2) or Both (⌥⌘3)")
+            }
+            ToolbarItem(placement: .principal) {
+                GraphicsMenu(model: model)
             }
             // Trailing: two bordered control groups, nothing else. Where
             // you are, then what you are looking at.

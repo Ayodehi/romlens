@@ -65,6 +65,16 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
     @objc func showHex(_ sender: Any?) { model.editorTab = .hex }
     @objc func showDisassembly(_ sender: Any?) { model.editorTab = .disassembly }
     @objc func showBoth(_ sender: Any?) { model.editorTab = .both }
+    @objc func showTileDecoder(_ sender: Any?) { model.openGraphics(.tiles) }
+    @objc func showPalette(_ sender: Any?) { model.openGraphics(.palette) }
+    @objc func showOam(_ sender: Any?) { model.openGraphics(.oam) }
+    @objc func showTilemap(_ sender: Any?) { model.openGraphics(.tilemap) }
+
+    @objc func openRecording(_ sender: Any?) {
+        RecordingController.open(model: model, window: window)
+    }
+
+    @objc func closeRecording(_ sender: Any?) { model.graphics.detach() }
     // Explicit animations: `DocumentView` binds these without one so the
     // framework's own re-application on window activation cannot slide the
     // content.
@@ -140,11 +150,21 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
         case #selector(showFileOffsets(_:)):
             item.state = model.addressStyle == .file ? .on : .off
         case #selector(showHex(_:)):
-            item.state = model.editorTab == .hex ? .on : .off
+            item.state = model.graphicsTab == nil && model.editorTab == .hex ? .on : .off
         case #selector(showDisassembly(_:)):
-            item.state = model.editorTab == .disassembly ? .on : .off
+            item.state = model.graphicsTab == nil && model.editorTab == .disassembly ? .on : .off
         case #selector(showBoth(_:)):
-            item.state = model.editorTab == .both ? .on : .off
+            item.state = model.graphicsTab == nil && model.editorTab == .both ? .on : .off
+        case #selector(showTileDecoder(_:)):
+            item.state = model.graphicsTab == .tiles ? .on : .off
+        case #selector(showPalette(_:)):
+            item.state = model.graphicsTab == .palette ? .on : .off
+        case #selector(showOam(_:)):
+            item.state = model.graphicsTab == .oam ? .on : .off
+        case #selector(showTilemap(_:)):
+            item.state = model.graphicsTab == .tilemap ? .on : .off
+        case #selector(closeRecording(_:)):
+            return model.graphics.hasRecording
         case #selector(toggleNavigator(_:)):
             item.title = model.isNavigatorVisible ? "Hide Navigator" : "Show Navigator"
         case #selector(toggleInspector(_:)):

@@ -1,11 +1,21 @@
 import RomlensKit
 import SwiftUI
 
-/// The centre of the window: Hex, Disassembly or Both.
+/// The centre of the window: Hex, Disassembly or Both, or one of the
+/// graphics views.
 struct EditorView: View {
     @Bindable var model: RomViewModel
 
     var body: some View {
+        if model.graphicsTab != nil {
+            GraphicsEditorView(model: model)
+        } else {
+            textEditor
+        }
+    }
+
+    @ViewBuilder
+    private var textEditor: some View {
         switch model.editorTab {
         case .hex:
             HexTableView(model: model)

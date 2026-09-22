@@ -16,6 +16,9 @@ struct InspectorView: View {
                             InstructionSection(model: model)
                         }
                         RegionSection(model: model)
+                        if let preview = model.preview {
+                            PreviewSection(model: model, preview: preview)
+                        }
                         LabelSection(model: model)
                         CommentsSection(model: model)
                         XrefsSection(model: model)
@@ -513,5 +516,45 @@ struct ByteReadingsGrid: View {
                 Text("—")
             }
         }
+    }
+}
+
+/// What a typed range looks like (checklist 2.25, 2.27), with a way into the
+/// full view. Compressed data previews its decompressed output, so this is
+/// also where "decompress and preview" lives.
+struct PreviewSection: View {
+    let model: RomViewModel
+    let preview: PreviewInfo
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Preview").font(.headline)
+            if let bitmap = preview.bitmap {
+                PixelImage(bitmap: bitmap, scale: scale(for: bitmap))
+            }
+            Text(preview.summary)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button(openTitle) { model.open(preview: preview) }
+                .controlSize(.small)
+                .disabled(preview.kind == "compressed" && preview.decompressed == nil)
+        }
+    }
+
+    private var openTitle: String {
+        let view = switch preview.view {
+        case .tileDecoder: "Tile Decoder"
+        case .palette: "Palette"
+        case .tilemap: "Tilemap"
+        }
+        return preview.kind == "compressed" ? "Decompress and Open in \(view)" : "Open in \(view)"
+    }
+
+    /// Fit the inspector's width: whole-number scales only, so pixels stay
+    /// square.
+    private func scale(for bitmap: BitmapInfo) -> CGFloat {
+        let fit = 256 / CGFloat(max(bitmap.width, 1))
+        return max(1, min(8, fit.rounded(.down)))
     }
 }

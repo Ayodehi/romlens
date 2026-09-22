@@ -68,6 +68,9 @@ enum MainMenu {
             item("Duplicate", #selector(NSDocument.duplicate(_:)), "s", modifiers: [.command, .shift, .option]),
             item("Revert to Saved", #selector(NSDocument.revertToSaved(_:))),
             .separator(),
+            item("Open Recording…", #selector(RomWindowController.openRecording(_:)), "o", modifiers: [.command, .option]),
+            item("Close Recording", #selector(RomWindowController.closeRecording(_:))),
+            .separator(),
             importMenu,
             export,
         ])
@@ -124,6 +127,12 @@ enum MainMenu {
             item("Hex", #selector(RomWindowController.showHex(_:)), "1", modifiers: [.command, .option]),
             item("Disassembly", #selector(RomWindowController.showDisassembly(_:)), "2", modifiers: [.command, .option]),
             item("Both", #selector(RomWindowController.showBoth(_:)), "3", modifiers: [.command, .option]),
+            submenu("Graphics", [
+                item("Tile Decoder", #selector(RomWindowController.showTileDecoder(_:)), "4", modifiers: [.command, .option]),
+                item("Palette", #selector(RomWindowController.showPalette(_:)), "5", modifiers: [.command, .option]),
+                item("OAM", #selector(RomWindowController.showOam(_:)), "6", modifiers: [.command, .option]),
+                item("Tilemap", #selector(RomWindowController.showTilemap(_:)), "7", modifiers: [.command, .option]),
+            ]),
             .separator(),
             item("File Offset and SNES Address", #selector(RomWindowController.showBothAddresses(_:)), "1"),
             item("SNES Address Only", #selector(RomWindowController.showSnesAddresses(_:)), "2"),
