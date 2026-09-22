@@ -145,6 +145,36 @@ Deltas from Phase 1 ("Disassemble", 21 September 2026):
   are not read, because the format was never verified and Diz exports both of
   the formats that are.
 
+- Imported symbols (Phase 2, 22 September 2026) read WLA-DX / bsnes-plus
+  `.sym`, no$sns `.sym` and VICE / ld65 `.lbl`. WLA came first because
+  `io::symbol_export` writes it, so the reader round-trips against our own
+  exporter and gets a correctness test for nothing; no$sns is the same label
+  grammar without the sections, so both cost one reader.
+
+  The collision rule is one sentence: a symbol file is somebody else's
+  opinion, and somebody else's opinion does not get to rename what this person
+  named. `LabelSource::User` is never overwritten; anything that is replaced is
+  counted and reported. Comments are treated as the user's unconditionally,
+  because there is no `CommentSource` and that is the reading which cannot
+  lose something they typed.
+
+  Nothing is silently dropped. Real files carry dots, `@` and ca65 `::`
+  scopes, so `sanitize_imported_label` rewrites them and every rewrite is
+  reported; names past 64 characters keep a hash of the original, or two ca65
+  scopes sharing a prefix would collapse into one label. Sanitising happens
+  after the whole file is read, since a file may name an address twice and
+  de-duplicating as it went would leave the survivor disambiguated from a name
+  that is no longer there.
+
+  An import is one `apply_batch` under `Origin::Import`, which is where
+  `Origin` earns its place: twenty thousand labels are one undo entry, the
+  batch is all-or-nothing, and `Origin::label_source` is what makes the same
+  `SetLabel` mean "the user named this" from a sheet and "a symbol file named
+  this" from an importer. Undo restores each label to exactly the source it
+  had, through a `RestoreLabel` inverse that exists for that reason alone. The
+  file's leading comment block is kept in `project.json`'s `imports[].notice`,
+  so a licence travels with what it covers.
+
 - Inline arguments (the Phase 1 test pass, 21 September 2026): a callee that
   adds a constant to its stacked return address (`LDA $01,S … ADC #n …
   STA $01,S`, also behind `PHP; PHB` at `$03,S` and through `TAY`/`TYA`)

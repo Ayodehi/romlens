@@ -399,6 +399,39 @@ fn project_scenario() {
         truth_path.to_str().unwrap(),
     ]);
     check("trace-lorom", &trace_log);
+
+    // Symbol import: a user name survives, others are rewritten and reported,
+    // and the licence notice travels with what it covers.
+    let sym_path = dir.join("theirs.sym");
+    std::fs::write(
+        &sym_path,
+        "; Symbols for the Romlens test ROM\n\
+; Licence: 0BSD\n\
+\n\
+[labels]\n\
+00:8000 Reset::Entry\n\
+00:800A main.loop\n\
+00:800E NMI@handler\n\
+00:800a main@loop\n\
+nonsense\n\
+[comments]\n\
+00:800A the spin\n",
+    )
+    .unwrap();
+    let sym_arg = sym_path.to_str().unwrap();
+    let imported = dir.join("Imported.romlens");
+    let imported = imported.to_str().unwrap();
+    let mut sym_log = redact_tmp(&dir, &run(&["project", imported, "init", "--rom", rom]));
+    sym_log += &run(&["project", imported, "label", "$00:8000", "MyOwnBoot"]);
+    sym_log += &redact_tmp(
+        &dir,
+        &run(&["import", "symbols", imported, "--rom", rom, sym_arg]),
+    );
+    sym_log += &run(&["labels", rom, "--project", imported]);
+    // Straight back out through our own exporter, which is the round trip the
+    // WLA reader exists to get for free.
+    sym_log += &run(&["export", "sym", rom, "--project", imported, "--out", "-"]);
+    check("symbols-lorom", &sym_log);
     // The package is the same five files an empty project writes.
     let empty = romlens_core::io::to_files(
         &romlens_core::RomImage::load(rom).unwrap(),

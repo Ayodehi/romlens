@@ -15,7 +15,9 @@ use crate::memory::map::MappingMode;
 use crate::memory::parse::{AddressExpr, parse_address_expr};
 use crate::model::comment::{Comment, CommentKind};
 use crate::model::label::{Label, LabelSource};
-use crate::model::project::{FlagOverride, Project, RomIdentity, Settings, TraceRecord};
+use crate::model::project::{
+    FlagOverride, ImportRecord, Project, RomIdentity, Settings, TraceRecord,
+};
 use crate::model::region::{DataKind, OverrideKind, RegionOverride};
 use crate::rom::image::RomImage;
 use crate::viewmodel::hex_rows::AddressStyle;
@@ -51,6 +53,22 @@ struct ProjectDto {
     /// Imported traces. `default` so a v1 package still opens.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     traces: Vec<TraceDto>,
+    /// Imported symbol files, with their licence notices.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    imports: Vec<ImportDto>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportDto {
+    source: String,
+    format: String,
+    #[serde(default)]
+    labels: u64,
+    #[serde(default)]
+    comments: u64,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    notice: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -184,6 +202,17 @@ pub fn to_files(rom: &RomImage, project: &Project) -> BTreeMap<String, Vec<u8>> 
                     format: t.format.clone(),
                     executed_bytes: t.executed_bytes,
                     read_bytes: t.read_bytes,
+                })
+                .collect(),
+            imports: project
+                .imports
+                .iter()
+                .map(|i| ImportDto {
+                    source: i.source.clone(),
+                    format: i.format.clone(),
+                    labels: i.labels,
+                    comments: i.comments,
+                    notice: i.notice.clone(),
                 })
                 .collect(),
             settings: SettingsDto {
@@ -438,6 +467,17 @@ pub fn from_files(
             project.flag_overrides.insert(offset, flags);
         }
     }
+    project.imports = dto
+        .imports
+        .iter()
+        .map(|i| ImportRecord {
+            source: i.source.clone(),
+            format: i.format.clone(),
+            labels: i.labels,
+            comments: i.comments,
+            notice: i.notice.clone(),
+        })
+        .collect();
     project.traces = dto
         .traces
         .iter()

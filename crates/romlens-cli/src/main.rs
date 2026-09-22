@@ -238,6 +238,21 @@ enum ImportCommand {
         #[arg(long)]
         format: Option<String>,
     },
+    /// A WLA-DX / bsnes-plus `.sym`, a no$sns `.sym` or a VICE `.lbl`.
+    Symbols {
+        /// The `.romlens` package to import into.
+        project: PathBuf,
+        /// The ROM, when it is not beside the package.
+        #[arg(long)]
+        rom: Option<PathBuf>,
+        file: PathBuf,
+        /// `wla`, `nocash` or `lbl`; detected from the file when omitted.
+        #[arg(long)]
+        format: Option<String>,
+        /// The name the labels are attributed to; the file name by default.
+        #[arg(long)]
+        source: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -489,6 +504,19 @@ fn main() -> Result<()> {
                 file,
                 format,
             } => commands::import::trace(&project, rom.as_deref(), &file, format.as_deref()),
+            ImportCommand::Symbols {
+                project,
+                rom,
+                file,
+                format,
+                source,
+            } => commands::import::symbols(
+                &project,
+                rom.as_deref(),
+                &file,
+                format.as_deref(),
+                source.as_deref(),
+            ),
         },
         Command::Truth { what } => match what {
             TruthCommand::FromCdl { rom, file, out } => {

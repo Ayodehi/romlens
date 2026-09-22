@@ -1,6 +1,7 @@
 //! Reading what other tools know about a ROM.
 
 pub mod cdl;
+pub mod symbols;
 pub mod usage_map;
 
 use crate::error::ProjectError;

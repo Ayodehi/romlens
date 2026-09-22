@@ -11,7 +11,7 @@ use crate::memory::map::MappingMode;
 use crate::model::command::{Command, Origin, UndoEntry};
 use crate::model::comment::{Comment, CommentKind};
 use crate::model::coverage::Coverage;
-use crate::model::label::{Label, LabelSource, validate_label_name};
+use crate::model::label::{Label, validate_label_name};
 use crate::model::region::{OverrideKind, RegionOverride};
 use crate::rom::image::RomImage;
 use crate::viewmodel::hex_rows::AddressStyle;
@@ -90,6 +90,19 @@ pub struct TraceRecord {
     pub read_bytes: u64,
 }
 
+/// One imported symbol file, as `project.json` records it.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ImportRecord {
+    pub source: String,
+    /// `wla`, `nocash` or `lbl`.
+    pub format: String,
+    pub labels: u64,
+    pub comments: u64,
+    /// The file's leading comment block, kept because a licence notice has to
+    /// travel with what it covers (`12-content-policy.md` rule 7).
+    pub notice: String,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Project {
     pub rom: RomIdentity,
@@ -108,6 +121,9 @@ pub struct Project {
     pub coverage: Option<Arc<Coverage>>,
     /// What was imported, in import order.
     pub traces: Vec<TraceRecord>,
+    /// Symbol files imported, in import order. The labels themselves live in
+    /// `labels` like any other; this is provenance and the licence notice.
+    pub imports: Vec<ImportRecord>,
     pub settings: Settings,
 }
 
@@ -121,6 +137,7 @@ impl Project {
             flag_overrides: BTreeMap::new(),
             coverage: None,
             traces: Vec::new(),
+            imports: Vec::new(),
             settings: Settings::default(),
         }
     }
@@ -133,6 +150,13 @@ impl Project {
         }
         self.traces.retain(|t| t.source != record.source);
         self.traces.push(record);
+    }
+
+    /// Record a symbol file that was imported. The labels are applied through
+    /// `apply_batch` so they are undoable; this is only the provenance.
+    pub fn add_import(&mut self, record: ImportRecord) {
+        self.imports.retain(|i| i.source != record.source);
+        self.imports.push(record);
     }
 
     /// The one address every mirror of a ROM byte is stored under; RAM and
@@ -224,7 +248,12 @@ impl Project {
     /// Apply one command and return the commands that take it back. Nothing
     /// outside this file calls it: an edit is always a batch, even of one, so
     /// there is a single place where a failure half-way is rolled back.
-    fn apply_one(&mut self, rom: &RomImage, cmd: &Command) -> Result<Vec<Command>, ProjectError> {
+    fn apply_one(
+        &mut self,
+        rom: &RomImage,
+        cmd: &Command,
+        origin: &Origin,
+    ) -> Result<Vec<Command>, ProjectError> {
         let inverse = match cmd {
             Command::SetLabel { address, name } => {
                 let address = Self::canonical(rom, *address);
@@ -239,7 +268,7 @@ impl Project {
                             Label {
                                 address,
                                 name: name.clone(),
-                                source: LabelSource::User,
+                                source: origin.label_source(),
                             },
                         );
                     }
@@ -247,9 +276,20 @@ impl Project {
                         self.labels.remove(&address);
                     }
                 }
-                vec![Command::SetLabel {
+                vec![Command::RestoreLabel {
                     address,
-                    name: previous.map(|l| l.name),
+                    label: previous,
+                }]
+            }
+            Command::RestoreLabel { address, label } => {
+                let address = Self::canonical(rom, *address);
+                let previous = match label {
+                    Some(l) => self.labels.insert(address, l.clone()),
+                    None => self.labels.remove(&address),
+                };
+                vec![Command::RestoreLabel {
+                    address,
+                    label: previous,
                 }]
             }
             Command::SetComment {
@@ -352,7 +392,7 @@ impl Project {
         let title = origin.title(&commands);
         let mut inverse: Vec<Command> = Vec::with_capacity(commands.len());
         for cmd in &commands {
-            match self.apply_one(rom, cmd) {
+            match self.apply_one(rom, cmd, &origin) {
                 // Prepending keeps `inverse` in undo order: last done, first
                 // undone.
                 Ok(inv) => {
@@ -362,7 +402,7 @@ impl Project {
                     // Unwinding cannot fail: every inverse was produced by a
                     // command this project just accepted.
                     for undo in std::mem::take(&mut inverse) {
-                        let _ = self.apply_one(rom, &undo);
+                        let _ = self.apply_one(rom, &undo, &origin);
                     }
                     return Err(e);
                 }

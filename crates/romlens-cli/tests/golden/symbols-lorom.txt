@@ -1,0 +1,25 @@
+created <tmp>/Imported.romlens for "ROMLENS TEST"
+Rename Label
+imported theirs.sym as wla: 2 labels added, 0 replaced, 1 comment added
+undo entry: Import from theirs.sym
+1 kept: you had already named them
+3 names rewritten to be usable:
+  Reset::Entry -> Reset_Entry
+  main@loop -> main_loop
+  NMI@handler -> NMI_handler
+1 line not understood:
+  nonsense
+notice kept in project.json:
+  Symbols for the Romlens test ROM
+  Licence: 0BSD
+0x000000  $00:8000  MyOwnBoot                user
+0x00000A  $00:800A  main_loop                imported:theirs.sym
+0x00000E  $00:800E  NMI_handler              imported:theirs.sym
+; Romlens symbols for "ROMLENS TEST" (SHA-256 a2462f1d74f993d0b3e10ae9425cd9b48253ac82c99913f07ef704d9c85dc6ee)
+[labels]
+00:8000 MyOwnBoot
+00:800A main_loop
+00:800E NMI_handler
+
+[comments]
+00:800A the spin
