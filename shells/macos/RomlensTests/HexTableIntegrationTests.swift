@@ -49,7 +49,8 @@ enum Fixture {
         // Hit testing: byte 3 of row 2, and the gap between hex and ASCII.
         let layout = model.layout
         let hit = NSPoint(x: layout.x(ofChar: layout.hexColumn(byte: 3)) + 1, y: 2 * layout.rowHeight + 3)
-        #expect(canvas.byte(at: hit) == 2 * 16 + 3)
+        let hitByte: UInt32? = canvas.byte(at: hit)
+        #expect(hitByte == UInt32(2 * 16 + 3))
         #expect(canvas.byte(at: NSPoint(x: 2, y: 5)) == nil)
 
         // Jump lands the header row in view and selects it.

@@ -12,7 +12,7 @@ struct HexTableView: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator(model: model) }
 
-    func makeNSView(context: Context) -> NSScrollView {
+    func makeNSView(context: Context) -> HexPaneView {
         let coordinator = context.coordinator
         let canvas = HexCanvasView(model: model)
         canvas.onKeyCommand = { [weak coordinator] command in coordinator?.handle(command) }
@@ -28,10 +28,12 @@ struct HexTableView: NSViewRepresentable {
         canvas.frame = NSRect(x: 0, y: 0, width: model.layout.totalWidth, height: canvas.documentHeight)
         coordinator.canvas = canvas
         coordinator.scrollView = scroll
-        return scroll
+        let header = HexColumnHeaderView(model: model)
+        coordinator.header = header
+        return HexPaneView(header: header, scrollView: scroll)
     }
 
-    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+    func updateNSView(_ pane: HexPaneView, context: Context) {
         let c = context.coordinator
         guard let canvas = c.canvas else { return }
         // Every property read here is observed; SwiftUI re-runs this update
@@ -43,11 +45,13 @@ struct HexTableView: NSViewRepresentable {
         if c.lineGeneration != generation {
             c.lineGeneration = generation
             canvas.layoutDidChange()
+            pane.headerHeightDidChange()
         }
         if c.selectedOffset != selected {
             if let old = c.selectedOffset { canvas.invalidate(row: Int(old / 16)) }
             if let new = selected { canvas.invalidate(row: Int(new / 16)) }
             c.selectedOffset = selected
+            c.header?.selectedByte = selected.map { Int($0 % 16) }
         }
         if let scroll, c.lastScrollId != scroll.id {
             c.lastScrollId = scroll.id
@@ -60,6 +64,7 @@ struct HexTableView: NSViewRepresentable {
         let model: RomViewModel
         weak var canvas: HexCanvasView?
         weak var scrollView: NSScrollView?
+        weak var header: HexColumnHeaderView?
         var lineGeneration = -1
         var selectedOffset: UInt32?
         var lastScrollId = 0

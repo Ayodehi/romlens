@@ -1,6 +1,7 @@
 import AppKit
 
-@main
+/// Installed by `main.swift`. (`@main` on an `NSApplicationDelegate` only
+/// instantiates the delegate from a main nib, and this app has none.)
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     // Instantiating the subclass first makes it the shared controller.

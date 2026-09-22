@@ -38,3 +38,22 @@ import Testing
         #expect(!RomDocument.autosavesInPlace)
     }
 }
+
+@MainActor
+@Suite struct MainMenuTests {
+    @Test func menuHasTheDocumentedMenus() {
+        let menu = MainMenu.build()
+        let titles = menu.items.map(\.title)
+        #expect(titles.dropFirst() == ["File", "Edit", "View", "Go", "Window", "Help"])
+        let go = menu.items.first { $0.title == "Go" }?.submenu
+        let jump = go?.items.first { $0.title == "Jump to Address…" }
+        #expect(jump?.keyEquivalent == "l")
+        #expect(jump?.action == #selector(RomWindowController.jumpToAddress(_:)))
+    }
+
+    /// The running test host is the real app, so its delegate must be installed.
+    @Test func appDelegateIsInstalled() {
+        #expect(NSApp.delegate is AppDelegate)
+        #expect(NSApp.mainMenu?.items.contains { $0.title == "Go" } == true)
+    }
+}
