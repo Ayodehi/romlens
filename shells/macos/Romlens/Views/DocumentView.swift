@@ -4,12 +4,15 @@ import SwiftUI
 /// Navigator on the left, the editor in the middle, the inspector on the
 /// right.
 ///
-/// The toolbar is in three groups, by what a thing *is* rather than where it
-/// fits: navigation on the leading edge where macOS puts back and forward,
-/// the editor tabs in the centre, and the view options and the analysis
-/// status trailing. They were previously all trailing, which ran the status
-/// text and the navigation buttons together into one pill that read as a
-/// single control.
+/// The toolbar holds only controls: the editor tabs in the centre, and
+/// navigation and the address style trailing. Nothing is added on the leading
+/// edge, because in a `NavigationSplitView` that space is the width of the
+/// sidebar and the document's title has to share it — one extra button there
+/// truncated "SuperMetroid.F8DF".
+///
+/// What the analyzer found is not a control, so it is not in the toolbar; it
+/// is in `RomHeaderBand` with the overview strip, which is about the same
+/// thing.
 struct DocumentView: View {
     @Bindable var model: RomViewModel
 
@@ -37,24 +40,8 @@ struct DocumentView: View {
                 .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 360)
         } detail: {
             VStack(spacing: 0) {
-                if model.isStripVisible {
-                    // Inset rather than edge to edge: the strip is a view of
-                    // the whole ROM, not a continuation of the editor's own
-                    // scroll, and butting it against the toolbar made it read
-                    // as part of the chrome.
-                    RegionStripView(model: model)
-                        .frame(height: 22)
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 4)
-                                .strokeBorder(.separator, lineWidth: 1)
-                        )
-                        .padding(.horizontal, 12)
-                        .padding(.top, 10)
-                        .padding(.bottom, 8)
-                        .help("The whole ROM, one column per pixel. Click to jump.")
-                    Divider()
-                }
+                RomHeaderBand(model: model)
+                Divider()
                 EditorView(model: model)
                 if model.isResultsVisible {
                     Divider()
@@ -67,12 +54,18 @@ struct DocumentView: View {
                 .inspectorColumnWidth(min: 280, ideal: 320, max: 420)
         }
         .toolbar {
-            // Leading: back and forward, the pair macOS puts here, and only
-            // that pair. The titlebar shares this space, so a third button
-            // truncated the document's name — and "Jump to Address" was the
-            // odd one out anyway: the others move through history, it opens a
-            // sheet, and it is ⌘L and a Go menu item already.
-            ToolbarItemGroup(placement: .navigation) {
+            ToolbarItem(placement: .principal) {
+                Picker("Editor", selection: $model.editorTab) {
+                    ForEach(RomViewModel.EditorTab.allCases) { tab in
+                        Text(tab.title).tag(tab)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .help("Hex (⌥⌘1), Disassembly (⌥⌘2) or Both (⌥⌘3)")
+            }
+            // Trailing: two bordered control groups, nothing else. Where
+            // you are, then what you are looking at.
+            ToolbarItemGroup {
                 Button {
                     model.goBack()
                 } label: {
@@ -88,17 +81,6 @@ struct DocumentView: View {
                 .disabled(!model.canGoForward)
                 .help("Forward (⌘])")
             }
-            ToolbarItem(placement: .principal) {
-                Picker("Editor", selection: $model.editorTab) {
-                    ForEach(RomViewModel.EditorTab.allCases) { tab in
-                        Text(tab.title).tag(tab)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .help("Hex (⌥⌘1), Disassembly (⌥⌘2) or Both (⌥⌘3)")
-            }
-            // Trailing: what is shown, then what was found. The status is
-            // informational and sits last, furthest from the controls.
             ToolbarItem {
                 Picker(selection: $model.addressStyle) {
                     ForEach(AddressStyle.allCases) { style in
@@ -109,9 +91,6 @@ struct DocumentView: View {
                 }
                 .pickerStyle(.menu)
                 .help("Which address columns the editor shows")
-            }
-            ToolbarItem {
-                AnalysisStatusItem(model: model)
             }
         }
         .sheet(item: $model.activeSheet) { sheet in
