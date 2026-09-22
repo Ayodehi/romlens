@@ -5,6 +5,7 @@ use std::path::Path;
 use anyhow::Result;
 use romlens_core::cpu65816::{NoSymbols, assumption_names, format_instruction};
 use romlens_core::model::{CommentKind, Evidence, Symbols};
+use romlens_core::viewmodel::preview::preview_at;
 use romlens_core::{FileOffset, MemoryClass, header_spans, interpret};
 
 use crate::commands::session;
@@ -176,6 +177,18 @@ pub fn run(rom: &Path, expr: &str, project: Option<&Path>) -> Result<()> {
     }
     if let Some(f) = s.project.flag_overrides.get(&off) {
         println!("Flag override: {f:?}");
+    }
+    if let Some(p) = preview_at(&s.rom, &s.snap, &s.project, off.0) {
+        println!("Preview:       {}", p.summary);
+        if let Some(bm) = &p.bitmap {
+            println!(
+                "               {}x{} image, sha256={}; Open in {}",
+                bm.width,
+                bm.height,
+                bm.digest(),
+                p.view.name()
+            );
+        }
     }
     Ok(())
 }

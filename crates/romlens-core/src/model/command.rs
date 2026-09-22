@@ -4,7 +4,7 @@ use crate::memory::address::{FileOffset, SnesAddress};
 use crate::model::comment::CommentKind;
 use crate::model::label::{Label, LabelSource};
 use crate::model::project::FlagOverride;
-use crate::model::region::OverrideKind;
+use crate::model::region::{OverrideKind, RegionParams};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
@@ -39,6 +39,12 @@ pub enum Command {
     ClearRegionOverride {
         start: FileOffset,
         len: u32,
+    },
+    /// How the override starting at `start` previews. Refused where no
+    /// override starts, since a preview option on nothing would be lost.
+    SetRegionParams {
+        start: FileOffset,
+        params: RegionParams,
     },
     /// `None` removes the override.
     SetFlagOverride {
@@ -80,6 +86,7 @@ impl Command {
                 ..
             } => "Mark as Unknown",
             Command::ClearRegionOverride { .. } => "Clear Mark",
+            Command::SetRegionParams { .. } => "Set Preview Options",
             Command::SetFlagOverride { flags: Some(_), .. } => "Set Flags",
             Command::SetFlagOverride { flags: None, .. } => "Remove Flags",
         }

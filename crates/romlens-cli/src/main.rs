@@ -545,6 +545,25 @@ enum ProjectCommand {
         #[arg(long)]
         bank: Option<String>,
     },
+    /// How the marked range starting here previews; options not given go
+    /// back to the defaults.
+    Preview {
+        expr: String,
+        /// A palette in ROM (BGR15) to draw graphics in.
+        #[arg(long)]
+        palette: Option<String>,
+        /// Tiles across.
+        #[arg(long)]
+        columns: Option<u16>,
+        /// For a tilemap: 32x32, 64x32, 32x64 or 64x64.
+        #[arg(long)]
+        size: Option<String>,
+        /// For a tilemap: the 4 bpp tiles in ROM to draw it with.
+        #[arg(long)]
+        tiles: Option<String>,
+        #[arg(long)]
+        rom: Option<PathBuf>,
+    },
     /// Remove marks from a range.
     Clear {
         expr: String,
@@ -863,6 +882,22 @@ fn main() -> Result<()> {
                 bpp,
                 elem: elem.as_deref(),
                 bank: bank.as_deref(),
+            }),
+            ProjectCommand::Preview {
+                expr,
+                palette,
+                columns,
+                size,
+                tiles,
+                rom,
+            } => commands::project::preview(commands::project::PreviewArgs {
+                dir: &path,
+                rom: rom.as_deref(),
+                expr: &expr,
+                palette: palette.as_deref(),
+                columns,
+                size: size.as_deref(),
+                tiles: tiles.as_deref(),
             }),
             ProjectCommand::Clear { expr, len, rom } => {
                 commands::project::clear(&path, rom.as_deref(), &expr, len)

@@ -60,6 +60,8 @@ pub enum ProjectError {
     InvalidLabelName(String),
     #[error("range {0} is outside the ROM or empty")]
     BadRange(String),
+    #[error("{0}: preview options need a marked range that starts there")]
+    NotMarked(String),
 }
 
 impl From<io::Error> for ProjectError {

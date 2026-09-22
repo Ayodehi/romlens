@@ -4,7 +4,7 @@
 use romlens_core::fixtures;
 use romlens_core::model::{
     Command, CommentKind, DataKind, FlagOverride, Origin, OverrideKind, Project, RegionOverride,
-    TableElem, UndoStack,
+    RegionParams, TableElem, UndoStack,
 };
 use romlens_core::{FileOffset, ProjectError, RomImage, SnesAddress};
 
@@ -181,7 +181,8 @@ fn region_marks_split_and_merge() {
             RegionOverride {
                 start: FileOffset(0x100),
                 len: 0x80,
-                kind: OverrideKind::Code
+                kind: OverrideKind::Code,
+                params: RegionParams::default(),
             },
             RegionOverride {
                 start: FileOffset(0x180),
@@ -189,12 +190,14 @@ fn region_marks_split_and_merge() {
                 kind: OverrideKind::Data(DataKind::Table {
                     stride: 4,
                     elem: TableElem::Raw,
-                })
+                }),
+                params: RegionParams::default(),
             },
             RegionOverride {
                 start: FileOffset(0x380),
                 len: 0x80,
-                kind: OverrideKind::Data(DataKind::Word)
+                kind: OverrideKind::Data(DataKind::Word),
+                params: RegionParams::default(),
             },
         ]
     );
@@ -468,4 +471,67 @@ fn origin_titles() {
         Origin::Accepted("the tutor".into()).title(&one),
         "Accept the tutor"
     );
+}
+
+#[test]
+fn preview_options_live_on_the_override_and_survive_undo() {
+    use romlens_core::graphics::tilemap::ScreenSize;
+    let rom = rom();
+    let mut p = Project::new(&rom);
+    let gfx = OverrideKind::Data(DataKind::Graphics { bpp: 4 });
+    check_inverse(&rom, &mut p, mark(0x1000, 0x400, gfx));
+    let params = RegionParams {
+        palette: Some(a(0x00, 0x9820)),
+        columns: Some(8),
+        screen_size: Some(ScreenSize::S64x32),
+        tiles: None,
+    };
+    let set = Command::SetRegionParams {
+        start: FileOffset(0x1000),
+        params,
+    };
+    check_inverse(&rom, &mut p, set);
+    assert_eq!(p.region_overrides[0].params, params);
+    // Setting options for bytes nobody marked is refused, not lost.
+    assert!(matches!(
+        p.apply(
+            &rom,
+            Command::SetRegionParams {
+                start: FileOffset(0x1001),
+                params,
+            }
+        ),
+        Err(ProjectError::NotMarked(_))
+    ));
+    // A mark that cuts the range keeps the options on both halves, and its
+    // undo puts them back exactly.
+    check_inverse(&rom, &mut p, mark(0x1100, 0x20, OverrideKind::Code));
+    assert_eq!(p.region_overrides[0].params, params);
+    assert_eq!(p.region_overrides[2].params, params);
+    // Overwriting the whole range drops them, and undo restores them.
+    check_inverse(&rom, &mut p, mark(0x1000, 0x400, gfx));
+    assert!(p.region_overrides[0].params.is_default());
+    assert!(
+        !Command::SetRegionParams {
+            start: FileOffset(0),
+            params
+        }
+        .affects_analysis()
+    );
+    // They round-trip through the package.
+    let mut p = Project::new(&rom);
+    p.apply(&rom, mark(0x1000, 0x400, gfx)).unwrap();
+    p.apply(
+        &rom,
+        Command::SetRegionParams {
+            start: FileOffset(0x1000),
+            params,
+        },
+    )
+    .unwrap();
+    let files = romlens_core::io::to_files(&rom, &p);
+    let back = romlens_core::io::from_files(&rom, &files).unwrap();
+    assert_eq!(back.region_overrides, p.region_overrides);
+    let json = String::from_utf8(files["regions.json"].clone()).unwrap();
+    assert!(json.contains("\"screenSize\": \"64x32\""), "{json}");
 }

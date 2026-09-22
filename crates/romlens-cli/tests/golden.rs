@@ -572,6 +572,39 @@ fn graphics_commands() {
         std::fs::read(out).unwrap(),
         &fixtures::graphics_lorom()[0x1000..0x1400]
     );
+    // Typed ranges preview in `inspect` (checklist 2.25).
+    let pkg = dir.join("g.romlens");
+    let pkg = pkg.to_str().unwrap();
+    let mut text = run(&["project", pkg, "init", "--rom", rom]);
+    for (at, len, kind) in [
+        ("0x1000", "1024", "graphics"),
+        ("0x1800", "512", "palette"),
+        ("0x2000", "2048", "tilemap"),
+        ("0x3000", "433", "compressed"),
+    ] {
+        text += &run_with(&["project", pkg, "mark", at, len, kind], &["--rom", rom]);
+    }
+    text += &run_with(
+        &["project", pkg, "preview", "0x2000", "--tiles", "0x1000"],
+        &["--palette", "0x1800", "--rom", rom],
+    );
+    text += &run_with(&["project", pkg, "preview", "0x2001"], &["--rom", rom]);
+    text += &run_with(
+        &["project", pkg, "preview", "0x1000", "--columns", "8"],
+        &["--palette", "0x1820", "--rom", rom],
+    );
+    for at in ["0x1000", "0x1800", "0x2000", "0x3000"] {
+        let out = run(&["inspect", rom, at, "--project", pkg]);
+        // The preview line and the image line under it.
+        let lines: Vec<&str> = out.lines().collect();
+        if let Some(i) = lines.iter().position(|l| l.starts_with("Preview")) {
+            for line in &lines[i..(i + 2).min(lines.len())] {
+                text += line;
+                text += "\n";
+            }
+        }
+    }
+    check("preview-graphics", &redact_tmp(&dir, &text));
     let _ = std::fs::remove_dir_all(dir);
 }
 

@@ -4,5 +4,6 @@ pub mod asm_lines;
 pub mod graphics;
 pub mod hex_rows;
 pub mod inspector;
+pub mod preview;
 pub mod region_summary;
 pub mod spans;

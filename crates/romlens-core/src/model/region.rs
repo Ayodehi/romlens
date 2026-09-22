@@ -305,6 +305,33 @@ impl Region {
     }
 }
 
+/// How a typed range previews: which palette a graphics range is drawn in,
+/// how many tiles across, a tilemap's size and where its tiles are.
+///
+/// On the override rather than on [`DataKind`], so the kind stays hashable
+/// with the batch encoding it already has, and so changing how a
+/// range *looks* never re-runs the analysis (`16-phase2-plan.md`, the
+/// cross-track decisions). Every field is optional; absent means the view's
+/// default — grayscale, sixteen across, 32×32, no tiles.
+///
+/// `tiles` names the tile data in ROM a tilemap preview draws with. The plan
+/// sketched a VRAM character base here, but a range of ROM bytes has no VRAM
+/// behind it; the recording views take their character base from the PPU
+/// registers instead.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct RegionParams {
+    pub palette: Option<SnesAddress>,
+    pub columns: Option<u16>,
+    pub screen_size: Option<crate::graphics::tilemap::ScreenSize>,
+    pub tiles: Option<SnesAddress>,
+}
+
+impl RegionParams {
+    pub fn is_default(&self) -> bool {
+        *self == RegionParams::default()
+    }
+}
+
 /// A user's classification of a byte range.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OverrideKind {
@@ -332,6 +359,7 @@ pub struct RegionOverride {
     pub start: FileOffset,
     pub len: u32,
     pub kind: OverrideKind,
+    pub params: RegionParams,
 }
 
 impl RegionOverride {

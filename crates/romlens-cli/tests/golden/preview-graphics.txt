@@ -1,0 +1,17 @@
+created <tmp>/g.romlens for "ROMLENS GRAPHICS"
+Mark as Data
+Mark as Data
+Mark as Data
+Mark as Data
+Set Preview Options
+[exit code 1]
+Error: 0x002001: preview options need a marked range that starts there
+Set Preview Options
+Preview:       32 tiles at 4bpp, 8 across, palette at $00:9820
+               64x32 image, sha256=7178f84a4ac8da1c8e707dcf022d75695e2fe069c7c71ecfd23a1a53a5681ee8; Open in Tile Decoder
+Preview:       256 colours in 16 rows, 120 distinct
+               16x16 image, sha256=23c02de4d2d66af768f80509c6da6039c3b36e66c13a857f80e8ca95ddd2c4b7; Open in Palette
+Preview:       1024 cells as 32x32, tiles $002–$019, 7 distinct; drawn with 4 bpp tiles at $00:9000
+               256x256 image, sha256=7d21d786c03f078e1614f8a23bb1acce74acb001f65e2781d43953f8bb87a063; Open in Tilemap
+Preview:       Super Metroid LZ: 1024 bytes from 433, shown as 32 4 bpp tiles, grayscale
+               128x16 image, sha256=5eeb494f5dd8ef14844a76266f3e1673db9dd3d6ded0b7c4a92be7ee1954021a; Open in Tile Decoder

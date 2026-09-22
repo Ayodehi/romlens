@@ -12,7 +12,7 @@ use crate::model::command::{Command, Origin, UndoEntry};
 use crate::model::comment::{Comment, CommentKind};
 use crate::model::coverage::Coverage;
 use crate::model::label::{Label, validate_label_name};
-use crate::model::region::{OverrideKind, RegionOverride};
+use crate::model::region::{OverrideKind, RegionOverride, RegionParams};
 use crate::rom::image::RomImage;
 use crate::viewmodel::hex_rows::AddressStyle;
 
@@ -222,16 +222,15 @@ impl Project {
             touched.push(r);
             if r.start.0 < start {
                 kept.push(RegionOverride {
-                    start: r.start,
                     len: start - r.start.0,
-                    kind: r.kind,
+                    ..r
                 });
             }
             if r.end() > end {
                 kept.push(RegionOverride {
                     start: FileOffset(end),
                     len: r.end() - end,
-                    kind: r.kind,
+                    ..r
                 });
             }
         }
@@ -328,29 +327,31 @@ impl Project {
                     start: *start,
                     len: *len,
                     kind: *kind,
+                    params: RegionParams::default(),
                 });
                 let mut inv = vec![Command::ClearRegionOverride {
                     start: *start,
                     len: *len,
                 }];
-                inv.extend(touched.into_iter().map(|r| Command::MarkRegion {
-                    start: r.start,
-                    len: r.len,
-                    kind: r.kind,
-                }));
+                inv.extend(restore(touched));
                 inv
             }
             Command::ClearRegionOverride { start, len } => {
                 Self::check_range(rom, start.0, *len)?;
-                let touched = self.cut_overrides(start.0, start.0 + len);
-                touched
-                    .into_iter()
-                    .map(|r| Command::MarkRegion {
-                        start: r.start,
-                        len: r.len,
-                        kind: r.kind,
-                    })
-                    .collect()
+                restore(self.cut_overrides(start.0, start.0 + len))
+            }
+            Command::SetRegionParams { start, params } => {
+                let r = self
+                    .region_overrides
+                    .iter_mut()
+                    .find(|r| r.start == *start)
+                    .ok_or_else(|| ProjectError::NotMarked(start.to_string()))?;
+                let previous = r.params;
+                r.params = *params;
+                vec![Command::SetRegionParams {
+                    start: *start,
+                    params: previous,
+                }]
             }
             Command::SetFlagOverride { offset, flags } => {
                 Self::check_range(rom, offset.0, 1)?;
@@ -420,4 +421,24 @@ impl Project {
     pub fn override_kind_at(&self, off: u32) -> Option<OverrideKind> {
         self.region_override_at(FileOffset(off)).map(|r| r.kind)
     }
+}
+
+/// The commands that put cut overrides back exactly: the mark, then its
+/// preview options if it had any.
+fn restore(touched: Vec<RegionOverride>) -> Vec<Command> {
+    let mut out = Vec::with_capacity(touched.len());
+    for r in touched {
+        out.push(Command::MarkRegion {
+            start: r.start,
+            len: r.len,
+            kind: r.kind,
+        });
+        if !r.params.is_default() {
+            out.push(Command::SetRegionParams {
+                start: r.start,
+                params: r.params,
+            });
+        }
+    }
+    out
 }

@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::API_VERSION;
 use crate::error::ProjectError;
+use crate::graphics::tilemap::ScreenSize;
 use crate::memory::address::{FileOffset, SnesAddress};
 use crate::memory::map::MappingMode;
 use crate::memory::parse::{AddressExpr, parse_address_expr};
@@ -18,7 +19,9 @@ use crate::model::label::{Label, LabelSource};
 use crate::model::project::{
     FlagOverride, ImportRecord, Project, RomIdentity, Settings, TraceRecord,
 };
-use crate::model::region::{BankRule, DataKind, OverrideKind, RegionOverride, TableElem};
+use crate::model::region::{
+    BankRule, DataKind, OverrideKind, RegionOverride, RegionParams, TableElem,
+};
 use crate::rom::image::RomImage;
 use crate::viewmodel::hex_rows::AddressStyle;
 
@@ -134,6 +137,23 @@ struct RegionDto {
     /// For `table` and `pointer`: `same`, `entry` or a bank such as `$C0`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     bank: Option<String>,
+    /// How the range previews (track 2B). Absent in every package written
+    /// before it, which reads as "the view's defaults".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    preview: Option<PreviewDto>,
+}
+
+#[derive(Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct PreviewDto {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    palette: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    columns: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    screen_size: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    tiles: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -297,6 +317,7 @@ pub fn to_files(rom: &RomImage, project: &Project) -> BTreeMap<String, Vec<u8>> 
                     .map(BankRule::name),
                 ),
             };
+            let p = r.params;
             RegionDto {
                 start: addr(r.start),
                 length: r.len,
@@ -306,6 +327,12 @@ pub fn to_files(rom: &RomImage, project: &Project) -> BTreeMap<String, Vec<u8>> 
                 bpp,
                 elem,
                 bank,
+                preview: (!p.is_default()).then(|| PreviewDto {
+                    palette: p.palette.map(|a| a.to_string()),
+                    columns: p.columns,
+                    screen_size: p.screen_size.map(|s| s.name().to_owned()),
+                    tiles: p.tiles.map(|a| a.to_string()),
+                }),
             }
         })
         .collect();
@@ -480,10 +507,33 @@ pub fn from_files(
         if r.length == 0 || start.0 as u64 + r.length as u64 > rom.len() as u64 {
             return Err(ProjectError::BadRange(format!("{}+{}", r.start, r.length)));
         }
+        let preview = r.preview.unwrap_or_default();
+        let params = RegionParams {
+            palette: preview
+                .palette
+                .as_deref()
+                .map(|t| parse_snes("regions.json", t))
+                .transpose()?,
+            columns: preview.columns,
+            screen_size: preview
+                .screen_size
+                .as_deref()
+                .map(|t| {
+                    ScreenSize::parse(t)
+                        .ok_or_else(|| json("regions.json", format!("unknown screen size {t:?}")))
+                })
+                .transpose()?,
+            tiles: preview
+                .tiles
+                .as_deref()
+                .map(|t| parse_snes("regions.json", t))
+                .transpose()?,
+        };
         regions.push(RegionOverride {
             start,
             len: r.length,
             kind,
+            params,
         });
     }
     regions.sort_by_key(|r| r.start);

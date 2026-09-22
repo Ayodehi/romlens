@@ -3,9 +3,11 @@
 use std::path::Path;
 
 use anyhow::{Result, anyhow};
+use romlens_core::graphics::tilemap::ScreenSize;
 use romlens_core::io::{to_files, write_package};
 use romlens_core::model::{
     BankRule, Command, CommentKind, DataKind, FlagOverride, LabelSource, OverrideKind, Project,
+    RegionParams,
 };
 use romlens_core::{AddressExpr, FileOffset, RomImage, SnesAddress};
 
@@ -112,6 +114,40 @@ pub fn mark(args: MarkArgs<'_>) -> Result<()> {
             start: FileOffset(rom_offset(r, args.expr)?),
             len: args.len,
             kind,
+        })
+    })
+}
+
+pub struct PreviewArgs<'a> {
+    pub dir: &'a Path,
+    pub rom: Option<&'a Path>,
+    pub expr: &'a str,
+    pub palette: Option<&'a str>,
+    pub columns: Option<u16>,
+    pub size: Option<&'a str>,
+    pub tiles: Option<&'a str>,
+}
+
+/// Set how the marked range starting at `expr` previews. Every option not
+/// given goes back to the view's default, so `preview <expr>` alone clears
+/// them.
+pub fn preview(a: PreviewArgs<'_>) -> Result<()> {
+    apply(a.dir, a.rom, |r| {
+        let params = RegionParams {
+            palette: a.palette.map(|e| snes_of(r, e)).transpose()?,
+            columns: a.columns,
+            screen_size: a
+                .size
+                .map(|s| {
+                    ScreenSize::parse(s)
+                        .ok_or_else(|| anyhow!("--size is 32x32, 64x32, 32x64 or 64x64"))
+                })
+                .transpose()?,
+            tiles: a.tiles.map(|e| snes_of(r, e)).transpose()?,
+        };
+        Ok(Command::SetRegionParams {
+            start: FileOffset(rom_offset(r, a.expr)?),
+            params,
         })
     })
 }
