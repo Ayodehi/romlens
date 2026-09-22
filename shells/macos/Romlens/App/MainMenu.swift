@@ -46,9 +46,6 @@ enum MainMenu {
     }
 
     private static func fileMenu() -> NSMenuItem {
-        let recent = submenu("Open Recent", [
-            item("Clear Menu", #selector(NSDocumentController.clearRecentDocuments(_:))),
-        ])
         let export = submenu("Export", [
             item("Assembly Listing…", #selector(RomWindowController.exportAssembly(_:))),
             item("Labels and Comments…", #selector(RomWindowController.exportAnnotations(_:))),
@@ -59,8 +56,9 @@ enum MainMenu {
             item("Symbols…", #selector(RomWindowController.importSymbols(_:))),
         ])
         return submenu("File", [
+            // AppKit inserts Open Recent after Open… by itself, as it does
+            // Rename, Move To and Share; building one here showed it twice.
             item("Open…", #selector(NSDocumentController.openDocument(_:)), "o"),
-            recent,
             .separator(),
             item("Close", #selector(NSWindow.performClose(_:)), "w"),
             item("Save", #selector(NSDocument.save(_:)), "s"),

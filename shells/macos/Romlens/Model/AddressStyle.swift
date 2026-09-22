@@ -16,7 +16,9 @@ enum AddressStyle: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// The short form, for anywhere the full label does not fit.
+    /// What the toolbar button shows. Shorter than the menu's wording,
+    /// because the button carries the *current* value where the menu has to
+    /// distinguish three of them.
     var shortLabel: String {
         switch self {
         case .both: "File + SNES"

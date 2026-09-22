@@ -16,20 +16,6 @@ import SwiftUI
 struct DocumentView: View {
     @Bindable var model: RomViewModel
 
-    /// The split view and the inspector re-apply their visibility through
-    /// these bindings when the window becomes key (clicking into a second
-    /// window), and the default transaction animates that as a slide of the
-    /// whole content. Writing through a plain transaction keeps those
-    /// re-applications silent; the View menu toggles animate explicitly in
-    /// `RomWindowController`.
-    private var columnVisibility: Binding<NavigationSplitViewVisibility> {
-        Binding(
-            get: { model.isNavigatorVisible ? .all : .detailOnly },
-            set: { model.isNavigatorVisible = $0 != .detailOnly }
-        )
-        .transaction(Transaction())
-    }
-
     /// No segment is selected while a graphics view has the editor, so the
     /// control never claims a tab that is not showing.
     private var editorTab: Binding<RomViewModel.EditorTab?> {
@@ -39,15 +25,20 @@ struct DocumentView: View {
         )
     }
 
-    private var inspectorPresented: Binding<Bool> {
-        $model.isInspectorVisible.transaction(Transaction())
-    }
-
     var body: some View {
-        NavigationSplitView(columnVisibility: columnVisibility) {
-            NavigatorView(model: model)
-                .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 360)
-        } detail: {
+        // Three plain panes rather than a `NavigationSplitView` with an
+        // inspector. Under the macOS 26+ toolbar a split view controller
+        // gives each column its own toolbar section and its own scroll-edge
+        // blur, sized to the titlebar and drawn over the top of the column
+        // whether or not anything scrolls beneath it. That blur sat on the
+        // header band, and the sections broke the toolbar into pieces that
+        // read as belonging to the panes below. A plain split keeps the
+        // toolbar one cohesive bar across the window, with the panes under it.
+        HSplitView {
+            if model.isNavigatorVisible {
+                NavigatorView(model: model)
+                    .frame(minWidth: 200, idealWidth: 240, maxWidth: 360)
+            }
             VStack(spacing: 0) {
                 RomHeaderBand(model: model)
                 Divider()
@@ -57,12 +48,21 @@ struct DocumentView: View {
                     SearchResultsView(model: model)
                 }
             }
-        }
-        .inspector(isPresented: inspectorPresented) {
-            RightPaneView(model: model)
-                .inspectorColumnWidth(min: 280, ideal: 320, max: 420)
+            .frame(minWidth: 420, maxWidth: .infinity)
+            if model.isInspectorVisible {
+                RightPaneView(model: model)
+                    .frame(minWidth: 280, idealWidth: 320, maxWidth: 420)
+            }
         }
         .toolbar {
+            ToolbarItem(placement: .navigation) {
+                Button {
+                    withAnimation { model.isNavigatorVisible.toggle() }
+                } label: {
+                    Label("Navigator", systemImage: "sidebar.left")
+                }
+                .help("Show or hide the navigator (⌘0)")
+            }
             ToolbarItem(placement: .principal) {
                 Picker("Editor", selection: editorTab) {
                     ForEach(RomViewModel.EditorTab.allCases) { tab in
@@ -70,6 +70,7 @@ struct DocumentView: View {
                     }
                 }
                 .pickerStyle(.segmented)
+                .controlSize(.large)
                 .help("Hex (⌥⌘1), Disassembly (⌥⌘2) or Both (⌥⌘3)")
             }
             ToolbarItem(placement: .principal) {
@@ -94,14 +95,26 @@ struct DocumentView: View {
                 .help("Forward (⌘])")
             }
             ToolbarItem {
-                Picker(selection: $model.addressStyle) {
-                    ForEach(AddressStyle.allCases) { style in
-                        Text(style.label).tag(style)
+                // A `Menu` rather than a `Picker(.menu)`: a menu-style picker
+                // renders as an `NSPopUpButton`, whose title inset is much
+                // tighter than a segmented control's, so the two sat in the
+                // toolbar with visibly different padding. Building the label
+                // by hand is what makes its insets ours to match.
+                Menu {
+                    Picker("Addresses", selection: $model.addressStyle) {
+                        ForEach(AddressStyle.allCases) { style in
+                            Text(style.label).tag(style)
+                        }
                     }
+                    .pickerStyle(.inline)
+                    .labelsHidden()
                 } label: {
-                    Label("Addresses", systemImage: "number")
+                    Text(model.addressStyle.shortLabel)
+                        .padding(.horizontal, 8)
                 }
-                .pickerStyle(.menu)
+                .menuStyle(.button)
+                .controlSize(.large)
+                .fixedSize()
                 .help("Which address columns the editor shows")
             }
         }
