@@ -186,6 +186,14 @@ fn lorom_analysis_commands() {
     // Accuracy against the truth the fixture builder states, which is the one
     // ground truth CI can hold (`12-content-policy.md`).
     check(
+        "map-mixed",
+        &format!(
+            "{}{}",
+            run(&["map", mixed, "--buckets", "64", "--width", "32"]),
+            run(&["map", mixed, "--buckets", "8", "--json"]),
+        ),
+    );
+    check(
         "accuracy-fixtures",
         &format!(
             "{}{}{}",
@@ -344,7 +352,14 @@ fn project_scenario() {
     log += &redact_tmp(&dir, &run(&["project", pkg, "history"]));
     log += &run(&["disasm", rom, "--project", pkg, "--count", "24"]);
     log += &run(&[
-        "disasm", rom, "--project", pkg, "--from", "0x7FFC", "--count", "3",
+        "disasm",
+        rom,
+        "--project",
+        pkg,
+        "--from",
+        "0x7FFC",
+        "--count",
+        "3",
     ]);
     log += &run(&["labels", rom, "--project", pkg, "--source", "user"]);
     log += &run(&["export", "sym", rom, "--project", pkg, "--out", "-"]);

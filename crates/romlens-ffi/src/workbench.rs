@@ -14,6 +14,7 @@ use romlens_core::io;
 use romlens_core::model::{self, Project, Symbols, UndoStack};
 use romlens_core::viewmodel::asm_lines::NONE_ADDRESS;
 use romlens_core::viewmodel::hex_rows::{BATCH_HEADER_LEN, BYTES_PER_ROW, ROW_STRIDE};
+use romlens_core::viewmodel::region_summary;
 use romlens_core::{
     FileOffset, LineIndex, SnesAddress, TextOptions, encode_lines, encode_rows, format_lines_text,
 };
@@ -419,6 +420,12 @@ impl Workbench {
     }
 
     /// Every region, for the navigator.
+    ///
+    /// Deprecated in Phase 2 and kept only so a shell built against 0.2.0
+    /// still links: a trace import can take a 3 MB ROM past forty thousand
+    /// regions, and returning all of them as generated records to be filtered
+    /// shell-side is exactly the shape `10-ffi-spike.md` measured as the
+    /// expensive one. Use `regions_of_kind` or `region_map`.
     pub fn regions_summary(&self) -> Vec<RegionInfo> {
         self.lock()
             .snapshot
@@ -426,6 +433,58 @@ impl Workbench {
             .iter()
             .map(RegionInfo::from)
             .collect()
+    }
+
+    /// Regions of one kind, largest first, at most `limit` of them.
+    ///
+    /// The navigator wants "the big code blocks", not every region, and the
+    /// core is where that question should be answered: a shell that asked for
+    /// everything and sorted it would pay for the whole list to cross the FFI
+    /// before discarding it.
+    pub fn regions_of_kind(&self, kind: RegionKind, limit: u32) -> Vec<RegionInfo> {
+        let inner = self.lock();
+        let mut out: Vec<&model::Region> = inner
+            .snapshot
+            .regions
+            .iter()
+            .filter(|r| {
+                matches!(
+                    (kind, r.kind),
+                    (RegionKind::Unknown, model::RegionKind::Unknown)
+                        | (RegionKind::Code, model::RegionKind::Code)
+                        | (RegionKind::Data, model::RegionKind::Data(_))
+                )
+            })
+            .collect();
+        out.sort_by(|a, b| b.len.cmp(&a.len).then(a.start.cmp(&b.start)));
+        out.truncate(limit as usize);
+        // Back into address order: the navigator lists them, it does not rank
+        // them, and "the ten biggest, in order" is what a reader can navigate.
+        out.sort_by_key(|r| r.start);
+        out.iter().map(|r| RegionInfo::from(*r)).collect()
+    }
+
+    /// The whole-ROM overview strip, reduced to `buckets` columns.
+    ///
+    /// A flat batch, like the hex rows: the shell draws one rect per column
+    /// from a buffer it walks once, and the reduction happens here so every
+    /// shell gets the same answer. The layout is documented on
+    /// `viewmodel::region_summary::encode_summary`.
+    pub fn region_map(&self, buckets: u32) -> Vec<u8> {
+        let entropy = Arc::clone(
+            self.entropy
+                .get_or_init(|| Arc::new(EntropyProfile::build(&self.rom.image))),
+        );
+        let inner = self.lock();
+        let len = self.rom.image.len() as u32;
+        let map = region_summary::summarize(
+            &inner.snapshot,
+            len,
+            buckets,
+            Some(&entropy),
+            inner.project.coverage.as_deref(),
+        );
+        region_summary::encode_summary(&map, len)
     }
 
     // ---- labels, xrefs, comments, warnings --------------------------------

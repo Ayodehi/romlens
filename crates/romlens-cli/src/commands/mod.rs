@@ -8,6 +8,7 @@ pub mod heuristics;
 pub mod import;
 pub mod inspect;
 pub mod labels;
+pub mod map;
 pub mod project;
 pub mod registers;
 pub mod rom;

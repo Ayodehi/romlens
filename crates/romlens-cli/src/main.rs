@@ -155,6 +155,20 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// The whole-ROM overview the shell's strip draws.
+    Map {
+        rom: PathBuf,
+        #[arg(long)]
+        project: Option<PathBuf>,
+        /// Columns across the whole image.
+        #[arg(long, default_value_t = 256)]
+        buckets: u32,
+        /// Columns per printed row.
+        #[arg(long, default_value_t = 64)]
+        width: u32,
+        #[arg(long)]
+        json: bool,
+    },
     /// List the dispatch tables the analyzer resolved.
     Tables {
         rom: PathBuf,
@@ -558,6 +572,13 @@ fn main() -> Result<()> {
             to.as_deref(),
             json,
         ),
+        Command::Map {
+            rom,
+            project,
+            buckets,
+            width,
+            json,
+        } => commands::map::run(&rom, project.as_deref(), buckets, width, json),
         Command::Tables {
             rom,
             project,

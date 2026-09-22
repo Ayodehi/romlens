@@ -1,0 +1,20 @@
+# code   + mostly code   . byte   t table/pointer   s string
+g graphics   p palette   m tilemap   z compressed   h header   (space) unknown
+
+0x000000  ....p...........................
+0x008000  ................................
+
+64 columns of 1024 bytes: 0 mostly code, 0 mostly unknown, 2 blended
+{
+  "romBytes": 65536,
+  "buckets": [
+    {"start": 0, "len": 8192, "kind": "byte", "confidence": 0.50, "share": 0.84, "mixed": true, "entropy": 0.81, "executed": 0.00},
+    {"start": 8192, "len": 8192, "kind": "byte", "confidence": 0.50, "share": 1.00, "mixed": false, "entropy": 0.00, "executed": 0.00},
+    {"start": 16384, "len": 8192, "kind": "byte", "confidence": 0.50, "share": 1.00, "mixed": false, "entropy": 0.00, "executed": 0.00},
+    {"start": 24576, "len": 8192, "kind": "byte", "confidence": 0.50, "share": 0.99, "mixed": false, "entropy": 0.04, "executed": 0.00},
+    {"start": 32768, "len": 8192, "kind": "byte", "confidence": 0.50, "share": 1.00, "mixed": false, "entropy": 0.00, "executed": 0.00},
+    {"start": 40960, "len": 8192, "kind": "byte", "confidence": 0.50, "share": 1.00, "mixed": false, "entropy": 0.00, "executed": 0.00},
+    {"start": 49152, "len": 8192, "kind": "byte", "confidence": 0.50, "share": 1.00, "mixed": false, "entropy": 0.00, "executed": 0.00},
+    {"start": 57344, "len": 8192, "kind": "byte", "confidence": 0.50, "share": 1.00, "mixed": false, "entropy": 0.00, "executed": 0.00}
+  ]
+}

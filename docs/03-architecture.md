@@ -195,6 +195,20 @@ Deltas from Phase 1 ("Disassemble", 21 September 2026):
   `regions.json` entry writes `elem` and `bank` only when they are not the
   default, so a plain table's JSON is exactly what v1 wrote.
 
+- The overview strip (Phase 2, 22 September 2026) is reduced in the core.
+  `viewmodel::region_summary::summarize` takes the strip's width in pixels and
+  returns one bucket per column, carrying the kind that covers most of it, the
+  share that kind has, the mean entropy and the traced fraction. A column that
+  is not all one kind says so, and the shell hatches it: a strip that painted
+  the majority kind and stopped would claim a bank was code because 51% of it
+  was, which is the confident wrongness the phase exists to avoid.
+
+  Reducing here rather than in a shell is not only about sharing the loop.
+  `Workbench::regions_summary` returns one record per region, which was fine at
+  a thousand regions and is not at the forty thousand a trace import produces;
+  it stays for compatibility, and `regions_of_kind` and `region_map` — a flat
+  batch, like the hex rows — are what a shell should call.
+
 - Inline arguments (the Phase 1 test pass, 21 September 2026): a callee that
   adds a constant to its stacked return address (`LDA $01,S … ADC #n …
   STA $01,S`, also behind `PHP; PHB` at `$03,S` and through `TAY`/`TYA`)
