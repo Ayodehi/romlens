@@ -259,11 +259,16 @@ fn lorom_analysis_commands() {
     check(
         "search-lorom",
         &format!(
-            "{}{}",
+            "{}{}{}{}",
             run(&["search", rom, "78 18 FB"]),
-            run(&[
-                "search", rom, "8D ?? 21", "--from", "$00:8000", "--to", "$00:8010"
-            ])
+            run_with(
+                &["search", rom, "8D ?? 21"],
+                &["--from", "$00:8000", "--to", "$00:8010"],
+            ),
+            // Text, and text in either case: the fixture's title is upper
+            // case, so only the second finds it.
+            run(&["search", rom, "romlens", "--text"]),
+            run(&["search", rom, "romlens", "--ignore-case"]),
         ),
     );
     check(

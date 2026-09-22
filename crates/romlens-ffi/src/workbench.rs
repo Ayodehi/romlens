@@ -945,16 +945,16 @@ impl Workbench {
     /// and `ignore_case` matches ASCII letters in either case. The case mask
     /// is applied inside the search rather than over its results, or `max`
     /// would be spent on candidates before the first real hit.
-    pub fn search(
-        &self,
-        pattern: String,
-        text: bool,
-        ignore_case: bool,
-        start: u32,
-        len: u32,
-        max: u32,
-        context: u32,
-    ) -> Result<Vec<SearchHit>, RomlensError> {
+    pub fn search(&self, query: SearchQuery) -> Result<Vec<SearchHit>, RomlensError> {
+        let SearchQuery {
+            pattern,
+            text,
+            ignore_case,
+            start,
+            len,
+            max,
+            context,
+        } = query;
         let bytes = self.rom.image.bytes();
         let (offsets, width) = if text || ignore_case {
             let (p, mask) = romlens_core::pattern_from_text(&pattern, ignore_case)?;

@@ -55,7 +55,7 @@ final class SearchModel {
             return
         }
         do {
-            hits = try workbench.search(
+            hits = try workbench.search(query: SearchQuery(
                 pattern: trimmed,
                 text: mode == .text,
                 ignoreCase: mode == .text && ignoreCase,
@@ -63,7 +63,7 @@ final class SearchModel {
                 len: UInt32.max,
                 max: Self.maxHits,
                 context: Self.context
-            )
+            ))
             error = nil
             searched = trimmed
             current = hits.isEmpty ? nil : 0

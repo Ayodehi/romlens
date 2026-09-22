@@ -304,6 +304,27 @@ pub struct ImportResult {
     pub has_widths: bool,
 }
 
+/// Everything ⌘F needs to ask for, in one record.
+///
+/// A record rather than seven parameters: a call site with seven positional
+/// arguments is unreadable in every generated language, and a search gains
+/// options over time.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct SearchQuery {
+    /// Hex byte pairs with `??` wildcards, or text when `text` is set.
+    pub pattern: String,
+    /// Match the pattern's own bytes rather than parsing it as hex.
+    pub text: bool,
+    /// Match ASCII letters in either case. Implies `text`.
+    pub ignore_case: bool,
+    pub start: u32,
+    pub len: u32,
+    /// At most this many hits.
+    pub max: u32,
+    /// Bytes either side of each hit.
+    pub context: u32,
+}
+
 /// One search result, with enough context to judge it without a second call.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct SearchHit {
