@@ -23,6 +23,10 @@ pub use memory::map::{AddressMap, MappingMode, MemoryClass, mirror_offset};
 pub use memory::parse::{AddressExpr, parse_address_expr};
 pub use rom::header::{ExtendedHeader, RomHeader, Vectors};
 pub use rom::image::{Resolved, RomImage, RomInfo};
+pub use viewmodel::asm_lines::{
+    ASM_BATCH_HEADER_LEN, ASM_LINE_STRIDE, ASM_LINE_VERSION, LineIndex, LineKind, LineRef,
+    TextOptions, encode_lines, format_lines_text,
+};
 pub use viewmodel::hex_rows::{
     AddressStyle, BATCH_HEADER_LEN, BYTES_PER_ROW, ROW_STRIDE, ROW_VERSION, encode_rows,
     format_rows_text,
