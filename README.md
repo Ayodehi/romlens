@@ -14,9 +14,11 @@ and stores annotations in a `.romlens` package; the CLI exposes every step;
 the macOS app shows the hex view, the disassembly and both in lockstep, with
 a navigator, an inspector, label/comment/region editing with undo, project
 documents and asar-syntax export. Phase 2 ("Discover code vs data") is
-planned in `docs/16-phase2-plan.md`: jump tables first, because static
-descent alone reached 0.2% of Super Metroid. They are now resolved, which
-takes that to 2.1%. The tutor stays deferred.
+planned in `docs/16-phase2-plan.md`. Its classification track is built:
+jump tables take the code map from 0.2% of Super Metroid to 2.1%, scored
+heuristics and imported emulator traces take unknown bytes from 99.8% to
+82.9%, and every guess carries its evidence and its score. Graphics and
+recordings are the remaining tracks; the tutor stays deferred.
 `spikes/` holds the FFI measurement that shaped the API. Start with the
 docs, then `docs/14-phase0-plan.md` and `docs/15-conformance-checklist.md`
 for what was built and how it is checked. Romlens is a study and visualization tool

@@ -147,3 +147,40 @@ Phase 1 additions (still to run):
     sharing message with "Include byte columns" off.
 12. Instruments Animation Hitches over a full trackpad scroll of the
     Disassembly and Both tabs (carried over from Phase 0).
+
+Phase 2 additions (still to run):
+
+13. Open the dev ROM: the status reads about 2.1% code and 15% data, and the
+    overview strip under the editor is coloured rather than a grey bar.
+    Click near the middle of the strip: the editor jumps there. Hover a
+    column: the tooltip names the kind, the confidence and the entropy. A
+    column that blends kinds is hatched, not painted flat.
+14. ⌘L `$80:987B`, then the Disassembly tab: the dispatch reads
+    `JSR (JTBL_809616,X)` rather than a number. ⌘L `$80:9616`: the region
+    chip says `table 80%`, and its popover names the dispatching instruction
+    with a Go link that lands back on `$80:987B`. The rows read
+    `dw SUB_…`, not `db`.
+15. Select a range of unclassified bytes in a graphics bank and read the
+    region chip: the evidence lists the heuristics with their scores,
+    strongest first, and each score is below 55%.
+16. ⌘F, `78 18 ?? 5C`, Return: the results list opens under the editor with
+    the matched bytes emphasised in each row's context. ⌘G and ⇧⌘G step and
+    wrap, and the position in the summary follows. Switch to Text, type
+    `metroid`, tick Ignore case: the header's title and the developer string
+    both appear.
+17. Select four bytes, Edit › Mark as ▸ Data…: pick Table, two bytes per
+    entry, entries are pointers to code, same bank. The disassembly renders
+    them as labels. ⌘Z reverts it as one step.
+18. File › Import ▸ Symbols… with a `.sym` naming an address you have
+    already named: the report says one was kept because you named it, lists
+    every rewritten name, and shows the file's licence notice. ⌘Z reverts
+    the whole import as one step.
+19. File › Import ▸ Execution Trace… with a `.cdl` you recorded yourself:
+    the report gives the executed and read byte counts and says the M/X
+    widths were recorded; the map gains code and the strip gains its traced
+    lane. Save and reopen: the coverage survives, and `traces/coverage.cdl`
+    is inside the package.
+20. Run `romlens truth from-cdl` on the same CDL and `romlens accuracy` with
+    it: code precision is at least 0.98. Record the number in
+    `10-ffi-spike.md`; it is the phase's pass mark and nothing in CI can
+    check it, because truth for a commercial ROM never ships.

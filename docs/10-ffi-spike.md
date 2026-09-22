@@ -101,60 +101,49 @@ batch, and the whole analysis is shorter than a frame budget on this ROM.
 
 ## Phase 2 measurements (22 September 2026)
 
-Core, release build, development ROM (3 MB), M5 Pro. Jump tables only; the
-heuristics, trace import and graphics work is not in these numbers.
+Core, release build, development ROM (3 MB), M5 Pro. Track 2A only; the
+graphics and recording tracks are not started.
 
-| Quantity | Phase 1 | With jump tables |
-|---|---|---|
-| Full analysis | 5 ms | 12 ms |
-| Instructions | 3,029 | 28,320 |
-| Code bytes | 6,872 (0.2%) | 65,495 (2.1%) |
-| Code blocks | 76 | 485 |
-| Auto labels | 256 | 2,998 |
-| Xrefs | 1,554 | 14,722 |
-| Warnings | 15 | 137 (34 informational jump tables) |
+`romlens analyze --no-tables` and `--no-heuristics` exist so the gain is
+attributable rather than merely coincident, and the first column below is
+exactly what Phase 1 produced.
 
-`romlens analyze --no-tables` reproduces the Phase 1 column exactly, which is
-what makes the gain attributable rather than merely coincident. The Phase 1
-figure above is 5 ms rather than the 7 ms recorded below because the pass loop
-now exits as soon as a pass adds nothing.
+| Quantity | Phase 1 | Jump tables | Heuristics | Both |
+|---|---|---|---|---|
+| Full analysis | 7 ms | 10 ms | 35 ms | 57 ms |
+| Instructions | 3,029 | 28,320 | 3,029 | 28,320 |
+| Code bytes | 6,872 (0.2%) | 65,495 (2.1%) | 6,872 (0.2%) | 65,495 (2.1%) |
+| Code blocks | 76 | 485 | 76 | 485 |
+| Data bytes | 160 (0.0%) | 1,625 (0.1%) | 471,645 (15.0%) | 473,012 (15.0%) |
+| Unknown bytes | 3,138,696 (99.8%) | 3,078,608 (97.9%) | 2,667,211 (84.8%) | 2,607,221 (82.9%) |
+| Regions | 136 | 1,012 | 806 | 1,672 |
+| Auto labels | 256 | 2,998 | 256 | 2,998 |
+| Xrefs | 1,554 | 14,722 | 1,554 | 14,722 |
+| Warnings | 15 | 137 | 15 | 137 |
 
-Tables resolved: 34, holding 521 entries over 1,042 bytes. The largest has 45
-entries. 28 were bounded by the first routine they point at and 6 by code the
-descent had already claimed, so no table on this ROM fell back to a weak stop
-reason. 54 dispatch sites remain unresolved and every one of them builds its
-table in RAM.
+The two are independent by construction. Jump tables add code and everything
+that follows from it; heuristics only fill bytes nothing else claimed, so they
+never change the code figures.
 
-The analyzer runs the descent up to eight times now instead of six, and a pass
-costs about 1.5 ms, which is where the 5 ms → 12 ms goes. Still two orders of
-magnitude inside the 2 s budget.
+### Jump tables
 
-### Scored heuristics
+34 resolved, holding 521 entries over 1,042 bytes; the largest has 45 entries.
+28 were bounded by the first routine they point at and 6 by code the descent
+had already claimed, so no table on this ROM fell back to a weak stop reason.
 
-Added the same day, over the bytes the walk and the sweep leave unclassified.
+54 dispatch sites remain unresolved and **every one of them builds its table in
+RAM**, which needs value tracking along control flow (Phase 3). Each warning
+names the address, so the manual fix is one `Mark as ▸ Table` with the entries
+declared as code.
 
-| Quantity | With jump tables | With heuristics too |
-|---|---|---|
-| Full analysis | 12 ms | 46 ms |
-| Data bytes | 1,625 (0.1%) | 473,012 (15.0%) |
-| Unknown bytes | 3,078,608 (97.9%) | 2,607,221 (82.9%) |
-| Regions | 1,012 | 1,672 |
+The descent now runs up to eight passes instead of six, at about 1.5 ms each,
+which is where 7 ms → 10 ms goes.
 
-Code is untouched, by construction: a heuristic only fills a byte nothing else
-claimed.
-
-The region count is the number to watch. Scoring per byte would have turned a
-thousand regions into millions; scoring per 256-byte window and merging
-neighbours that agree to within a 5% step turns it into 1,672, and
-`tests/heuristics.rs` bounds it so a future heuristic cannot quietly regress
-that. Of the 46 ms, the entropy profile is a single pass over the image and is
-cached on the `Workbench`, so the edit loop pays about 34 ms, not 46.
-
-What each guess claimed on the development ROM:
+### Heuristics
 
 | Heuristic | Spans | Bytes | |
 |---|---|---|---|
-| entropy | 333 | 440,576 | mostly constant fill and one high-entropy band |
+| entropy | 333 | 440,576 | mostly constant fill, plus one high-entropy band |
 | pointers | 94 | 324,352 | |
 | palette | 54 | 20,992 | |
 | ascii | 2 | 1,536 | |
@@ -163,13 +152,40 @@ What each guess claimed on the development ROM:
 The sums exceed the 473,012 bytes actually painted because the guesses overlap
 and the strongest one on a byte wins.
 
+The region count is the number to watch. Scoring per byte would have turned a
+thousand regions into millions; scoring per 256-byte window and merging
+neighbours that agree to within a 5% step gives 1,672, and
+`tests/heuristics.rs` bounds it so a future heuristic cannot quietly regress
+that. The entropy profile is one pass over the image and is cached on the
+`Workbench`, so the edit loop pays about 45 ms rather than 57.
+
 Two known false positives, both left standing until the accuracy harness can
 price them rather than tuned away by eye: a block of Super Metroid tilemap
-entries at `0x052100` is 75% printable and reads as a string, and constant
-fill is claimed as byte data at 50% — defensible, since padding is certainly
-not code, but it is the reason "unknown" fell as far as it did.
+entries at `0x052100` is 75% printable and reads as a string, and constant fill
+is claimed as byte data at 50% — defensible, since padding is certainly not
+code, and the reason "unknown" fell as far as it did.
 
-## Not measured, still to check in Phase 0
+### Imports
+
+| Quantity | Value |
+|---|---|
+| Reading a 3 MB Mesen2 CDL and writing the package | 16 ms |
+| Analysis with a 20%-coverage trace applied | 182 ms |
+| `romlens truth from-cdl` over 3 MB | 21 ms |
+
+The 182 ms is with roughly thirteen thousand observed opcode starts seeded into
+the walk, which is the shape a real play session has. Still an order of
+magnitude inside the 2 s budget.
+
+### Accuracy
+
+The fixtures score 1.000 precision and 1.000 recall in CI, which is a
+regression guard rather than a challenge — they were built to be recognisable.
+The development-ROM target (code precision ≥ 0.98, recall ≥ 50%) is unmeasured
+until someone records a CDL from their own play session: truth for a commercial
+ROM is derived from it and never ships (`12-content-policy.md`).
+
+## Not measured, still to check in Phase 0## Not measured, still to check in Phase 0
 
 - Async call and callback-interface overhead (event delivery from the core's
   thread pool to the main thread).

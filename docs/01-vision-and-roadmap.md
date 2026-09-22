@@ -153,6 +153,17 @@ Windows and Linux shells stay unstarted. Phase 2 is sequenced as three
 independently shippable tracks — 2A classification, 2B graphics, 2C
 recordings — and only 2A fits the four-to-eight-week estimate above.
 
+**Track 2A shipped on 22 September 2026.** Jump tables took the code map from
+0.2% of Super Metroid to 2.1%; scored heuristics and imported traces took
+unknown bytes from 99.8% to 82.9%. What changed against the bullets above:
+DiztinGUIsh import is dropped rather than deferred, because the format was
+never verified and Diz exports two that are read; PJBoy's logs are not used to
+compute accuracy, because they are never redistributed
+(`12-content-policy.md`) — `romlens truth from-cdl` builds truth from a
+recording the developer makes themselves instead; ca65 `.dbg` moves to Phase 3,
+where its line and span records have a source view to land in. Previews, the
+graphics views and recording import are tracks 2B and 2C, still to start.
+
 ### Phase 3 — Recover structure (8–12 weeks)
 
 Deliverable: functions, control-flow graphs, call graph, and a first
