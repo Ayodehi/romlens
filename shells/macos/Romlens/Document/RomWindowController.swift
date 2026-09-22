@@ -51,8 +51,11 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
     @objc func showHex(_ sender: Any?) { model.editorTab = .hex }
     @objc func showDisassembly(_ sender: Any?) { model.editorTab = .disassembly }
     @objc func showBoth(_ sender: Any?) { model.editorTab = .both }
-    @objc func toggleNavigator(_ sender: Any?) { model.isNavigatorVisible.toggle() }
-    @objc func toggleInspector(_ sender: Any?) { model.isInspectorVisible.toggle() }
+    // Explicit animations: `DocumentView` binds these without one so the
+    // framework's own re-application on window activation cannot slide the
+    // content.
+    @objc func toggleNavigator(_ sender: Any?) { withAnimation { model.isNavigatorVisible.toggle() } }
+    @objc func toggleInspector(_ sender: Any?) { withAnimation { model.isInspectorVisible.toggle() } }
 
     // MARK: Editing
 

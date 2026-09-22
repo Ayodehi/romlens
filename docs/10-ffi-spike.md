@@ -81,8 +81,8 @@ Core, release build, development ROM (3 MB), M5 Pro:
 
 | Quantity | Value |
 |---|---|
-| Full analysis (descent + sweep + labels) | 19 ms |
-| Static reach from the twelve vectors | 2,756 instructions, 6,245 code bytes, 221 labels, 1,400 xrefs, 13 warnings |
+| Full analysis (two descent passes + sweep + labels) | 7 ms |
+| Static reach from the twelve vectors | 3,029 instructions, 6,872 code bytes, 256 labels, 1,554 xrefs, 15 warnings (with inline arguments skipped; 2,756 instructions and 6,245 bytes before) |
 | Why so little | the main loop dispatches through `JSR ($xxxx,X)` tables; jump tables are Phase 2 |
 
 Shell, debug build, `RomlensTests` on a 3 MB padded fixture:

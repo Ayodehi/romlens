@@ -98,6 +98,9 @@ enum Command {
         /// Report phases on stderr.
         #[arg(long)]
         progress: bool,
+        /// Also list the analyzer's warnings.
+        #[arg(long)]
+        warnings: bool,
     },
     /// List labels.
     Labels {
@@ -337,7 +340,8 @@ fn main() -> Result<()> {
             stats: _,
             json,
             progress,
-        } => commands::analyze::run(&rom, project.as_deref(), json, progress),
+            warnings,
+        } => commands::analyze::run(&rom, project.as_deref(), json, progress, warnings),
         Command::Labels {
             rom,
             project,

@@ -83,7 +83,7 @@ Deltas from Phase 1 ("Disassemble", 21 September 2026):
   `InsnRecord` (about 6 MB for a fully coded 3 MB image), not a lazy
   per-bank cache: re-decoding from the record is exact and the memory is
   cheap. The whole pipeline (descent, sweep, labels) re-runs on every
-  analysis-affecting command; it takes about 20 ms on the development ROM in
+  analysis-affecting command; it takes under 10 ms on the development ROM in
   release, far under the 2 s budget, so incremental invalidation is deferred.
 - Only static edges are followed: branches, `JSR`/`JSL`, `JMP`/`JML`, and
   `JMP (abs)`/`JML [abs]` through a pointer slot in ROM. `JMP (abs,X)`,
@@ -92,6 +92,26 @@ Deltas from Phase 1 ("Disassemble", 21 September 2026):
   after code that decodes to at least two instructions ending exactly on a
   block end with no `BRK`/`WDM`/`STP`/`COP` and every branch target in ROM;
   it never seeds entries or labels.
+- Inline arguments (the Phase 1 test pass, 21 September 2026): a callee that
+  adds a constant to its stacked return address (`LDA $01,S … ADC #n …
+  STA $01,S`, also behind `PHP; PHB` at `$03,S` and through `TAY`/`TYA`)
+  takes `n` bytes of inline arguments. `analysis::inline::ReturnAdjust`
+  recognises the idiom in a callee's first 40 instructions; because the
+  caller is walked before the callee, `analyze` runs the descent again (up to
+  six passes, each a few milliseconds) with the callees found so far, and
+  their callers then skip the arguments, which become data at 0.8 with the
+  evidence "inline argument" (`dl` for three bytes, `dw` for two). Super
+  Metroid's boot path stopped after 40 instructions without this.
+- Straight-line code that runs into `BRK`/`WDM`/`STP`/`COP` raises a
+  `SuspiciousFallthrough` warning (`SuspiciousEntry` covers only the first
+  instruction of an entry). `romlens analyze --warnings` lists every warning,
+  the CLI twin of the inspector's list.
+- Confidence 0.7 marks the instructions whose operand width rests on M/X
+  assumed after a `PLP` or an `XCE` with unknown carry, and everything after
+  the first of them in the same walk (the stream may be misaligned), until a
+  `REP`/`SEP` re-establishes the width: the `ASSUMED_WIDTHS` bit on the
+  record. The `PLP` itself decodes exactly and keeps 0.9, so a `PLP; RTS`
+  epilogue no longer splits its region.
 - The project package stores canonical SNES addresses as strings
   (`"$80:841C"`) in every JSON file, never file offsets, so RAM labels fit
   and mirrors collapse. The remembered ROM path is not in `project.json`: the
@@ -295,9 +315,13 @@ asking the user.
   `THIRD-PARTY-NOTICES.md`. No GPL code is linked; GPL emulators are used
   out of process only.
 - macOS deployment target is macOS 27; the shell may use any API available
-  there. Bundle identifier is a placeholder (`io.github.placeholder.Romlens`)
-  until the GitHub account is chosen; it changes once, before the first
-  public release.
+  there. Bundle identifier is `io.github.ayodehi.Romlens` and the document
+  UTIs are `io.github.ayodehi.romlens.{sfc,project}` (the GitHub account was
+  chosen on 22 September 2026). The username segment must stay lower case:
+  LaunchServices lower-cases a declared UTI, and `ProjectDocumentController`
+  routes ROMs by comparing the type name to `ProjectDocument.romType` as an
+  exact string, so a capital there silently disables document de-duplication.
+  See `11-naming.md`.
 - Workflow: direct commits to `main` while the project is young; branches
   and pull requests once there is enough to break.
 - ROMs are never bundled, uploaded or copied into project files.

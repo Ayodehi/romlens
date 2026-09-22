@@ -58,6 +58,10 @@ pub const ASSUMED_PLP: u8 = 0b0000_0010;
 pub const ASSUMED_DBR: u8 = 0b0000_0100;
 pub const ASSUMED_DP: u8 = 0b0000_1000;
 pub const BANK_WRAP: u8 = 0b0001_0000;
+/// Set by the analyzer, not the decoder: this instruction's operand width
+/// (or the alignment of the stream it sits in) rests on M/X values assumed
+/// after a `PLP` or an `XCE` with unknown carry.
+pub const ASSUMED_WIDTHS: u8 = 0b0010_0000;
 
 pub fn assumption_names(bits: u8) -> Vec<&'static str> {
     let mut out = Vec::new();
@@ -75,6 +79,9 @@ pub fn assumption_names(bits: u8) -> Vec<&'static str> {
     }
     if bits & BANK_WRAP != 0 {
         out.push("instruction crosses the end of the bank");
+    }
+    if bits & ASSUMED_WIDTHS != 0 {
+        out.push("operand widths rest on M/X assumed after an earlier PLP or XCE");
     }
     out
 }

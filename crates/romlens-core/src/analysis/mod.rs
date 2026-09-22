@@ -8,18 +8,20 @@
 pub mod control;
 pub mod descent;
 pub mod flow;
+pub mod inline;
 pub mod labels;
 pub mod snapshot;
 pub mod sweep;
 pub mod xrefs;
 
+use std::collections::BTreeMap;
 use std::time::Instant;
 
 pub use control::{AnalysisControl, AnalysisPhase, Cancelled, Progress};
 pub use snapshot::{AnalysisSnapshot, AnalysisStats, InsnRecord, Warning, WarningKind};
 
-use crate::analysis::descent::{KIND_NONE, Walk};
-use crate::cpu65816::{ASSUMED_PLP, ASSUMED_XCE_CARRY};
+use crate::analysis::descent::{KIND_NONE, SeedSource, Walk};
+use crate::cpu65816::ASSUMED_WIDTHS;
 use crate::memory::address::FileOffset;
 use crate::model::project::Project;
 use crate::model::region::{DataKind, Evidence, OverrideKind, Region, RegionKind};
@@ -33,6 +35,12 @@ const TAG_OPERAND: u8 = 3;
 const TAG_POINTER: u8 = 4;
 const TAG_HEADER: u8 = 5;
 const TAG_USER: u8 = 6;
+const TAG_INLINE: u8 = 7;
+
+/// Passes of the descent: a callee found adjusting its return address in
+/// one pass makes its callers skip the inline arguments in the next, which
+/// can uncover the next such callee. Each pass is a few milliseconds.
+const MAX_PASSES: u32 = 6;
 
 /// Run the analyzer over a ROM under a project's overrides.
 pub fn analyze(
@@ -41,9 +49,22 @@ pub fn analyze(
     control: &AnalysisControl,
 ) -> Result<AnalysisSnapshot, Cancelled> {
     let started = Instant::now();
-    let mut walk = Walk::new(rom, project);
-    walk.seed();
-    walk.run(control)?;
+    let mut inline_args: BTreeMap<u32, u16> = BTreeMap::new();
+    let mut pass = 0;
+    let mut walk = loop {
+        pass += 1;
+        let mut walk = Walk::new(rom, project);
+        walk.inline_args = inline_args.clone();
+        walk.seed();
+        walk.run(control)?;
+        let mut grew = false;
+        for (callee, n) in &walk.found_inline_args {
+            grew |= inline_args.insert(*callee, *n) != Some(*n);
+        }
+        if !grew || pass == MAX_PASSES {
+            break walk;
+        }
+    };
     let swept = sweep::sweep(&mut walk, control)?;
     control.check()?;
     control.report(AnalysisPhase::Labels, 0, 1);
@@ -68,7 +89,7 @@ pub fn analyze(
     // Code from the descent.
     let mut records: Vec<(InsnRecord, u16)> = std::mem::take(&mut walk.records);
     for (r, _) in &records {
-        let c = if r.assumptions & (ASSUMED_XCE_CARRY | ASSUMED_PLP) != 0 {
+        let c = if r.assumptions & ASSUMED_WIDTHS != 0 {
             70
         } else {
             90
@@ -96,17 +117,18 @@ pub fn analyze(
     // Data the code pointed at, on bytes nothing else claimed.
     for s in &walk.seeds {
         let end = (s.offset + s.len).min(n as u32);
+        let jump_pointer = s.source == SeedSource::JumpPointer;
         for b in s.offset..end {
             let b = b as usize;
-            if cls[b] != 0 && !(tag[b] == TAG_OPERAND && s.jump_pointer) {
+            if cls[b] != 0 && !(tag[b] == TAG_OPERAND && jump_pointer) {
                 continue;
             }
             cls[b] = RegionKind::Data(s.kind).code();
             conf[b] = (s.confidence * 100.0) as u8;
-            tag[b] = if s.jump_pointer {
-                TAG_POINTER
-            } else {
-                TAG_OPERAND
+            tag[b] = match s.source {
+                SeedSource::Operand => TAG_OPERAND,
+                SeedSource::JumpPointer => TAG_POINTER,
+                SeedSource::InlineArgument => TAG_INLINE,
             };
         }
     }
@@ -166,6 +188,10 @@ pub fn analyze(
             TAG_POINTER => vec![Evidence::Heuristic {
                 name: "jump pointer".into(),
                 score: 0.9,
+            }],
+            TAG_INLINE => vec![Evidence::Heuristic {
+                name: "inline argument".into(),
+                score: 0.8,
             }],
             TAG_HEADER => vec![Evidence::Heuristic {
                 name: "internal header".into(),

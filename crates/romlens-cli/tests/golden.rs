@@ -379,6 +379,10 @@ fn dev_rom_golden() {
     );
     check("analyze-supermetroid", &run(&["analyze", rom, "--stats"]));
     check(
+        "warnings-supermetroid",
+        &run(&["analyze", rom, "--warnings"]),
+    );
+    check(
         "labels-supermetroid",
         &run(&["labels", rom, "--count", "40"]),
     );

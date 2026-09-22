@@ -5,24 +5,35 @@ import SwiftUI
 /// right; tabs, address style, analysis status and navigation in the toolbar.
 struct DocumentView: View {
     @Bindable var model: RomViewModel
-    @State private var columns: NavigationSplitViewVisibility = .all
+
+    /// The split view and the inspector re-apply their visibility through
+    /// these bindings when the window becomes key (clicking into a second
+    /// window), and the default transaction animates that as a slide of the
+    /// whole content. Writing through a plain transaction keeps those
+    /// re-applications silent; the View menu toggles animate explicitly in
+    /// `RomWindowController`.
+    private var columnVisibility: Binding<NavigationSplitViewVisibility> {
+        Binding(
+            get: { model.isNavigatorVisible ? .all : .detailOnly },
+            set: { model.isNavigatorVisible = $0 != .detailOnly }
+        )
+        .transaction(Transaction())
+    }
+
+    private var inspectorPresented: Binding<Bool> {
+        $model.isInspectorVisible.transaction(Transaction())
+    }
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $columns) {
+        NavigationSplitView(columnVisibility: columnVisibility) {
             NavigatorView(model: model)
                 .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 360)
         } detail: {
             EditorView(model: model)
         }
-        .inspector(isPresented: $model.isInspectorVisible) {
+        .inspector(isPresented: inspectorPresented) {
             RightPaneView(model: model)
                 .inspectorColumnWidth(min: 280, ideal: 320, max: 420)
-        }
-        .onChange(of: model.isNavigatorVisible, initial: true) { _, visible in
-            columns = visible ? .all : .detailOnly
-        }
-        .onChange(of: columns) { _, value in
-            model.isNavigatorVisible = value != .detailOnly
         }
         .toolbar {
             ToolbarItem(placement: .principal) {

@@ -1,15 +1,22 @@
 //! Recursive descent from the vectors and the user's code marks, tracking
 //! flags along every static edge.
+//!
+//! Two things the straight walk cannot see are recovered by bookkeeping:
+//! how far the M/X widths still rest on an assumption (`WidthTrust`), and
+//! callees that add to their stacked return address to skip inline
+//! arguments (`found_inline_args`, fed back through `inline_args` by a
+//! second pass in `analysis::analyze`).
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 
 use crate::analysis::control::{AnalysisControl, AnalysisPhase, Cancelled};
 use crate::analysis::flow::refine;
+use crate::analysis::inline::ReturnAdjust;
 use crate::analysis::snapshot::{InsnRecord, Warning, WarningKind};
 use crate::analysis::xrefs::{vector_slots, xref_for};
 use crate::cpu65816::{
-    ASSUMED_DBR, ASSUMED_XCE_CARRY, AddressingMode, BANK_WRAP, FlagState, Instruction, Mnemonic,
-    TargetKind, decode,
+    ASSUMED_DBR, ASSUMED_WIDTHS, ASSUMED_XCE_CARRY, AddressingMode, BANK_WRAP, FlagState,
+    Instruction, Mnemonic, TargetKind, decode,
 };
 use crate::memory::address::{FileOffset, SnesAddress};
 use crate::model::project::{FlagOverride, Project};
@@ -20,10 +27,24 @@ use crate::rom::image::RomImage;
 pub const KIND_NONE: u8 = 0;
 pub const KIND_OPCODE: u8 = 1;
 pub const KIND_OPERAND: u8 = 2;
+/// Inline arguments after a call: skipped by the caller, never decoded.
+pub const KIND_INLINE: u8 = 3;
 
 pub const OVR_NONE: u8 = 0;
 pub const OVR_CODE: u8 = 1;
 pub const OVR_WALL: u8 = 2;
+
+/// Where a `DataSeed` came from (decides its tag and evidence).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SeedSource {
+    /// An instruction read or wrote there (0.6).
+    Operand,
+    /// A `JMP (abs)` / `JML [abs]` slot (gets a `PTR_` label, 0.9).
+    JumpPointer,
+    /// Bytes after a call that the callee skips by adjusting its return
+    /// address (0.8).
+    InlineArgument,
+}
 
 /// A data range an instruction pointed at.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -32,8 +53,22 @@ pub struct DataSeed {
     pub len: u32,
     pub kind: DataKind,
     pub confidence: f32,
-    /// A `JMP (abs)` / `JML [abs]` slot (gets a `PTR_` label, 0.9).
-    pub jump_pointer: bool,
+    pub source: SeedSource,
+}
+
+/// How far the operand widths of a walk rest on an assumption. The `PLP`
+/// or `XCE` that made the assumption decodes exactly; what it puts at risk
+/// is every later instruction whose length depends on M or X, and the
+/// alignment of the stream after the first of those.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct WidthTrust {
+    /// M was assumed (a `PLP`, or an `XCE` with unknown carry).
+    m: bool,
+    /// X was assumed.
+    x: bool,
+    /// An instruction was decoded under an assumed width: the rest of the
+    /// walk may be misaligned.
+    uncertain: bool,
 }
 
 struct Entry {
@@ -47,6 +82,7 @@ struct Entry {
     /// A user-seeded entry: defers to any walk that already covered it
     /// instead of reporting a conflict.
     soft: bool,
+    trust: WidthTrust,
 }
 
 pub struct Walk<'a> {
@@ -66,6 +102,11 @@ pub struct Walk<'a> {
     pub seeds: Vec<DataSeed>,
     /// Opcode starts reached with two different width states.
     pub conflicts: Vec<u32>,
+    /// Callees known to skip inline arguments: entry offset → byte count
+    /// (from an earlier pass; see `analysis::analyze`).
+    pub inline_args: BTreeMap<u32, u16>,
+    /// Callees this pass saw adding to their stacked return address.
+    pub found_inline_args: BTreeMap<u32, u16>,
     worklist: VecDeque<Entry>,
     processed: u64,
 }
@@ -134,6 +175,8 @@ impl<'a> Walk<'a> {
             warnings: Vec::new(),
             seeds: Vec::new(),
             conflicts: Vec::new(),
+            inline_args: BTreeMap::new(),
+            found_inline_args: BTreeMap::new(),
             worklist: VecDeque::new(),
             processed: 0,
         }
@@ -148,8 +191,15 @@ impl<'a> Walk<'a> {
     }
 
     /// Queue an entry if the address maps to ROM.
-    fn push(&mut self, address: SnesAddress, flags: FlagState, depth: u16, entry_point: bool) {
-        self.push_entry(address, flags, depth, entry_point, false);
+    fn push(
+        &mut self,
+        address: SnesAddress,
+        flags: FlagState,
+        depth: u16,
+        entry_point: bool,
+        trust: WidthTrust,
+    ) {
+        self.push_entry(address, flags, depth, entry_point, false, trust);
     }
 
     fn push_entry(
@@ -159,6 +209,7 @@ impl<'a> Walk<'a> {
         depth: u16,
         entry_point: bool,
         soft: bool,
+        trust: WidthTrust,
     ) {
         if let Some(off) = self.rom.file_offset_for(address) {
             self.worklist.push_back(Entry {
@@ -168,6 +219,7 @@ impl<'a> Walk<'a> {
                 depth,
                 entry_point,
                 soft,
+                trust,
             });
         }
     }
@@ -178,7 +230,13 @@ impl<'a> Walk<'a> {
         let h = self.rom.header().clone();
         let reset = h.emulation.reset;
         if reset != 0 && reset != 0xFFFF {
-            self.push(SnesAddress::new(0, reset), FlagState::RESET, 0, true);
+            self.push(
+                SnesAddress::new(0, reset),
+                FlagState::RESET,
+                0,
+                true,
+                WidthTrust::default(),
+            );
         }
         for v in [
             h.native.cop,
@@ -188,7 +246,13 @@ impl<'a> Walk<'a> {
             h.native.irq,
         ] {
             if v != 0 && v != 0xFFFF {
-                self.push(SnesAddress::new(0, v), FlagState::NATIVE_VECTOR, 0, true);
+                self.push(
+                    SnesAddress::new(0, v),
+                    FlagState::NATIVE_VECTOR,
+                    0,
+                    true,
+                    WidthTrust::default(),
+                );
             }
         }
         for v in [
@@ -198,7 +262,13 @@ impl<'a> Walk<'a> {
             h.emulation.irq,
         ] {
             if v != 0 && v != 0xFFFF {
-                self.push(SnesAddress::new(0, v), FlagState::EMULATION_VECTOR, 0, true);
+                self.push(
+                    SnesAddress::new(0, v),
+                    FlagState::EMULATION_VECTOR,
+                    0,
+                    true,
+                    WidthTrust::default(),
+                );
             }
         }
         for v in vector_slots(self.rom) {
@@ -232,7 +302,7 @@ impl<'a> Walk<'a> {
                 if let Some(o) = self.project.flag_overrides.get(&FileOffset(off)) {
                     apply_override(&mut flags, o);
                 }
-                self.push_entry(addr, flags, 0, true, true);
+                self.push_entry(addr, flags, 0, true, true, WidthTrust::default());
             }
         }
     }
@@ -263,6 +333,8 @@ impl<'a> Walk<'a> {
         let mut flags = entry.flags;
         let mut history: Vec<Instruction> = Vec::with_capacity(3);
         let mut first = entry.entry_point;
+        let mut trust = entry.trust;
+        let mut ret_adjust = ReturnAdjust::default();
         loop {
             if off >= n {
                 return;
@@ -305,6 +377,14 @@ impl<'a> Walk<'a> {
                     );
                     return;
                 }
+                KIND_INLINE => {
+                    self.warn(
+                        off,
+                        WarningKind::FlagConflict,
+                        format!("{} is an inline argument of the call before it", addr),
+                    );
+                    return;
+                }
                 _ => {}
             }
             let Some(mut insn) = decode(&bytes[off as usize..], addr, FileOffset(off), flags)
@@ -312,6 +392,15 @@ impl<'a> Walk<'a> {
                 return;
             };
             refine(&history, &mut insn);
+            // Decoded under an assumed width, or after something that was:
+            // the length may be wrong, and so may every length after it.
+            if trust.uncertain
+                || (trust.m && insn.mode == AddressingMode::ImmediateM)
+                || (trust.x && insn.mode == AddressingMode::ImmediateX)
+            {
+                trust.uncertain = true;
+                insn.assumptions |= ASSUMED_WIDTHS;
+            }
             // Operand bytes already decoded as opcodes: overlapping instructions.
             let end = off + insn.len as u32;
             if end > n || (off + 1..end).any(|b| self.kind[b as usize] != KIND_NONE) {
@@ -323,18 +412,28 @@ impl<'a> Walk<'a> {
                 );
                 return;
             }
+            let suspicious = matches!(
+                insn.mnemonic,
+                Mnemonic::BRK | Mnemonic::WDM | Mnemonic::STP | Mnemonic::COP
+            );
             if first {
                 first = false;
-                if matches!(
-                    insn.mnemonic,
-                    Mnemonic::BRK | Mnemonic::WDM | Mnemonic::STP | Mnemonic::COP
-                ) {
+                if suspicious {
                     self.warn(
                         off,
                         WarningKind::SuspiciousEntry,
                         format!("entry point {} starts with {}", addr, insn.mnemonic),
                     );
                 }
+            } else if suspicious {
+                self.warn(
+                    off,
+                    WarningKind::SuspiciousFallthrough,
+                    format!(
+                        "code falls through into {} at {}; inline arguments or data?",
+                        insn.mnemonic, addr
+                    ),
+                );
             }
             self.kind[off as usize] = KIND_OPCODE;
             self.wkey[off as usize] = key;
@@ -343,6 +442,11 @@ impl<'a> Walk<'a> {
             }
             self.records
                 .push((InsnRecord::from_instruction(&insn), entry.depth));
+            // A callee that adds to its stacked return address skips that
+            // many bytes of inline arguments.
+            if let Some(n) = ret_adjust.observe(&insn) {
+                self.found_inline_args.insert(entry.offset, n);
+            }
             if insn.assumptions & ASSUMED_XCE_CARRY != 0 {
                 self.warn(
                     off,
@@ -366,7 +470,7 @@ impl<'a> Walk<'a> {
                             _ => DataKind::Byte,
                         },
                         confidence: 0.6,
-                        jump_pointer: false,
+                        source: SeedSource::Operand,
                     });
                 }
             }
@@ -376,9 +480,38 @@ impl<'a> Walk<'a> {
             let m = insn.mnemonic;
             let target = insn.target;
             let mut stop = m.is_block_end();
+            // Do the widths after this instruction still rest on an assumption?
+            match m {
+                Mnemonic::SEP | Mnemonic::REP => {
+                    let imm = insn.operand.value() as u8;
+                    if imm & 0x20 != 0 {
+                        trust.m = false;
+                    }
+                    if imm & 0x10 != 0 {
+                        trust.x = false;
+                    }
+                }
+                Mnemonic::XCE => {
+                    if insn.assumptions & ASSUMED_XCE_CARRY != 0 {
+                        trust.m = true;
+                        trust.x = true;
+                    } else if after.e {
+                        // Emulation mode forces both widths.
+                        trust.m = false;
+                        trust.x = false;
+                    }
+                }
+                Mnemonic::PLP if !after.e => {
+                    trust.m = true;
+                    trust.x = true;
+                }
+                _ => {}
+            }
+            // Inline arguments after this call (a callee from `inline_args`).
+            let mut skip = 0u32;
             if m.is_branch() {
                 if let Some(t) = target {
-                    self.push(t.address, after, depth, false);
+                    self.push(t.address, after, depth, false, trust);
                 }
             } else if m.is_call() {
                 match insn.mode {
@@ -389,7 +522,14 @@ impl<'a> Walk<'a> {
                     ),
                     _ => {
                         if let Some(t) = target {
-                            self.push(t.address, after, depth.saturating_add(1), true);
+                            self.push(t.address, after, depth.saturating_add(1), true, trust);
+                            if let Some(k) = self
+                                .rom
+                                .file_offset_for(t.address)
+                                .and_then(|o| self.inline_args.get(&o.0))
+                            {
+                                skip = *k as u32;
+                            }
                         }
                     }
                 }
@@ -421,7 +561,7 @@ impl<'a> Walk<'a> {
                                     len: if long { 3 } else { 2 },
                                     kind: DataKind::Pointer,
                                     confidence: 0.9,
-                                    jump_pointer: true,
+                                    source: SeedSource::JumpPointer,
                                 });
                                 self.xrefs.push((
                                     XRef {
@@ -433,7 +573,7 @@ impl<'a> Walk<'a> {
                                     },
                                     true,
                                 ));
-                                self.push(dest, after, depth, true);
+                                self.push(dest, after, depth, true, trust);
                             }
                             _ => self.warn(
                                 off,
@@ -449,7 +589,7 @@ impl<'a> Walk<'a> {
                     ),
                     _ => {
                         if let Some(t) = target {
-                            self.push(t.address, after, depth, false);
+                            self.push(t.address, after, depth, false, trust);
                         }
                     }
                 }
@@ -472,6 +612,27 @@ impl<'a> Walk<'a> {
             flags = after;
             off = end;
             addr = next;
+            if skip > 0 {
+                let stop_at = (end + skip).min(n);
+                self.seeds.push(DataSeed {
+                    offset: end,
+                    len: stop_at - end,
+                    kind: match skip {
+                        3 => DataKind::Long,
+                        2 => DataKind::Word,
+                        _ => DataKind::Byte,
+                    },
+                    confidence: 0.8,
+                    source: SeedSource::InlineArgument,
+                });
+                for b in end..stop_at {
+                    if self.kind[b as usize] == KIND_NONE {
+                        self.kind[b as usize] = KIND_INLINE;
+                    }
+                }
+                off = stop_at;
+                addr = SnesAddress::new(addr.bank(), addr.offset().wrapping_add(skip as u16));
+            }
             // Stepping past $FFFF lands in the next bank's low half, which is
             // never ROM in the same way; the wrap warning above already fired.
             if self.rom.file_offset_for(addr) != Some(FileOffset(off)) {

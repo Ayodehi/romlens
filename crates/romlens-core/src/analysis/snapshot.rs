@@ -66,6 +66,9 @@ pub enum WarningKind {
     FlagConflict,
     UnknownCarryXce,
     SuspiciousEntry,
+    /// Straight-line code ran into `BRK`/`WDM`/`STP`/`COP`: usually inline
+    /// arguments after a call, or data the walk should not have reached.
+    SuspiciousFallthrough,
     BankWrap,
     WalkedIntoUserData,
 }
@@ -77,6 +80,7 @@ impl WarningKind {
             WarningKind::FlagConflict => "flag conflict",
             WarningKind::UnknownCarryXce => "unknown carry at XCE",
             WarningKind::SuspiciousEntry => "suspicious entry",
+            WarningKind::SuspiciousFallthrough => "suspicious fall-through",
             WarningKind::BankWrap => "bank wrap",
             WarningKind::WalkedIntoUserData => "walked into user data",
         }

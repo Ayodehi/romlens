@@ -1,0 +1,22 @@
+Code:          6872 bytes (0.2%) in 76 blocks, 3029 instructions
+Data:          160 bytes (0.0%)
+Unknown:       3138696 bytes (99.8%)
+Labels:        256
+Xrefs:         1554
+Warnings:      15 (8 flag conflicts)
+
+0x000103  $80:8103   flag conflict            $80:8103 reached with M=0 X=0 and M=1 X=0
+0x00034B  $80:834B   flag conflict            $80:834B reached with M=0 X=0 and M=0 X=1
+0x000482  $80:8482   flag conflict            $80:8482 reached with M=0 X=0 and M=1 X=1
+0x0006E1  $80:86E1   flag conflict            $80:86E1 reached with M=1 X=1 and M=0 X=0
+0x00096E  $80:896E   flag conflict            $80:896E reached with M=0 X=0 and M=0 X=1
+0x00098A  $80:898A   computed jump            $80:898A: jump through a pointer in RAM; target unknown
+0x000B1A  $80:8B1A   flag conflict            $80:8B1A reached with M=0 X=0 and M=0 X=1
+0x0011A9  $80:91A9   flag conflict            $80:91A9 reached with M=1 X=1 and M=1 X=0
+0x00187B  $80:987B   computed jump            $80:987B: JSR through a table; targets not followed
+0x003229  $80:B229   flag conflict            $80:B229 reached with M=1 X=0 and M=0 X=0
+0x01096B  $82:896B   computed jump            $82:896B: JSR through a table; targets not followed
+0x010A00  $82:8A00   computed jump            $82:8A00: JSR through a table; targets not followed
+0x04000D  $88:800D   computed jump            $88:800D: JSR through a table; targets not followed
+0x04020D  $88:820D   computed jump            $88:820D: JSR through a table; targets not followed
+0x04052C  $88:852C   computed jump            $88:852C: jump through a pointer in RAM; target unknown

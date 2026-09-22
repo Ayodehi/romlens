@@ -75,10 +75,12 @@ fn walker_follows_every_static_edge() {
     assert_eq!(at(0x20).unwrap().len, 3);
     assert_eq!(at(0x23).unwrap().opcode, 0x60);
     assert_eq!(at(0x40).unwrap().opcode, 0x28);
+    // PLP; RTL: the PLP decodes exactly and nothing after it depends on the
+    // widths it left unknown, so the confidence stays at 0.9.
     let sub_b = snap.region_at(FileOffset(0x40)).unwrap();
     assert!(
-        (sub_b.confidence - 0.7).abs() < 1e-6,
-        "PLP lowers confidence"
+        (sub_b.confidence - 0.9).abs() < 1e-6,
+        "PLP alone does not lower confidence"
     );
     assert_eq!(sub_b.evidence, vec![Evidence::VectorReach { depth: 1 }]);
     assert_eq!(
@@ -257,4 +259,99 @@ fn cancellation_is_honoured() {
     // The fixture is too small to hit a check inside the walk, but the
     // post-descent check fires.
     assert!(analyze(&rom, &Project::new(&rom), &control).is_err());
+}
+
+/// RESET → $8000. Callees at $8028 and $8040 add 3 and 2 to their return
+/// address (the second after `PHP; PHB`, through Y); $8060 is a plain
+/// `RTL`; $8070 and $8078 start with `PLP`, the second re-establishing the
+/// widths with `REP #$30`.
+fn inline_and_plp() -> RomImage {
+    let mut code = vec![0u8; 0x100];
+    let mut put = |at: usize, bytes: &[u8]| code[at..at + bytes.len()].copy_from_slice(bytes);
+    put(0x00, &[0x18, 0xFB, 0xC2, 0x30]); // CLC; XCE; REP #$30
+    put(0x04, &[0x22, 0x28, 0x80, 0x00]); // JSL $008028
+    put(0x08, &[0x00, 0x90, 0x00]); // inline: dl $009000
+    put(0x0B, &[0xA9, 0x01, 0x00]); // LDA #$0001
+    put(0x0E, &[0x22, 0x40, 0x80, 0x00]); // JSL $008040
+    put(0x12, &[0x34, 0x12]); // inline: dw $1234
+    put(0x14, &[0x22, 0x70, 0x80, 0x00]); // JSL $008070
+    put(0x18, &[0x22, 0x78, 0x80, 0x00]); // JSL $008078
+    put(0x1C, &[0x22, 0x60, 0x80, 0x00]); // JSL $008060
+    put(0x20, &[0x00, 0x00]); // BRK: reached by fall-through
+    // LDA $01,S; CLC; ADC #$0003; STA $01,S; RTL
+    put(
+        0x28,
+        &[0xA3, 0x01, 0x18, 0x69, 0x03, 0x00, 0x83, 0x01, 0x6B],
+    );
+    // PHP; PHB; LDA $03,S; TAY; TYA; CLC; ADC #$0002; STA $03,S; PLB; PLP; RTL
+    put(
+        0x40,
+        &[
+            0x08, 0x8B, 0xA3, 0x03, 0xA8, 0x98, 0x18, 0x69, 0x02, 0x00, 0x83, 0x03, 0xAB, 0x28,
+            0x6B,
+        ],
+    );
+    put(0x60, &[0x6B]); // RTL
+    put(0x70, &[0x28, 0xA9, 0x01, 0x00, 0x6B]); // PLP; LDA #$0001; RTL
+    put(0x78, &[0x28, 0xC2, 0x30, 0xA9, 0x01, 0x00, 0x6B]); // PLP; REP #$30; LDA #$0001; RTL
+    put(0xA0, &[0x40]); // RTI
+    let mut vectors = [0x80A0u16; 12];
+    vectors[10] = 0x8000;
+    RomImage::from_bytes(
+        fixtures::build_custom(MappingMode::LoRom, 0x8000, false, &code, "INLINE", vectors),
+        "inline.sfc",
+    )
+    .unwrap()
+}
+
+#[test]
+fn inline_arguments_are_skipped_and_assumed_widths_lower_confidence() {
+    use romlens_core::cpu65816::ASSUMED_WIDTHS;
+    let rom = inline_and_plp();
+    let project = Project::new(&rom);
+    let snap = analyze(&rom, &project, &AnalysisControl::silent()).unwrap();
+    let at = |off: u32| snap.instruction_at(FileOffset(off)).copied();
+    let region = |off: u32| snap.region_at(FileOffset(off)).unwrap().clone();
+    let inline_evidence = vec![Evidence::Heuristic {
+        name: "inline argument".into(),
+        score: 0.8,
+    }];
+    // Three inline bytes after the first call: data, and the walk resumed
+    // exactly after them.
+    assert!(at(0x08).is_none());
+    let long = region(0x08);
+    assert_eq!(long.kind, RegionKind::Data(DataKind::Long));
+    assert_eq!((long.start, long.len), (FileOffset(0x08), 3));
+    assert!((long.confidence - 0.8).abs() < 1e-6);
+    assert_eq!(long.evidence, inline_evidence);
+    assert_eq!((at(0x0B).unwrap().opcode, at(0x0B).unwrap().len), (0xA9, 3));
+    // Two after the second: the callee found the slot behind PHP; PHB and
+    // moved the address through Y.
+    let word = region(0x12);
+    assert_eq!(word.kind, RegionKind::Data(DataKind::Word));
+    assert_eq!((word.start, word.len), (FileOffset(0x12), 2));
+    assert_eq!(word.evidence, inline_evidence);
+    assert_eq!(at(0x14).unwrap().opcode, 0x22);
+    // The plain callee has no arguments: the BRK after its call is reached
+    // and reported; the earlier passes' false alarms did not leak.
+    let fallthrough: Vec<u32> = snap
+        .warnings
+        .iter()
+        .filter(|w| w.kind == WarningKind::SuspiciousFallthrough)
+        .map(|w| w.offset.0)
+        .collect();
+    assert_eq!(fallthrough, vec![0x20]);
+    // PLP keeps 0.9; the LDA #imm decoded under the widths it left unknown,
+    // and the RTL after it, drop to 0.7 and carry the assumption.
+    assert!((region(0x70).confidence - 0.9).abs() < 1e-6);
+    assert!((region(0x71).confidence - 0.7).abs() < 1e-6);
+    assert_eq!(region(0x71).len, 4, "LDA #$0001 and RTL share the region");
+    assert_ne!(at(0x71).unwrap().assumptions & ASSUMED_WIDTHS, 0);
+    assert_ne!(at(0x74).unwrap().assumptions & ASSUMED_WIDTHS, 0);
+    assert_eq!(at(0x70).unwrap().assumptions & ASSUMED_WIDTHS, 0);
+    // REP #$30 after the PLP re-establishes both widths: nothing drops.
+    for off in [0x78, 0x79, 0x7B, 0x7E] {
+        assert!((region(off).confidence - 0.9).abs() < 1e-6, "{off:#x}");
+        assert_eq!(at(off).unwrap().assumptions & ASSUMED_WIDTHS, 0, "{off:#x}");
+    }
 }

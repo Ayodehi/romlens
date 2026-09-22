@@ -445,6 +445,7 @@ pub enum WarningKind {
     FlagConflict,
     UnknownCarryXce,
     SuspiciousEntry,
+    SuspiciousFallthrough,
     BankWrap,
     WalkedIntoUserData,
 }
@@ -466,6 +467,7 @@ impl From<&snapshot::Warning> for WarningInfo {
                 snapshot::WarningKind::FlagConflict => WarningKind::FlagConflict,
                 snapshot::WarningKind::UnknownCarryXce => WarningKind::UnknownCarryXce,
                 snapshot::WarningKind::SuspiciousEntry => WarningKind::SuspiciousEntry,
+                snapshot::WarningKind::SuspiciousFallthrough => WarningKind::SuspiciousFallthrough,
                 snapshot::WarningKind::BankWrap => WarningKind::BankWrap,
                 snapshot::WarningKind::WalkedIntoUserData => WarningKind::WalkedIntoUserData,
             },
