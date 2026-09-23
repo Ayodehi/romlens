@@ -341,6 +341,31 @@ pub fn tilemap_cells(bytes: Vec<u8>, size: ScreenSize) -> Vec<TilemapCellInfo> {
         .collect()
 }
 
+/// The Mode 7 map's 128×128 cells from a whole VRAM: each entry is the low
+/// byte of a word, so `raw` and `tile` are the same 8-bit number, and there is
+/// no palette, priority or flip. `byte_offset` is the entry's offset in VRAM.
+#[uniffi::export]
+pub fn mode7_cells(vram: Vec<u8>) -> Vec<TilemapCellInfo> {
+    use romlens_core::graphics::mode7::{MAP_CELLS, map_entry, map_entry_offset};
+    (0..MAP_CELLS)
+        .flat_map(|row| (0..MAP_CELLS).map(move |col| (col, row)))
+        .map(|(col, row)| {
+            let tile = map_entry(&vram, col, row);
+            TilemapCellInfo {
+                col,
+                row,
+                raw: tile as u16,
+                tile: tile as u16,
+                palette: 0,
+                priority: false,
+                hflip: false,
+                vflip: false,
+                byte_offset: map_entry_offset(col, row) as u32,
+            }
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct DecompressInfo {
     pub output: Vec<u8>,
@@ -593,18 +618,15 @@ impl RecordingSession {
             msg: format!("the recording has no {r}"),
         };
         let ppu = state.ppu().ok_or_else(|| missing("PPU registers"))?;
+        let vram = state.vram().ok_or_else(|| missing("VRAM"))?;
+        let cgram = state.cgram().ok_or_else(|| missing("CGRAM"))?;
+        if ppu.bg_mode() == 7 && bg == 1 {
+            return Ok(romlens_core::graphics::mode7::render_plane(vram, cgram).into());
+        }
         let cfg = BgConfig::from_ppu(&ppu, bg).ok_or_else(|| RomlensError::Recording {
-            msg: match ppu.bg_mode() {
-                7 => "Mode 7 is not drawn by the Phase 2 renderer".to_owned(),
-                m => format!("mode {m} has no BG{bg}"),
-            },
+            msg: format!("mode {} has no BG{bg}", ppu.bg_mode()),
         })?;
-        Ok(render_bg_layer(
-            state.vram().ok_or_else(|| missing("VRAM"))?,
-            state.cgram().ok_or_else(|| missing("CGRAM"))?,
-            &cfg,
-        )
-        .into())
+        Ok(render_bg_layer(vram, cgram, &cfg).into())
     }
 
     /// One sprite at its own size.
@@ -654,6 +676,41 @@ pub fn make_graphics_test_rom() -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mode_7_draws_its_plane_and_lists_its_cells() {
+        use romlens_core::recording::writer::WriterOptions;
+        use romlens_core::recording::{MachineState, RomrecWriter, fixtures};
+        let mut state = fixtures::frames(1).remove(0);
+        let mut ppu = state.ppu().unwrap();
+        ppu.set_register(0x2105, 7);
+        state
+            .regions
+            .insert(CoreRegion::PpuState, ppu.bytes.to_vec());
+        let mut vram = vec![0u8; 0x10000];
+        vram[2 * (128 + 3)] = 0x42; // map cell (3, 1) is tile $42
+        state.regions.insert(CoreRegion::Vram, vram.clone());
+        let mut w = RomrecWriter::new(
+            std::io::Cursor::new(Vec::new()),
+            &fixtures::identity(),
+            &CoreRegion::ALL,
+            WriterOptions::default(),
+            0,
+        )
+        .unwrap();
+        w.write_frame(&MachineState { frame: 0, ..state }).unwrap();
+        let rec = RecordingSession::from_bytes(w.finish().unwrap().into_inner()).unwrap();
+        let plane = rec.render_bg(0, 1).unwrap();
+        assert_eq!((plane.width, plane.height), (1024, 1024));
+        assert!(matches!(
+            rec.render_bg(0, 2),
+            Err(RomlensError::Recording { .. })
+        ));
+        let cells = mode7_cells(vram);
+        assert_eq!(cells.len(), 128 * 128);
+        let c = &cells[128 + 3];
+        assert_eq!((c.col, c.row, c.tile, c.byte_offset), (3, 1, 0x42, 2 * 131));
+    }
 
     #[test]
     fn a_recording_opens_from_bytes_and_draws() {

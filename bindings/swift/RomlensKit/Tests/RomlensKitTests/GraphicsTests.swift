@@ -21,6 +21,14 @@ import Testing
         #expect(tileByteLen(format: .bpp2) == 16)
     }
 
+    @Test func mode7CellsReadLowBytes() {
+        var vram = Data(count: 0x10000)
+        vram[2 * (128 + 3)] = 0x42
+        let cells = mode7Cells(vram: vram)
+        #expect(cells.count == 128 * 128)
+        #expect(cells[128 + 3].tile == 0x42 && cells[128 + 3].byteOffset == 262)
+    }
+
     @Test func aRecordingRendersItsLayers() throws {
         let rec = try RecordingSession.fromBytes(bytes: makeTestRecording(frames: 12))
         #expect(rec.info().frameCount == 12)

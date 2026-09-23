@@ -676,6 +676,24 @@ fn recording_commands() {
     );
     out += &run(&["rec", "info", raw]);
     out += &run_with(&["render", "bg", "--rec", raw], &["--bg", "1"]);
+    // Mode 7: BGMODE 7 in the same registers, and VRAM whose map cell
+    // (c, r) is tile (c + r) & $FF with tile t's pixels all t.
+    let mut ppu7 = std::fs::read(&ppu).unwrap();
+    ppu7[5] = 7;
+    let mut vram7 = vec![0u8; 0x10000];
+    for w in 0..0x4000usize {
+        vram7[w * 2] = ((w % 128 + w / 128) & 0xFF) as u8;
+        vram7[w * 2 + 1] = (w / 64) as u8;
+    }
+    let (ppu7_path, vram7_path, rec7) = (arg("ppu7"), arg("vram7"), arg("mode7"));
+    std::fs::write(&ppu7_path, ppu7).unwrap();
+    std::fs::write(&vram7_path, vram7).unwrap();
+    out += &run_with(
+        &["rec", "import-raw", "--rom", rom, "--vram", &vram7_path],
+        &["--cgram", &cgram, "--ppu", &ppu7_path, "--out", &rec7],
+    );
+    out += &run_with(&["render", "bg", "--rec", &rec7], &["--bg", "1"]);
+    out += &run_with(&["render", "bg", "--rec", &rec7], &["--bg", "2"]);
     check("rec-graphics", &redact_tmp(&dir, &out));
     let _ = std::fs::remove_dir_all(dir);
 }

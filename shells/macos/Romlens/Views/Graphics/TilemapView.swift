@@ -11,7 +11,7 @@ struct TilemapView: View {
 
     var body: some View {
         let cells = graphics.cells()
-        let size = graphics.currentLayer?.size ?? graphics.screenSize
+        let size = graphics.mapCells
         VStack(spacing: 0) {
             controls
             Divider()
@@ -50,7 +50,10 @@ struct TilemapView: View {
                 .pickerStyle(.segmented)
                 .fixedSize()
                 if let layer = graphics.currentLayer, let ppu = graphics.ppu {
-                    if let format = layer.format {
+                    if graphics.isMode7 {
+                        Text("Mode 7: the 128×128 plane at $0000, 8 bpp, drawn untransformed (the M7A–M7D rotation and scaling are not applied)")
+                            .foregroundStyle(.secondary)
+                    } else if let format = layer.format {
                         Text("Mode \(ppu.bgMode): \(format.title), \(layer.size.title), map $\(GraphicsStyle.hex(layer.mapWord, 4)), tiles $\(GraphicsStyle.hex(layer.charWord, 4))\(layer.tile16 ? ", 16×16" : "")")
                             .foregroundStyle(.secondary)
                     } else {
@@ -72,7 +75,7 @@ struct TilemapView: View {
         .padding(.vertical, 6)
     }
 
-    private func numbers(_ cells: [TilemapCellInfo], size: ScreenSize) -> some View {
+    private func numbers(_ cells: [TilemapCellInfo], size: (columns: Int, rows: Int)) -> some View {
         Canvas { ctx, _ in
             for c in cells {
                 let rect = CGRect(x: CGFloat(c.col) * Self.cell, y: CGFloat(c.row) * Self.cell, width: Self.cell, height: Self.cell)
@@ -84,28 +87,28 @@ struct TilemapView: View {
                 )
             }
         }
-        .frame(width: CGFloat(size.cells.columns) * Self.cell, height: CGFloat(size.cells.rows) * Self.cell)
+        .frame(width: CGFloat(size.columns) * Self.cell, height: CGFloat(size.rows) * Self.cell)
     }
 
-    private func grid(size: ScreenSize) -> some View {
+    private func grid(size: (columns: Int, rows: Int)) -> some View {
         Canvas { ctx, canvas in
             var path = Path()
-            for c in 0...size.cells.columns {
+            for c in 0...size.columns {
                 path.move(to: CGPoint(x: CGFloat(c) * Self.cell, y: 0))
                 path.addLine(to: CGPoint(x: CGFloat(c) * Self.cell, y: canvas.height))
             }
-            for r in 0...size.cells.rows {
+            for r in 0...size.rows {
                 path.move(to: CGPoint(x: 0, y: CGFloat(r) * Self.cell))
                 path.addLine(to: CGPoint(x: canvas.width, y: CGFloat(r) * Self.cell))
             }
             ctx.stroke(path, with: .color(.secondary.opacity(0.25)), lineWidth: 0.5)
             if let i = graphics.selectedCell {
-                let cols = size.cells.columns
+                let cols = size.columns
                 let rect = CGRect(x: CGFloat(i % cols) * Self.cell, y: CGFloat(i / cols) * Self.cell, width: Self.cell, height: Self.cell)
                 ctx.stroke(Path(rect), with: .color(.accentColor), lineWidth: 2)
             }
         }
-        .frame(width: CGFloat(size.cells.columns) * Self.cell, height: CGFloat(size.cells.rows) * Self.cell)
+        .frame(width: CGFloat(size.columns) * Self.cell, height: CGFloat(size.rows) * Self.cell)
         .allowsHitTesting(false)
     }
 }
@@ -118,6 +121,27 @@ struct CellDetail: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Cell (\(cell.col), \(cell.row))").font(.headline)
+            if graphics.isMode7 {
+                // A Mode 7 entry is one byte: the tile number and nothing else.
+                Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 4) {
+                    row("Tile", "$" + GraphicsStyle.hex(cell.tile, 2))
+                    row("VRAM", "$" + GraphicsStyle.hex(cell.byteOffset, 4))
+                }
+                .font(.callout)
+                Text("Low byte of word row × 128 + column; the tile's pixels are the high bytes of words 64 × tile onward")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                entryDetail
+            }
+            Spacer()
+        }
+        .padding()
+    }
+
+    private var entryDetail: some View {
+        VStack(alignment: .leading, spacing: 8) {
             Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 4) {
                 row("Entry", "$" + GraphicsStyle.hex(cell.raw, 4))
                 row("Tile", "$" + GraphicsStyle.hex(cell.tile, 3))
@@ -137,9 +161,7 @@ struct CellDetail: View {
                 }
                 .controlSize(.small)
             }
-            Spacer()
         }
-        .padding()
     }
 
     @ViewBuilder

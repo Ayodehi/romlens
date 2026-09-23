@@ -6,6 +6,7 @@
 use std::path::Path;
 
 use anyhow::{Context, Result, anyhow};
+use romlens_core::graphics::mode7;
 use romlens_core::graphics::render::{BgConfig, render_bg_layer, render_sprite};
 use romlens_core::recording::format::{COMPRESSION_ZSTD, FLAG_WRAM_KEYFRAME_ONLY, KIND_KEY};
 use romlens_core::recording::import::state_from_dumps;
@@ -337,11 +338,13 @@ pub fn render(a: RenderArgs<'_>) -> Result<()> {
         anyhow!("the recording has no PPU registers, so there is no mode to draw")
     })?;
     let (bm, what) = match (a.bg, a.sprite) {
+        (Some(1), _) if ppu.bg_mode() == 7 => (
+            mode7::render_plane(vram, cgram),
+            "BG1, mode 7, the 128x128 plane untransformed (M7A-M7D not applied)".to_owned(),
+        ),
         (Some(bg), _) => {
-            let cfg = BgConfig::from_ppu(&ppu, bg).ok_or_else(|| match ppu.bg_mode() {
-                7 => anyhow!("Mode 7 is not drawn by the Phase 2 renderer"),
-                mode => anyhow!("mode {mode} has no BG{bg}"),
-            })?;
+            let cfg = BgConfig::from_ppu(&ppu, bg)
+                .ok_or_else(|| anyhow!("mode {} has no BG{bg}", ppu.bg_mode()))?;
             let what = format!(
                 "BG{bg}, mode {}, {} {}, map at word ${:04X}, tiles at ${:04X}{}",
                 ppu.bg_mode(),

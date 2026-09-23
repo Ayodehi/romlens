@@ -95,3 +95,8 @@ Regions:      ppu 256, vram 65536, cgram 512, oam 544
 Layers:       none
 frame 0: BG1, mode 1, 4bpp 32x32, map at word $1000, tiles at $0000
 256x256 sha256=70a8e82dd859ec92ce3c2a4da7faf1a738da9a868e98eb62f3c874e6527f567b
+wrote <tmp>/mode7.bin: one frame with ppu, vram, cgram
+frame 0: BG1, mode 7, the 128x128 plane untransformed (M7A-M7D not applied)
+1024x1024 sha256=a6879df34bd14064ae9cfa245878a5eceaa72772f367188801701fc5ae7d9b28
+[exit code 1]
+Error: mode 7 has no BG2

@@ -12,6 +12,7 @@
 //! recorded framebuffer to test them against (`16-phase2-plan.md` 2B.6).
 
 pub mod compress;
+pub mod mode7;
 pub mod oam;
 pub mod palette;
 pub mod ppu_state;

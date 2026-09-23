@@ -330,7 +330,21 @@ final class GraphicsModel {
     }
 
     func cells() -> [TilemapCellInfo] {
-        tilemapCells(bytes: tilemapBytes(), size: currentLayer?.size ?? screenSize)
+        if isMode7 {
+            return mode7Cells(vram: region(.vram) ?? Data())
+        }
+        return tilemapCells(bytes: tilemapBytes(), size: currentLayer?.size ?? screenSize)
+    }
+
+    /// Whether the Tilemap view is showing the Mode 7 plane: one fixed
+    /// 128×128 map of byte entries, not a `BGnSC` map.
+    var isMode7: Bool {
+        source == .recording && currentLayer?.format == .mode7
+    }
+
+    /// The map's cells across and down, as the view lays them out.
+    var mapCells: (columns: Int, rows: Int) {
+        isMode7 ? (128, 128) : (currentLayer?.size ?? screenSize).cells
     }
 
     /// Select cell `index` in reading order. Its bytes come from the cell,

@@ -2,7 +2,8 @@
 //! CGRAM and the registers. Nothing else.
 //!
 //! No priority, no `TM`/`TS`, no windows, no colour math, no OBJ-over-BG
-//! compositing, no Mode 7, no hi-res or interlace. The only honest oracle for
+//! compositing, no Mode 7 transform (`mode7` draws the plane untransformed),
+//! no hi-res or interlace. The only honest oracle for
 //! those is a recorded framebuffer to diff against, and that is a Phase 3
 //! consumer; a compositor written now would be several hundred lines of
 //! unverified code (`16-phase2-plan.md` 2B.6). Phase 3 adds `compose(…)`
