@@ -34,6 +34,7 @@ struct FindSheet: View {
                 .frame(minHeight: 20, alignment: .leading)
             HStack {
                 Button("Show Results") {
+                    model.resultsKind = .find
                     model.isResultsVisible = true
                     dismiss()
                 }

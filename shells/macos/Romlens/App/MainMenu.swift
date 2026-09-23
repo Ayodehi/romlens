@@ -141,7 +141,7 @@ enum MainMenu {
             item("Show Navigator", #selector(RomWindowController.toggleNavigator(_:)), "0"),
             item("Show Inspector", #selector(RomWindowController.toggleInspector(_:)), "0", modifiers: [.command, .option]),
             item("Show Overview Strip", #selector(RomWindowController.toggleStrip(_:)), "0", modifiers: [.command, .shift]),
-            item("Show Find Results", #selector(RomWindowController.toggleResults(_:)), "0", modifiers: [.command, .control]),
+            item("Show Results", #selector(RomWindowController.toggleResults(_:)), "0", modifiers: [.command, .control]),
             .separator(),
             item("Enter Full Screen", #selector(NSWindow.toggleFullScreen(_:)), "f", modifiers: [.command, .control]),
         ])
@@ -155,6 +155,7 @@ enum MainMenu {
             .separator(),
             item("Jump to Address…", #selector(RomWindowController.jumpToAddress(_:)), "l"),
             item("Follow Reference", #selector(RomWindowController.followReference(_:)), "\r"),
+            item("Find References", #selector(RomWindowController.findReferences(_:)), "F", modifiers: [.command, .shift]),
             item("Back", #selector(RomWindowController.goBack(_:)), "["),
             item("Forward", #selector(RomWindowController.goForward(_:)), "]"),
             .separator(),

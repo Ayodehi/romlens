@@ -49,6 +49,7 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
     @objc func findNext(_ sender: Any?) { model.stepSearch(by: 1) }
     @objc func findPrevious(_ sender: Any?) { model.stepSearch(by: -1) }
     @objc func followReference(_ sender: Any?) { model.followReference() }
+    @objc func findReferences(_ sender: Any?) { model.findReferences() }
     @objc func goBack(_ sender: Any?) { model.goBack() }
     @objc func goForward(_ sender: Any?) { model.goForward() }
     @objc func goToHeader(_ sender: Any?) { model.jump(to: model.info.headerOffset) }
@@ -195,9 +196,18 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
             return hasSelection
         case #selector(findNext(_:)), #selector(findPrevious(_:)):
             return model.search.hasResults
+        case #selector(findReferences(_:)):
+            // Named for what it will look for, so a right-click on a line
+            // says whose references it lists and how many there are.
+            guard let target = model.referenceTarget else {
+                item.title = "Find References"
+                return false
+            }
+            item.title = "Find References to \(target.name) (\(target.count))"
+            return target.count > 0
         case #selector(toggleResults(_:)):
-            item.title = model.isResultsVisible ? "Hide Find Results" : "Show Find Results"
-            return model.search.hasResults
+            item.title = model.isResultsVisible ? "Hide Results" : "Show Results"
+            return model.search.hasResults || model.references.hasResults
         case #selector(toggleStrip(_:)):
             item.title = model.isStripVisible ? "Hide Overview Strip" : "Show Overview Strip"
             return true

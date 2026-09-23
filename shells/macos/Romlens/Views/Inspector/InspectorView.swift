@@ -409,7 +409,10 @@ struct XrefsSection: View {
                     .buttonStyle(.plain)
                 }
                 if model.xrefsTo.count > 50 {
-                    Text("and \(model.xrefsTo.count - 50) more").font(.caption).foregroundStyle(.tertiary)
+                    Button("Show all \(model.xrefsTo.count)") { model.findReferences() }
+                        .buttonStyle(.link)
+                        .font(.caption)
+                        .help("List every reference in the results pane (⇧⌘F)")
                 }
             }
             if !model.xrefsFrom.isEmpty {

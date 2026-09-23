@@ -259,6 +259,8 @@ enum EditorContextMenu {
             menu.addItem(i)
         }
         item("Follow Reference", #selector(RomWindowController.followReference(_:)))
+        // Titled and enabled by `RomWindowController.validateMenuItem`.
+        item("Find References", #selector(RomWindowController.findReferences(_:)))
         menu.addItem(.separator())
         item("Rename Label…", #selector(RomWindowController.renameLabel(_:)))
         item("Comment…", #selector(RomWindowController.editComment(_:)))

@@ -44,6 +44,60 @@ import Testing
         #expect(m.search.summary.contains("match"))
     }
 
+    // MARK: Find References
+
+    @Test func findReferencesListsEveryReferrerAndVisitsThem() async throws {
+        let m = try await model()
+        let target = try #require(
+            m.workbench.labels().first { !m.workbench.xrefsTo(snesAddress: $0.address).isEmpty },
+            "the fixture's dispatch table gives its targets references"
+        )
+        m.jump(toSnesAddress: target.address)
+        let named = try #require(m.referenceTarget)
+        #expect(named.name == target.name)
+        #expect(named.count == m.xrefsTo.count)
+
+        m.findReferences()
+        #expect(m.isResultsVisible)
+        #expect(m.resultsKind == .references)
+        #expect(m.references.targetName == target.name)
+        #expect(m.references.rows.map(\.fileOffset) == m.xrefsTo.map(\.fromOffset))
+        #expect(m.references.current == nil, "finding does not move the selection")
+
+        let first = try #require(m.references.rows.first)
+        m.goToReference(at: 0)
+        #expect(m.selectedOffset == first.fileOffset)
+        #expect(m.references.summary.hasPrefix("1 of "))
+        #expect(m.canGoBack, "a reference visited is in the history")
+
+        // A Find afterwards takes the pane back without losing the list.
+        m.search.query = "78 18 FB"
+        m.runSearch()
+        #expect(m.resultsKind == .find)
+        #expect(m.references.rows.count == named.count)
+    }
+
+    @Test func aReferenceIsNamedByTheRoutineItIsIn() {
+        func label(_ name: String, _ address: UInt32, _ source: LabelSource = .auto) -> LabelInfo {
+            LabelInfo(address: address, name: name, source: source, origin: "", fileOffset: nil)
+        }
+        let routines = ReferencesModel.routineLabels([
+            label("CODE_808010", 0x80_8010),
+            label("SUB_808000", 0x80_8000),
+            label("DATA_808100", 0x80_8100),
+            label("CODE_Loop", 0x80_8040, .user),
+            label("SUB_818000", 0x81_8000),
+        ])
+        #expect(routines.map(\.name) == ["SUB_808000", "CODE_Loop", "SUB_818000"],
+                "the analyzer's inner labels are skipped; a user's name is kept")
+        #expect(ReferencesModel.routine(containing: 0x80_8000, in: routines) == "SUB_808000")
+        #expect(ReferencesModel.routine(containing: 0x80_801C, in: routines) == "SUB_808000+1C")
+        #expect(ReferencesModel.routine(containing: 0x80_9000, in: routines) == "CODE_Loop+FC0")
+        #expect(ReferencesModel.routine(containing: 0x80_7FFF, in: routines) == nil)
+        #expect(ReferencesModel.routine(containing: 0x82_8000, in: routines) == nil,
+                "a label in another bank does not contain the reference")
+    }
+
     @Test func steppingWrapsAndReportsPosition() async throws {
         let m = try await model()
         // `00` occurs many times, so there is something to step through.

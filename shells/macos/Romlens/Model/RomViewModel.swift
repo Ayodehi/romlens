@@ -46,6 +46,7 @@ final class RomViewModel {
     let session: WorkbenchSession
     let navigator = NavigatorModel()
     let search = SearchModel()
+    let references = ReferencesModel()
     @ObservationIgnored let cache: HexRowCache
     @ObservationIgnored let asmCache: AsmLineCache
     let metrics = MonoMetrics()
@@ -96,6 +97,10 @@ final class RomViewModel {
     var isNavigatorVisible = true
     var isInspectorVisible = true
     var isResultsVisible = false
+    /// Which list the results pane shows: the last Find, or the last Find
+    /// References. Each keeps its own list, so switching loses neither.
+    var resultsKind: ResultsKind = .find
+    enum ResultsKind { case find, references }
     var isStripVisible = true
     /// Bumped when the strip's data is stale; it re-reduces rather than
     /// redrawing what the last analysis said.
@@ -439,6 +444,7 @@ final class RomViewModel {
     // MARK: Find
 
     func runSearch() {
+        resultsKind = .find
         search.search(in: workbench)
         if let hit = search.hits.first {
             jump(to: hit.fileOffset)
@@ -454,6 +460,29 @@ final class RomViewModel {
     func goToHit(at index: Int) {
         guard let hit = search.select(index) else { return }
         jump(to: hit.fileOffset)
+    }
+
+    // MARK: Find References
+
+    /// What Find References would look for: the selected item's label, or
+    /// its address, with how many references there are.
+    var referenceTarget: (name: String, count: Int)? {
+        guard let address = selectedAddress else { return nil }
+        return (label?.name ?? formatSnesAddress(address: address), xrefsTo.count)
+    }
+
+    /// List everything that refers to the selected item, in the results
+    /// pane. The selection stays where it is until a row is chosen.
+    func findReferences() {
+        guard let address = selectedAddress else { return }
+        references.find(to: address, in: workbench)
+        resultsKind = .references
+        isResultsVisible = true
+    }
+
+    func goToReference(at index: Int) {
+        guard let row = references.select(index) else { return }
+        jump(to: row.fileOffset)
     }
 
     /// The marked range the selection is in, whose preview options can be

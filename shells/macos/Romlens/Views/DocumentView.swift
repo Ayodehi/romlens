@@ -45,7 +45,10 @@ struct DocumentView: View {
                 EditorView(model: model)
                 if model.isResultsVisible {
                     Divider()
-                    SearchResultsView(model: model)
+                    switch model.resultsKind {
+                    case .find: SearchResultsView(model: model)
+                    case .references: ReferencesView(model: model)
+                    }
                 }
             }
             .frame(minWidth: 420, maxWidth: .infinity)
