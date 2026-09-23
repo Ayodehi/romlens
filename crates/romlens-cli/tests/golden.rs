@@ -619,8 +619,63 @@ fn recording_commands() {
     let other = write_fixture(&dir, MappingMode::LoRom);
     let other = other.to_str().unwrap();
     let mut out = run(&["testrec", "--out", rec, "--frames", "90"]);
+    out += &run(&["rec", "validate", rec, "--rom", rom, "--sample", "8"]);
+    out += &run(&["rec", "validate", rec, "--rom", other]);
+    let cut = dir.join("cut.romrec");
+    let cut = cut.to_str().unwrap();
+    let whole = std::fs::read(rec).unwrap();
+    std::fs::write(cut, &whole[..whole.len() * 2 / 3]).unwrap();
+    out += &run(&["rec", "validate", cut]);
+    out += &run(&["rec", "validate", cut, "--recover", "--strict"]);
+    let window = dir.join("window.romrec");
+    let window = window.to_str().unwrap();
+    out += &redact_tmp(
+        &dir,
+        &run_with(
+            &["rec", "convert", rec, "--from", "25"],
+            &["--to", "35", "--out", window],
+        ),
+    );
+    out += &redact_tmp(&dir, &run(&["rec", "validate", window, "--rom", rom]));
+    out += &run_with(
+        &["rec", "when", window, "--region", "vram"],
+        &["--offset", "0xA0"],
+    );
+    out += &redact_tmp(
+        &dir,
+        &run_with(
+            &["rec", "convert", rec, "--from", "80"],
+            &["--to", "95", "--out", window],
+        ),
+    );
     out += &run(&["rec", "info", rec, "--rom", rom]);
     out += &run(&["rec", "info", rec, "--rom", other]);
+    // Frame 30 rewrites tile 5 in VRAM ($A0-$BF); CGRAM entry 17 cycles.
+    out += &redact_tmp(&dir, &run(&["rec", "index", rec]));
+    out += &run_with(
+        &["rec", "when", rec, "--region", "vram"],
+        &["--offset", "0xA0", "--len", "32"],
+    );
+    out += &run_with(
+        &["rec", "when", rec, "--region", "vram"],
+        &["--offset", "0xA0", "--after", "30"],
+    );
+    out += &run_with(
+        &["rec", "when", rec, "--region", "vram"],
+        &["--offset", "0xA0", "--after", "50", "--backward"],
+    );
+    out += &run_with(
+        &["rec", "when", rec, "--region", "cgram"],
+        &["--offset", "34", "--len", "2", "--after", "3"],
+    );
+    out += &run_with(
+        &["rec", "when", rec, "--region", "vram"],
+        &["--offset", "0x10000"],
+    );
+    out += &run_with(
+        &["rec", "changes", rec, "--region", "vram"],
+        &["--from", "29", "--to", "30"],
+    );
     out += &run_with(
         &["rec", "extract", rec],
         &["--frame", "40", "--region", "oam", "--hex"],
@@ -730,6 +785,30 @@ fn mesen_recorder_commands() {
     );
     out += &run(&["rec", "info", &rec]);
     out += &run_with(&["rec", "pack", &clean, "--rom", other], &["--out", &rec]);
+    // Refer to it from a project, and see that it is noticed when replaced.
+    let pkg = path("P.romlens");
+    out += &redact_tmp(&dir, &run(&["project", &pkg, "init", "--rom", rom]));
+    out += &redact_tmp(
+        &dir,
+        &run(&["project", &pkg, "recordings", "add", &rec, "--rom", rom]),
+    );
+    out += &redact_tmp(&dir, &run(&["project", &pkg, "recordings", "--rom", rom]));
+    out += &run(&[
+        "rec", "pack", &clean, "--rom", rom, "--out", &rec, "--wram", "full",
+    ])
+    .replace(&*dir.to_string_lossy(), "<tmp>");
+    out += &redact_tmp(
+        &dir,
+        &run(&["project", &pkg, "recordings", "list", "--rom", rom]),
+    );
+    out += &redact_tmp(
+        &dir,
+        &run(&["project", &pkg, "recordings", "remove", &rec, "--rom", rom]),
+    );
+    out += &redact_tmp(
+        &dir,
+        &run(&["project", &pkg, "recordings", "remove", &rec, "--rom", rom]),
+    );
     let script = path("mesen_recorder.lua");
     out += &run(&["rec", "script", "--out", &script]);
     assert_eq!(std::fs::read_to_string(&script).unwrap(), RECORDER_SCRIPT);

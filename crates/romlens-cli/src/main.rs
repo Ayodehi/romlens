@@ -392,6 +392,57 @@ enum RecCommand {
         #[arg(long)]
         recover: bool,
     },
+    /// Every problem with a recording, each with a stable code.
+    Validate {
+        rec: PathBuf,
+        /// Check it was made from this ROM.
+        #[arg(long)]
+        rom: Option<PathBuf>,
+        /// Rebuild this many frames and check their changes against the truth.
+        #[arg(long, default_value_t = 16)]
+        sample: u32,
+        /// Fail on warnings too.
+        #[arg(long)]
+        strict: bool,
+        /// Treat a missing footer as a recording in progress.
+        #[arg(long)]
+        recover: bool,
+    },
+    /// Build (or refresh) the index beside a recording that answers `when`.
+    Index {
+        rec: PathBuf,
+        /// Build it even if the saved one matches.
+        #[arg(long)]
+        rebuild: bool,
+    },
+    /// The next frame that changes a byte range, or with --backward the last.
+    When {
+        rec: PathBuf,
+        /// cpu, ppu, io, vram, cgram, oam, timing, or wram when every frame
+        /// carries it.
+        #[arg(long)]
+        region: String,
+        /// A byte offset in the region; 0x for hex.
+        #[arg(long)]
+        offset: String,
+        #[arg(long, default_value_t = 1)]
+        len: u32,
+        /// Search after this frame (backward: at or before it).
+        #[arg(long, default_value_t = 0)]
+        after: u64,
+        #[arg(long)]
+        backward: bool,
+    },
+    /// The byte ranges of a region that may differ between two frames.
+    Changes {
+        rec: PathBuf,
+        #[arg(long)]
+        from: u64,
+        #[arg(long)]
+        to: u64,
+        #[arg(long)]
+        region: String,
+    },
     /// One region at one frame.
     Extract {
         rec: PathBuf,
@@ -442,6 +493,19 @@ enum RecCommand {
         /// Store payloads uncompressed.
         #[arg(long)]
         no_compress: bool,
+    },
+    /// A new recording of frames FROM to TO of one, numbered from 0.
+    Convert {
+        rec: PathBuf,
+        #[arg(long)]
+        from: u64,
+        /// The last frame kept, inclusive.
+        #[arg(long)]
+        to: u64,
+        #[arg(long)]
+        out: PathBuf,
+        #[arg(long, default_value_t = 60)]
+        keyframe_interval: u16,
     },
     /// Write the Mesen recorder script.
     Script {
@@ -634,6 +698,23 @@ enum ProjectCommand {
         #[arg(long)]
         rom: Option<PathBuf>,
     },
+    /// The recordings the project refers to (never copies).
+    Recordings {
+        #[command(subcommand)]
+        what: Option<RecordingsCommand>,
+        #[arg(long, global = true)]
+        rom: Option<PathBuf>,
+    },
+}
+
+#[derive(Subcommand)]
+enum RecordingsCommand {
+    /// Refer to a recording of this ROM.
+    Add { rec: PathBuf },
+    /// Drop a reference; the file is left alone.
+    Remove { rec: PathBuf },
+    /// What is referred to, and whether each file is still there and unchanged.
+    List,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -979,6 +1060,19 @@ fn run() -> Result<()> {
                 },
             ),
             ProjectCommand::History { rom } => commands::project::history(&path, rom.as_deref()),
+            ProjectCommand::Recordings { what, rom } => {
+                let (add, remove) = match what {
+                    Some(RecordingsCommand::Add { rec }) => (Some(rec), None),
+                    Some(RecordingsCommand::Remove { rec }) => (None, Some(rec)),
+                    Some(RecordingsCommand::List) | None => (None, None),
+                };
+                commands::project::recordings(
+                    &path,
+                    rom.as_deref(),
+                    add.as_deref(),
+                    remove.as_deref(),
+                )
+            }
         },
         Command::Registers { address } => commands::registers::run(address.as_deref()),
         Command::Tiles {
@@ -1045,6 +1139,28 @@ fn run() -> Result<()> {
             RecCommand::Info { rec, rom, recover } => {
                 commands::rec::info(&rec, rom.as_deref(), recover)
             }
+            RecCommand::Validate {
+                rec,
+                rom,
+                sample,
+                strict,
+                recover,
+            } => commands::rec::validate(&rec, rom.as_deref(), sample, strict, recover),
+            RecCommand::Index { rec, rebuild } => commands::rec::index(&rec, rebuild),
+            RecCommand::When {
+                rec,
+                region,
+                offset,
+                len,
+                after,
+                backward,
+            } => commands::rec::when(&rec, &region, &offset, len, after, backward),
+            RecCommand::Changes {
+                rec,
+                from,
+                to,
+                region,
+            } => commands::rec::changes(&rec, from, to, &region),
             RecCommand::Extract {
                 rec,
                 frame,
@@ -1087,6 +1203,13 @@ fn run() -> Result<()> {
                 },
             ),
             RecCommand::Script { out } => commands::rec::script(&out),
+            RecCommand::Convert {
+                rec,
+                from,
+                to,
+                out,
+                keyframe_interval,
+            } => commands::rec::convert(&rec, from, to, &out, keyframe_interval),
         },
         Command::Render { what } => {
             let (rec, frame, bg, sprite, ascii) = match what {

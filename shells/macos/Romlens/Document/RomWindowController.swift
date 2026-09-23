@@ -23,6 +23,7 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
         hosting.sceneBridgingOptions = [.toolbars]
         window.contentViewController = hosting
         window.subtitle = Self.subtitle(for: model.info)
+        RecordingController.reattach(model: model)
     }
 
     @available(*, unavailable)
@@ -74,7 +75,10 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
         RecordingController.open(model: model, window: window)
     }
 
-    @objc func closeRecording(_ sender: Any?) { model.graphics.detach() }
+    @objc func closeRecording(_ sender: Any?) { RecordingController.close(model: model) }
+    @objc func importSnapshot(_ sender: Any?) { RecordingController.importSnapshot(model: model, window: window) }
+    @objc func exportFrameRegion(_ sender: Any?) { RecordingController.exportFrameRegion(model: model, window: window) }
+    @objc func saveRecorderScript(_ sender: Any?) { RecordingController.saveRecorderScript(window: window) }
     // Explicit animations: `DocumentView` binds these without one so the
     // framework's own re-application on window activation cannot slide the
     // content.
@@ -163,7 +167,7 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
             item.state = model.graphicsTab == .oam ? .on : .off
         case #selector(showTilemap(_:)):
             item.state = model.graphicsTab == .tilemap ? .on : .off
-        case #selector(closeRecording(_:)):
+        case #selector(closeRecording(_:)), #selector(exportFrameRegion(_:)):
             return model.graphics.hasRecording
         case #selector(toggleNavigator(_:)):
             item.title = model.isNavigatorVisible ? "Hide Navigator" : "Show Navigator"

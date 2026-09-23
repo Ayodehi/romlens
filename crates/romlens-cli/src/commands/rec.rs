@@ -29,10 +29,47 @@ fn open(path: &Path, recover: bool) -> Result<RomrecSource> {
     r.with_context(|| format!("opening {}", path.display()))
 }
 
-fn create(path: &Path) -> Result<std::io::BufWriter<std::fs::File>> {
-    Ok(std::io::BufWriter::new(
-        std::fs::File::create(path).with_context(|| format!("creating {}", path.display()))?,
-    ))
+/// A recording being written: to `<out>.part`, moved over `out` only by
+/// [`commit`](Staged::commit), so a command that fails part-way — a stream
+/// from the wrong ROM, a damaged one — never destroys a good file already at
+/// `out`. Dropped uncommitted, it removes the partial file.
+struct Staged {
+    part: std::path::PathBuf,
+    out: std::path::PathBuf,
+    done: bool,
+}
+
+impl Staged {
+    fn create(out: &Path) -> Result<(Staged, std::io::BufWriter<std::fs::File>)> {
+        let mut part = out.as_os_str().to_owned();
+        part.push(".part");
+        let part = std::path::PathBuf::from(part);
+        let file =
+            std::fs::File::create(&part).with_context(|| format!("creating {}", out.display()))?;
+        Ok((
+            Staged {
+                part,
+                out: out.to_owned(),
+                done: false,
+            },
+            std::io::BufWriter::new(file),
+        ))
+    }
+
+    fn commit(mut self) -> Result<()> {
+        std::fs::rename(&self.part, &self.out)
+            .with_context(|| format!("writing {}", self.out.display()))?;
+        self.done = true;
+        Ok(())
+    }
+}
+
+impl Drop for Staged {
+    fn drop(&mut self) {
+        if !self.done {
+            let _ = std::fs::remove_file(&self.part);
+        }
+    }
 }
 
 pub fn testrec(out: &Path, frames: u32, interval: u16) -> Result<()> {
@@ -43,17 +80,13 @@ pub fn testrec(out: &Path, frames: u32, interval: u16) -> Result<()> {
         mapping: 0,
         ..WriterOptions::default()
     };
-    let mut w = RomrecWriter::new(
-        create(out)?,
-        &fixtures::identity(),
-        &StateRegion::ALL,
-        options,
-        0,
-    )?;
+    let (staged, file) = Staged::create(out)?;
+    let mut w = RomrecWriter::new(file, &fixtures::identity(), &StateRegion::ALL, options, 0)?;
     for s in &states {
         w.write_frame(s)?;
     }
     w.finish()?;
+    staged.commit()?;
     println!(
         "wrote {} synthetic recording, {frames} frames, of the graphics test ROM",
         out.display()
@@ -220,15 +253,11 @@ pub fn import_raw(a: ImportRaw<'_>) -> Result<()> {
         producer: "romlens import-raw".to_owned(),
         producer_version: romlens_core::API_VERSION.to_owned(),
     };
-    let mut w = RomrecWriter::new(
-        create(a.out)?,
-        &identity,
-        &regions,
-        WriterOptions::default(),
-        0,
-    )?;
+    let (staged, file) = Staged::create(a.out)?;
+    let mut w = RomrecWriter::new(file, &identity, &regions, WriterOptions::default(), 0)?;
     w.write_frame(&state)?;
     w.finish()?;
+    staged.commit()?;
     let names: Vec<&str> = regions.iter().map(|r| r.name()).collect();
     println!(
         "wrote {}: one frame with {}",
@@ -238,13 +267,151 @@ pub fn import_raw(a: ImportRaw<'_>) -> Result<()> {
     Ok(())
 }
 
+fn region_arg(name: &str) -> Result<StateRegion> {
+    StateRegion::parse(name).ok_or_else(|| {
+        anyhow!("no region {name:?}: use cpu, ppu, io, wram, vram, cgram, oam or timing")
+    })
+}
+
+fn number(text: &str) -> Result<u32> {
+    let t = text.trim();
+    let parsed = match t.strip_prefix("0x").or_else(|| t.strip_prefix('$')) {
+        Some(hex) => u32::from_str_radix(hex, 16),
+        None => t.parse(),
+    };
+    parsed.map_err(|_| anyhow!("{text:?} is not a number (0x for hex)"))
+}
+
+pub fn index(rec: &Path, rebuild: bool) -> Result<()> {
+    use romlens_core::recording::change_index::{load_or_build, sidecar_path};
+    let src = open(rec, false)?;
+    let (index, built) = load_or_build(rec, &src, rebuild)?;
+    let (entries, bytes) = index.stats();
+    println!(
+        "{} {}: {} frames, {entries} block entries, {bytes} bytes",
+        if built { "built" } else { "loaded" },
+        sidecar_path(rec).display(),
+        src.index().len()
+    );
+    for r in StateRegion::ALL {
+        if src.regions().contains(&r) && !index.covers(r) {
+            println!(
+                "{} is not indexed: the recording keeps it in keyframes only",
+                r.name()
+            );
+        }
+    }
+    Ok(())
+}
+
+pub fn when(
+    rec: &Path,
+    region: &str,
+    offset: &str,
+    len: u32,
+    after: u64,
+    backward: bool,
+) -> Result<()> {
+    use romlens_core::recording::change_index::load_or_build;
+    let region = region_arg(region)?;
+    let offset = number(offset)?;
+    let len = len.max(1);
+    if offset as u64 + len as u64 > region.size() as u64 {
+        return Err(anyhow!(
+            "{} is {} bytes; {offset:#x}+{len} runs past it",
+            region.name(),
+            region.size()
+        ));
+    }
+    let src = open(rec, false)?;
+    let (index, _) = load_or_build(rec, &src, false)?;
+    if !index.covers(region) {
+        return Err(anyhow!(
+            "{} is not indexed: the recording keeps it in keyframes only",
+            region.name()
+        ));
+    }
+    let what = format!("{} {offset:#06x}+{len}", region.name());
+    match index.when(&src, region, offset, len, after, backward)? {
+        Some(0) if backward => println!("{what}: unchanged since the recording began (frame 0)"),
+        Some(f) if backward => println!("{what}: last changed at frame {f}"),
+        Some(f) => println!("{what}: next changes at frame {f}"),
+        None if backward => println!("{what}: not in the recording"),
+        None => println!("{what}: does not change after frame {after}"),
+    }
+    Ok(())
+}
+
+pub fn changes(rec: &Path, from: u64, to: u64, region: &str) -> Result<()> {
+    let region = region_arg(region)?;
+    let src = open(rec, false)?;
+    let runs = src.changes(from, to, region)?;
+    let bytes: u64 = runs.iter().map(|r| r.len as u64).sum();
+    println!(
+        "{} between frames {from} and {to}: {} run{}, {bytes} bytes",
+        region.name(),
+        runs.len(),
+        if runs.len() == 1 { "" } else { "s" }
+    );
+    for r in &runs {
+        println!("  {:#07x}+{:#x}", r.offset, r.len);
+    }
+    Ok(())
+}
+
+pub fn validate(
+    rec: &Path,
+    rom: Option<&Path>,
+    sample: u32,
+    strict: bool,
+    recover: bool,
+) -> Result<()> {
+    use romlens_core::recording::validate::{Severity, ValidateOptions, validate as check};
+    let rom_sha256 = match rom {
+        Some(p) => Some(*load_rom(p)?.sha256()),
+        None => None,
+    };
+    let file = std::fs::File::open(rec).with_context(|| format!("opening {}", rec.display()))?;
+    let report = check(
+        Box::new(std::io::BufReader::new(file)),
+        ValidateOptions {
+            rom_sha256,
+            sample,
+            recover,
+        },
+    );
+    for d in &report.diagnostics {
+        let level = match d.severity {
+            Severity::Error => "error",
+            Severity::Warning => "warning",
+        };
+        let at = d.frame.map(|f| format!(" (frame {f})")).unwrap_or_default();
+        println!("{} {level}{at}: {}", d.code, d.message);
+    }
+    let count = |n: usize, what: &str| format!("{n} {what}{}", if n == 1 { "" } else { "s" });
+    println!(
+        "{}: {} frames, {} sampled; {}, {}",
+        rec.display(),
+        report.frames,
+        report.sampled,
+        count(report.errors(), "error"),
+        count(report.warnings(), "warning")
+    );
+    if report.errors() > 0 || (strict && report.warnings() > 0) {
+        return Err(anyhow!("the recording is not valid"));
+    }
+    Ok(())
+}
+
 pub fn pack(stream: &Path, rom: &Path, out: &Path, options: PackOptions) -> Result<()> {
     let rom = load_rom(rom)?;
     let input = std::io::BufReader::new(
         std::fs::File::open(stream).with_context(|| format!("opening {}", stream.display()))?,
     );
-    let report = pack_stream(input, &rom, create(out)?, options)
+    let (staged, file) = Staged::create(out)?;
+    let report = pack_stream(input, &rom, file, options)
         .with_context(|| format!("packing {}", stream.display()))?;
+    staged.commit()?;
     println!(
         "wrote {}: {} frames from {}, {} DMA transfers",
         out.display(),
@@ -297,6 +464,55 @@ pub fn pack(stream: &Path, rom: &Path, out: &Path, options: PackOptions) -> Resu
             "Mesen does not export {}, so they read as zero until the game writes them",
             regs.join(", ")
         );
+    }
+    Ok(())
+}
+
+/// Cut a recording down to frames `from`..=`to`: the state at each is
+/// rebuilt and written anew, so the first becomes a keyframe. The write log
+/// and other layers are not carried over. A source that kept WRAM in
+/// keyframes only has none at most frames, and the cut's keyframes fall on
+/// arbitrary ones, so its WRAM is left out rather than written stale.
+pub fn convert(rec: &Path, from: u64, to: u64, out: &Path, interval: u16) -> Result<()> {
+    use romlens_core::recording::format::FLAG_WRAM_KEYFRAME_ONLY;
+    let src = open(rec, false)?;
+    let count = src.index().len() as u64;
+    if from > to || to >= count {
+        return Err(anyhow!(
+            "frames {from} to {to} are not in a recording of {count} frames (0 to {})",
+            count.saturating_sub(1)
+        ));
+    }
+    let header = src.header();
+    let sparse_wram = header.flags & FLAG_WRAM_KEYFRAME_ONLY != 0;
+    let options = WriterOptions {
+        keyframe_interval: interval,
+        mapping: header.mapping,
+        compress: header.compression != 0,
+        ..WriterOptions::default()
+    };
+    let regions: Vec<StateRegion> = src
+        .regions()
+        .into_iter()
+        .filter(|r| !(sparse_wram && *r == StateRegion::Wram))
+        .collect();
+    let (staged, file) = Staged::create(out)?;
+    let mut w = RomrecWriter::new(file, src.identity(), &regions, options, header.created)?;
+    for f in from..=to {
+        let mut state = src.state_at(f)?;
+        state.regions.retain(|r, _| regions.contains(r));
+        w.write_frame(&state)?;
+    }
+    w.finish()?;
+    staged.commit()?;
+    println!(
+        "wrote {}: frames {from} to {to} of {}, {} frames",
+        out.display(),
+        rec.display(),
+        to - from + 1
+    );
+    if sparse_wram {
+        println!("WRAM is left out: the recording kept it in keyframes only");
     }
     Ok(())
 }

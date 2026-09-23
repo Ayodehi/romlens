@@ -17,7 +17,7 @@ use crate::memory::parse::{AddressExpr, parse_address_expr};
 use crate::model::comment::{Comment, CommentKind};
 use crate::model::label::{Label, LabelSource};
 use crate::model::project::{
-    FlagOverride, ImportRecord, Project, RomIdentity, Settings, TraceRecord,
+    FlagOverride, ImportRecord, Project, RecordingRef, RomIdentity, Settings, TraceRecord,
 };
 use crate::model::region::{
     BankRule, DataKind, OverrideKind, RegionOverride, RegionParams, TableElem,
@@ -59,6 +59,21 @@ struct ProjectDto {
     /// Imported symbol files, with their licence notices.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     imports: Vec<ImportDto>,
+    /// Recordings, by reference only.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    recordings: Vec<RecordingDto>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RecordingDto {
+    path: String,
+    #[serde(default)]
+    frames: u64,
+    #[serde(default)]
+    producer: String,
+    #[serde(default)]
+    fingerprint: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -240,6 +255,16 @@ pub fn to_files(rom: &RomImage, project: &Project) -> BTreeMap<String, Vec<u8>> 
                     labels: i.labels,
                     comments: i.comments,
                     notice: i.notice.clone(),
+                })
+                .collect(),
+            recordings: project
+                .recordings
+                .iter()
+                .map(|r| RecordingDto {
+                    path: r.path.clone(),
+                    frames: r.frames,
+                    producer: r.producer.clone(),
+                    fingerprint: r.fingerprint.clone(),
                 })
                 .collect(),
             settings: SettingsDto {
@@ -570,6 +595,16 @@ pub fn from_files(
             labels: i.labels,
             comments: i.comments,
             notice: i.notice.clone(),
+        })
+        .collect();
+    project.recordings = dto
+        .recordings
+        .iter()
+        .map(|r| RecordingRef {
+            path: r.path.clone(),
+            frames: r.frames,
+            producer: r.producer.clone(),
+            fingerprint: r.fingerprint.clone(),
         })
         .collect();
     project.traces = dto

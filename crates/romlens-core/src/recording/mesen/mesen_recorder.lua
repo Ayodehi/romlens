@@ -1,4 +1,4 @@
--- Romlens recorder for Mesen (2.x and MesenCE).
+﻿-- Romlens recorder for Mesen (2.x and MesenCE).
 --
 -- Writes a raw stream of the machine at every frame end. `romlens rec pack`
 -- turns it into a .romrec recording; this script only captures and leaves
@@ -31,6 +31,7 @@ local out_path = os.getenv("ROMLENS_REC_OUT")
 if not out_path or out_path == "" then
   out_path = emu.getScriptDataFolder() .. "/romlens-" .. os.date("%Y%m%d-%H%M%S") .. ".rlstream"
 end
+emu.log(out_path)
 local frame_limit = tonumber(os.getenv("ROMLENS_REC_FRAMES") or "")
 
 local out = assert(io.open(out_path, "wb"))

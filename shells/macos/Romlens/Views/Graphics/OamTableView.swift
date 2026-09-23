@@ -18,7 +18,13 @@ struct OamTableView: View {
             Divider()
             HStack(spacing: 0) {
                 Table(rows, selection: selection) {
-                    TableColumn("#") { Text("\($0.entry.index)").monospacedDigit() }.width(32)
+                    TableColumn("#") { row in
+                        HStack(spacing: 3) {
+                            Text("\(row.entry.index)").monospacedDigit()
+                            if graphics.spriteChanged(row.entry.index) { ChangeDot() }
+                        }
+                    }
+                    .width(40)
                     TableColumn("X") { Text("\($0.entry.x)").monospacedDigit() }.width(40)
                     TableColumn("Y") { Text("\($0.entry.y)").monospacedDigit() }.width(40)
                     TableColumn("Tile") { Text("$" + GraphicsStyle.hex($0.entry.tile, 3)).monospaced() }.width(48)
@@ -97,6 +103,7 @@ struct SpriteDetail: View {
             .font(.callout)
             Text("Byte 3 is vhoopppn: flips, priority, palette, and the tile's ninth bit.")
                 .font(.caption).foregroundStyle(.tertiary)
+            ChangeHistoryRow(graphics: graphics, region: .oam, offset: entry.lowOffset, len: 4)
             Spacer()
         }
         .padding()

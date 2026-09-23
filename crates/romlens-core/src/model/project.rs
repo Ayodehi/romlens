@@ -103,6 +103,21 @@ pub struct ImportRecord {
     pub notice: String,
 }
 
+/// A recording the project refers to: where it is and how to know it is
+/// still the same file. Never its contents — a recording holds the game's
+/// VRAM, CGRAM and OAM (`12-content-policy.md` rule 4).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RecordingRef {
+    /// Where it was attached from, as given.
+    pub path: String,
+    pub frames: u64,
+    pub producer: String,
+    /// The recording's length, frame count and index CRC-32, as
+    /// `len:frames:crc`: what the change index keys on, and enough to tell
+    /// that the file at `path` has been replaced.
+    pub fingerprint: String,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Project {
     pub rom: RomIdentity,
@@ -124,6 +139,8 @@ pub struct Project {
     /// Symbol files imported, in import order. The labels themselves live in
     /// `labels` like any other; this is provenance and the licence notice.
     pub imports: Vec<ImportRecord>,
+    /// Recordings attached to the project, by reference.
+    pub recordings: Vec<RecordingRef>,
     pub settings: Settings,
 }
 
@@ -138,6 +155,7 @@ impl Project {
             coverage: None,
             traces: Vec::new(),
             imports: Vec::new(),
+            recordings: Vec::new(),
             settings: Settings::default(),
         }
     }
@@ -157,6 +175,20 @@ impl Project {
     pub fn add_import(&mut self, record: ImportRecord) {
         self.imports.retain(|i| i.source != record.source);
         self.imports.push(record);
+    }
+
+    /// Refer to a recording, replacing any earlier reference to the same
+    /// path. Like a trace, this is not an undoable edit.
+    pub fn attach_recording(&mut self, r: RecordingRef) {
+        self.recordings.retain(|x| x.path != r.path);
+        self.recordings.push(r);
+    }
+
+    /// Drop the reference to `path`; whether there was one.
+    pub fn detach_recording(&mut self, path: &str) -> bool {
+        let before = self.recordings.len();
+        self.recordings.retain(|x| x.path != path);
+        self.recordings.len() != before
     }
 
     /// The one address every mirror of a ROM byte is stored under; RAM and

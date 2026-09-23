@@ -114,13 +114,13 @@ are not started.
 | # | Capability | Shell must expose | CLI scenario | macOS | Win | Linux |
 |---|---|---|---|---|---|---|
 | 2.28 | Open a recording | File › Open Recording…; a frame field with prev/next appears and the graphics tabs read the recording's state | `romlens rec info R` | 🧪 | ⬜ | ⬜ |
-| 2.29 | Validate a recording | The open path shows the validator's diagnostics verbatim and refuses a recording whose ROM hash differs | `romlens rec validate R [--rom <rom>] [--sample N] [--strict] [--recover]` | ⬜ | ⬜ | ⬜ |
-| 2.30 | Extract a frame region (CLI done in 2B; the shell's Export Frame Region… is not) | Export Frame Region… writes VRAM, CGRAM, OAM, WRAM or the register blocks | `romlens rec extract R --frame N --region vram [--out F] [--hex]` | ⬜ | ⬜ | ⬜ |
-| 2.31 | What changed between frames | The graphics views badge entries that changed since the previous frame | `romlens rec changes R --from A --to B --region vram` | ⬜ | ⬜ | ⬜ |
-| 2.32 | When did this byte change | The inspector on a VRAM/CGRAM/OAM byte reads "changed at frame N, next at M" with Go | `romlens rec when R --region vram --offset 0x4000 [--len 2] [--after N] [--backward]`, `romlens rec index R [--rebuild]` | ⬜ | ⬜ | ⬜ |
-| 2.33 | Snapshot import (`rec import-raw` done in 2B; the shell item and `.mss` are not) | File › Import Snapshot… accepts loose VRAM/CGRAM/OAM dumps and a Mesen2 savestate, producing a one-frame recording | `romlens rec import-raw --vram f --cgram f --oam f --out r.romrec`, `romlens rec import-savestate s.mss --out r.romrec` | ⬜ | ⬜ | ⬜ |
-| 2.34 | Ship the recorder script (CLI done; the shell item is not) | Help › Save Mesen Recorder Script… writes the .lua and shows the three-step instructions | `romlens rec script --out mesen_recorder.lua`, then `romlens rec pack <stream> --rom <rom> --out r.romrec [--wram full\|keyframe\|off]` | ⬜ | ⬜ | ⬜ |
-| 2.35 | Recordings referenced, never copied | Attaching one stores path and hash in the project; Save shows the docs/12 notice; a shareable export omits recordings | `romlens project <P> recordings [add R \| list \| remove R]` | ⬜ | ⬜ | ⬜ |
+| 2.29 | Validate a recording; a recording cut short offers "Open What Was Recorded" | The open path shows the validator's diagnostics verbatim and refuses a recording whose ROM hash differs | `romlens rec validate R [--rom <rom>] [--sample N] [--strict] [--recover]` | 🧪 | ⬜ | ⬜ |
+| 2.30 | Extract a frame region | Export Frame Region… writes VRAM, CGRAM, OAM, WRAM or the register blocks | `romlens rec extract R --frame N --region vram [--out F] [--hex]` | 🧪 | ⬜ | ⬜ |
+| 2.31 | What changed between frames (badges are exact: runs narrow, bytes decide; a sprite's own high-table bits) | The graphics views badge entries that changed since the previous frame | `romlens rec changes R --from A --to B --region vram` | 🧪 | ⬜ | ⬜ |
+| 2.32 | When did this byte change (shown in each graphics view's detail pane, where VRAM, CGRAM and OAM bytes are selected, rather than the inspector) | The inspector on a VRAM/CGRAM/OAM byte reads "changed at frame N, next at M" with Go | `romlens rec when R --region vram --offset 0x4000 [--len 2] [--after N] [--backward]`, `romlens rec index R [--rebuild]` | 🧪 | ⬜ | ⬜ |
+| 2.33 | Snapshot import (`.mss` savestates are not read: optional, and not done) | File › Import Snapshot… accepts loose VRAM/CGRAM/OAM dumps and a Mesen2 savestate, producing a one-frame recording | `romlens rec import-raw --vram f --cgram f --oam f --out r.romrec`, `romlens rec import-savestate s.mss --out r.romrec` | 🧪 | ⬜ | ⬜ |
+| 2.34 | Ship the recorder script | Help › Save Mesen Recorder Script… writes the .lua and shows the three-step instructions | `romlens rec script --out mesen_recorder.lua`, then `romlens rec pack <stream> --rom <rom> --out r.romrec [--wram full\|keyframe\|off]` | 🧪 | ⬜ | ⬜ |
+| 2.35 | Recordings referenced, never copied (the Open panel says so rather than Save, and there is no shareable export yet to omit them from; the project reattaches its recording on open only while the file is unchanged) | Attaching one stores path and hash in the project; Save shows the docs/12 notice; a shareable export omits recordings | `romlens project <P> recordings [add R \| list \| remove R]` | 🧪 | ⬜ | ⬜ |
 | 2.36 | Synthetic recording fixture (done in 2B, with `--keyframe-interval`) | (n/a) | `romlens testrec --out r.romrec [--frames N]`, then every row above against it | n/a | ⬜ | ⬜ |
 
 
@@ -233,3 +233,27 @@ Phase 2B additions (still to run). Write the fixtures first:
     the preview decompresses 16384 bytes. Browse them in the decoder; there
     is no way to export the image, which is deliberate (`12-content-policy.md`
     rule 5).
+
+Phase 2C additions (still to run), with `g.sfc` and `g.romrec` from above.
+
+29. Open `g.sfc` and `g.romrec`. Step to frame 30: in the Tile Decoder at
+    VRAM 0, tile 5 is outlined in orange; in the OAM view sprite 0 has a
+    dot every frame and sprite 2 never does; in the Palette view entry 17
+    has a dot on the frames it changes. Select tile 5: the row under the
+    sheet reads "Changed at frame 30 · No later change"; at frame 10 it
+    reads "Next at frame 30", and clicking that goes there.
+30. Save the project, close it, reopen it: the recording is attached again.
+    Replace `g.romrec` with `romlens testrec --out g.romrec --frames 12`
+    and reopen: it is not reattached. `romlens project <P> recordings`
+    lists it as changed since it was attached.
+31. Cut `g.romrec` short (`head -c 20000 g.romrec > cut.romrec`) and open
+    it: "The recording was not finished", and Open What Was Recorded reads
+    the whole frames. Damage a byte of a payload and open that: "The
+    recording is damaged", with the validator's codes.
+32. File › Export Frame Region…, pick CGRAM: 512 bytes, equal to
+    `romlens rec extract g.romrec --frame N --region cgram`. File › Import
+    Snapshot… with that file plus VRAM and OAM exports: a one-frame
+    recording, attached, drawing the same layers.
+33. Help › Save Mesen Recorder Script…: the file equals `romlens rec script`,
+    and the three steps are shown. On a recording made with it, frames where
+    the screen is off say "screen off (forced blank)" in the header.

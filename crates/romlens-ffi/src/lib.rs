@@ -610,6 +610,22 @@ mod tests {
         ));
         wb.mark_saved();
         assert!(!wb.is_dirty());
+        // A recording is referred to, dirties the project, travels in its
+        // files, and can be let go.
+        let r = crate::graphics::RecordingRefInfo {
+            path: "/tmp/s.romrec".into(),
+            frames: 3,
+            producer: "Mesen".into(),
+            fingerprint: "1:3:0".into(),
+        };
+        wb.attach_recording(r.clone());
+        assert!(wb.is_dirty());
+        let with = Workbench::with_project_files(rom.clone(), wb.project_files()).unwrap();
+        assert_eq!(with.recordings(), vec![r]);
+        assert!(wb.detach_recording("/tmp/s.romrec".into()));
+        assert!(!wb.detach_recording("/tmp/s.romrec".into()));
+        assert!(wb.recordings().is_empty());
+        wb.mark_saved();
         assert_eq!(wb.xrefs_to(0x2100).len(), 1);
         assert!(wb.export_symbols(true).contains("NMI_00800E"));
         assert!(wb.export_asar(Some(0), Some(16)).contains("STA.w $2100"));

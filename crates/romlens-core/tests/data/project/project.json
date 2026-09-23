@@ -11,5 +11,13 @@
   },
   "settings": {
     "addressStyle": "snes"
-  }
+  },
+  "recordings": [
+    {
+      "path": "/Users/someone/Recordings/session.romrec",
+      "frames": 18478,
+      "producer": "Mesen",
+      "fingerprint": "48386469:18478:a6d70fae"
+    }
+  ]
 }

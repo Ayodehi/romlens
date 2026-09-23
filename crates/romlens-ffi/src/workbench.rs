@@ -920,6 +920,55 @@ impl Workbench {
         Ok(result)
     }
 
+    /// Refer to a recording from the project: its path and fingerprint,
+    /// never its contents. Not an undoable edit, like a trace import; it
+    /// marks the project dirty and changes no analysis.
+    pub fn attach_recording(&self, reference: crate::graphics::RecordingRefInfo) {
+        let dirty = {
+            let mut inner = self.lock();
+            inner
+                .project
+                .attach_recording(model::project::RecordingRef {
+                    path: reference.path,
+                    frames: reference.frames,
+                    producer: reference.producer,
+                    fingerprint: reference.fingerprint,
+                });
+            inner.dirty = true;
+            inner.dirty
+        };
+        self.emit(WorkbenchEvent::ProjectChanged { dirty });
+    }
+
+    /// Stop referring to the recording at `path`; the file is left alone.
+    pub fn detach_recording(&self, path: String) -> bool {
+        let (removed, dirty) = {
+            let mut inner = self.lock();
+            let removed = inner.project.detach_recording(&path);
+            inner.dirty |= removed;
+            (removed, inner.dirty)
+        };
+        if removed {
+            self.emit(WorkbenchEvent::ProjectChanged { dirty });
+        }
+        removed
+    }
+
+    /// The recordings the project refers to, in the order attached.
+    pub fn recordings(&self) -> Vec<crate::graphics::RecordingRefInfo> {
+        self.lock()
+            .project
+            .recordings
+            .iter()
+            .map(|r| crate::graphics::RecordingRefInfo {
+                path: r.path.clone(),
+                frames: r.frames,
+                producer: r.producer.clone(),
+                fingerprint: r.fingerprint.clone(),
+            })
+            .collect()
+    }
+
     /// What has been imported, for the inspector and the licence notices.
     pub fn imports(&self) -> Vec<ImportResult> {
         let inner = self.lock();

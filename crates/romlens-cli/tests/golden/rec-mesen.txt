@@ -28,6 +28,16 @@ Error: packing <tmp>/clean.rlstream
 
 Caused by:
     the stream was not recorded from this ROM: the stream was recorded from a 32768-byte ROM; this one is 65536 bytes
+created <tmp>/P.romlens for "ROMLENS TEST"
+referred to <tmp>/r.romrec: 11 frames from Mesen; the recording stays where it is
+<tmp>/r.romrec  11 frames, Mesen  (present)
+wrote <tmp>/r.romrec: 12 frames from Mesen, 1 DMA transfers
+this Mesen does not export 65 fields, among them cpu.a, cpu.x, cpu.y; their bits are zero
+Mesen does not export $212A, $212B, $2130, so they read as zero until the game writes them
+<tmp>/r.romrec  11 frames, Mesen  (changed since it was attached)
+no longer referring to <tmp>/r.romrec; the file was left alone
+[exit code 1]
+Error: the project does not refer to <tmp>/r.romrec
 wrote <tmp>/mesen_recorder.lua
 1. In Mesen, open Debug > Script Window and load the script.
 2. In the script window's settings, allow access to I/O and OS functions, then run it.

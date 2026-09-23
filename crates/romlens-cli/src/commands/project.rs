@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use romlens_core::graphics::tilemap::ScreenSize;
 use romlens_core::io::{to_files, write_package};
 use romlens_core::model::{
@@ -207,6 +207,57 @@ pub fn flags(dir: &Path, rom: Option<&Path>, expr: &str, args: FlagArgs<'_>) -> 
 }
 
 /// What the project holds, since the undo stack lives only in a session.
+/// Refer to, drop, or list the project's recordings. A recording holds the
+/// game's VRAM, CGRAM and OAM, so the project keeps its path and fingerprint
+/// and never its contents (`12-content-policy.md` rule 4).
+pub fn recordings(
+    dir: &Path,
+    rom: Option<&Path>,
+    add: Option<&Path>,
+    remove: Option<&Path>,
+) -> Result<()> {
+    use romlens_core::recording::RomrecSource;
+    use romlens_core::recording::change_index::{IndexKey, reference};
+    let rom = rom_for_project(dir, rom)?;
+    let mut p = load_project(&rom, dir)?;
+    if let Some(rec) = add {
+        let src = RomrecSource::open(rec).with_context(|| format!("opening {}", rec.display()))?;
+        src.check_rom(rom.sha256())?;
+        let path = rec.to_string_lossy().into_owned();
+        let r = reference(&path, &src);
+        println!(
+            "referred to {path}: {} frames from {}; the recording stays where it is",
+            r.frames, r.producer
+        );
+        p.attach_recording(r);
+        save_project(&rom, dir, &p)?;
+    }
+    if let Some(rec) = remove {
+        let path = rec.to_string_lossy().into_owned();
+        if !p.detach_recording(&path) {
+            return Err(anyhow!("the project does not refer to {path}"));
+        }
+        println!("no longer referring to {path}; the file was left alone");
+        save_project(&rom, dir, &p)?;
+    }
+    if add.is_none() && remove.is_none() {
+        if p.recordings.is_empty() {
+            println!("no recordings");
+        }
+        for r in &p.recordings {
+            let state = match RomrecSource::open(Path::new(&r.path)) {
+                Err(_) => "missing".to_owned(),
+                Ok(src) if IndexKey::of(&src).fingerprint() != r.fingerprint => {
+                    "changed since it was attached".to_owned()
+                }
+                Ok(_) => "present".to_owned(),
+            };
+            println!("{}  {} frames, {}  ({state})", r.path, r.frames, r.producer);
+        }
+    }
+    Ok(())
+}
+
 pub fn history(dir: &Path, rom: Option<&Path>) -> Result<()> {
     let rom = rom_for_project(dir, rom)?;
     let p = load_project(&rom, dir)?;

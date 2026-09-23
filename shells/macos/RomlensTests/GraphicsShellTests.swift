@@ -126,6 +126,57 @@ import Testing
         #expect(g.source == .rom && !g.hasRecording)
     }
 
+    @Test func changesAreMarkedExactlyAndTheirHistoryGoes() async throws {
+        let m = try await model()
+        let url = try recordingURL()
+        defer {
+            try? FileManager.default.removeItem(at: url)
+            try? FileManager.default.removeItem(at: URL(fileURLWithPath: url.path + ".idx"))
+        }
+        #expect(RecordingController.attach(url: url, model: m, window: nil))
+        #expect(m.workbench.recordings().map(\.path) == [url.path], "the project refers to it")
+        #expect(m.workbench.isDirty())
+        let g = m.graphics
+        // fixtures::frames rewrites tile 5 ($A0-$BF) at frame 30 and moves
+        // sprite 0 every frame; sprite 2 never changes.
+        g.frame = 30
+        #expect(g.changed(.vram, offset: 0xA0, len: 32))
+        #expect(!g.changed(.vram, offset: 0x200, len: 32))
+        #expect(g.spriteChanged(0))
+        #expect(!g.spriteChanged(2))
+        let h = try #require(g.history(.vram, offset: 0xA0, len: 32))
+        #expect(h.indexed && h.last == 30 && h.next == nil)
+        g.frame = 10
+        #expect(g.history(.vram, offset: 0xA0, len: 32)?.next == 30)
+        g.frame = 0
+        #expect(!g.changed(.vram, offset: 0xA0, len: 32), "frame 0 has nothing before it")
+        RecordingController.close(model: m)
+        #expect(m.workbench.recordings().isEmpty && !g.hasRecording)
+    }
+
+    @Test func aProjectReattachesItsRecordingOnlyWhileItIsUnchanged() async throws {
+        let m = try await model()
+        let url = try recordingURL()
+        defer {
+            try? FileManager.default.removeItem(at: url)
+            try? FileManager.default.removeItem(at: URL(fileURLWithPath: url.path + ".idx"))
+        }
+        #expect(RecordingController.attach(url: url, model: m, window: nil))
+        let files = m.workbench.projectFiles()
+        let reopen = { () throws -> RomViewModel in
+            let wb = try Workbench.withProjectFiles(rom: m.rom, files: files)
+            return RomViewModel(rom: m.rom, workbench: wb, startAnalysis: false)
+        }
+        let again = try reopen()
+        RecordingController.reattach(model: again)
+        #expect(again.graphics.hasRecording && again.graphics.frameCount == 40)
+        // Replaced by a different recording at the same path: not reattached.
+        try makeTestRecording(frames: 12).write(to: url)
+        let changed = try reopen()
+        RecordingController.reattach(model: changed)
+        #expect(!changed.graphics.hasRecording)
+    }
+
     @Test func aRecordingOfAnotherRomIsRefused() async throws {
         let m = try await Fixture.analyzedModel(rom: Fixture.smallRom())
         let session = try RecordingSession.fromBytes(bytes: makeTestRecording(frames: 1))

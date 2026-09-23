@@ -36,7 +36,10 @@ that tracks against it.
 | 2C week-one measurement | done, 22 September 2026, on Mesen 2.2.1 (MesenCE): throughput is not a problem (about 6 ms a frame reading everything, twice real time); PPU-memory write callbacks never fire (a Mesen bug, fixed in our fork github.com/Ayodehi/MesenCE and not upstream), so dirty ranges come from comparing 256-byte blocks; CPU-address callbacks are bank-exact; `getState()` does export DMA channel state and decoded PPU registers. docs/09 is corrected |
 | 2C recorder | done: `mesen_recorder.lua` writes a raw stream and `romlens rec pack` makes the `.romrec`, so compression, hashing and the register layouts live in Rust. The `io` block and the `WLOG` DMA record are now defined (docs/13). `romlens rec script` writes the script. Verified against direct dumps: VRAM, CGRAM, OAM and WRAM identical at every frame checked, through boot and 3,406 frames of gameplay replayed from a movie; every rebuilt PPU register agrees with the byte the game wrote |
 | Mode 7 plane (2.26) | done: `graphics::mode7` draws the 128×128 plane untransformed (map in VRAM's low bytes, pixels in its high bytes), in the Tilemap view and `render bg`. Checked against Mesen's screen at two title-screen frames: about 95% of pixels agree once projected through the matrix. The projection needed a shift of a few pixels to line up (V−6 at both frames, H+3 at one), so which moment a frame-end snapshot's registers describe relative to the frame on screen is open; it matters to the Phase 3 compositor, not to the plane |
-| Track 2C (recordings) | the rest not started: headless `rec from-movie` (needs a zip reader for `.mmo`), validator, `ChangeIndex`, `.mss` import, `recordings.json`, the recording UI and Help › Save Mesen Recorder Script… |
+| 2C validator | done: `recording::validate` and `romlens rec validate`, twelve code families (the plan said eleven and never listed them; docs/13 has the list), tested by damaging one good recording in each way and asserting the exact codes. Every real recording made so far validates clean, the 18,478-frame session in under half a second with 32 frames rebuilt |
+| 2C `ChangeIndex` | done: `recording::change_index`, `romlens rec index`, `rec when` and `rec changes`, with the brute-force equivalence test the plan asked for (over a thousand queries, and no real change ever missed). WRAM kept in keyframes only is left out of the index rather than answered wrongly. Sidecar format in docs/13 |
+| 2C shell and project | done: recordings referred to by path and fingerprint in `project.json` (a `recordings` array beside `traces` and `imports`, rather than a separate `recordings.json`) and `romlens project <P> recordings`; reattached on open while unchanged. File › Open Recording… validates and offers to open a recording cut short; exact change badges in all four views; "Changed at frame N · Next at M" in each view's detail pane; File › Import Snapshot…, Export Frame Region…, Help › Save Mesen Recorder Script…; the header notes forced blank and dimmed frames. `romlens rec convert` cuts a window. Writing a recording goes through `<out>.part`, so a failed command never damages a good file (a golden caught `rec pack` doing that) |
+| **Track 2C complete** | 22 September 2026, except by decision: `.mss` import (optional in the plan, not done) and Mesen movies (cut item 14). Its checklist rows are 🧪, awaiting the manual pass (steps 29-33) |
 
 ## Context
 
@@ -653,6 +656,16 @@ shippable follow-ons rather than pretending the whole phase fits.
 11. Mesen2 `.mss` parsing: optional, last, version-gated.
 12. A frame scrubber; Phase 2 gets a frame field with prev/next.
 13. The Atlas and tutor Fix mode, per the scope decisions above.
+14. Mesen movies (`.mmo`), and `rec from-movie`: a future goal, by decision
+    (22 September 2026). A `.mmo` is a zip of a savestate and the input
+    log, and replays deterministically (measured), but reading one needs a
+    zip reader in the core. The replay it would give, headless and with
+    instrumentation too slow to run live (which instruction read each ROM
+    byte, PPU writes with their PC), is meant for the code/data work
+    instead: the recorder can capture its own starting savestate and each
+    frame's input, so any session recorded with it replays, with no movie
+    and no new dependency. A savestate is tied to the Mesen build that made
+    it, so the stream must name that build.
 
 Two additions the roadmap does not name, both small and high-leverage:
 `romlens testrec`, the recording twin of `romlens testrom`, so every golden

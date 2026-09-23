@@ -23,6 +23,7 @@ struct TilemapView: View {
                         } else {
                             numbers(cells, size: size)
                         }
+                        changedCells(cells, size: size)
                         grid(size: size)
                     }
                     .onTapGesture(coordinateSpace: .local) { p in
@@ -90,6 +91,22 @@ struct TilemapView: View {
         .frame(width: CGFloat(size.columns) * Self.cell, height: CGFloat(size.rows) * Self.cell)
     }
 
+    /// Cells whose entry changed since the previous frame, outlined.
+    private func changedCells(_ cells: [TilemapCellInfo], size: (columns: Int, rows: Int)) -> some View {
+        let changed = cells.filter { c in
+            guard let at = graphics.cellVram(c) else { return false }
+            return graphics.changed(.vram, offset: Int(at.offset), len: Int(at.len))
+        }
+        return Canvas { ctx, _ in
+            for c in changed {
+                let rect = CGRect(x: CGFloat(c.col) * Self.cell, y: CGFloat(c.row) * Self.cell, width: Self.cell, height: Self.cell)
+                ctx.stroke(Path(rect.insetBy(dx: 1, dy: 1)), with: .color(.orange), lineWidth: 1.5)
+            }
+        }
+        .frame(width: CGFloat(size.columns) * Self.cell, height: CGFloat(size.rows) * Self.cell)
+        .allowsHitTesting(false)
+    }
+
     private func grid(size: (columns: Int, rows: Int)) -> some View {
         Canvas { ctx, canvas in
             var path = Path()
@@ -134,6 +151,9 @@ struct CellDetail: View {
                     .fixedSize(horizontal: false, vertical: true)
             } else {
                 entryDetail
+            }
+            if let at = graphics.cellVram(cell) {
+                ChangeHistoryRow(graphics: graphics, region: .vram, offset: at.offset, len: at.len)
             }
             Spacer()
         }

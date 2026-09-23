@@ -272,8 +272,27 @@ Romlens ships:
    a producer: a bsnes-plus script, a libretro frontend, a hardware capture
    rig, or a homebrew developer's own test harness that emits snapshots from
    their build.
+
+   `romlens rec validate R [--rom <rom>] [--sample N] [--strict]
+   [--recover]` walks the whole file and reports every problem, not the
+   first, each with a stable code (`recording/validate.rs`): `H` the
+   header, `F` the footer, frame counts and both CRC-32s, `I` the index
+   against the chunks, `T` the chunk walk, `K` keyframes and frame
+   numbering, `D` each frame's directory, `R` runs, `P` payloads, `L` the
+   layer bits and `WLOG` bodies, `W` WRAM against the keyframe-only flag,
+   `M` the ROM, and `S` sampled frames rebuilt and their `changes` checked
+   against what really changed. Errors break the format; warnings are
+   allowed but not what a careful producer writes, and `--strict` fails
+   on them too. Five of any one code are listed, then a count.
 3. **Savestate import** as a one-frame recording without deltas, for people
    who just want to look at a moment.
+   Loose dumps work today (`romlens rec import-raw`, File › Import
+   Snapshot…); reading Mesen's `.mss` savestates is not built.
+
+4. **Cutting a window** out of a long recording: `romlens rec convert R
+   --from A --to B --out W` rebuilds each frame and renumbers from 0. The
+   write log is not carried over, and WRAM kept in keyframes only is left
+   out, since the cut's keyframes fall where the source has none.
 
 ## The Mesen stream
 
@@ -312,6 +331,27 @@ them. Wherever both exist, it also checks each rebuilt register against the
 byte the game last wrote and warns on any disagreement: none in 17,850
 comparisons over Super Metroid's boot, nor in the 3,406-frame gameplay
 recording.
+
+## The change index
+
+`<recording>.romrec.idx`, beside the recording (`recording/change_index.rs`;
+built by `romlens rec index`, and by `rec when` the first time it is
+needed). It answers "which frames changed these bytes" without reading every
+frame: each indexed region is cut into 256-byte blocks, and each block keeps
+the frames whose change runs touch it, as delta-encoded LEB128 varints or,
+when more than a quarter of the frames are in the list, a bitmap. Frame 0
+counts as a change to everything, since it is where every byte's history
+starts.
+
+The index narrows and never answers: a candidate frame is returned only after
+its own change runs are read and found to touch the bytes asked about.
+WRAM is indexed only when every frame carries it. The file is `ROMRIDX\0`,
+a u32 version (1), the key it belongs to (the recording's length, frame
+count and the CRC-32 of its index entries: content, not a modification time),
+then per region its id, block count, and per block a kind byte (0 varints,
+1 bitmap), the entry count, the body length and the body. A sidecar whose key
+does not match is rebuilt. Measured on the 18,478-frame session: built in
+0.3 s, 45 KB, loaded in 5 ms.
 
 ## One interface, two sources
 

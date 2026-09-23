@@ -237,8 +237,17 @@ struct TileSheet: View {
                 }
             }
             .controlSize(.small)
+            if graphics.source == .recording {
+                ChangeHistoryRow(
+                    graphics: graphics,
+                    region: .vram,
+                    offset: graphics.vramOffset + UInt32(graphics.selectedTile * graphics.tileLen),
+                    len: UInt32(graphics.tileLen)
+                )
+            }
             ZStack(alignment: .topLeading) {
                 PixelImage(bitmap: sheet, scale: Self.scale)
+                changedTiles
                 selectionBox
             }
             .onTapGesture(coordinateSpace: .local) { p in
@@ -248,6 +257,28 @@ struct TileSheet: View {
                 if index < graphics.sheetTiles { graphics.selectTile(index) }
             }
         }
+    }
+
+    /// Tiles whose bytes changed since the previous frame, outlined.
+    private var changedTiles: some View {
+        let s = 8 * Self.scale
+        let cols = max(graphics.columns, 1)
+        let len = graphics.tileLen
+        let base = Int(graphics.vramOffset)
+        let changed = (0..<graphics.sheetTiles).filter {
+            graphics.changed(.vram, offset: base + $0 * len, len: len)
+        }
+        return Canvas { ctx, _ in
+            for i in changed {
+                let rect = CGRect(x: CGFloat(i % cols) * s, y: CGFloat(i / cols) * s, width: s, height: s)
+                ctx.stroke(Path(rect.insetBy(dx: 1, dy: 1)), with: .color(.orange), lineWidth: 1.5)
+            }
+        }
+        .frame(
+            width: CGFloat(cols) * s,
+            height: CGFloat((graphics.sheetTiles + cols - 1) / cols) * s
+        )
+        .allowsHitTesting(false)
     }
 
     private var selectionBox: some View {

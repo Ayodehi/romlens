@@ -11,7 +11,7 @@ use crate::recording::{
     Layers, MachineState, MachineStateSource, RecordingError, RecordingIdentity, StateRegion,
 };
 
-trait ReadSeek: Read + Seek + Send {}
+pub trait ReadSeek: Read + Seek + Send {}
 impl<T: Read + Seek + Send> ReadSeek for T {}
 
 /// An open recording. Reads chunks on demand, so a long session never has to
@@ -47,6 +47,11 @@ impl RomrecSource {
     /// when the footer is missing — what a crashed recorder leaves.
     pub fn open_recovering(path: &Path) -> Result<Self, RecordingError> {
         Self::from_reader(Box::new(std::fs::File::open(path)?), true)
+    }
+
+    /// Open over a stream already in hand, as the validator does.
+    pub fn from_boxed(file: Box<dyn ReadSeek>, recover: bool) -> Result<Self, RecordingError> {
+        Self::from_reader(file, recover)
     }
 
     pub fn from_bytes(bytes: Vec<u8>, recover: bool) -> Result<Self, RecordingError> {

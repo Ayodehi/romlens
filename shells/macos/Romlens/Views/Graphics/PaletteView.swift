@@ -9,6 +9,7 @@ struct PaletteView: View {
 
     var body: some View {
         let entries = graphics.colours()
+        let changed = graphics.change(.cgram)?.bytes ?? IndexSet()
         HStack(alignment: .top, spacing: 24) {
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(0..<16, id: \.self) { row in
@@ -19,13 +20,20 @@ struct PaletteView: View {
                             .frame(width: 44, alignment: .trailing)
                         ForEach(0..<16, id: \.self) { col in
                             let i = row * 16 + col
-                            swatch(entries.indices.contains(i) ? entries[i] : nil, index: i)
+                            swatch(
+                                entries.indices.contains(i) ? entries[i] : nil,
+                                index: i,
+                                changed: changed.contains(i * 2) || changed.contains(i * 2 + 1)
+                            )
                         }
                     }
                 }
             }
             if let i = graphics.selectedColour, entries.indices.contains(i) {
-                ColourDetail(entry: entries[i])
+                VStack(alignment: .leading, spacing: 8) {
+                    ColourDetail(entry: entries[i])
+                    ChangeHistoryRow(graphics: graphics, region: .cgram, offset: UInt32(i * 2), len: 2)
+                }
             } else {
                 Text("Click a swatch").foregroundStyle(.tertiary)
             }
@@ -40,7 +48,7 @@ struct PaletteView: View {
     }
 
     @ViewBuilder
-    private func swatch(_ entry: PaletteEntryInfo?, index: Int) -> some View {
+    private func swatch(_ entry: PaletteEntryInfo?, index: Int, changed: Bool) -> some View {
         let selected = graphics.selectedColour == index
         Rectangle()
             .fill(entry.map { GraphicsStyle.colour($0.rgb) } ?? .clear)
@@ -50,6 +58,9 @@ struct PaletteView: View {
                 if entry?.unusedBit == true {
                     Image(systemName: "exclamationmark").font(.caption2).foregroundStyle(.red)
                 }
+            }
+            .overlay(alignment: .topTrailing) {
+                if changed { ChangeDot().offset(x: 2, y: -2) }
             }
             .onTapGesture { graphics.selectColour(index) }
             .help(entry.map { "\(index): $\(GraphicsStyle.hex($0.raw, 4))" } ?? "")

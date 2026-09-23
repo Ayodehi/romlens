@@ -46,6 +46,12 @@ struct GraphicsSourceBar: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
+            if let note = graphics.screenNote {
+                Text(note)
+                    .font(.callout)
+                    .foregroundStyle(.orange)
+                    .help("INIDISP ($2100) at this frame: what the views show was not what the screen showed")
+            }
             Spacer()
             switch graphics.source {
             case .rom:
@@ -96,12 +102,56 @@ struct FrameStepper: View {
             Button { graphics.step(by: -1) } label: { Image(systemName: "chevron.left") }
                 .disabled(graphics.frame == 0)
                 .help("Previous frame")
-            TextField("Frame", value: $graphics.frame, format: .number)
+            TextField("Frame", value: $graphics.frame, format: .number.grouping(.never))
                 .frame(width: 64)
                 .multilineTextAlignment(.trailing)
             Button { graphics.step(by: 1) } label: { Image(systemName: "chevron.right") }
                 .disabled(graphics.frame + 1 >= graphics.frameCount)
                 .help("Next frame")
+        }
+    }
+}
+
+/// The mark on an entry that changed since the previous frame.
+struct ChangeDot: View {
+    var body: some View {
+        Circle()
+            .fill(Color.orange)
+            .frame(width: 6, height: 6)
+            .help("Changed since the previous frame")
+    }
+}
+
+/// "Changed at frame N · Next at M", each a button that goes there: when the
+/// selected bytes last changed at or before this frame, and next change.
+struct ChangeHistoryRow: View {
+    let graphics: GraphicsModel
+    let region: StateRegion
+    let offset: UInt32
+    let len: UInt32
+
+    var body: some View {
+        if let h = graphics.history(region, offset: offset, len: len) {
+            if !h.indexed {
+                Text("Kept in keyframes only, so not frame by frame")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                HStack(spacing: 8) {
+                    if let last = h.last {
+                        Button(last == 0 ? "Unchanged since frame 0" : "Changed at frame \(last)") {
+                            graphics.frame = last
+                        }
+                        .disabled(last == graphics.frame)
+                    }
+                    if let next = h.next {
+                        Button("Next at frame \(next)") { graphics.frame = next }
+                    } else {
+                        Text("No later change").foregroundStyle(.secondary)
+                    }
+                }
+                .buttonStyle(.link)
+                .font(.caption)
+            }
         }
     }
 }

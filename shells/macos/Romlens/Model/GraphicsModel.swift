@@ -167,6 +167,88 @@ final class GraphicsModel {
         return try? recording.region(frame: frame, region: r)
     }
 
+    /// A region at the current frame, for File › Export Frame Region….
+    func regionBytes(_ r: StateRegion) -> Data? { region(r) }
+
+    // MARK: Changes
+
+    /// One region's comparison with the previous frame: which bytes differ,
+    /// and both frames' bytes for the checks finer than a byte.
+    struct FrameChange {
+        let frame: UInt64
+        let bytes: IndexSet
+        let before: [UInt8]
+        let now: [UInt8]
+    }
+
+    @ObservationIgnored private var changeCache: [StateRegion: FrameChange] = [:]
+
+    /// Exactly what changed in `r` since the previous frame. The recording's
+    /// change runs are a superset (nearby changes share a run), so they only
+    /// narrow the search; the two frames' bytes decide. Cached per frame,
+    /// since every swatch and cell asks.
+    func change(_ r: StateRegion) -> FrameChange? {
+        guard source == .recording, let recording, frame > 0 else { return nil }
+        if let c = changeCache[r], c.frame == frame { return c }
+        guard let flat = try? recording.changes(from: frame - 1, to: frame, region: r) else { return nil }
+        var bytes = IndexSet()
+        var before: [UInt8] = [], now: [UInt8] = []
+        if !flat.isEmpty,
+           let a = try? recording.region(frame: frame - 1, region: r),
+           let b = try? recording.region(frame: frame, region: r) {
+            before = [UInt8](a)
+            now = [UInt8](b)
+            for i in stride(from: 0, to: flat.count - 1, by: 2) {
+                let start = Int(flat[i]), end = min(start + Int(flat[i + 1]), before.count, now.count)
+                for at in start..<max(start, end) where before[at] != now[at] { bytes.insert(at) }
+            }
+        }
+        let c = FrameChange(frame: frame, bytes: bytes, before: before, now: now)
+        changeCache[r] = c
+        return c
+    }
+
+    /// Whether any of `len` bytes from `offset` changed since the previous frame.
+    func changed(_ r: StateRegion, offset: Int, len: Int) -> Bool {
+        guard let c = change(r), !c.bytes.isEmpty else { return false }
+        return c.bytes.intersects(integersIn: offset..<offset + max(len, 1))
+    }
+
+    /// Whether sprite `index` changed: its four low-table bytes, or its own
+    /// two bits of the high-table byte it shares with three others.
+    func spriteChanged(_ index: UInt8) -> Bool {
+        let low = Int(index) * 4
+        if changed(.oam, offset: low, len: 4) { return true }
+        guard let c = change(.oam) else { return false }
+        let high = 0x200 + Int(index) / 4, shift = Int(index % 4) * 2
+        guard c.bytes.contains(high), high < c.before.count, high < c.now.count else { return false }
+        return (c.before[high] >> shift) & 3 != (c.now[high] >> shift) & 3
+    }
+
+    /// When these bytes last changed at or before this frame and next change
+    /// after it; nil unless reading a recording.
+    func history(_ r: StateRegion, offset: UInt32, len: UInt32) -> ChangeHistory? {
+        guard source == .recording, let recording else { return nil }
+        return try? recording.history(region: r, offset: offset, len: len, frame: frame)
+    }
+
+    /// Where a tilemap cell's entry sits in VRAM, reading a recording.
+    func cellVram(_ cell: TilemapCellInfo) -> (offset: UInt32, len: UInt32)? {
+        guard source == .recording else { return nil }
+        if isMode7 { return (cell.byteOffset, 1) }
+        guard let layer = currentLayer else { return nil }
+        return ((UInt32(layer.mapWord) * 2 + cell.byteOffset) % 0x10000, 2)
+    }
+
+    /// Whether the screen was off or dimmed at this frame (INIDISP), which
+    /// is why a frame can show nothing that makes sense.
+    var screenNote: String? {
+        guard let inidisp = ppu?.inidisp else { return nil }
+        if inidisp & 0x80 != 0 { return "screen off (forced blank)" }
+        let brightness = inidisp & 0x0F
+        return brightness < 15 ? "brightness \(brightness)/15" : nil
+    }
+
     // MARK: Bytes
 
     /// `len` bytes the tile views decode, from wherever the source says.

@@ -67,6 +67,8 @@ enum MainMenu {
             item("Revert to Saved", #selector(NSDocument.revertToSaved(_:))),
             .separator(),
             item("Open Recording…", #selector(RomWindowController.openRecording(_:)), "o", modifiers: [.command, .option]),
+            item("Import Snapshot…", #selector(RomWindowController.importSnapshot(_:))),
+            item("Export Frame Region…", #selector(RomWindowController.exportFrameRegion(_:))),
             item("Close Recording", #selector(RomWindowController.closeRecording(_:))),
             .separator(),
             importMenu,
@@ -175,6 +177,8 @@ enum MainMenu {
     private static func helpMenu() -> NSMenuItem {
         let menu = submenu("Help", [
             item("Romlens Help", #selector(NSApplication.showHelp(_:)), "?"),
+            .separator(),
+            item("Save Mesen Recorder Script…", #selector(RomWindowController.saveRecorderScript(_:))),
         ])
         NSApp.helpMenu = menu.submenu
         return menu

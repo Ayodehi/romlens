@@ -1,4 +1,24 @@
 wrote <tmp>/t.romrec synthetic recording, 90 frames, of the graphics test ROM
+<tmp>/t.romrec: 90 frames, 8 sampled; 0 errors, 0 warnings
+M1 error: the recording was made from a different ROM (the SHA-256 differs)
+<tmp>/t.romrec: 90 frames, 0 sampled; 1 error, 0 warnings
+[exit code 1]
+Error: the recording is not valid
+F1 error: there is no footer: the recording is in progress or was cut short (--recover checks what is on disk)
+T2 error: the chunk at 0x81d8 runs past the end of the frames
+<tmp>/cut.romrec: 60 frames, 0 sampled; 2 errors, 0 warnings
+[exit code 1]
+Error: the recording is not valid
+F1 warning: there is no footer: the recording is in progress or was cut short; checking the frames on disk
+T2 warning: the last chunk at 0x81d8 was cut short
+<tmp>/cut.romrec: 60 frames, 16 sampled; 0 errors, 2 warnings
+[exit code 1]
+Error: the recording is not valid
+wrote <tmp>/window.romrec: frames 25 to 35 of <tmp>/t.romrec, 11 frames
+<tmp>/window.romrec: 11 frames, 10 sampled; 0 errors, 0 warnings
+vram 0x00a0+1: next changes at frame 5
+[exit code 1]
+Error: frames 80 to 95 are not in a recording of 90 frames (0 to 89)
 Format:       1.0
 Producer:     romlens testrec 0.4.0
 ROM SHA-256:  cfd385e8107dc5977e88d9b3f4b4b9ce866c707732e4fb7fef36ba5687b20f77
@@ -17,6 +37,15 @@ Storage:      54474 bytes, zstd
               keyframes 5535 bytes each on average, deltas 464
 Regions:      cpu 16, ppu 256, io 128, wram 131072, vram 65536, cgram 512, oam 544, timing 16
 Layers:       none
+built <tmp>/t.romrec.idx: 90 frames, 1223 block entries, 7946 bytes
+vram 0x00a0+32: next changes at frame 30
+vram 0x00a0+1: does not change after frame 30
+vram 0x00a0+1: last changed at frame 30
+cgram 0x0022+2: next changes at frame 4
+[exit code 1]
+Error: vram is 65536 bytes; 0x10000+1 runs past it
+vram between frames 29 and 30: 1 run, 32 bytes
+  0x000a0+0x20
 00000  68 30 08 20 58 34 05 2A 70 30 08 64 90 30 08 F6
 00010  00 F0 00 00 00 F0 00 00 00 F0 00 00 00 F0 00 00
 00020  00 F0 00 00 00 F0 00 00 00 F0 00 00 00 F0 00 00

@@ -499,6 +499,8 @@ pub struct PpuSummary {
     pub bg_mode: u8,
     pub obsel: u8,
     pub main_screen: u8,
+    /// `$2100`: bit 7 forced blank, bits 0-3 brightness.
+    pub inidisp: u8,
     /// Per BG 1–4: the format in this mode (absent where the mode has no
     /// such layer), map and character word addresses, size, 16×16 cells.
     pub layers: Vec<BgLayerInfo>,
@@ -521,6 +523,43 @@ pub struct BgLayerInfo {
 #[derive(uniffi::Object)]
 pub struct RecordingSession {
     source: RomrecSource,
+    /// Where it came from, to validate the file itself and keep its index.
+    origin: Origin,
+    index: std::sync::Mutex<Option<romlens_core::recording::change_index::ChangeIndex>>,
+}
+
+enum Origin {
+    Path(String),
+    Bytes(Vec<u8>),
+}
+
+/// The validator's verdict, for the open path to show verbatim.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct ValidationSummary {
+    pub errors: u32,
+    pub warnings: u32,
+    /// One line per diagnostic: code, severity, frame, message.
+    pub lines: Vec<String>,
+}
+
+/// When a byte range last changed at or before a frame, and when it next
+/// changes after it.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct ChangeHistory {
+    /// False for WRAM kept in keyframes only, which cannot be answered per
+    /// frame.
+    pub indexed: bool,
+    pub last: Option<u64>,
+    pub next: Option<u64>,
+}
+
+/// What a project keeps to refer to a recording.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct RecordingRefInfo {
+    pub path: String,
+    pub frames: u64,
+    pub producer: String,
+    pub fingerprint: String,
 }
 
 #[uniffi::export]
@@ -534,14 +573,104 @@ impl RecordingSession {
         } else {
             RomrecSource::open(p)?
         };
-        Ok(Arc::new(RecordingSession { source }))
+        Ok(Arc::new(RecordingSession {
+            source,
+            origin: Origin::Path(path),
+            index: Default::default(),
+        }))
     }
 
     #[uniffi::constructor]
     pub fn from_bytes(bytes: Vec<u8>) -> Result<Arc<Self>, RomlensError> {
         Ok(Arc::new(RecordingSession {
-            source: RomrecSource::from_bytes(bytes, false)?,
+            source: RomrecSource::from_bytes(bytes.clone(), false)?,
+            origin: Origin::Bytes(bytes),
+            index: Default::default(),
         }))
+    }
+
+    /// Everything wrong with the file, sampling `sample` frames.
+    pub fn validate(&self, sample: u32) -> Result<ValidationSummary, RomlensError> {
+        use romlens_core::recording::validate::{Severity, ValidateOptions, validate};
+        let file: Box<dyn romlens_core::recording::reader::ReadSeek> = match &self.origin {
+            Origin::Path(p) => Box::new(std::io::BufReader::new(
+                std::fs::File::open(p).map_err(|e| RomlensError::Io { msg: e.to_string() })?,
+            )),
+            Origin::Bytes(b) => Box::new(std::io::Cursor::new(b.clone())),
+        };
+        let report = validate(
+            file,
+            ValidateOptions {
+                rom_sha256: None,
+                sample,
+                recover: self.source.recovered(),
+            },
+        );
+        Ok(ValidationSummary {
+            errors: report.errors() as u32,
+            warnings: report.warnings() as u32,
+            lines: report
+                .diagnostics
+                .iter()
+                .map(|d| {
+                    let level = match d.severity {
+                        Severity::Error => "error",
+                        Severity::Warning => "warning",
+                    };
+                    let at = d.frame.map(|f| format!(" (frame {f})")).unwrap_or_default();
+                    format!("{} {level}{at}: {}", d.code, d.message)
+                })
+                .collect(),
+        })
+    }
+
+    /// When `[offset, offset + len)` of `region` last changed at or before
+    /// `frame`, and next changes after it. Builds the index on first use,
+    /// saved beside a recording opened from a file.
+    pub fn history(
+        &self,
+        region: StateRegion,
+        offset: u32,
+        len: u32,
+        frame: u64,
+    ) -> Result<ChangeHistory, RomlensError> {
+        use romlens_core::recording::change_index::{ChangeIndex, load_or_build};
+        let mut slot = self.index.lock().unwrap();
+        if slot.is_none() {
+            *slot = Some(match &self.origin {
+                Origin::Path(p) => load_or_build(Path::new(p), &self.source, false)?.0,
+                Origin::Bytes(_) => ChangeIndex::build(&self.source)?,
+            });
+        }
+        let index = slot.as_ref().expect("just built");
+        let region = region.into();
+        if !index.covers(region) {
+            return Ok(ChangeHistory {
+                indexed: false,
+                last: None,
+                next: None,
+            });
+        }
+        Ok(ChangeHistory {
+            indexed: true,
+            last: index.when(&self.source, region, offset, len, frame, true)?,
+            next: index.when(&self.source, region, offset, len, frame, false)?,
+        })
+    }
+
+    /// What a project stores to refer to this recording; `None` for one
+    /// opened from bytes, which has no path to refer to.
+    pub fn reference(&self) -> Option<RecordingRefInfo> {
+        let Origin::Path(path) = &self.origin else {
+            return None;
+        };
+        let r = romlens_core::recording::change_index::reference(path, &self.source);
+        Some(RecordingRefInfo {
+            path: r.path,
+            frames: r.frames,
+            producer: r.producer,
+            fingerprint: r.fingerprint,
+        })
     }
 
     pub fn info(&self) -> RecordingInfo {
@@ -593,6 +722,7 @@ impl RecordingSession {
         Ok(PpuSummary {
             bg_mode: ppu.bg_mode(),
             obsel: ppu.register(0x2101),
+            inidisp: ppu.register(0x2100),
             main_screen: ppu.register(0x212C),
             layers: (1..=4u8)
                 .map(|bg| BgLayerInfo {
@@ -667,6 +797,59 @@ pub fn make_test_recording(frames: u32) -> Vec<u8> {
     w.finish().expect("in memory").into_inner()
 }
 
+/// The Mesen recorder script, as `romlens rec script` writes it.
+#[uniffi::export]
+pub fn recorder_script() -> String {
+    romlens_core::recording::mesen::RECORDER_SCRIPT.to_owned()
+}
+
+/// Write a one-frame recording of `rom` from loose memory dumps, the way
+/// `romlens rec import-raw` does. Each dump must be its region's size (OAM
+/// may be the 512-byte low table alone). Written beside `path` and moved
+/// into place, so a failure leaves any file already there alone.
+#[uniffi::export]
+pub fn write_snapshot_recording(
+    rom: Arc<Rom>,
+    vram: Option<Vec<u8>>,
+    cgram: Option<Vec<u8>>,
+    oam: Option<Vec<u8>>,
+    ppu: Option<Vec<u8>>,
+    path: String,
+) -> Result<(), RomlensError> {
+    use romlens_core::recording::import::state_from_dumps;
+    use romlens_core::recording::writer::WriterOptions;
+    use romlens_core::recording::{RecordingIdentity, RomrecWriter};
+    let dumps: Vec<(CoreRegion, Vec<u8>)> = [
+        (CoreRegion::Vram, vram),
+        (CoreRegion::Cgram, cgram),
+        (CoreRegion::Oam, oam),
+        (CoreRegion::PpuState, ppu),
+    ]
+    .into_iter()
+    .filter_map(|(r, b)| b.map(|b| (r, b)))
+    .collect();
+    let state = state_from_dumps(&dumps)?;
+    let regions: Vec<CoreRegion> = state.regions.keys().copied().collect();
+    let identity = RecordingIdentity {
+        rom_sha256: *rom.image.sha256(),
+        producer: "Romlens Import Snapshot".to_owned(),
+        producer_version: romlens_core::API_VERSION.to_owned(),
+    };
+    let io = |e: std::io::Error| RomlensError::Io { msg: e.to_string() };
+    let part = format!("{path}.part");
+    let result = (|| {
+        let file = std::io::BufWriter::new(std::fs::File::create(&part).map_err(io)?);
+        let mut w = RomrecWriter::new(file, &identity, &regions, WriterOptions::default(), 0)?;
+        w.write_frame(&state)?;
+        w.finish()?;
+        std::fs::rename(&part, &path).map_err(io)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&part);
+    }
+    result
+}
+
 /// The graphics test ROM, for shell tests.
 #[uniffi::export]
 pub fn make_graphics_test_rom() -> Vec<u8> {
@@ -710,6 +893,45 @@ mod tests {
         assert_eq!(cells.len(), 128 * 128);
         let c = &cells[128 + 3];
         assert_eq!((c.col, c.row, c.tile, c.byte_offset), (3, 1, 0x42, 2 * 131));
+    }
+
+    #[test]
+    fn a_recording_validates_answers_history_and_refers_to_itself() {
+        let rec = RecordingSession::from_bytes(make_test_recording(40)).unwrap();
+        let v = rec.validate(8).unwrap();
+        assert_eq!((v.errors, v.warnings), (0, 0), "{:?}", v.lines);
+        // fixtures::frames rewrites tile 5 ($A0-$BF) at frame 30.
+        let h = rec.history(StateRegion::Vram, 0xA0, 32, 35).unwrap();
+        assert_eq!((h.indexed, h.last, h.next), (true, Some(30), None));
+        let h = rec.history(StateRegion::Vram, 0xA0, 32, 10).unwrap();
+        assert_eq!((h.last, h.next), (Some(0), Some(30)));
+        assert_eq!(rec.reference(), None);
+        assert!(recorder_script().contains("RLSTREAM"));
+
+        let dir = std::env::temp_dir().join(format!("romlens-ffi-snap-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("s.romrec").to_string_lossy().into_owned();
+        let rom = Rom::from_bytes(make_graphics_test_rom(), "g.sfc".to_owned()).unwrap();
+        write_snapshot_recording(
+            rom.clone(),
+            Some(vec![0; 0x10000]),
+            Some(vec![0; 512]),
+            Some(vec![0; 512]),
+            None,
+            path.clone(),
+        )
+        .unwrap();
+        let snap = RecordingSession::open(path.clone(), false).unwrap();
+        snap.check_rom(rom.clone()).unwrap();
+        assert_eq!(snap.info().frame_count, 1);
+        assert_eq!(snap.reference().unwrap().frames, 1);
+        // A bad dump fails and leaves the good file alone.
+        assert!(
+            write_snapshot_recording(rom, Some(vec![0; 3]), None, None, None, path.clone())
+                .is_err()
+        );
+        assert!(RecordingSession::open(path, false).is_ok());
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

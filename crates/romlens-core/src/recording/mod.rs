@@ -11,6 +11,7 @@
 //! belongs to a separate `LiveSource` later, so this trait stays small,
 //! read-only and object-safe.
 
+pub mod change_index;
 pub mod conformance;
 pub mod delta;
 pub mod fixtures;
@@ -20,6 +21,7 @@ pub mod io_state;
 pub mod memory;
 pub mod mesen;
 pub mod reader;
+pub mod validate;
 pub mod writer;
 
 use std::collections::BTreeMap;

@@ -130,6 +130,12 @@ fn sample(rom: &RomImage) -> Project {
     )
     .unwrap();
     p.settings.address_style = AddressStyle::Snes;
+    p.attach_recording(romlens_core::model::project::RecordingRef {
+        path: "/Users/someone/Recordings/session.romrec".into(),
+        frames: 18478,
+        producer: "Mesen".into(),
+        fingerprint: "48386469:18478:a6d70fae".into(),
+    });
     p
 }
 
@@ -282,7 +288,11 @@ fn v1_package_still_opens() {
         text.contains("\"version\": 1"),
         "the v1 fixture was regenerated and is no longer v1"
     );
-    assert_eq!(from_files(&rom, &files).unwrap(), sample(&rom));
+    // Everything but what arrived after v1: a v1 package refers to no
+    // recordings.
+    let mut expected = sample(&rom);
+    expected.recordings.clear();
+    assert_eq!(from_files(&rom, &files).unwrap(), expected);
     assert_eq!(read_identity(&files).unwrap(), RomIdentity::of(&rom));
 }
 
