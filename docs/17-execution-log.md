@@ -16,8 +16,15 @@ to 2.6 MB.
 
 The logger is in the MesenCE fork (github.com/Ayodehi/MesenCE,
 `Core/SNES/Debugger/SnesExecutionLogger.cpp`), exposed to Lua as
-`emu.startExecutionLog()`, `emu.stopExecutionLog()`, `emu.clearExecutionLog()`
-and `emu.getExecutionLog()`. Stock Mesen releases do not have it.
+`emu.startExecutionLog()`, `emu.stopExecutionLog()`, `emu.clearExecutionLog()`,
+`emu.getExecutionLog()` and `emu.takeExecutionLogDelta()`. Stock Mesen
+releases do not have it.
+
+`takeExecutionLogDelta()` returns what was recorded since the previous call,
+in the same format: entries that are new or whose count or width states
+changed, each count being the increase. Merging every delta in order gives the
+whole log, and `getExecutionLog()` is unaffected. A live session uses it to
+send the log as the game plays (`13-recording-format.md`, "Live sessions").
 
 The recorder script (Help › Save Mesen Recorder Script…) feature-detects it.
 On the fork it starts the log with the recording, writes `<name>.mxlog`

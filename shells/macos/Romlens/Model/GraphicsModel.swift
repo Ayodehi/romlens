@@ -125,6 +125,9 @@ final class GraphicsModel {
     private(set) var liveStatus: String?
     /// Show each frame as it arrives.
     var followLive = true
+    /// Instructions the live session's execution log has added to the
+    /// project so far.
+    private(set) var liveDiscovered: UInt64 = 0
     @ObservationIgnored private var applyingLive = false
 
     /// Where selecting something with a ROM byte range should send it.
@@ -166,6 +169,7 @@ final class GraphicsModel {
         try attach(session.recording(), name: "Live")
         live = session
         followLive = true
+        liveDiscovered = 0
         liveStatus = "waiting for Mesen on port \(session.port())"
         // The session may have heard from Mesen before this attached.
         if let status = session.status() { liveStatusChanged(status) }
@@ -198,6 +202,11 @@ final class GraphicsModel {
         }
     }
 
+    /// The project gained `added` instructions from the live execution log.
+    func liveLogMerged(added: UInt64) {
+        liveDiscovered += added
+    }
+
     /// Stop listening, keeping the frames already received.
     func stopLive() {
         live?.stop()
@@ -228,8 +237,16 @@ final class GraphicsModel {
     /// The registers at the current frame, when reading a recording.
     var ppu: PpuSummary? {
         guard source == .recording, let recording else { return nil }
-        return try? recording.ppuSummary(frame: frame)
+        // A frame never changes once recorded, and the tilemap asks once per
+        // cell while drawing: a thousand calls into the core per frame kept a
+        // live session's main thread busy full time.
+        let id = ObjectIdentifier(recording)
+        if let c = ppuCache, c.session == id, c.frame == frame { return c.value }
+        let value = try? recording.ppuSummary(frame: frame)
+        ppuCache = (id, frame, value)
+        return value
     }
+    @ObservationIgnored private var ppuCache: (session: ObjectIdentifier, frame: UInt64, value: PpuSummary?)?
 
     private func region(_ r: StateRegion) -> Data? {
         guard let recording else { return nil }
@@ -378,7 +395,8 @@ final class GraphicsModel {
             return "ROM " + snes + formatFileOffset(offset: romOffset)
         case .recording:
             if let liveStatus {
-                return "Live, frame \(frame), \(liveStatus)"
+                let found = liveDiscovered > 0 ? ", \(liveDiscovered) instructions found" : ""
+                return "Live, frame \(frame), \(liveStatus)\(found)"
             }
             return "\(recordingName ?? "Recording"), frame \(frame) of \(frameCount)"
         case .bytes(let label, let data):

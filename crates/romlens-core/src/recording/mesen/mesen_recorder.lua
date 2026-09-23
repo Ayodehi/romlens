@@ -20,7 +20,10 @@
 -- Session), trying every two seconds. A new connection gets the header and a
 -- full frame first, then the same deltas the file gets. Sends never block the
 -- game; a connection that falls 16 MB behind is dropped, and the file
--- recording carries on regardless.
+-- recording carries on regardless. With the fork's takeExecutionLogDelta,
+-- the connection also gets the execution log: all of it on connecting, then
+-- once a second what the CPU did since ('X' records), so Romlens can fill in
+-- the disassembly as the game plays.
 --
 -- Stream format 1, little-endian (docs/13, "The Mesen stream"):
 --   header  "RLSTREAM", u16 version, s2 producer, s2 ROM SHA-1,
@@ -191,6 +194,12 @@ local function live_try_connect()
   emu.log("Romlens recorder: streaming live to Romlens on port " .. LIVE_PORT)
 end
 
+-- The execution log over the live connection: 'X', u32 length, the log.
+local xlog_live = xlog and emu.takeExecutionLogDelta ~= nil
+local function live_xlog(data)
+  live_send("X" .. string.pack("<I4", #data) .. data)
+end
+
 -- $2100-$2133, the last byte the game wrote to each. A callback on the
 -- register memory type sees a write through any bank mirror ($00-$3F,
 -- $80-$BF), including DMA's B-bus writes, so two callbacks cover what would
@@ -282,8 +291,15 @@ local function write_frame()
       for b = 0, n - 1 do full[#full + 1] = string.pack("<I2", b) .. previous[r][b] end
     end
     live_send(table.concat(full))
+    if xlog_live then
+      -- Everything so far, then deltas from here: taking one first sets the
+      -- point the next delta counts from.
+      emu.takeExecutionLogDelta()
+      live_xlog(emu.getExecutionLog())
+    end
   else
     live_send(bytes)
+    if xlog_live and live and frame % 60 == 0 then live_xlog(emu.takeExecutionLogDelta()) end
   end
   frame = frame + 1
   if frame % 60 == 0 then out:flush() end
@@ -296,6 +312,8 @@ function finish()
   out:close()
   if live then
     live.sock:settimeout(1)
+    -- The last delta, so the session's merged log is the whole log.
+    if xlog_live then live_xlog(emu.takeExecutionLogDelta()) end
     live_send("E" .. string.pack("<I4", frame))
     live_close()
   end

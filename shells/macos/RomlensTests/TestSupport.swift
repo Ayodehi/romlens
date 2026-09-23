@@ -46,6 +46,28 @@ enum Fixture {
 
     struct TimeoutError: Error {}
 
+    /// An execution log of `rom`, as the fork's `emu.getExecutionLog()` writes
+    /// it: the boot instruction at $00:8000 and an unreachable one at
+    /// $00:800C it was seen to call, both with 8-bit A and X.
+    static func execLog(rom: [UInt8]) -> Data {
+        func le32(_ v: UInt32) -> [UInt8] { withUnsafeBytes(of: v.littleEndian, Array.init) }
+        var crc: UInt32 = 0xFFFF_FFFF
+        for b in rom {
+            crc ^= UInt32(b)
+            for _ in 0..<8 { crc = crc & 1 != 0 ? (crc >> 1) ^ 0xEDB8_8320 : crc >> 1 }
+        }
+        var log = Array("MXLG".utf8) + [1, 0, 0, 0] + le32(~crc) + le32(UInt32(rom.count)) + le32(4)
+        log += Array("INST".utf8) + le32(16) + le32(2)
+        for (pc, abs) in [(0x00_8000, 0), (0x00_800C, 0x0C)] as [(UInt32, UInt32)] {
+            log += le32(pc) + le32(abs) + [1, 1 << 3, 0, 0] + le32(1)
+        }
+        log += Array("ACCS".utf8) + le32(24) + le32(0)
+        log += Array("FLOW".utf8) + le32(16) + le32(1)
+        log += le32(0x00_8000) + le32(0x00_800C) + [5, 0, 0, 0] + le32(1)  // indirect call
+        log += Array("DMA ".utf8) + le32(24) + le32(0)
+        return Data(log)
+    }
+
     /// Run the main run loop for a moment (callable from async tests).
     static func spin(_ seconds: TimeInterval) {
         RunLoop.main.run(until: Date().addingTimeInterval(seconds))

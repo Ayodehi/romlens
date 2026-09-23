@@ -614,6 +614,7 @@ pub fn live(
     enum Event {
         Frame(u64),
         Status(LiveStatus),
+        Log(Vec<u8>),
     }
     struct Events(Mutex<Sender<Event>>);
     impl LiveEvents for Events {
@@ -622,6 +623,9 @@ pub fn live(
         }
         fn status(&self, s: LiveStatus) {
             let _ = self.0.lock().unwrap().send(Event::Status(s));
+        }
+        fn exec_log(&self, log: Vec<u8>) {
+            let _ = self.0.lock().unwrap().send(Event::Log(log));
         }
     }
 
@@ -638,8 +642,24 @@ pub fn live(
     let mut received = 0u64;
     let mut last_report = std::time::Instant::now();
     let mut connected = false;
+    let mut merged: Option<romlens_core::model::exec_log::ExecLog> = None;
     while let Ok(event) = rx.recv() {
         match event {
+            Event::Log(bytes) => {
+                let log = romlens_core::io::import::exec_log::read(&bytes, rom.bytes())?;
+                let before = merged.as_ref().map_or(0, |m| m.insns.len());
+                match &mut merged {
+                    Some(m) => m.merge(&log),
+                    None => merged = Some(log),
+                }
+                let after = merged.as_ref().map_or(0, |m| m.insns.len());
+                println!(
+                    "execution log: {} bytes, {} instructions known (+{})",
+                    bytes.len(),
+                    after,
+                    after - before
+                );
+            }
             Event::Frame(n) => {
                 received += 1;
                 if last_report.elapsed().as_secs() >= 1 {
@@ -675,6 +695,13 @@ pub fn live(
     }
     server.stop();
     println!("{received} frames received");
+    if let (Some(dir), Some(log)) = (dump, &merged) {
+        std::fs::create_dir_all(dir)?;
+        std::fs::write(
+            dir.join("merged.mxlog"),
+            romlens_core::io::import::exec_log::write(log),
+        )?;
+    }
     if let (Some(dir), Some(last)) = (dump, source.latest()) {
         std::fs::create_dir_all(dir)?;
         for (region, name) in [

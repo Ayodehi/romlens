@@ -13,6 +13,8 @@ pub const STREAM_MAGIC: &[u8; 8] = b"RLSTREAM";
 pub const STREAM_VERSION: u16 = 1;
 /// Blocks are this long, except the last of a region that is not a multiple.
 pub const BLOCK: usize = 256;
+/// The largest execution log record read: far above a real session's.
+pub const MAX_EXEC_LOG: usize = 256 << 20;
 /// Samples of the ROM the header carries, each [`SAMPLE_LEN`] bytes.
 pub const SAMPLES: usize = 64;
 pub const SAMPLE_LEN: usize = 16;
@@ -129,6 +131,9 @@ pub enum Record {
     End {
         frames: u32,
     },
+    /// An execution log (`io::import::exec_log`), whole or a delta: what the
+    /// CPU did since the previous one. Sent on a live connection only.
+    ExecLog(Vec<u8>),
 }
 
 /// Reads a stream record by record.
@@ -332,6 +337,15 @@ impl<R: Read> StreamReader<R> {
             b'E' => Ok(Some(Record::End {
                 frames: need!(t.u32()),
             })),
+            b'X' => {
+                let len = need!(t.u32()) as usize;
+                if len > MAX_EXEC_LOG {
+                    return Err(StreamError::Corrupt(format!(
+                        "an execution log record claims {len} bytes"
+                    )));
+                }
+                Ok(Some(Record::ExecLog(need!(t.bytes(len)))))
+            }
             other => Err(StreamError::Corrupt(format!(
                 "unknown record tag {other:#04x}"
             ))),
@@ -456,6 +470,11 @@ pub mod encode {
             Record::End { frames } => {
                 b.push(b'E');
                 b.extend_from_slice(&frames.to_le_bytes());
+            }
+            Record::ExecLog(log) => {
+                b.push(b'X');
+                b.extend_from_slice(&(log.len() as u32).to_le_bytes());
+                b.extend_from_slice(log);
             }
         }
         b

@@ -45,6 +45,19 @@ import Testing
         #expect(session.analysis == .idle)
     }
 
+    /// A rerun asked for during a run waits for that run instead of
+    /// cancelling it. Cancelling meant a live session, merging its execution
+    /// log every second, could cancel every run and the numbers never moved.
+    @Test func aRerunDuringARunFollowsIt() async throws {
+        let session = WorkbenchSession(workbench: Workbench(rom: try Fixture.rom(megabytes: 1)))
+        session.reanalysisDelay = .zero
+        let before = session.analysisGeneration
+        session.startAnalysis()
+        session.scheduleReanalysis()
+        try await Fixture.settle { session.analysisGeneration >= before + 2 && !session.analysis.isRunning }
+        #expect(session.analysisGeneration == before + 2, "both runs finished")
+    }
+
     /// The last progress report can arrive after the analysis finished; it
     /// must not start the bar again, or "building lines" stays up for good.
     @Test func progressAfterTheRunEndsIsIgnored() async throws {

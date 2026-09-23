@@ -18,7 +18,19 @@ enum LiveController {
     }
 
     static func start(model: RomViewModel, window: NSWindow?) {
-        let bridge = LiveBridge(graphics: model.graphics)
+        // What the game ran joins the project as it plays. The merge runs on
+        // the session's own thread, since the workbench is thread safe and a
+        // long session's log is large; only the bookkeeping and the rerun of
+        // the analysis come back to the main actor.
+        let workbench = model.workbench
+        let bridge = LiveBridge(
+            graphics: model.graphics,
+            merge: { log in try? workbench.mergeLiveLog(source: "live session", bytes: log) },
+            merged: { [weak model] added in
+                model?.session.liveLogMerged()
+                model?.graphics.liveLogMerged(added: added)
+            }
+        )
         do {
             let session = try LiveSession.start(rom: model.rom, port: liveDefaultPort(), listener: bridge)
             try model.graphics.attachLive(session)
@@ -38,12 +50,28 @@ enum LiveController {
 /// thirty times, with only the newest frame, so rendering never falls behind.
 final class LiveBridge: LiveListener, @unchecked Sendable {
     private weak var graphics: GraphicsModel?
+    /// Runs on the session's thread; returns the instructions added.
+    private let merge: @Sendable (Data) -> UInt64?
+    private let merged: @MainActor (UInt64) -> Void
     private let lock = NSLock()
     private var latest: UInt64?
     private var scheduled = false
 
-    @MainActor init(graphics: GraphicsModel) {
+    @MainActor init(
+        graphics: GraphicsModel,
+        merge: @escaping @Sendable (Data) -> UInt64? = { _ in nil },
+        merged: @escaping @MainActor (UInt64) -> Void = { _ in }
+    ) {
         self.graphics = graphics
+        self.merge = merge
+        self.merged = merged
+    }
+
+    func onExecLog(log: Data) {
+        guard let added = merge(log) else { return }
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated { self.merged(added) }
+        }
     }
 
     func onFrame(frame: UInt64) {

@@ -45,6 +45,9 @@ final class WorkbenchSession {
     @ObservationIgnored private var bridge: ListenerBridge?
     @ObservationIgnored private var analysisTask: Task<Void, Never>?
     @ObservationIgnored private var reanalysisTask: Task<Void, Never>?
+    /// Another run was asked for while one was running; start it when that
+    /// one ends.
+    @ObservationIgnored private var rerunRequested = false
     /// Debounce for analysis-affecting commands.
     @ObservationIgnored var reanalysisDelay: Duration = .milliseconds(300)
 
@@ -68,6 +71,7 @@ final class WorkbenchSession {
                 guard let self, !Task.isCancelled else { return }
                 self.stats = stats
                 self.analysis = .idle
+                self.startRequestedRerun()
             } catch is CancellationError {
                 self?.analysis = .idle
             } catch {
@@ -77,26 +81,40 @@ final class WorkbenchSession {
                 } else {
                     self.analysis = .failed(error.localizedDescription)
                 }
+                self.startRequestedRerun()
             }
         }
     }
 
+    private func startRequestedRerun() {
+        guard rerunRequested else { return }
+        rerunRequested = false
+        startAnalysis()
+    }
+
     func cancelAnalysis() {
+        rerunRequested = false
         workbench.cancelAnalysis()
         analysisTask?.cancel()
         analysisTask = nil
         analysis = .idle
     }
 
-    /// Re-run after a short pause; a running analysis is cancelled first.
+    /// Re-run after a short pause. A run already under way finishes first
+    /// and the new one follows it: cancelling it instead meant that changes
+    /// arriving faster than a run takes, as a live session's execution log
+    /// does every second, could cancel every run and the numbers never moved.
     func scheduleReanalysis() {
         reanalysisTask?.cancel()
         let delay = reanalysisDelay
         reanalysisTask = Task { [weak self] in
             try? await Task.sleep(for: delay)
             guard let self, !Task.isCancelled else { return }
-            if self.analysis.isRunning { self.cancelAnalysis() }
-            self.startAnalysis()
+            if self.analysis.isRunning {
+                self.rerunRequested = true
+            } else {
+                self.startAnalysis()
+            }
         }
     }
 
@@ -163,6 +181,21 @@ final class WorkbenchSession {
         let result = try workbench.importTrace(source: source, bytes: bytes)
         finishCommand(affectsAnalysis: true)
         return result
+    }
+
+    /// Merge a live session's execution log; see `Workbench.mergeLiveLog`.
+    /// Returns how many instructions are new to the project.
+    @discardableResult
+    func mergeLiveLog(_ bytes: Data) throws -> UInt64 {
+        let added = try workbench.mergeLiveLog(source: "live session", bytes: bytes)
+        liveLogMerged()
+        return added
+    }
+
+    /// After `Workbench.mergeLiveLog` ran off the main actor: the bookkeeping
+    /// a command does, and the re-analysis.
+    func liveLogMerged() {
+        finishCommand(affectsAnalysis: true)
     }
 
     func importSymbols(source: String, text: String) throws -> ImportResult {

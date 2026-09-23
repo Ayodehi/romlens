@@ -873,6 +873,42 @@ impl Workbench {
         Ok(result)
     }
 
+    /// Merge an execution log from a live session: the whole log on
+    /// connecting, then each delta as it arrives. Like `import_trace`, but
+    /// it keeps the undo history, since it runs every second while the game
+    /// plays, and one source name covers the whole session. Returns how many
+    /// instructions the project's log holds now that it did not before.
+    pub fn merge_live_log(&self, source: String, bytes: Vec<u8>) -> Result<u64, RomlensError> {
+        let log = io::import::exec_log::read(&bytes, self.rom.image.bytes())?;
+        if log.is_empty() {
+            return Ok(0);
+        }
+        let coverage = log.to_coverage(self.rom.image.bytes());
+        let (added, generation, dirty) = {
+            let mut inner = self.lock();
+            let before = inner.project.exec_log.as_ref().map_or(0, |l| l.insns.len());
+            let (executed_bytes, read_bytes) = (coverage.executed.count(), coverage.read.count());
+            inner.project.add_trace(
+                model::TraceRecord {
+                    source,
+                    format: io::TraceFormat::ExecLog.name().to_owned(),
+                    executed_bytes,
+                    read_bytes,
+                },
+                coverage,
+            );
+            inner.project.add_exec_log(&log);
+            let after = inner.project.exec_log.as_ref().map_or(0, |l| l.insns.len());
+            let (generation, dirty) = self.after_edit(&mut inner, true);
+            ((after - before) as u64, generation, dirty)
+        };
+        self.emit(WorkbenchEvent::ProjectChanged { dirty });
+        self.emit(WorkbenchEvent::ViewChanged {
+            view_generation: generation,
+        });
+        Ok(added)
+    }
+
     /// Import a symbol file. One undo entry, all or nothing.
     pub fn import_symbols(
         &self,

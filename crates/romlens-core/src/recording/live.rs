@@ -184,6 +184,10 @@ pub trait LiveEvents: Send + Sync {
     /// A frame arrived and is now the latest.
     fn frame(&self, number: u64);
     fn status(&self, status: LiveStatus);
+    /// An execution log arrived: the whole log so far on connecting, then
+    /// what was recorded since the previous one. Merging each in turn gives
+    /// the session's log.
+    fn exec_log(&self, _log: Vec<u8>) {}
 }
 
 /// A listener on the loopback address, one connection at a time.
@@ -371,6 +375,7 @@ fn read_stream(
                 let n = source.push(decoder.frame(&f, next, &LIVE_REGIONS));
                 events.frame(n);
             }
+            Ok(Some(Record::ExecLog(log))) => events.exec_log(log),
             Ok(Some(Record::End { .. })) => {
                 return LiveStatus::Disconnected {
                     reason: "the script stopped".into(),

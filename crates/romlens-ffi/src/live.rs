@@ -35,6 +35,9 @@ impl From<live::LiveStatus> for LiveStatus {
 pub trait LiveListener: Send + Sync {
     fn on_frame(&self, frame: u64);
     fn on_status(&self, status: LiveStatus);
+    /// An execution log: the whole log on connecting, then what the CPU did
+    /// since the previous one. Hand each to `Workbench::merge_live_log`.
+    fn on_exec_log(&self, log: Vec<u8>);
 }
 
 /// Forwards events, remembering the last status: a shell attaches after the
@@ -52,6 +55,9 @@ impl LiveEvents for Forward {
         let status: LiveStatus = status.into();
         *self.last.lock().unwrap() = Some(status.clone());
         self.listener.on_status(status);
+    }
+    fn exec_log(&self, log: Vec<u8>) {
+        self.listener.on_exec_log(log);
     }
 }
 
@@ -163,8 +169,26 @@ impl LiveSession {
 }
 
 /// A short recorder stream of `rom`, as the script sends it, for shell
-/// tests: frame n writes VRAM block n, and the stream ends cleanly.
+/// tests: frame n writes VRAM block n, and the stream ends cleanly. With
+/// `exec_log`, that record is sent after the first frame, as a live
+/// connection sends the execution log.
 #[uniffi::export]
-pub fn make_test_stream(rom: Arc<Rom>, frames: u32) -> Vec<u8> {
-    romlens_core::recording::mesen::stream::encode::fixture(rom.image.bytes(), frames, true)
+pub fn make_test_stream(rom: Arc<Rom>, frames: u32, exec_log: Option<Vec<u8>>) -> Vec<u8> {
+    use romlens_core::recording::mesen::stream::{Record, StreamReader, encode};
+    let plain = encode::fixture(rom.image.bytes(), frames, true);
+    let Some(log) = exec_log else {
+        return plain;
+    };
+    let mut reader = StreamReader::new(std::io::Cursor::new(&plain)).expect("a fixture reads");
+    let mut out = encode::header(&reader.header);
+    let mut sent = false;
+    while let Ok(Some(r)) = reader.next_record() {
+        let frame = matches!(r, Record::Frame(_));
+        out.extend(encode::record(&r));
+        if frame && !sent {
+            out.extend(encode::record(&Record::ExecLog(log.clone())));
+            sent = true;
+        }
+    }
+    out
 }

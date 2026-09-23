@@ -690,6 +690,8 @@ pub fn pack<R: Read, W: Write + Seek>(
             }
             Record::Dma(d) => pending.push(*d),
             Record::StateLoaded { .. } => decoder.report.state_loads += 1,
+            // A live connection's; a file keeps its log beside it instead.
+            Record::ExecLog(_) => {}
             Record::End { .. } => {}
         }
     }

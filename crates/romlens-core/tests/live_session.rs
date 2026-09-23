@@ -9,13 +9,14 @@ use std::time::{Duration, Instant};
 use romlens_core::RomImage;
 use romlens_core::fixtures;
 use romlens_core::recording::live::{LiveEvents, LiveServer, LiveStatus};
-use romlens_core::recording::mesen::stream::encode;
+use romlens_core::recording::mesen::stream::{Record, StreamReader, encode};
 use romlens_core::recording::{MachineStateSource, RecordingError, StateRegion};
 
 #[derive(Default)]
 struct Log {
     frames: Mutex<Vec<u64>>,
     statuses: Mutex<Vec<LiveStatus>>,
+    logs: Mutex<Vec<Vec<u8>>>,
 }
 
 impl LiveEvents for Log {
@@ -24,6 +25,9 @@ impl LiveEvents for Log {
     }
     fn status(&self, s: LiveStatus) {
         self.statuses.lock().unwrap().push(s);
+    }
+    fn exec_log(&self, log: Vec<u8>) {
+        self.logs.lock().unwrap().push(log);
     }
 }
 
@@ -114,5 +118,33 @@ fn a_stream_from_another_rom_is_refused() {
             .any(|s| matches!(s, LiveStatus::Refused { .. }))
     });
     assert!(log.frames.lock().unwrap().is_empty());
+    server.stop();
+}
+
+#[test]
+fn execution_logs_arrive_between_frames() {
+    let rom = rom();
+    let log = Arc::new(Log::default());
+    let mut server = LiveServer::start(&rom, 0, 600, log.clone()).unwrap();
+    // The fixture's frames with two log records, as the script sends them:
+    // the whole log after the first frame, a delta after the third.
+    let plain = encode::fixture(rom.bytes(), 4, true);
+    let mut reader = StreamReader::new(std::io::Cursor::new(&plain)).unwrap();
+    let mut bytes = encode::header(&reader.header);
+    let mut frames = 0;
+    while let Some(r) = reader.next_record().unwrap() {
+        let frame = matches!(r, Record::Frame(_));
+        bytes.extend(encode::record(&r));
+        if frame {
+            frames += 1;
+            if frames == 1 || frames == 3 {
+                bytes.extend(encode::record(&Record::ExecLog(vec![frames as u8; 5])));
+            }
+        }
+    }
+    send(server.port(), &bytes);
+    wait("both logs", || log.logs.lock().unwrap().len() == 2);
+    assert_eq!(*log.logs.lock().unwrap(), vec![vec![1u8; 5], vec![3u8; 5]]);
+    wait("all frames", || log.frames.lock().unwrap().len() == 4);
     server.stop();
 }

@@ -319,6 +319,11 @@ Little-endian; `s1`/`s2` are strings with a u8/u16 length.
 - **`L`:** frame (u32); a savestate was loaded before it.
 - **`E`:** frames written (u32), the clean end. A stream without it was
   cut short; `rec pack` keeps every whole frame and says so.
+- **`X`, an execution log:** length (u32), then an `.mxlog`
+  (`17-execution-log.md`). Sent on a live connection only: the whole log on
+  connecting, then once a second what the CPU did since, and a last one just
+  before `E`. A file recording keeps its log beside it instead, so `rec pack`
+  skips these.
 
 The ROM check is the size and samples, because Mesen offers only SHA-1 and
 Romlens hashes with SHA-256. `rec pack` builds the PPU state block from the
@@ -360,8 +365,17 @@ using the LuaSocket library Mesen bundles, which stock releases have too.
   recorded from another ROM is refused on its header. The sandboxed app has
   the `network.server` entitlement for this, and no other network access.
 
-Code discovery live (the execution log as it grows) needs the fork to hand
-over only what is new since the last call; that is the next step.
+- **Code discovery live.** With the MesenCE fork's
+  `emu.takeExecutionLogDelta()`, the connection also carries the execution
+  log as `X` records. Romlens merges each into the open project
+  (`Workbench::merge_live_log`, which keeps the undo history, unlike an
+  import) and re-analyzes after its usual short pause, so the disassembly,
+  the overview strip and the "seen" references fill in as the game plays;
+  the header counts the instructions found. The deltas' counts are the
+  increases since the previous one, so the merge is exact: over 1,500 frames
+  of Super Metroid, 26 records merged to the same 2,953 instructions, 809
+  transfers and access and DMA runs as the full log the script wrote at the
+  end.
 
 ## The change index
 
