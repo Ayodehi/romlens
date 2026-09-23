@@ -60,6 +60,86 @@ final class StubLocator: RomLocator {
         #expect(model.session.canUndo)
     }
 
+    /// Quit closes each edited document, which autosaves it while the main
+    /// thread waits. A save override that needed the main thread to finish
+    /// hung there with a beachball; this waited forever before the fix.
+    @Test func closingAnEditedDocumentSavesWithoutHanging() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("romlens-close-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("t.romlens")
+        let doc = ProjectDocument()
+        try doc.read(from: makeTestRom(mapping: .loRom), ofType: Fixture.romType)
+        let model = try #require(doc.model)
+        model.session.cancelAnalysis()
+        var saved: Error?? = .none
+        doc.save(to: url, ofType: Fixture.projectType, for: .saveAsOperation) { saved = .some($0) }
+        try await wait("Save As finishes") { saved != nil }
+        #expect(saved! == nil)
+        #expect(doc.fileURL == url)
+
+        model.select(offset: 0)
+        try model.setLabel(name: "Boot")
+        #expect(doc.isDocumentEdited)
+        let delegate = CloseDelegate()
+        doc.canClose(withDelegate: delegate, shouldClose: #selector(CloseDelegate.document(_:shouldClose:contextInfo:)), contextInfo: nil)
+        try await wait("the close finishes") { delegate.answer != nil }
+        #expect(delegate.answer == true)
+        #expect(!doc.isDocumentEdited, "the close saved the edit")
+    }
+
+    private func wait(_ what: String, until condition: @MainActor () -> Bool) async throws {
+        do {
+            try await Fixture.settle(until: condition)
+        } catch {
+            Issue.record("waited 5 s for \(what)")
+            throw error
+        }
+    }
+
+    /// An imported trace is stored as `traces/coverage.cdl`, in a directory
+    /// inside the package. Saving one failed with "The file doesn't exist",
+    /// and reading ignored the directory, so the trace was lost either way.
+    @Test func aSavedProjectKeepsItsImportedTrace() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("romlens-trace-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("t.romlens")
+        let doc = ProjectDocument()
+        try doc.read(from: makeTestRom(mapping: .loRom), ofType: Fixture.romType)
+        let model = try #require(doc.model)
+        model.session.cancelAnalysis()
+        var cdl = Array("CDLv2".utf8) + [0, 0, 0, 0]
+        cdl += [UInt8](repeating: 0, count: Int(model.byteCount))
+        cdl[9 + 0x0C] = 0x01
+        _ = try model.session.importTrace(source: "play.cdl", bytes: Data(cdl))
+        let stored = try #require(model.workbench.projectFiles()[ProjectDocumentTests.coverage])
+
+        var saved: Error?? = .none
+        doc.save(to: url, ofType: Fixture.projectType, for: .saveAsOperation) { saved = .some($0) }
+        try await wait("Save As finishes") { saved != nil }
+        #expect(saved! == nil)
+        let onDisk = url.appendingPathComponent(ProjectDocumentTests.coverage)
+        #expect(try Data(contentsOf: onDisk) == stored, "written in a traces directory")
+
+        let stub = StubLocator()
+        stub.bytes = makeTestRom(mapping: .loRom)
+        let back = ProjectDocument()
+        try withStub(stub) {
+            try back.read(from: FileWrapper(url: url), ofType: Fixture.projectType)
+        }
+        let reopened = try #require(back.model)
+        #expect(reopened.workbench.projectFiles()[ProjectDocumentTests.coverage] == stored, "read back from it")
+        // Opening analyzes, and the progress bar goes away when it is done.
+        #expect(reopened.session.analysis.isRunning)
+        try await wait("the reopened project's analysis") {
+            reopened.session.hasSnapshot && !reopened.session.analysis.isRunning
+        }
+        #expect(reopened.session.analysis == .idle)
+    }
+
+    static let coverage = "traces/coverage.cdl"
+
     @Test func packageRoundTripKeepsTheLabel() throws {
         let stub = StubLocator()
         stub.bytes = makeTestRom(mapping: .loRom)
@@ -153,5 +233,15 @@ final class StubLocator: RomLocator {
         #expect(NSApp.delegate is AppDelegate)
         #expect(NSApp.mainMenu?.items.contains { $0.title == "Go" } == true)
         #expect(NSDocumentController.shared is ProjectDocumentController)
+    }
+}
+
+/// Receives `canClose(withDelegate:…)`'s answer.
+@MainActor
+final class CloseDelegate: NSObject {
+    var answer: Bool?
+
+    @objc func document(_ document: NSDocument, shouldClose: Bool, contextInfo: UnsafeMutableRawPointer?) {
+        answer = shouldClose
     }
 }

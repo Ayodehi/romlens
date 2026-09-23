@@ -226,6 +226,11 @@ final class WorkbenchSession {
         case .projectChanged(let dirty):
             isDirty = dirty
         case .analysisProgress(let phase, let done, let total):
+            // Progress travels on its own hop at a lower priority than the
+            // finished analysis, so the run's last report ("building lines,
+            // 1 of 1") can land after the run ended and set the bar going
+            // again, where it stayed. Only a running analysis shows progress.
+            guard analysis.isRunning else { return }
             let fraction = total == 0 ? 0 : Double(done) / Double(total)
             analysis = .running(fraction: fraction, phase: Self.phaseName(phase))
         }

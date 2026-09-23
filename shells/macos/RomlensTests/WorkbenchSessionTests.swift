@@ -44,6 +44,22 @@ import Testing
         session.cancelAnalysis()
         #expect(session.analysis == .idle)
     }
+
+    /// The last progress report can arrive after the analysis finished; it
+    /// must not start the bar again, or "building lines" stays up for good.
+    @Test func progressAfterTheRunEndsIsIgnored() async throws {
+        let session = WorkbenchSession(workbench: Workbench(rom: try Fixture.smallRom()))
+        #expect(session.analysis == .idle)
+        session.handle(.analysisProgress(phase: .lines, done: 1, total: 1))
+        #expect(session.analysis == .idle)
+
+        session.startAnalysis()
+        session.handle(.analysisProgress(phase: .lines, done: 0, total: 1))
+        #expect(session.analysis == .running(fraction: 0, phase: "building lines"))
+        try await Fixture.settle { session.hasSnapshot && !session.analysis.isRunning }
+        session.handle(.analysisProgress(phase: .lines, done: 1, total: 1))
+        #expect(session.analysis == .idle)
+    }
 }
 
 @MainActor

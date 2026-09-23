@@ -115,10 +115,8 @@ final class ProjectDocument: NSDocument {
             return
         }
         guard let children = fileWrapper.fileWrappers else { throw CocoaError(.fileReadCorruptFile) }
-        var files: [String: Data] = [:]
-        for (name, child) in children where child.isRegularFile && name != Self.localFileName {
-            if let data = child.regularFileContents { files[name] = data }
-        }
+        var files = Self.packageFiles(fileWrapper)
+        files[Self.localFileName] = nil
         let local: LocalRecord? = children[Self.localFileName]?.regularFileContents
             .flatMap { try? JSONDecoder().decode(LocalRecord.self, from: $0) }
         let identity = try projectIdentity(files: files)
@@ -126,10 +124,50 @@ final class ProjectDocument: NSDocument {
             let located = try Self.locatorFactory().locate(identity: identity, local: local, packageURL: fileURL)
             let rom = try Rom.fromBytes(bytes: located.bytes, name: located.url.lastPathComponent)
             let workbench = try Workbench.withProjectFiles(rom: rom, files: files)
+            // Creating the view model starts the analysis.
             install(rom: rom, workbench: workbench, url: located.url, bookmark: located.bookmark)
-            model?.session.startAnalysis()
         }
         lastWrapper = fileWrapper
+    }
+
+    // MARK: Package paths
+
+    /// Every regular file in a package, keyed by its `/`-separated path, as
+    /// the core names them: `traces/coverage.cdl` is a file in a `traces`
+    /// directory, not a file with a slash in its name.
+    nonisolated static func packageFiles(_ wrapper: FileWrapper, prefix: String = "") -> [String: Data] {
+        var files: [String: Data] = [:]
+        for (name, child) in wrapper.fileWrappers ?? [:] {
+            if child.isDirectory {
+                files.merge(packageFiles(child, prefix: prefix + name + "/")) { a, _ in a }
+            } else if child.isRegularFile, let data = child.regularFileContents {
+                files[prefix + name] = data
+            }
+        }
+        return files
+    }
+
+    /// Store `data` at a `/`-separated path under `root`, making the
+    /// directories on the way and replacing whatever was there.
+    nonisolated static func put(_ data: Data, at path: String, in root: FileWrapper) {
+        var parts = path.split(separator: "/").map(String.init)
+        guard let name = parts.popLast() else { return }
+        var dir = root
+        for part in parts {
+            if let existing = dir.fileWrappers?[part], existing.isDirectory {
+                dir = existing
+            } else {
+                if let old = dir.fileWrappers?[part] { dir.removeFileWrapper(old) }
+                let made = FileWrapper(directoryWithFileWrappers: [:])
+                made.preferredFilename = part
+                dir.addFileWrapper(made)
+                dir = made
+            }
+        }
+        if let old = dir.fileWrappers?[name] { dir.removeFileWrapper(old) }
+        let child = FileWrapper(regularFileWithContents: data)
+        child.preferredFilename = name
+        dir.addFileWrapper(child)
     }
 
     // MARK: Writing
@@ -141,12 +179,8 @@ final class ProjectDocument: NSDocument {
         if wrapper.preferredFilename == nil, let name = fileURL?.lastPathComponent, !name.isEmpty {
             wrapper.preferredFilename = name
         }
-        let files = workbench.projectFiles()
-        for (name, data) in files {
-            if let old = wrapper.fileWrappers?[name] { wrapper.removeFileWrapper(old) }
-            let child = FileWrapper(regularFileWithContents: data)
-            child.preferredFilename = name
-            wrapper.addFileWrapper(child)
+        for (path, data) in workbench.projectFiles() {
+            Self.put(data, at: path, in: wrapper)
         }
         let local = LocalRecord(bookmark: romBookmark, lastPath: romURL?.path)
         if let old = wrapper.fileWrappers?[Self.localFileName] { wrapper.removeFileWrapper(old) }
@@ -159,9 +193,31 @@ final class ProjectDocument: NSDocument {
         return wrapper
     }
 
-    override func save(to url: URL, ofType typeName: String, for saveOperation: NSDocument.SaveOperationType) async throws {
-        try await super.save(to: url, ofType: typeName, for: saveOperation)
-        workbench?.markSaved()
+    // The completion-handler form, not the `async` one. An `async` override
+    // resumes after `super` on the main actor, but closing the document (on
+    // quit, say) blocks the main thread until any save in flight finishes:
+    // an autosave still waiting to resume there never does, and the app
+    // hangs on quit. AppKit calls this handler on the main thread itself.
+    override func save(
+        to url: URL,
+        ofType typeName: String,
+        for saveOperation: NSDocument.SaveOperationType,
+        completionHandler: @escaping (Error?) -> Void
+    ) {
+        super.save(to: url, ofType: typeName, for: saveOperation) { [weak self] error in
+            if error == nil { self?.workbench?.markSaved() }
+            completionHandler(error)
+        }
+    }
+
+    /// An untitled project is named after its ROM, so with the extension
+    /// hidden the panel read as if it would overwrite `Game.sfc`. Show the
+    /// extension and say what is being saved.
+    override func prepareSavePanel(_ savePanel: NSSavePanel) -> Bool {
+        savePanel.isExtensionHidden = false
+        savePanel.canSelectHiddenExtension = false
+        savePanel.message = "Save a Romlens project: your labels, comments, marks and imported traces. The ROM file is never changed."
+        return true
     }
 
     override func makeWindowControllers() {
