@@ -1,84 +1,37 @@
-Code:          65495 bytes (2.1%) in 485 blocks, 28320 instructions
+Code:          65495 bytes (2.1%) in 409 blocks, 28320 instructions
 Data:          473012 bytes (15.0%)
 Unknown:       2607221 bytes (82.9%)
-Regions:       1672
+Regions:       1596
 Labels:        2998
 Xrefs:         14722
-Warnings:      137 (48 flag conflicts)
+Warnings:      90 (1 flag conflicts)
 
-0x000103  $80:8103   flag conflict            $80:8103 reached with M=0 X=0 and M=1 X=0
 0x000191  $80:8191   suspicious fall-through  code falls through into BRK at $80:8191; inline arguments or data?
 0x000192  $80:8192   flag conflict            $80:8192 is inside another instruction
-0x000338  $80:8338   flag conflict            $80:8338 reached with M=0 X=0 and M=1 X=0
-0x000338  $80:8338   flag conflict            $80:8338 reached with M=0 X=0 and M=1 X=1
-0x00034B  $80:834B   flag conflict            $80:834B reached with M=0 X=0 and M=0 X=1
-0x00034B  $80:834B   flag conflict            $80:834B reached with M=0 X=0 and M=1 X=0
-0x00034B  $80:834B   flag conflict            $80:834B reached with M=0 X=0 and M=1 X=1
-0x00035D  $80:835D   flag conflict            $80:835D reached with M=0 X=0 and M=1 X=1
-0x000462  $80:8462   flag conflict            $80:8462 reached with M=0 X=1 and M=0 X=0
-0x000482  $80:8482   flag conflict            $80:8482 reached with M=0 X=0 and M=1 X=1
-0x000573  $80:8573   flag conflict            $80:8573 reached with M=1 X=1 and M=0 X=0
-0x0006E1  $80:86E1   flag conflict            $80:86E1 reached with M=1 X=1 and M=0 X=0
-0x00094B  $80:894B   flag conflict            $80:894B reached with M=0 X=0 and M=1 X=1
-0x00096C  $80:896C   flag conflict            $80:896C reached with M=1 X=1 and M=0 X=0
-0x00096E  $80:896E   flag conflict            $80:896E reached with M=0 X=0 and M=0 X=1
 0x00098A  $80:898A   computed jump            $80:898A: jump through a pointer in RAM; target unknown
-0x000B1A  $80:8B1A   flag conflict            $80:8B1A reached with M=0 X=0 and M=0 X=1
-0x000C83  $80:8C83   flag conflict            $80:8C83 reached with M=0 X=1 and M=0 X=0
-0x000F0C  $80:8F0C   flag conflict            $80:8F0C reached with M=0 X=0 and M=1 X=1
-0x001049  $80:9049   flag conflict            $80:9049 reached with M=0 X=0 and M=1 X=1
-0x001092  $80:9092   flag conflict            $80:9092 reached with M=1 X=1 and M=0 X=0
-0x001114  $80:9114   flag conflict            $80:9114 reached with M=1 X=1 and M=0 X=0
-0x001196  $80:9196   flag conflict            $80:9196 reached with M=1 X=1 and M=0 X=0
-0x0011A9  $80:91A9   flag conflict            $80:91A9 reached with M=1 X=1 and M=1 X=0
-0x0011A9  $80:91A9   flag conflict            $80:91A9 reached with M=1 X=1 and M=0 X=0
-0x0011A9  $80:91A9   flag conflict            $80:91A9 reached with M=1 X=1 and M=1 X=0
 0x00187B  $80:987B   jump table               $80:987B: 14 entries at $80:9616 (28 bytes), bounded by code
-0x00232E  $80:A32E   flag conflict            $80:A32E reached with M=0 X=0 and M=1 X=0
-0x00236F  $80:A36F   flag conflict            $80:A36F reached with M=0 X=0 and M=1 X=0
-0x00263E  $80:A63E   flag conflict            $80:A63E reached with M=1 X=0 and M=0 X=0
-0x002890  $80:A890   flag conflict            $80:A890 reached with M=1 X=0 and M=0 X=0
 0x002E5C  $80:AE5C   jump table               $80:AE5C: 4 entries at $80:AE76 (8 bytes), bounded by first target
-0x003229  $80:B229   flag conflict            $80:B229 reached with M=1 X=0 and M=0 X=0
-0x0033D3  $80:B3D3   flag conflict            $80:B3D3 reached with M=0 X=0 and M=1 X=0
 0x008CFE  $81:8CFE   jump table               $81:8CFE: 6 entries at $81:8D03 (12 bytes), bounded by first target
 0x0090B8  $81:90B8   jump table               $81:90B8: 8 entries at $81:90BD (16 bytes), bounded by first target
 0x009405  $81:9405   jump table               $81:9405: 34 entries at $81:940A (68 bytes), bounded by first target
-0x00975E  $81:975E   flag conflict            $81:975E reached with M=0 X=0 and M=1 X=1
-0x009BEF  $81:9BEF   flag conflict            $81:9BEF reached with M=0 X=0 and M=1 X=1
 0x009E48  $81:9E48   jump table               $81:9E48: 23 entries at $81:9E4D (46 bytes), bounded by first target
-0x00A3D0  $81:A3D0   flag conflict            $81:A3D0 reached with M=0 X=0 and M=1 X=0
-0x00ABA7  $81:ABA7   flag conflict            $81:ABA7 reached with M=1 X=0 and M=0 X=0
-0x00AC7E  $81:AC7E   flag conflict            $81:AC7E reached with M=1 X=0 and M=0 X=0
-0x00B14A  $81:B14A   flag conflict            $81:B14A reached with M=1 X=0 and M=0 X=0
 0x01017B  $82:817B   computed jump            $82:817B: table base $82:0012 is not in ROM; the table is built at run time
 0x01096B  $82:896B   jump table               $82:896B: 45 entries at $82:8981 (90 bytes), bounded by first target
 0x010A00  $82:8A00   jump table               $82:8A00: 5 entries at $82:8A22 (10 bytes), bounded by first target
-0x010B3D  $82:8B3D   flag conflict            $82:8B3D reached with M=0 X=0 and M=1 X=0
 0x010C09  $82:8C09   computed jump            $82:8C09: table base $82:0000 is not in ROM; the table is built at run time
 0x010C2B  $82:8C2B   computed jump            $82:8C2B: table base $82:1B0D is not in ROM; the table is built at run time
 0x010C45  $82:8C45   computed jump            $82:8C45: jump through a pointer in RAM; target unknown
 0x010D11  $82:8D11   computed jump            $82:8D11: jump through a pointer in RAM; target unknown
-0x0110E6  $82:90E6   flag conflict            $82:90E6 reached with M=0 X=0 and M=1 X=0
 0x01110A  $82:910A   jump table               $82:910A: 8 entries at $82:9110 (16 bytes), bounded by first target
-0x011185  $82:9185   flag conflict            $82:9185 reached with M=0 X=0 and M=1 X=0
-0x0111AA  $82:91AA   flag conflict            $82:91AA reached with M=0 X=0 and M=1 X=0
-0x011230  $82:9230   flag conflict            $82:9230 reached with M=0 X=0 and M=1 X=0
-0x01125C  $82:925C   flag conflict            $82:925C reached with M=0 X=0 and M=1 X=0
 0x011268  $82:9268   jump table               $82:9268: 5 entries at $82:926E (10 bytes), bounded by first target
-0x011349  $82:9349   flag conflict            $82:9349 reached with M=0 X=0 and M=1 X=0
 0x01138B  $82:938B   computed jump            $82:938B: jump through a pointer in RAM; target unknown
-0x0113C1  $82:93C1   flag conflict            $82:93C1 reached with M=0 X=0 and M=1 X=0
-0x011603  $82:9603   flag conflict            $82:9603 reached with M=1 X=0 and M=0 X=0
 0x01261D  $82:A61D   jump table               $82:A61D: 3 entries at $82:A622 (6 bytes), bounded by first target
-0x012985  $82:A985   flag conflict            $82:A985 reached with M=1 X=0 and M=0 X=0
 0x012C5A  $82:AC5A   jump table               $82:AC5A: 4 entries at $82:AC68 (8 bytes), bounded by first target
 0x012C7C  $82:AC7C   jump table               $82:AC7C: 2 entries at $82:AC87 (4 bytes), bounded by code
 0x012D1B  $82:AD1B   jump table               $82:AD1B: 2 entries at $82:AD25 (4 bytes), bounded by first target
 0x013BED  $82:BBED   computed jump            $82:BBED: jump through a pointer in RAM; target unknown
 0x01616F  $82:E16F   computed jump            $82:E16F: jump through a pointer in RAM; target unknown
 0x01628F  $82:E28F   computed jump            $82:E28F: jump through a pointer in RAM; target unknown
-0x0168B9  $82:E8B9   flag conflict            $82:E8B9 reached with M=1 X=1 and M=0 X=0
 0x0169CD  $82:E9CD   jump table               $82:E9CD: 8 entries at $82:E9D5 (16 bytes), bounded by first target
 0x016BAA  $82:EBAA   jump table               $82:EBAA: 13 entries at $82:EBC1 (26 bytes), bounded by first target
 0x016D9A  $82:ED9A   jump table               $82:ED9A: 5 entries at $82:EDA7 (10 bytes), bounded by first target

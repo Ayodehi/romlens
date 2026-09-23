@@ -30,8 +30,23 @@ enum AsmLinePainter {
             context.stroke(rect.insetBy(dx: 0.5, dy: 0.5), width: 1)
         }
         if record.hasWarning {
+            // A warning triangle in its own column, the size of a capital
+            // letter, so it reads at a glance without covering the text.
+            let side = min(layout.markWidth - 4, h - 4)
+            let x = layout.markStart + (layout.markWidth - side) / 2 - 1
+            let top = y + (h - side) / 2
+            let triangle = CGMutablePath()
+            triangle.move(to: CGPoint(x: x + side / 2, y: top))
+            triangle.addLine(to: CGPoint(x: x + side, y: top + side))
+            triangle.addLine(to: CGPoint(x: x, y: top + side))
+            triangle.closeSubpath()
             context.setFillColor(NSColor.systemOrange.cgColor)
-            context.fill(CGRect(x: layout.leftPadding + layout.gutterWidth + 1, y: y + h / 2 - 2, width: 3, height: 4))
+            context.addPath(triangle)
+            context.fillPath()
+            context.setFillColor(NSColor.black.withAlphaComponent(0.8).cgColor)
+            let bar = max(1.5, side / 7)
+            context.fill(CGRect(x: x + (side - bar) / 2, y: top + side * 0.35, width: bar, height: side * 0.33))
+            context.fill(CGRect(x: x + (side - bar) / 2, y: top + side * 0.76, width: bar, height: bar))
         }
         context.saveGState()
         context.textMatrix = CGAffineTransform(scaleX: 1, y: -1)

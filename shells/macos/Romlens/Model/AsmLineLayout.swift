@@ -10,6 +10,9 @@ struct AsmLineLayout {
     let leftPadding: CGFloat = 8
     /// The region stripe in the gutter.
     let gutterWidth: CGFloat = 6
+    /// The column for a line's warning mark, between the stripe and the
+    /// text, so the mark never sits on an address.
+    let markWidth: CGFloat = 14
 
     init(style: AddressStyle, metrics: MonoMetrics = MonoMetrics()) {
         self.style = style
@@ -27,7 +30,8 @@ struct AsmLineLayout {
     var textColumn: Int { addressChars + bytesChars + 1 }
     let maxTextChars = 80
     var totalChars: Int { textColumn + maxTextChars }
-    var textStart: CGFloat { leftPadding + gutterWidth + 2 }
+    var markStart: CGFloat { leftPadding + gutterWidth + 2 }
+    var textStart: CGFloat { markStart + markWidth }
     var totalWidth: CGFloat { textStart + CGFloat(totalChars) * charWidth + leftPadding }
 
     func x(ofChar c: Int) -> CGFloat { textStart + CGFloat(c) * charWidth }

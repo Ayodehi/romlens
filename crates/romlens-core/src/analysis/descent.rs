@@ -118,8 +118,12 @@ pub struct Walk<'a> {
     pub xrefs: Vec<(XRef, bool)>,
     pub warnings: Vec<Warning>,
     pub seeds: Vec<DataSeed>,
-    /// Opcode starts reached with two different width states.
+    /// Opcode starts reached with two different width states that decode
+    /// something differently (see [`Descent::widths_matter`]).
     pub conflicts: Vec<u32>,
+    /// Width conflicts found while walking, judged once the walk is done:
+    /// (offset, address, the width key already there, the arriving one).
+    pending_conflicts: Vec<(u32, SnesAddress, u8, u8)>,
     /// Callees known to skip inline arguments: entry offset → byte count
     /// (from an earlier pass; see `analysis::analyze`).
     pub inline_args: BTreeMap<u32, u16>,
@@ -198,6 +202,7 @@ impl<'a> Walk<'a> {
             warnings: Vec::new(),
             seeds: Vec::new(),
             conflicts: Vec::new(),
+            pending_conflicts: Vec::new(),
             inline_args: BTreeMap::new(),
             found_inline_args: BTreeMap::new(),
             jump_tables: BTreeMap::new(),
@@ -567,7 +572,96 @@ impl<'a> Walk<'a> {
             self.walk(entry);
         }
         control.report(AnalysisPhase::Descent, self.processed, self.processed);
+        self.judge_conflicts();
         Ok(())
+    }
+
+    /// Keep only the width conflicts that change how some byte decodes. Code
+    /// reached with 8-bit X from one caller and 16-bit X from another reads
+    /// the same way unless an X-sized immediate comes before the widths agree
+    /// again, and warning about it anyway buries the conflicts that matter.
+    fn judge_conflicts(&mut self) {
+        let mut judged = std::collections::HashSet::new();
+        for (off, addr, before, arriving) in std::mem::take(&mut self.pending_conflicts) {
+            if !judged.insert((off, before.min(arriving), before.max(arriving))) {
+                continue;
+            }
+            if self.widths_matter(off, addr, before, arriving) {
+                self.conflicts.push(off);
+                self.warn(
+                    off,
+                    WarningKind::FlagConflict,
+                    format!(
+                        "{} reached with {} and {}, which decode differently",
+                        addr,
+                        key_name(before),
+                        key_name(arriving)
+                    ),
+                );
+            }
+        }
+    }
+
+    /// Whether code entered at `off` under width key `a` and under width
+    /// key `b` can decode any instruction to a different length before the
+    /// two agree again. Both states are decoded side by side along every
+    /// path — fallthrough, branches, calls and direct jumps — and a path
+    /// stops once its two states have the same widths (after a `REP`, `SEP`,
+    /// `PLP` or `XCE` that sets them). An indirect jump with the widths still
+    /// apart, or a search too long to finish, counts as mattering: unsure
+    /// keeps the warning.
+    fn widths_matter(&self, off: u32, addr: SnesAddress, a: u8, b: u8) -> bool {
+        const LIMIT: usize = 4096;
+        let bytes = self.rom.bytes();
+        let state = |key: u8| FlagState {
+            m: key & 1 != 0,
+            x: key & 2 != 0,
+            ..FlagState::NATIVE_VECTOR
+        };
+        let mut stack = vec![(off, addr, state(a), state(b))];
+        let mut seen = std::collections::HashSet::new();
+        while let Some((o, at, fa, fb)) = stack.pop() {
+            if !seen.insert((o, fa.width_key(), fb.width_key())) {
+                continue;
+            }
+            if seen.len() > LIMIT {
+                return true;
+            }
+            let Some(rest) = bytes.get(o as usize..) else {
+                continue;
+            };
+            let (Some(ia), Some(ib)) = (
+                decode(rest, at, FileOffset(o), fa),
+                decode(rest, at, FileOffset(o), fb),
+            ) else {
+                continue;
+            };
+            if ia.len != ib.len {
+                return true;
+            }
+            let (na, nb) = (ia.flags_after, ib.flags_after);
+            if na.width_key() == nb.width_key() {
+                continue;
+            }
+            let m = ia.mnemonic;
+            let mut follow = |t: SnesAddress| {
+                if let Some(to) = self.rom.file_offset_for(t) {
+                    stack.push((to.0, t, na, nb));
+                }
+            };
+            if m.is_branch() || m.is_call() || m.is_jump() {
+                match ia.target {
+                    Some(t) if t.kind == TargetKind::Code => follow(t.address),
+                    // Through a table or a pointer, with the widths apart:
+                    // wherever it lands may decode differently.
+                    _ => return true,
+                }
+            }
+            if !m.is_block_end() {
+                follow(ia.next_address());
+            }
+        }
+        false
     }
 
     fn walk(&mut self, entry: Entry) {
@@ -599,17 +693,12 @@ impl<'a> Walk<'a> {
             match self.kind[off as usize] {
                 KIND_OPCODE => {
                     if self.wkey[off as usize] != key && !(entry.soft && first) {
-                        self.conflicts.push(off);
-                        self.warn(
+                        self.pending_conflicts.push((
                             off,
-                            WarningKind::FlagConflict,
-                            format!(
-                                "{} reached with {} and {}",
-                                addr,
-                                key_name(self.wkey[off as usize] - 1),
-                                key_name(key - 1)
-                            ),
-                        );
+                            addr,
+                            self.wkey[off as usize] - 1,
+                            key - 1,
+                        ));
                     }
                     return;
                 }
