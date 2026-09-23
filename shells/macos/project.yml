@@ -74,6 +74,9 @@ targets:
         com.apple.security.app-sandbox: true
         com.apple.security.files.user-selected.read-write: true
         com.apple.security.files.bookmarks.app-scope: true
+        # File › Start Live Session listens on 127.0.0.1 for the recorder
+        # script's stream (romlens_core::recording::live).
+        com.apple.security.network.server: true
   RomlensTests:
     type: bundle.unit-test
     platform: macOS

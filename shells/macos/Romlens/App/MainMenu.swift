@@ -70,6 +70,7 @@ enum MainMenu {
             item("Import Snapshot…", #selector(RomWindowController.importSnapshot(_:))),
             item("Export Frame Region…", #selector(RomWindowController.exportFrameRegion(_:))),
             item("Close Recording", #selector(RomWindowController.closeRecording(_:))),
+            item("Start Live Session", #selector(RomWindowController.toggleLiveSession(_:)), "l", modifiers: [.command, .option]),
             .separator(),
             importMenu,
             export,

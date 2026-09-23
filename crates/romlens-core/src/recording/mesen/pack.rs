@@ -542,6 +542,81 @@ fn mapping_byte(m: MappingMode) -> u8 {
 }
 
 /// Pack a recorder stream made while running `rom`.
+/// Turns a stream's records into machine states one frame at a time: what
+/// [`pack`] writes to a file, and what a live session holds in memory.
+pub struct StreamDecoder {
+    fields: Fields,
+    memory: Vec<Vec<u8>>,
+    pub report: PackReport,
+}
+
+impl StreamDecoder {
+    pub fn new(header: &StreamHeader) -> Self {
+        let fields = Fields::new(header);
+        let mut report = PackReport {
+            producer: header.producer.clone(),
+            created: header.created,
+            missing_fields: FIELDS.iter().copied().filter(|n| !fields.has(n)).collect(),
+            ..PackReport::default()
+        };
+        if indexed_fields().iter().any(|n| !fields.has(n)) {
+            report
+                .missing_fields
+                .push("ppu.layers / window / controller fields");
+        }
+        StreamDecoder {
+            fields,
+            memory: MEMORY.iter().map(|(_, size)| vec![0u8; *size]).collect(),
+            report,
+        }
+    }
+
+    /// Apply one frame record and return the machine after it, numbered
+    /// `number`, holding `regions`.
+    pub fn frame(&mut self, f: &FrameRecord, number: u64, regions: &[StateRegion]) -> MachineState {
+        self.fields.apply(&f.fields);
+        for (image, blocks) in self.memory.iter_mut().zip(&f.blocks) {
+            for (block, bytes) in blocks {
+                let at = *block as usize * BLOCK;
+                image[at..at + bytes.len()].copy_from_slice(bytes);
+            }
+        }
+        let mut state = MachineState {
+            frame: number,
+            ..MachineState::default()
+        };
+        state.regions.insert(
+            StateRegion::CpuRegisters,
+            cpu_registers(&self.fields).encode().to_vec(),
+        );
+        state.regions.insert(
+            StateRegion::PpuState,
+            ppu_state(&self.fields, f, &mut self.report).bytes.to_vec(),
+        );
+        state.regions.insert(
+            StateRegion::IoState,
+            io_state(&self.fields, f).bytes.to_vec(),
+        );
+        let mut timing = vec![0u8; StateRegion::Timing.size()];
+        timing[..8].copy_from_slice(&number.to_le_bytes());
+        state.regions.insert(StateRegion::Timing, timing);
+        for (region, image) in [
+            StateRegion::Vram,
+            StateRegion::Cgram,
+            StateRegion::Oam,
+            StateRegion::Wram,
+        ]
+        .into_iter()
+        .zip(&self.memory)
+        {
+            if regions.contains(&region) {
+                state.regions.insert(region, image.clone());
+            }
+        }
+        state
+    }
+}
+
 pub fn pack<R: Read, W: Write + Seek>(
     stream: R,
     rom: &RomImage,
@@ -553,19 +628,7 @@ pub fn pack<R: Read, W: Write + Seek>(
     if let Some(why) = header.rom_mismatch(rom.bytes()) {
         return Err(PackError::RomMismatch(why));
     }
-    let mut fields = Fields::new(&header);
-    let mut report = PackReport {
-        producer: header.producer.clone(),
-        created: header.created,
-        missing_fields: FIELDS.iter().copied().filter(|n| !fields.has(n)).collect(),
-        ..PackReport::default()
-    };
-    let indexed = indexed_fields();
-    if indexed.iter().any(|n| !fields.has(n)) {
-        report
-            .missing_fields
-            .push("ppu.layers / window / controller fields");
-    }
+    let mut decoder = StreamDecoder::new(&header);
 
     let mut regions = vec![
         StateRegion::CpuRegisters,
@@ -602,58 +665,22 @@ pub fn pack<R: Read, W: Write + Seek>(
         header.created.max(0) as u64,
     )?;
 
-    let mut memory: Vec<Vec<u8>> = MEMORY.iter().map(|(_, size)| vec![0u8; *size]).collect();
     let mut pending: Vec<DmaEvent> = Vec::new();
     while let Some(record) = reader.next_record()? {
         match record {
             Record::Frame(f) => {
-                if f.frame as u64 != report.frames {
+                let frames = decoder.report.frames;
+                if f.frame as u64 != frames {
                     return Err(StreamError::Corrupt(format!(
                         "frame {} follows frame {}",
                         f.frame,
-                        report.frames.wrapping_sub(1)
+                        frames.wrapping_sub(1)
                     ))
                     .into());
                 }
-                fields.apply(&f.fields);
-                for (image, blocks) in memory.iter_mut().zip(&f.blocks) {
-                    for (block, bytes) in blocks {
-                        let at = *block as usize * BLOCK;
-                        image[at..at + bytes.len()].copy_from_slice(bytes);
-                    }
-                }
-                let mut state = MachineState {
-                    frame: report.frames,
-                    ..MachineState::default()
-                };
-                state.regions.insert(
-                    StateRegion::CpuRegisters,
-                    cpu_registers(&fields).encode().to_vec(),
-                );
-                state.regions.insert(
-                    StateRegion::PpuState,
-                    ppu_state(&fields, &f, &mut report).bytes.to_vec(),
-                );
-                state
-                    .regions
-                    .insert(StateRegion::IoState, io_state(&fields, &f).bytes.to_vec());
-                let mut timing = vec![0u8; StateRegion::Timing.size()];
-                timing[..8].copy_from_slice(&report.frames.to_le_bytes());
-                state.regions.insert(StateRegion::Timing, timing);
-                for (region, image) in [
-                    StateRegion::Vram,
-                    StateRegion::Cgram,
-                    StateRegion::Oam,
-                    StateRegion::Wram,
-                ]
-                .into_iter()
-                .zip(&memory)
-                {
-                    if regions.contains(&region) {
-                        state.regions.insert(region, image.clone());
-                    }
-                }
+                let state = decoder.frame(&f, frames, &regions);
                 writer.write_frame(&state)?;
+                let report = &mut decoder.report;
                 if !pending.is_empty() {
                     writer.write_layer(LAYER_MAGICS[1], &wlog_body(report.frames, &pending))?;
                     report.dma_events += pending.len() as u64;
@@ -662,10 +689,11 @@ pub fn pack<R: Read, W: Write + Seek>(
                 report.frames += 1;
             }
             Record::Dma(d) => pending.push(*d),
-            Record::StateLoaded { .. } => report.state_loads += 1,
+            Record::StateLoaded { .. } => decoder.report.state_loads += 1,
             Record::End { .. } => {}
         }
     }
+    let mut report = decoder.report;
     report.truncated = reader.truncated;
     if report.frames == 0 {
         return Err(PackError::Empty);

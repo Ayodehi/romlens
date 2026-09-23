@@ -109,8 +109,23 @@ final class GraphicsModel {
     private(set) var recordingInfo: RecordingInfo?
     private(set) var recordingName: String?
     var frame: UInt64 = 0 {
-        didSet { if frame != oldValue { clampFrame() } }
+        didSet {
+            if frame != oldValue { clampFrame() }
+            // Moving off the newest frame pauses following; coming back to
+            // it resumes. Only a person moves the frame while live, since a
+            // new frame arriving sets it under `applyingLive`.
+            if live != nil, !applyingLive { followLive = frame + 1 >= frameCount }
+        }
     }
+
+    // Live
+    /// The live session the recording is fed from, while one runs.
+    private(set) var live: LiveSession?
+    /// What the live session is doing, in words.
+    private(set) var liveStatus: String?
+    /// Show each frame as it arrives.
+    var followLive = true
+    @ObservationIgnored private var applyingLive = false
 
     /// Where selecting something with a ROM byte range should send it.
     @ObservationIgnored var selectBytes: ((Range<UInt32>) -> Void)?
@@ -137,23 +152,77 @@ final class GraphicsModel {
     }
 
     func detach() {
+        live?.stop()
+        live = nil
+        liveStatus = nil
         recording = nil
         recordingInfo = nil
         recordingName = nil
         if source == .recording { source = .rom }
     }
 
+    /// Read a live session's frames as the recording, following the newest.
+    func attachLive(_ session: LiveSession) throws {
+        try attach(session.recording(), name: "Live")
+        live = session
+        followLive = true
+        liveStatus = "waiting for Mesen on port \(session.port())"
+        // The session may have heard from Mesen before this attached.
+        if let status = session.status() { liveStatusChanged(status) }
+        if let latest = session.latestFrame() { liveArrived(latest: latest) }
+    }
+
+    /// New frames have arrived; `latest` is the newest.
+    func liveArrived(latest: UInt64) {
+        guard let recording, live != nil else { return }
+        recordingInfo = recording.info()
+        guard followLive, latest != frame else { return }
+        applyingLive = true
+        frame = latest
+        applyingLive = false
+    }
+
+    func liveStatusChanged(_ status: LiveStatus) {
+        guard live != nil else { return }
+        switch status {
+        case .listening(let port):
+            if liveStatus?.hasPrefix("streaming") == true || liveStatus == nil {
+                liveStatus = "waiting for Mesen on port \(port)"
+            }
+        case .connected:
+            liveStatus = "streaming"
+        case .disconnected(let reason):
+            liveStatus = "\(reason); waiting for Mesen"
+        case .refused(let reason):
+            liveStatus = "refused: \(reason)"
+        }
+    }
+
+    /// Stop listening, keeping the frames already received.
+    func stopLive() {
+        live?.stop()
+        live = nil
+        liveStatus = nil
+        if recording != nil { recordingName = "Live (stopped)" }
+        recordingInfo = recording?.info()
+    }
+
+    var isLive: Bool { live != nil }
+
     var frameCount: UInt64 { recordingInfo?.frameCount ?? 0 }
+    /// The oldest readable frame: a live session keeps only its latest.
+    var firstFrame: UInt64 { recordingInfo?.firstFrame ?? 0 }
     var hasRecording: Bool { recording != nil }
 
     func step(by delta: Int) {
         guard frameCount > 0 else { return }
         let next = Int64(frame) + Int64(delta)
-        frame = UInt64(min(max(next, 0), Int64(frameCount) - 1))
+        frame = UInt64(min(max(next, Int64(firstFrame)), Int64(frameCount) - 1))
     }
 
     private func clampFrame() {
         if frameCount > 0, frame >= frameCount { frame = frameCount - 1 }
+        if frame < firstFrame { frame = firstFrame }
     }
 
     /// The registers at the current frame, when reading a recording.
@@ -308,6 +377,9 @@ final class GraphicsModel {
             let snes = rom.snesAddressFor(fileOffset: romOffset).map { formatSnesAddress(address: $0) + " · " } ?? ""
             return "ROM " + snes + formatFileOffset(offset: romOffset)
         case .recording:
+            if let liveStatus {
+                return "Live, frame \(frame), \(liveStatus)"
+            }
             return "\(recordingName ?? "Recording"), frame \(frame) of \(frameCount)"
         case .bytes(let label, let data):
             return "\(label), \(data.count) bytes"

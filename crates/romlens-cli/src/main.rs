@@ -512,6 +512,24 @@ enum RecCommand {
         #[arg(long)]
         out: PathBuf,
     },
+    /// Listen for the recorder script's live stream and report what arrives.
+    Live {
+        #[arg(long)]
+        rom: PathBuf,
+        /// 0 for any free port, printed on start.
+        #[arg(long, default_value_t = romlens_core::recording::live::DEFAULT_PORT)]
+        port: u16,
+        /// Stop after this many frames.
+        #[arg(long)]
+        frames: Option<u64>,
+        /// Stop when the first connection ends.
+        #[arg(long)]
+        once: bool,
+        /// On exit, write the last frame's vram.bin, cgram.bin and oam.bin
+        /// to this directory.
+        #[arg(long)]
+        dump: Option<PathBuf>,
+    },
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -1203,6 +1221,13 @@ fn run() -> Result<()> {
                 },
             ),
             RecCommand::Script { out } => commands::rec::script(&out),
+            RecCommand::Live {
+                rom,
+                port,
+                frames,
+                once,
+                dump,
+            } => commands::rec::live(&rom, port, frames, once, dump.as_deref()),
             RecCommand::Convert {
                 rec,
                 from,

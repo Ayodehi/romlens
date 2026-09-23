@@ -14,6 +14,14 @@
 -- it into Romlens as a trace (docs/17). Elsewhere the script records the
 -- stream alone, as before.
 --
+-- Live: with Mesen's network access on as well, the script also sends the
+-- stream to Romlens over a local connection (127.0.0.1, port 7462 or
+-- $ROMLENS_LIVE_PORT) whenever Romlens is listening (File › Start Live
+-- Session), trying every two seconds. A new connection gets the header and a
+-- full frame first, then the same deltas the file gets. Sends never block the
+-- game; a connection that falls 16 MB behind is dropped, and the file
+-- recording carries on regardless.
+--
 -- Stream format 1, little-endian (docs/13, "The Mesen stream"):
 --   header  "RLSTREAM", u16 version, s2 producer, s2 ROM SHA-1,
 --           i8 created (Unix seconds), u32 ROM size, 64 x 16 bytes of ROM
@@ -135,7 +143,53 @@ local header = { "RLSTREAM", string.pack("<I2", VERSION), string.pack("<s2", "Me
   string.pack("<I4", rom_size), table.concat(samples),
   string.pack("<I2", #fields) }
 for _, k in ipairs(fields) do header[#header + 1] = string.pack("<s1", k) end
-out:write(table.concat(header))
+local header_bytes = table.concat(header)
+out:write(header_bytes)
+
+-- The live connection, when there is one: { sock, pending, fresh }.
+local LIVE_PORT = tonumber(os.getenv("ROMLENS_LIVE_PORT") or "") or 7462
+local LIVE_BACKLOG = 16 << 20
+local has_socket, socket = pcall(require, "socket.core")
+local live = nil
+
+local function live_close(why)
+  if not live then return end
+  pcall(live.sock.close, live.sock)
+  live = nil
+  if why then emu.log("Romlens recorder: live connection closed: " .. why) end
+end
+
+local function live_flush()
+  while live and #live.pending > 0 do
+    local last, err, partial = live.sock:send(live.pending)
+    local sent = last or partial or 0
+    if sent > 0 then live.pending = live.pending:sub(sent + 1) end
+    if err == "timeout" then break end
+    if err then return live_close(err) end
+  end
+  if live and #live.pending > LIVE_BACKLOG then live_close("Romlens is not keeping up") end
+end
+
+local function live_send(data)
+  if not live then return end
+  live.pending = live.pending .. data
+  live_flush()
+end
+
+local function live_try_connect()
+  if not has_socket or live then return end
+  local c = socket.tcp()
+  if not c then return end
+  c:settimeout(0.02)
+  if not c:connect("127.0.0.1", LIVE_PORT) then
+    c:close()
+    return
+  end
+  c:settimeout(0)
+  pcall(c.setoption, c, "tcp-nodelay", true)
+  live = { sock = c, pending = header_bytes, fresh = true }
+  emu.log("Romlens recorder: streaming live to Romlens on port " .. LIVE_PORT)
+end
 
 -- $2100-$2133, the last byte the game wrote to each. A callback on the
 -- register memory type sees a write through any bank mirror ($00-$3F,
@@ -169,7 +223,9 @@ end
 
 local function on_dma(_, value)
   local s = emu.getState()
-  out:write("D", string.pack("<I4I1I2", frame, value, value_of(s["ppu.scanline"])), dma_registers())
+  local d = "D" .. string.pack("<I4I1I2", frame, value, value_of(s["ppu.scanline"])) .. dma_registers()
+  out:write(d)
+  live_send(d)
 end
 
 local cpu = emu.cpuType.snes
@@ -188,14 +244,13 @@ local function write_frame()
       changed[#changed + 1] = string.pack("<I2i8", i - 1, v)
     end
   end
-  local parts = { "F", string.pack("<I4I2", frame, #changed), table.concat(changed) }
   local regs = {}
   for i = 0, 0x33 do
     regs[i + 1] = last[i]
     regs[i + 53] = seen[i]
   end
-  parts[#parts + 1] = string.pack(REGISTER_FORMAT, table.unpack(regs, 1, 104))
-  parts[#parts + 1] = dma_registers()
+  local registers = string.pack(REGISTER_FORMAT, table.unpack(regs, 1, 104)) .. dma_registers()
+  local parts = { "F", string.pack("<I4I2", frame, #changed), table.concat(changed), registers }
   for r, region in ipairs(regions) do
     local mem, size = region[1], region[2]
     previous[r] = previous[r] or {}
@@ -212,7 +267,24 @@ local function write_frame()
     parts[#parts + 1] = string.pack("<I2", count)
     parts[#parts + 1] = table.concat(blocks)
   end
-  out:write(table.concat(parts))
+  local bytes = table.concat(parts)
+  out:write(bytes)
+  if live and live.fresh then
+    -- A new connection starts from nothing, so it gets every field and every
+    -- block once; after that it gets what the file gets.
+    live.fresh = false
+    local full = { "F", string.pack("<I4I2", frame, #fields) }
+    for i = 1, #fields do full[#full + 1] = string.pack("<I2i8", i - 1, previous_values[i] or 0) end
+    full[#full + 1] = registers
+    for r, region in ipairs(regions) do
+      local n = (region[2] - 1) // BLOCK + 1
+      full[#full + 1] = string.pack("<I2", n)
+      for b = 0, n - 1 do full[#full + 1] = string.pack("<I2", b) .. previous[r][b] end
+    end
+    live_send(table.concat(full))
+  else
+    live_send(bytes)
+  end
   frame = frame + 1
   if frame % 60 == 0 then out:flush() end
 end
@@ -222,6 +294,11 @@ function finish()
   finished = true
   out:write("E", string.pack("<I4", frame))
   out:close()
+  if live then
+    live.sock:settimeout(1)
+    live_send("E" .. string.pack("<I4", frame))
+    live_close()
+  end
   emu.log("Romlens recorder: " .. frame .. " frames to " .. out_path)
   if xlog then
     write_xlog()
@@ -232,6 +309,7 @@ end
 
 emu.addEventCallback(guarded(function()
   if finished then return end
+  if frame % 120 == 0 then live_try_connect() end
   write_frame()
   if xlog and frame % 3600 == 0 then write_xlog() end
   if frame_limit and frame >= frame_limit then
@@ -244,6 +322,7 @@ emu.addEventCallback(guarded(function()
   -- The loaded state's registers were written before we could see them.
   reset_registers()
   out:write("L", string.pack("<I4", frame))
+  live_send("L" .. string.pack("<I4", frame))
 end), emu.eventType.stateLoaded)
 
 emu.addEventCallback(guarded(finish), emu.eventType.scriptEnded)
@@ -251,4 +330,9 @@ emu.addEventCallback(guarded(finish), emu.eventType.scriptEnded)
 emu.log("Romlens recorder: writing " .. out_path)
 if xlog then
   emu.log("Romlens recorder: and an execution log, " .. xlog_path)
+end
+if has_socket then
+  emu.log("Romlens recorder: will stream live to Romlens on port " .. LIVE_PORT .. " when it listens")
+else
+  emu.log("Romlens recorder: live streaming is off (turn on network access in the script settings)")
 end

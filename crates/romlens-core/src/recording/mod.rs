@@ -18,6 +18,7 @@ pub mod fixtures;
 pub mod format;
 pub mod import;
 pub mod io_state;
+pub mod live;
 pub mod memory;
 pub mod mesen;
 pub mod reader;
@@ -261,6 +262,8 @@ pub enum RecordingError {
     NewerVersion(u16, u16),
     #[error("frame {frame} is past the end of the recording ({count} frames)")]
     NoSuchFrame { frame: u64, count: u64 },
+    #[error("frame {frame} is no longer held by the live session, which keeps frames from {first}")]
+    Dropped { frame: u64, first: u64 },
     #[error("the recording has no {0} region")]
     MissingRegion(&'static str),
     #[error(

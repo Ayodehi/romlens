@@ -332,6 +332,37 @@ byte the game last wrote and warns on any disagreement: none in 17,850
 comparisons over Super Metroid's boot, nor in the 3,406-frame gameplay
 recording.
 
+## Live sessions
+
+Added 23 September 2026. The recorder script can also send its stream to
+Romlens while the game runs. File › Start Live Session (⌥⌘L) listens on
+`127.0.0.1`, port 7462; `romlens rec live --rom <rom>` does the same from the
+command line and reports what arrives. With Mesen's script settings allowing
+both I/O and network access, the script tries to connect every two seconds,
+using the LuaSocket library Mesen bundles, which stock releases have too.
+
+- **The same bytes as the file.** A new connection gets the stream header and
+  one full frame (every field and every memory block), then the deltas the
+  file gets. So Romlens can connect at any point in a session, and one decoder
+  (`StreamDecoder`) serves `rec pack` and live sessions alike. Checked by
+  connecting at stream frame 840: the live session's last frame matched the
+  packed file's VRAM, CGRAM and OAM byte for byte.
+- **Never slows the game.** Sends are non-blocking. A connection that falls
+  16 MB behind is dropped, and the file recording carries on regardless.
+- **A window, not a file.** A `LiveSource` is a `MachineStateSource` like a
+  `.romrec`, so the Tilemap, Tiles, Palette and OAM views read it unchanged. It
+  keeps the latest 600 frames (ten seconds, about 40 MB) without WRAM, and
+  numbers frames itself, so a script that reconnects carries on the count.
+  The views follow the newest frame; stepping back pauses that, and stepping
+  to the newest resumes it. Updates reach the views at most 30 times a
+  second.
+- **Local and checked.** Only loopback connections are accepted, and a stream
+  recorded from another ROM is refused on its header. The sandboxed app has
+  the `network.server` entitlement for this, and no other network access.
+
+Code discovery live (the execution log as it grows) needs the fork to hand
+over only what is new since the last call; that is the next step.
+
 ## The change index
 
 `<recording>.romrec.idx`, beside the recording (`recording/change_index.rs`;

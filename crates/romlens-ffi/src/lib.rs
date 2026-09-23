@@ -5,6 +5,7 @@
 
 mod future;
 pub mod graphics;
+pub mod live;
 pub mod records;
 pub mod workbench;
 

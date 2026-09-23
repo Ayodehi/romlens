@@ -100,7 +100,7 @@ struct FrameStepper: View {
     var body: some View {
         HStack(spacing: 4) {
             Button { graphics.step(by: -1) } label: { Image(systemName: "chevron.left") }
-                .disabled(graphics.frame == 0)
+                .disabled(graphics.frame <= graphics.firstFrame)
                 .help("Previous frame")
             TextField("Frame", value: $graphics.frame, format: .number.grouping(.never))
                 .frame(width: 64)
@@ -108,6 +108,15 @@ struct FrameStepper: View {
             Button { graphics.step(by: 1) } label: { Image(systemName: "chevron.right") }
                 .disabled(graphics.frame + 1 >= graphics.frameCount)
                 .help("Next frame")
+            if graphics.isLive {
+                Toggle(isOn: $graphics.followLive) {
+                    Image(systemName: "dot.radiowaves.left.and.right")
+                }
+                .toggleStyle(.button)
+                .help(graphics.followLive
+                    ? "Following the game: each frame shows as it arrives"
+                    : "Paused on this frame; click to follow the game again")
+            }
         }
     }
 }

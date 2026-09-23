@@ -491,6 +491,11 @@ pub struct RecordingInfo {
     pub file_len: u64,
     /// The index was rebuilt by scanning a file with no footer.
     pub recovered: bool,
+    /// The oldest frame still readable: 0 for a file; a live session keeps
+    /// only its latest frames.
+    pub first_frame: u64,
+    /// Frames are still arriving from a live session.
+    pub live: bool,
 }
 
 /// The registers the graphics views need at one frame, decoded.
@@ -522,7 +527,7 @@ pub struct BgLayerInfo {
 /// An open `.romrec`. The shell keeps one per attached recording.
 #[derive(uniffi::Object)]
 pub struct RecordingSession {
-    source: RomrecSource,
+    source: Source,
     /// Where it came from, to validate the file itself and keep its index.
     origin: Origin,
     index: std::sync::Mutex<Option<romlens_core::recording::change_index::ChangeIndex>>,
@@ -531,6 +536,40 @@ pub struct RecordingSession {
 enum Origin {
     Path(String),
     Bytes(Vec<u8>),
+    Live,
+}
+
+/// A recording file, or the frames of a live session as they arrive.
+enum Source {
+    File(Box<RomrecSource>),
+    Live(Arc<romlens_core::recording::live::LiveSource>),
+}
+
+impl Source {
+    fn dynamic(&self) -> &dyn MachineStateSource {
+        match self {
+            Source::File(f) => &**f,
+            Source::Live(l) => &**l,
+        }
+    }
+
+    fn file(&self) -> Option<&RomrecSource> {
+        match self {
+            Source::File(f) => Some(f),
+            Source::Live(_) => None,
+        }
+    }
+}
+
+impl RecordingSession {
+    /// The session a live listener feeds.
+    pub(crate) fn live(source: Arc<romlens_core::recording::live::LiveSource>) -> Arc<Self> {
+        Arc::new(RecordingSession {
+            source: Source::Live(source),
+            origin: Origin::Live,
+            index: Default::default(),
+        })
+    }
 }
 
 /// The validator's verdict, for the open path to show verbatim.
@@ -574,7 +613,7 @@ impl RecordingSession {
             RomrecSource::open(p)?
         };
         Ok(Arc::new(RecordingSession {
-            source,
+            source: Source::File(Box::new(source)),
             origin: Origin::Path(path),
             index: Default::default(),
         }))
@@ -583,7 +622,7 @@ impl RecordingSession {
     #[uniffi::constructor]
     pub fn from_bytes(bytes: Vec<u8>) -> Result<Arc<Self>, RomlensError> {
         Ok(Arc::new(RecordingSession {
-            source: RomrecSource::from_bytes(bytes.clone(), false)?,
+            source: Source::File(Box::new(RomrecSource::from_bytes(bytes.clone(), false)?)),
             origin: Origin::Bytes(bytes),
             index: Default::default(),
         }))
@@ -592,18 +631,27 @@ impl RecordingSession {
     /// Everything wrong with the file, sampling `sample` frames.
     pub fn validate(&self, sample: u32) -> Result<ValidationSummary, RomlensError> {
         use romlens_core::recording::validate::{Severity, ValidateOptions, validate};
+        // A live session is decoded as it arrives; there is no file to check.
+        let Some(source) = self.source.file() else {
+            return Ok(ValidationSummary {
+                errors: 0,
+                warnings: 0,
+                lines: Vec::new(),
+            });
+        };
         let file: Box<dyn romlens_core::recording::reader::ReadSeek> = match &self.origin {
             Origin::Path(p) => Box::new(std::io::BufReader::new(
                 std::fs::File::open(p).map_err(|e| RomlensError::Io { msg: e.to_string() })?,
             )),
             Origin::Bytes(b) => Box::new(std::io::Cursor::new(b.clone())),
+            Origin::Live => unreachable!("a live session has no file"),
         };
         let report = validate(
             file,
             ValidateOptions {
                 rom_sha256: None,
                 sample,
-                recover: self.source.recovered(),
+                recover: source.recovered(),
             },
         );
         Ok(ValidationSummary {
@@ -635,11 +683,19 @@ impl RecordingSession {
         frame: u64,
     ) -> Result<ChangeHistory, RomlensError> {
         use romlens_core::recording::change_index::{ChangeIndex, load_or_build};
+        // Not indexed live: the frames it would index are still arriving.
+        let Some(source) = self.source.file() else {
+            return Ok(ChangeHistory {
+                indexed: false,
+                last: None,
+                next: None,
+            });
+        };
         let mut slot = self.index.lock().unwrap();
         if slot.is_none() {
             *slot = Some(match &self.origin {
-                Origin::Path(p) => load_or_build(Path::new(p), &self.source, false)?.0,
-                Origin::Bytes(_) => ChangeIndex::build(&self.source)?,
+                Origin::Path(p) => load_or_build(Path::new(p), source, false)?.0,
+                Origin::Bytes(_) | Origin::Live => ChangeIndex::build(source)?,
             });
         }
         let index = slot.as_ref().expect("just built");
@@ -653,18 +709,18 @@ impl RecordingSession {
         }
         Ok(ChangeHistory {
             indexed: true,
-            last: index.when(&self.source, region, offset, len, frame, true)?,
-            next: index.when(&self.source, region, offset, len, frame, false)?,
+            last: index.when(source, region, offset, len, frame, true)?,
+            next: index.when(source, region, offset, len, frame, false)?,
         })
     }
 
     /// What a project stores to refer to this recording; `None` for one
     /// opened from bytes, which has no path to refer to.
     pub fn reference(&self) -> Option<RecordingRefInfo> {
-        let Origin::Path(path) = &self.origin else {
+        let (Origin::Path(path), Some(source)) = (&self.origin, self.source.file()) else {
             return None;
         };
-        let r = romlens_core::recording::change_index::reference(path, &self.source);
+        let r = romlens_core::recording::change_index::reference(path, source);
         Some(RecordingRefInfo {
             path: r.path,
             frames: r.frames,
@@ -674,26 +730,45 @@ impl RecordingSession {
     }
 
     pub fn info(&self) -> RecordingInfo {
-        let h = self.source.header();
-        RecordingInfo {
-            frame_count: self.source.frame_count().unwrap_or(0),
-            keyframe_interval: h.keyframe_interval,
-            producer: h.producer.clone(),
-            producer_version: h.producer_version.clone(),
-            rom_sha256: self.source.identity().sha256_hex(),
-            regions: self.source.regions().into_iter().map(Into::into).collect(),
-            file_len: self.source.file_len(),
-            recovered: self.source.recovered(),
+        let s = self.source.dynamic();
+        let common = RecordingInfo {
+            frame_count: s.frame_count().unwrap_or(0),
+            keyframe_interval: 0,
+            producer: s.identity().producer.clone(),
+            producer_version: s.identity().producer_version.clone(),
+            rom_sha256: s.identity().sha256_hex(),
+            regions: s.regions().into_iter().map(Into::into).collect(),
+            file_len: 0,
+            recovered: false,
+            first_frame: 0,
+            live: false,
+        };
+        match &self.source {
+            Source::File(f) => RecordingInfo {
+                keyframe_interval: f.header().keyframe_interval,
+                file_len: f.file_len(),
+                recovered: f.recovered(),
+                ..common
+            },
+            Source::Live(l) => RecordingInfo {
+                first_frame: l.first_frame(),
+                live: true,
+                ..common
+            },
         }
     }
 
     /// Refuse a recording of another ROM with the core's message.
     pub fn check_rom(&self, rom: Arc<Rom>) -> Result<(), RomlensError> {
-        Ok(self.source.check_rom(rom.image.sha256())?)
+        match &self.source {
+            Source::File(f) => Ok(f.check_rom(rom.image.sha256())?),
+            // The listener refused any stream of another ROM on its header.
+            Source::Live(_) => Ok(()),
+        }
     }
 
     pub fn region(&self, frame: u64, region: StateRegion) -> Result<Vec<u8>, RomlensError> {
-        Ok(self.source.region_at(frame, region.into())?)
+        Ok(self.source.dynamic().region_at(frame, region.into())?)
     }
 
     /// Byte ranges of `region` that may have changed from `from` to `to`, as
@@ -706,6 +781,7 @@ impl RecordingSession {
     ) -> Result<Vec<u32>, RomlensError> {
         Ok(self
             .source
+            .dynamic()
             .changes(from, to, region.into())?
             .into_iter()
             .flat_map(|r| [r.offset, r.len])
@@ -713,7 +789,7 @@ impl RecordingSession {
     }
 
     pub fn ppu_summary(&self, frame: u64) -> Result<PpuSummary, RomlensError> {
-        let state = self.source.state_at(frame)?;
+        let state = self.source.dynamic().state_at(frame)?;
         let ppu = state.ppu().ok_or(RecordingError::MissingRegion("ppu"))?;
         let cpu = state
             .region(CoreRegion::CpuRegisters)
@@ -743,7 +819,7 @@ impl RecordingSession {
 
     /// One BG layer's whole map at `frame`.
     pub fn render_bg(&self, frame: u64, bg: u8) -> Result<BitmapInfo, RomlensError> {
-        let state = self.source.state_at(frame)?;
+        let state = self.source.dynamic().state_at(frame)?;
         let missing = |r: &'static str| RomlensError::Recording {
             msg: format!("the recording has no {r}"),
         };
@@ -761,7 +837,7 @@ impl RecordingSession {
 
     /// One sprite at its own size.
     pub fn render_sprite(&self, frame: u64, index: u8) -> Result<BitmapInfo, RomlensError> {
-        let state = self.source.state_at(frame)?;
+        let state = self.source.dynamic().state_at(frame)?;
         let missing = |r: &'static str| RomlensError::Recording {
             msg: format!("the recording has no {r}"),
         };

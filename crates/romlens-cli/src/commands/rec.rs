@@ -596,3 +596,95 @@ pub fn render(a: RenderArgs<'_>) -> Result<()> {
     }
     Ok(())
 }
+
+/// `rec live`: listen for the recorder's live stream, printing each status
+/// change and a line per second of frames.
+pub fn live(
+    rom: &Path,
+    port: u16,
+    frames: Option<u64>,
+    once: bool,
+    dump: Option<&Path>,
+) -> Result<()> {
+    use romlens_core::recording::MachineStateSource;
+    use romlens_core::recording::live::{DEFAULT_CAPACITY, LiveEvents, LiveServer, LiveStatus};
+    use std::sync::Mutex;
+    use std::sync::mpsc::{Sender, channel};
+
+    enum Event {
+        Frame(u64),
+        Status(LiveStatus),
+    }
+    struct Events(Mutex<Sender<Event>>);
+    impl LiveEvents for Events {
+        fn frame(&self, n: u64) {
+            let _ = self.0.lock().unwrap().send(Event::Frame(n));
+        }
+        fn status(&self, s: LiveStatus) {
+            let _ = self.0.lock().unwrap().send(Event::Status(s));
+        }
+    }
+
+    let rom = crate::commands::session::load_rom(rom)?;
+    let (tx, rx) = channel();
+    let mut server = LiveServer::start(
+        &rom,
+        port,
+        DEFAULT_CAPACITY,
+        std::sync::Arc::new(Events(Mutex::new(tx))),
+    )
+    .with_context(|| format!("listening on port {port}"))?;
+    let source = server.source();
+    let mut received = 0u64;
+    let mut last_report = std::time::Instant::now();
+    let mut connected = false;
+    while let Ok(event) = rx.recv() {
+        match event {
+            Event::Frame(n) => {
+                received += 1;
+                if last_report.elapsed().as_secs() >= 1 {
+                    last_report = std::time::Instant::now();
+                    let pc = source
+                        .state_at(n)
+                        .ok()
+                        .and_then(|s| {
+                            s.region(StateRegion::CpuRegisters)
+                                .map(romlens_core::recording::CpuRegisters::decode)
+                        })
+                        .map(|c| format!("${:02X}:{:04X}", c.pb, c.pc))
+                        .unwrap_or_default();
+                    println!("frame {n}: {received} received, PC {pc}");
+                }
+                if frames.is_some_and(|f| received >= f) {
+                    break;
+                }
+            }
+            Event::Status(s) => {
+                println!("{s:?}");
+                match s {
+                    LiveStatus::Connected { .. } => connected = true,
+                    LiveStatus::Disconnected { .. } | LiveStatus::Refused { .. }
+                        if once && connected =>
+                    {
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    server.stop();
+    println!("{received} frames received");
+    if let (Some(dir), Some(last)) = (dump, source.latest()) {
+        std::fs::create_dir_all(dir)?;
+        for (region, name) in [
+            (StateRegion::Vram, "vram.bin"),
+            (StateRegion::Cgram, "cgram.bin"),
+            (StateRegion::Oam, "oam.bin"),
+        ] {
+            std::fs::write(dir.join(name), source.region_at(last, region)?)?;
+        }
+        println!("frame {last} written to {}", dir.display());
+    }
+    Ok(())
+}

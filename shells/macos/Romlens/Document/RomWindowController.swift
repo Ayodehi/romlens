@@ -77,6 +77,7 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
     }
 
     @objc func closeRecording(_ sender: Any?) { RecordingController.close(model: model) }
+    @objc func toggleLiveSession(_ sender: Any?) { LiveController.toggle(model: model, window: window) }
     @objc func importSnapshot(_ sender: Any?) { RecordingController.importSnapshot(model: model, window: window) }
     @objc func exportFrameRegion(_ sender: Any?) { RecordingController.exportFrameRegion(model: model, window: window) }
     @objc func saveRecorderScript(_ sender: Any?) { RecordingController.saveRecorderScript(window: window) }
@@ -170,6 +171,8 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
             item.state = model.graphicsTab == .tilemap ? .on : .off
         case #selector(closeRecording(_:)), #selector(exportFrameRegion(_:)):
             return model.graphics.hasRecording
+        case #selector(toggleLiveSession(_:)):
+            item.title = model.graphics.isLive ? "Stop Live Session" : "Start Live Session"
         case #selector(toggleNavigator(_:)):
             item.title = model.isNavigatorVisible ? "Hide Navigator" : "Show Navigator"
         case #selector(toggleInspector(_:)):
