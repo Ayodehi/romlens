@@ -8,6 +8,12 @@
 -- Output: $ROMLENS_REC_OUT, or romlens-<time>.rlstream in the script data
 -- folder. $ROMLENS_REC_FRAMES stops the emulator after that many frames.
 --
+-- Where Mesen has an execution log (emu.startExecutionLog, in the MesenCE
+-- fork), the script also records one and writes it beside the stream as
+-- <name>.mxlog: every minute, so a crash loses little, and at the end. Import
+-- it into Romlens as a trace (docs/17). Elsewhere the script records the
+-- stream alone, as before.
+--
 -- Stream format 1, little-endian (docs/13, "The Mesen stream"):
 --   header  "RLSTREAM", u16 version, s2 producer, s2 ROM SHA-1,
 --           i8 created (Unix seconds), u32 ROM size, 64 x 16 bytes of ROM
@@ -36,6 +42,25 @@ local frame_limit = tonumber(os.getenv("ROMLENS_REC_FRAMES") or "")
 
 local out = assert(io.open(out_path, "wb"))
 out:setvbuf("full", 1 << 20)
+
+-- The execution log, when this Mesen has one.
+local xlog_path = out_path:gsub("%.rlstream$", "") .. ".mxlog"
+local xlog = emu.startExecutionLog ~= nil and emu.getExecutionLog ~= nil
+if xlog then
+  emu.startExecutionLog()
+end
+
+-- Written to a .part file and renamed, so a reader never sees half a log.
+local function write_xlog()
+  if not xlog then return end
+  local data = emu.getExecutionLog()
+  local part = xlog_path .. ".part"
+  local f = assert(io.open(part, "wb"))
+  f:write(data)
+  f:close()
+  os.remove(xlog_path)
+  assert(os.rename(part, xlog_path))
+end
 
 -- Memory regions in stream order: memory type, size.
 local regions = {
@@ -198,11 +223,17 @@ function finish()
   out:write("E", string.pack("<I4", frame))
   out:close()
   emu.log("Romlens recorder: " .. frame .. " frames to " .. out_path)
+  if xlog then
+    write_xlog()
+    emu.stopExecutionLog()
+    emu.log("Romlens recorder: execution log to " .. xlog_path)
+  end
 end
 
 emu.addEventCallback(guarded(function()
   if finished then return end
   write_frame()
+  if xlog and frame % 3600 == 0 then write_xlog() end
   if frame_limit and frame >= frame_limit then
     finish()
     emu.stop(0)
@@ -218,3 +249,6 @@ end), emu.eventType.stateLoaded)
 emu.addEventCallback(guarded(finish), emu.eventType.scriptEnded)
 
 emu.log("Romlens recorder: writing " .. out_path)
+if xlog then
+  emu.log("Romlens recorder: and an execution log, " .. xlog_path)
+end

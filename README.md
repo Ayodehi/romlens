@@ -44,6 +44,7 @@ embedded core is the planned next step after that, feeding the same views.
 | [docs/14-phase0-plan.md](docs/14-phase0-plan.md) | Phase 0 implementation plan: layout, work breakdown, tests, CI, verification |
 | [docs/15-conformance-checklist.md](docs/15-conformance-checklist.md) | Frontend conformance checklist: what every shell must expose, with the CLI scenario for each item |
 | [docs/16-phase2-plan.md](docs/16-phase2-plan.md) | Phase 2 implementation plan: jump tables, scored heuristics, trace and symbol imports, graphics decoders, the .romrec format |
+| [docs/17-execution-log.md](docs/17-execution-log.md) | Execution logs (.mxlog) from the MesenCE fork: the format, and the references and data types Romlens takes from them |
 
 Decisions so far are listed at the end of the interactive proposal and in
 `docs/01-vision-and-roadmap.md` (Phase 0 acceptance criteria and working

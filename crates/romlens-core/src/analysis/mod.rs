@@ -13,6 +13,7 @@ pub mod heuristics;
 pub mod inline;
 pub mod jumptable;
 pub mod labels;
+pub mod observed;
 pub mod snapshot;
 pub mod sweep;
 pub mod xrefs;
@@ -48,10 +49,12 @@ const TAG_TABLE: u8 = 8;
 const TAG_HEURISTIC: u8 = 9;
 const TAG_TRACE_CODE: u8 = 10;
 const TAG_TRACE_DATA: u8 = 11;
+/// Typed by what an execution log saw (`observed`).
+const TAG_OBSERVED: u8 = 12;
 
 /// What a resolved `JMP`/`JSR (abs,X)` table is: two-byte entries pointing at
 /// code in the table's own bank.
-const JUMP_TABLE_KIND: RegionKind = RegionKind::Data(DataKind::Table {
+pub(crate) const JUMP_TABLE_KIND: RegionKind = RegionKind::Data(DataKind::Table {
     stride: jumptable::ENTRY_LEN as u8,
     elem: TableElem::Code(BankRule::SameBank),
 });
@@ -325,6 +328,31 @@ pub fn analyze_cached(
             paint.set(b, code, conf, TAG_TABLE, hid);
         }
     }
+    // What an execution log saw the data used for: ROM a DMA channel sent to
+    // CGRAM, VRAM or OAM, and the entries a dispatcher read. That is a fact
+    // about the bytes, so it outranks every guess — the sweep, an operand's
+    // hint, the heuristics — but not code, a resolved table or the header.
+    // The kind carries parameters the class lane cannot, so it is kept per
+    // span, as a table's is.
+    let mut observed_kinds: std::collections::HashMap<u32, RegionKind> =
+        std::collections::HashMap::new();
+    if let Some(log) = &project.exec_log {
+        let spans = observed::dma_spans(log, n as u32)
+            .into_iter()
+            .chain(observed::jump_table_spans(rom, log));
+        for span in spans {
+            let hid = paint.intern(vec![Evidence::Observed(span.what)]);
+            observed_kinds.insert(hid, span.kind);
+            let code = span.kind.code();
+            for b in span.start..(span.start + span.len).min(n as u32) {
+                let b = b as usize;
+                if paint.cls[b] != 0 && !matches!(paint.tag[b], TAG_SWEEP | TAG_OPERAND) {
+                    continue;
+                }
+                paint.set(b, code, span.confidence, TAG_OBSERVED, hid);
+            }
+        }
+    }
     // Bytes an emulator read but never executed. Only fills what nothing else
     // claimed: a byte can legitimately be both read and executed, and the
     // executed pass above has already had its say.
@@ -403,6 +431,11 @@ pub fn analyze_cached(
         // read back as `Table { elem: Raw }` and render as bytes.
         let kind = if paint.tag[start] == TAG_TABLE {
             JUMP_TABLE_KIND
+        } else if paint.tag[start] == TAG_OBSERVED {
+            observed_kinds
+                .get(&paint.hid[start])
+                .copied()
+                .unwrap_or_else(|| kind_from_code(paint.cls[start]))
         } else if paint.tag[start] == TAG_USER {
             project
                 .override_kind_at(start as u32)
@@ -475,7 +508,35 @@ pub fn analyze_cached(
         .filter(|(_, l)| *l)
         .map(|(x, _)| (x.from.0, x.to.as_u24()))
         .collect();
-    let all_xrefs: Vec<_> = walk.xrefs.iter().map(|(x, _)| *x).collect();
+    let mut all_xrefs: Vec<_> = walk.xrefs.iter().map(|(x, _)| *x).collect();
+    let mut labelable = labelable;
+    if let Some(log) = &project.exec_log {
+        // What the game did joins what the disassembler inferred. A reference
+        // both found keeps the disassembler's record, marked seen; the rest
+        // are added. Code targets name labels either way, as a `JSR` does.
+        let seen = observed::xrefs(rom, log);
+        let keys: std::collections::HashSet<(u32, u32, crate::model::xref::XRefKind)> = seen
+            .iter()
+            .map(|x| (x.from.0, x.to.as_u24(), x.kind))
+            .collect();
+        let mut known = std::collections::HashSet::new();
+        for x in &mut all_xrefs {
+            let key = (x.from.0, x.to.as_u24(), x.kind);
+            if keys.contains(&key) {
+                x.observed = true;
+                x.certain = true;
+                known.insert(key);
+            }
+        }
+        for x in seen {
+            if x.kind.is_code() {
+                labelable.insert((x.from.0, x.to.as_u24()));
+            }
+            if known.insert((x.from.0, x.to.as_u24(), x.kind)) {
+                all_xrefs.push(x);
+            }
+        }
+    }
     let mut vectors = vectors;
     if let Some(coverage) = &project.coverage {
         // A subroutine entry an emulator saw deserves the same `SUB_` name a

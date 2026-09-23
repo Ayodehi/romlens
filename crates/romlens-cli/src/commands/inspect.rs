@@ -107,6 +107,7 @@ pub fn run(rom: &Path, expr: &str, project: Option<&Path>) -> Result<()> {
                 Evidence::User => "marked by the user".to_owned(),
                 Evidence::Imported(s) => format!("imported from {s}"),
                 Evidence::Trace { file, hits } => format!("trace {file} ({hits} hits)"),
+                Evidence::Observed(what) => what.clone(),
             })
             .collect();
         println!(

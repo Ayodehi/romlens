@@ -4,6 +4,7 @@
 pub mod command;
 pub mod comment;
 pub mod coverage;
+pub mod exec_log;
 pub mod hardware;
 pub mod label;
 pub mod project;

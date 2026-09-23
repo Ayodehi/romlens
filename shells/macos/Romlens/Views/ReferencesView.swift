@@ -67,10 +67,12 @@ struct ReferencesView: View {
             Text(row.text)
                 .lineLimit(1)
             Spacer(minLength: 8)
-            Text(row.certain ? row.kindName : "\(row.kindName)?")
+            Text(row.observed ? "\(row.kindName), seen" : row.certain ? row.kindName : "\(row.kindName)?")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
-                .help(row.certain ? "" : "The analyzer is not sure of this reference")
+                .help(row.observed
+                    ? "An execution log saw the game do this"
+                    : row.certain ? "" : "The analyzer is not sure of this reference")
         }
     }
 }

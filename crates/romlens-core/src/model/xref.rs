@@ -57,4 +57,7 @@ pub struct XRef {
     pub to_offset: Option<FileOffset>,
     pub kind: XRefKind,
     pub certain: bool,
+    /// An emulator saw it happen (an execution log), rather than the
+    /// disassembler inferring it.
+    pub observed: bool,
 }

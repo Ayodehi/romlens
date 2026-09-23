@@ -11,6 +11,7 @@ use crate::memory::map::MappingMode;
 use crate::model::command::{Command, Origin, UndoEntry};
 use crate::model::comment::{Comment, CommentKind};
 use crate::model::coverage::Coverage;
+use crate::model::exec_log::ExecLog;
 use crate::model::label::{Label, validate_label_name};
 use crate::model::region::{OverrideKind, RegionOverride, RegionParams};
 use crate::rom::image::RomImage;
@@ -134,6 +135,10 @@ pub struct Project {
     /// on the undo stack would be absurd. `Arc` because the analyzer clones the
     /// project on every run.
     pub coverage: Option<Arc<Coverage>>,
+    /// Every imported execution log, merged. Its coverage is in `coverage`
+    /// too; this keeps the relationships a code/data log cannot hold: which
+    /// instruction read what, where transfers went, what DMA moved.
+    pub exec_log: Option<Arc<ExecLog>>,
     /// What was imported, in import order.
     pub traces: Vec<TraceRecord>,
     /// Symbol files imported, in import order. The labels themselves live in
@@ -153,6 +158,7 @@ impl Project {
             region_overrides: Vec::new(),
             flag_overrides: BTreeMap::new(),
             coverage: None,
+            exec_log: None,
             traces: Vec::new(),
             imports: Vec::new(),
             recordings: Vec::new(),
@@ -168,6 +174,15 @@ impl Project {
         }
         self.traces.retain(|t| t.source != record.source);
         self.traces.push(record);
+    }
+
+    /// Merge an execution log in. Its coverage goes through `add_trace`
+    /// like any other trace's; this keeps the log.
+    pub fn add_exec_log(&mut self, log: &ExecLog) {
+        match &mut self.exec_log {
+            Some(existing) => Arc::make_mut(existing).merge(log),
+            None => self.exec_log = Some(Arc::new(log.clone())),
+        }
     }
 
     /// Record a symbol file that was imported. The labels are applied through

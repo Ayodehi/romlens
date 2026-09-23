@@ -112,6 +112,7 @@ enum RecordingController {
                     1. In Mesen, open Debug › Script Window and load \(url.lastPathComponent).
                     2. In the script window's settings, allow access to I/O and OS functions, then run it.
                     3. Play, then stop the script. Run romlens rec pack on the .rlstream it wrote (in Mesen's script data folder) to make a .romrec, and open that here.
+                    4. A Mesen with an execution log (the MesenCE fork) also gets a .mxlog beside the stream: import it with File › Import › Execution Trace… for the calls, jumps, reads and DMA the game made.
                     """,
                     window: window,
                     style: .informational

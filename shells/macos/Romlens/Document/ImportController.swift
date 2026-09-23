@@ -22,7 +22,8 @@ enum ImportController {
         var message: String {
             switch self {
             case .trace:
-                return "A Mesen2 .cdl or a bsnes-plus usage map. What an emulator saw execute outranks the disassembler's guesses, and the recorded M/X widths fix what static analysis cannot."
+                // Short: the panel grows as wide as its message is long.
+                return "A Mesen .cdl or execution log (.mxlog), or a bsnes-plus usage map."
             case .symbols:
                 return "A WLA-DX or bsnes-plus .sym, a no$sns .sym, or a VICE .lbl. Your own names are never overwritten."
             }
@@ -30,7 +31,7 @@ enum ImportController {
 
         var extensions: [String] {
             switch self {
-            case .trace: ["cdl", "map", "bin", "usage"]
+            case .trace: ["cdl", "map", "bin", "usage", "mxlog"]
             case .symbols: ["sym", "lbl", "txt"]
             }
         }
@@ -97,6 +98,9 @@ enum ImportController {
             lines.append("\(r.executedBytes) bytes executed, \(r.readBytes) read, as \(r.format).")
             if r.hasWidths {
                 lines.append("The recorded M/X widths now steer the disassembler.")
+            }
+            if !r.detail.isEmpty {
+                lines.append("Execution log: \(r.detail). Its calls, jumps and reads join the references, marked “seen”.")
             }
         case .symbols:
             lines.append("\(r.labelsAdded) labels added, \(r.labelsReplaced) replaced, \(r.commentsAdded) comments added, as \(r.format).")

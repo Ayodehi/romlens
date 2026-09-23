@@ -164,6 +164,17 @@ recording the developer makes themselves instead; ca65 `.dbg` moves to Phase 3,
 where its line and span records have a source view to land in. Previews, the
 graphics views and recording import are tracks 2B and 2C, still to start.
 
+**Execution logs (23 September 2026).** Coverage says a byte was executed or
+read; telling code from data reliably needs to know *what* read it and where
+control went. The MesenCE fork now records an execution log — instructions
+with their widths, each instruction's reads and writes, every control
+transfer and every DMA — and Romlens imports it as a trace
+(`17-execution-log.md`). It adds the references the game made, including
+indirect calls no static walk can follow, and types ROM by where DMA sent it.
+The next uses, in order: follow decompressor → RAM buffer → DMA chains to type
+compressed sources, map RAM-resident code back to its ROM origin, and use the
+recorded width states to settle flag conflicts.
+
 ### Phase 3 — Recover structure (8–12 weeks)
 
 Deliverable: functions, control-flow graphs, call graph, and a first

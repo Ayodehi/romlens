@@ -273,6 +273,7 @@ impl<'a> Walk<'a> {
                             to_offset: self.rom.file_offset_for(*target),
                             kind: if call { XRefKind::Call } else { XRefKind::Jump },
                             certain: false,
+                            observed: false,
                         },
                         true,
                     ));
@@ -397,6 +398,7 @@ impl<'a> Walk<'a> {
                     to_offset: self.rom.file_offset_for(v.target),
                     kind: XRefKind::Vector,
                     certain: true,
+                    observed: false,
                 },
                 true,
             ));
@@ -516,6 +518,7 @@ impl<'a> Walk<'a> {
                         to_offset: Some(to),
                         kind: if code { XRefKind::Jump } else { XRefKind::Read },
                         certain: false,
+                        observed: false,
                     },
                     true,
                 ));
@@ -911,6 +914,7 @@ impl<'a> Walk<'a> {
                                         to_offset: self.rom.file_offset_for(dest),
                                         kind: XRefKind::Jump,
                                         certain: true,
+                                        observed: false,
                                     },
                                     true,
                                 ));

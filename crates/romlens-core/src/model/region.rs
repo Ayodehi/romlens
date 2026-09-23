@@ -283,6 +283,8 @@ pub enum Evidence {
         file: String,
         hits: u32,
     },
+    /// What an execution log saw the bytes used for.
+    Observed(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -34,6 +34,8 @@ pub const PROJECT_FORMAT: &str = "romlens-project";
 pub const PROJECT_VERSION: u32 = 2;
 /// Where the merged coverage lives inside a package.
 pub const COVERAGE_FILE: &str = "traces/coverage.cdl";
+/// Where the merged execution log lives, in the format the fork writes.
+pub const EXEC_LOG_FILE: &str = "traces/execution.mxlog";
 
 pub const PROJECT_FILES: [&str; 5] = [
     "project.json",
@@ -385,6 +387,12 @@ pub fn to_files(rom: &RomImage, project: &Project) -> BTreeMap<String, Vec<u8>> 
             COVERAGE_FILE.to_owned(),
             crate::io::import::to_stored(coverage),
         );
+        if let Some(log) = &project.exec_log {
+            files.insert(
+                EXEC_LOG_FILE.to_owned(),
+                crate::io::import::exec_log::write(log),
+            );
+        }
     }
     files
 }
@@ -627,6 +635,12 @@ pub fn from_files(
             bytes,
             rom.len() as u32,
         )?));
+        if let Some(bytes) = files.get(EXEC_LOG_FILE) {
+            project.exec_log = Some(std::sync::Arc::new(crate::io::import::exec_log::read(
+                bytes,
+                rom.bytes(),
+            )?));
+        }
     } else {
         project.traces.clear();
     }

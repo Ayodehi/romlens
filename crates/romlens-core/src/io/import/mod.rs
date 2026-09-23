@@ -1,11 +1,13 @@
 //! Reading what other tools know about a ROM.
 
 pub mod cdl;
+pub mod exec_log;
 pub mod symbols;
 pub mod usage_map;
 
 use crate::error::ProjectError;
 use crate::model::coverage::Coverage;
+use crate::model::exec_log::ExecLog;
 use crate::rom::image::RomImage;
 
 /// The trace formats this reads.
@@ -15,6 +17,8 @@ pub enum TraceFormat {
     Cdl,
     /// bsnes-plus usage map.
     UsageMap,
+    /// The Mesen fork's execution log (`exec_log`).
+    ExecLog,
 }
 
 impl TraceFormat {
@@ -22,6 +26,7 @@ impl TraceFormat {
         match self {
             TraceFormat::Cdl => "cdl",
             TraceFormat::UsageMap => "usage",
+            TraceFormat::ExecLog => "mxlog",
         }
     }
 
@@ -29,6 +34,7 @@ impl TraceFormat {
         match name {
             "cdl" => Some(TraceFormat::Cdl),
             "usage" | "usagemap" | "usage-map" => Some(TraceFormat::UsageMap),
+            "mxlog" | "exec" | "execution-log" => Some(TraceFormat::ExecLog),
             _ => None,
         }
     }
@@ -41,6 +47,9 @@ impl TraceFormat {
 /// and a bare file the size of the ROM is a header-less CDL.
 pub fn detect(bytes: &[u8], rom: &RomImage) -> Result<TraceFormat, ProjectError> {
     let rom_len = rom.len() as u32;
+    if bytes.starts_with(exec_log::MAGIC) {
+        return Ok(TraceFormat::ExecLog);
+    }
     if bytes.starts_with(cdl::MAGIC) {
         return Ok(TraceFormat::Cdl);
     }
@@ -51,27 +60,54 @@ pub fn detect(bytes: &[u8], rom: &RomImage) -> Result<TraceFormat, ProjectError>
         return Ok(TraceFormat::Cdl);
     }
     Err(ProjectError::BadFormat(format!(
-        "{} bytes is neither a Mesen2 CDL for this {rom_len}-byte ROM nor a bsnes-plus usage map. \
+        "{} bytes is not a Mesen execution log, a Mesen2 CDL for this {rom_len}-byte ROM or a bsnes-plus usage map. \
 DiztinGUIsh projects are not read directly: export a bsnes usage map or a WLA `.sym` from Diz",
         bytes.len()
     )))
 }
 
+/// A trace as read: its coverage, which every format has, and for an
+/// execution log the log itself, which says far more.
+#[derive(Debug, Clone)]
+pub struct Trace {
+    pub format: TraceFormat,
+    pub coverage: Coverage,
+    pub exec_log: Option<ExecLog>,
+}
+
 /// Read a trace, detecting the format when one is not given.
+pub fn read(
+    bytes: &[u8],
+    rom: &RomImage,
+    format: Option<TraceFormat>,
+) -> Result<Trace, ProjectError> {
+    let format = match format {
+        Some(f) => f,
+        None => detect(bytes, rom)?,
+    };
+    let (coverage, exec_log) = match format {
+        TraceFormat::Cdl => (cdl::read(bytes, rom.len() as u32)?, None),
+        TraceFormat::UsageMap => (usage_map::read(bytes, rom)?, None),
+        TraceFormat::ExecLog => {
+            let log = exec_log::read(bytes, rom.bytes())?;
+            (log.to_coverage(rom.bytes()), Some(log))
+        }
+    };
+    Ok(Trace {
+        format,
+        coverage,
+        exec_log,
+    })
+}
+
+/// [`read`], for callers that want only the coverage.
 pub fn read_trace(
     bytes: &[u8],
     rom: &RomImage,
     format: Option<TraceFormat>,
 ) -> Result<(TraceFormat, Coverage), ProjectError> {
-    let format = match format {
-        Some(f) => f,
-        None => detect(bytes, rom)?,
-    };
-    let coverage = match format {
-        TraceFormat::Cdl => cdl::read(bytes, rom.len() as u32)?,
-        TraceFormat::UsageMap => usage_map::read(bytes, rom)?,
-    };
-    Ok((format, coverage))
+    let t = read(bytes, rom, format)?;
+    Ok((t.format, t.coverage))
 }
 
 /// The folded form a project stores: one byte per ROM byte, whatever the
@@ -130,7 +166,11 @@ mod tests {
 
     #[test]
     fn format_names_round_trip() {
-        for f in [TraceFormat::Cdl, TraceFormat::UsageMap] {
+        for f in [
+            TraceFormat::Cdl,
+            TraceFormat::UsageMap,
+            TraceFormat::ExecLog,
+        ] {
             assert_eq!(TraceFormat::parse(f.name()), Some(f));
         }
         assert_eq!(TraceFormat::parse("diz"), None);

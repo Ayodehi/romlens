@@ -402,7 +402,11 @@ struct XrefsSection: View {
                         HStack {
                             Text(x.fromAddress.map { formatSnesAddress(address: $0) } ?? formatFileOffset(offset: x.fromOffset)).monospaced()
                             Text(x.kindName).foregroundStyle(.secondary)
-                            if !x.certain { Text("?").foregroundStyle(.tertiary) }
+                            if x.observed {
+                                Text("seen").foregroundStyle(.tertiary).help("An execution log saw the game do this")
+                            } else if !x.certain {
+                                Text("?").foregroundStyle(.tertiary)
+                            }
                         }
                         .font(.callout)
                     }

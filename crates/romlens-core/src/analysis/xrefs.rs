@@ -39,6 +39,7 @@ pub fn xref_for(rom: &RomImage, insn: &Instruction) -> Option<XRef> {
         to_offset,
         kind,
         certain: t.certain,
+        observed: false,
     })
 }
 

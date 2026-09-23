@@ -16,6 +16,8 @@ final class ReferencesModel {
         let snesAddress: UInt32?
         let kindName: String
         let certain: Bool
+        /// An emulator saw it happen (an execution log).
+        let observed: Bool
         /// The referring instruction, labels applied; empty when the
         /// reference is from data (a pointer or table entry).
         let text: String
@@ -48,6 +50,7 @@ final class ReferencesModel {
                 snesAddress: x.fromAddress,
                 kindName: x.kindName,
                 certain: x.certain,
+                observed: x.observed,
                 text: workbench.instructionAt(fileOffset: x.fromOffset)?.text ?? "",
                 routine: x.fromAddress.flatMap { Self.routine(containing: $0, in: routines) }
             )

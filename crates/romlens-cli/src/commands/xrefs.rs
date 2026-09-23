@@ -30,7 +30,13 @@ pub fn run(rom: &Path, expr: &str, project: Option<&Path>) -> Result<()> {
                 .snes_address_for(x.from)
                 .map_or("--:----".to_owned(), |a| a.to_string()),
             x.kind.name(),
-            if x.certain { "" } else { " (uncertain)" }
+            if x.observed {
+                " (seen)"
+            } else if x.certain {
+                ""
+            } else {
+                " (uncertain)"
+            }
         );
     }
     if let Some(off) = offset {
@@ -42,7 +48,13 @@ pub fn run(rom: &Path, expr: &str, project: Option<&Path>) -> Result<()> {
                 x.to,
                 x.to_offset.map_or("        ".to_owned(), |o| o.to_string()),
                 x.kind.name(),
-                if x.certain { "" } else { " (uncertain)" }
+                if x.observed {
+                    " (seen)"
+                } else if x.certain {
+                    ""
+                } else {
+                    " (uncertain)"
+                }
             );
         }
     }

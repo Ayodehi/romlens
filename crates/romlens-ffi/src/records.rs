@@ -297,6 +297,8 @@ pub struct ImportResult {
     pub skipped: Vec<String>,
     /// The file's leading comment block, kept with the project.
     pub notice: String,
+    /// For an execution log: what it holds, in words. Empty otherwise.
+    pub detail: String,
     /// For a trace: bytes seen to execute and to be read.
     pub executed_bytes: u64,
     pub read_bytes: u64,
@@ -383,6 +385,11 @@ impl From<&model::Evidence> for EvidenceInfo {
             model::Evidence::Trace { file, hits } => EvidenceInfo {
                 kind: EvidenceKind::Trace,
                 detail: format!("{file} ({hits} hits)"),
+                score: 1.0,
+            },
+            model::Evidence::Observed(what) => EvidenceInfo {
+                kind: EvidenceKind::Trace,
+                detail: what.clone(),
                 score: 1.0,
             },
         }
@@ -526,6 +533,8 @@ pub struct XRefInfo {
     pub kind: XRefKind,
     pub kind_name: String,
     pub certain: bool,
+    /// An emulator saw it happen.
+    pub observed: bool,
 }
 
 pub fn xref_info(rom: &romlens_core::RomImage, x: &model::XRef) -> XRefInfo {
@@ -537,6 +546,7 @@ pub fn xref_info(rom: &romlens_core::RomImage, x: &model::XRef) -> XRefInfo {
         kind: x.kind.into(),
         kind_name: x.kind.name().to_owned(),
         certain: x.certain,
+        observed: x.observed,
     }
 }
 

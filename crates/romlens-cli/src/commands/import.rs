@@ -4,7 +4,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use romlens_core::io::import::symbols::{self, SymbolFormat};
-use romlens_core::io::import::{TraceFormat, read_trace};
+use romlens_core::io::import::{Trace, TraceFormat, read};
 use romlens_core::model::{ImportRecord, Origin, TraceRecord};
 
 use crate::commands::session::{load_project, rom_for_project, save_project};
@@ -13,15 +13,19 @@ pub fn trace(dir: &Path, rom: Option<&Path>, file: &Path, format: Option<&str>) 
     let format = match format {
         Some(name) => match TraceFormat::parse(name) {
             Some(f) => Some(f),
-            None => bail!("unknown trace format {name:?}; use cdl or usage"),
+            None => bail!("unknown trace format {name:?}; use cdl, usage or mxlog"),
         },
         None => None,
     };
     let rom = rom_for_project(dir, rom)?;
     let mut project = load_project(&rom, dir)?;
     let bytes = std::fs::read(file).with_context(|| format!("reading {}", file.display()))?;
-    let (format, coverage) = read_trace(&bytes, &rom, format)?;
-    if coverage.is_empty() {
+    let Trace {
+        format,
+        coverage,
+        exec_log,
+    } = read(&bytes, &rom, format)?;
+    if coverage.is_empty() && exec_log.as_ref().is_none_or(|l| l.is_empty()) {
         bail!(
             "{} records nothing for this ROM; it was probably taken from another image",
             file.display()
@@ -44,6 +48,9 @@ pub fn trace(dir: &Path, rom: Option<&Path>, file: &Path, format: Option<&str>) 
         },
         coverage,
     );
+    if let Some(log) = &exec_log {
+        project.add_exec_log(log);
+    }
     save_project(&rom, dir, &project)?;
 
     let total = rom.len() as f64;
@@ -55,6 +62,17 @@ pub fn trace(dir: &Path, rom: Option<&Path>, file: &Path, format: Option<&str>) 
         read_bytes as f64 * 100.0 / total,
         if widths { ", with M/X widths" } else { "" }
     );
+    if let Some(log) = &exec_log {
+        println!(
+            "execution log: {} instructions ({} in more than one width), {} access runs, \
+{} transfers, {} DMA runs",
+            log.insns.len(),
+            log.insns.iter().filter(|i| i.mixed_widths()).count(),
+            log.accesses.len(),
+            log.flows.len(),
+            log.dma.len()
+        );
+    }
     if project.traces.len() > 1 {
         println!("merged with {} earlier traces", project.traces.len() - 1);
     }

@@ -814,7 +814,7 @@ impl Workbench {
 
     // ---- importing ---------------------------------------------------------
 
-    /// Import a Mesen2 CDL or a bsnes-plus usage map.
+    /// Import a Mesen2 CDL, a bsnes-plus usage map or a Mesen execution log.
     ///
     /// Not a `Command`: an import is a body of observation rather than an edit
     /// with an inverse, and putting two megabytes of bitsets on the undo stack
@@ -824,8 +824,12 @@ impl Workbench {
         source: String,
         bytes: Vec<u8>,
     ) -> Result<ImportResult, RomlensError> {
-        let (format, coverage) = io::import::read_trace(&bytes, &self.rom.image, None)?;
-        if coverage.is_empty() {
+        let io::import::Trace {
+            format,
+            coverage,
+            exec_log,
+        } = io::import::read(&bytes, &self.rom.image, None)?;
+        if coverage.is_empty() && exec_log.as_ref().is_none_or(|l| l.is_empty()) {
             return Err(RomlensError::Project {
                 msg: format!("{source} records nothing for this ROM"),
             });
@@ -840,6 +844,7 @@ impl Workbench {
             rewritten: Vec::new(),
             skipped: Vec::new(),
             notice: String::new(),
+            detail: exec_log.as_ref().map(exec_log_summary).unwrap_or_default(),
             executed_bytes: coverage.executed.count(),
             read_bytes: coverage.read.count(),
             has_widths: coverage.flags.recorded,
@@ -855,6 +860,9 @@ impl Workbench {
                 },
                 coverage,
             );
+            if let Some(log) = &exec_log {
+                inner.project.add_exec_log(log);
+            }
             inner.undo.clear();
             self.after_edit(&mut inner, true)
         };
@@ -891,6 +899,7 @@ impl Workbench {
                     .collect(),
                 skipped: file.skipped.clone(),
                 notice: file.notice.clone(),
+                detail: String::new(),
                 executed_bytes: 0,
                 read_bytes: 0,
                 has_widths: false,
@@ -986,6 +995,7 @@ impl Workbench {
                 rewritten: Vec::new(),
                 skipped: Vec::new(),
                 notice: String::new(),
+                detail: String::new(),
                 executed_bytes: t.executed_bytes,
                 read_bytes: t.read_bytes,
                 has_widths: false,
@@ -1001,6 +1011,7 @@ impl Workbench {
             rewritten: Vec::new(),
             skipped: Vec::new(),
             notice: i.notice.clone(),
+            detail: String::new(),
             executed_bytes: 0,
             read_bytes: 0,
             has_widths: false,
@@ -1135,4 +1146,17 @@ pub fn read_project_package(path: String) -> Result<HashMap<String, Vec<u8>>, Ro
 pub fn project_identity(files: HashMap<String, Vec<u8>>) -> Result<RomIdentityInfo, RomlensError> {
     let files: std::collections::BTreeMap<String, Vec<u8>> = files.into_iter().collect();
     Ok((&io::read_identity(&files)?).into())
+}
+
+/// What an execution log holds, for the import summary.
+fn exec_log_summary(log: &romlens_core::model::exec_log::ExecLog) -> String {
+    let mixed = log.insns.iter().filter(|i| i.mixed_widths()).count();
+    format!(
+        "{} instructions ({} in more than one width), {} access runs, {} transfers, {} DMA runs",
+        log.insns.len(),
+        mixed,
+        log.accesses.len(),
+        log.flows.len(),
+        log.dma.len()
+    )
 }
