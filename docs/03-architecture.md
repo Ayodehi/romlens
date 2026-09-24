@@ -243,8 +243,14 @@ Deltas from Phase 1 ("Disassemble", 21 September 2026):
   `SuspiciousFallthrough` warning (`SuspiciousEntry` covers only the first
   instruction of an entry). `romlens analyze --warnings` lists every warning,
   the CLI twin of the inspector's list.
+- A `PLP` that pulls the status a `PHP` earlier on the same path pushed
+  restores that `PHP`'s widths: the walk follows the bytes each push and pull
+  moves (by the widths then in force), and where the `PLP`'s byte is the
+  `PHP`'s it takes M and X from there and marks the record `RESTORED_PLP`.
+  `PHP; SEP #$30; …; PLP` is back in the widths it started in, not assumed
+  still 8-bit. A `TCS`/`TXS`, or a pull past the saved byte, forgets it.
 - Confidence 0.7 marks the instructions whose operand width rests on M/X
-  assumed after a `PLP` or an `XCE` with unknown carry, and everything after
+  assumed after an unpaired `PLP` or an `XCE` with unknown carry, and everything after
   the first of them in the same walk (the stream may be misaligned), until a
   `REP`/`SEP` re-establishes the width: the `ASSUMED_WIDTHS` bit on the
   record. The `PLP` itself decodes exactly and keeps 0.9, so a `PLP; RTS`

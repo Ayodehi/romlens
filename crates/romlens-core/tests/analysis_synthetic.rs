@@ -116,10 +116,10 @@ fn walker_follows_every_static_edge() {
     assert_eq!(data.len, 2);
     assert_eq!(snap.auto_labels[&a(0x9000)].name, "DATA_009000");
     assert_eq!(snap.xrefs_to(a(0x9000))[0].kind, XRefKind::Write);
-    // Labels: SUB for call targets, CODE for the branch target.
+    // Labels: SUB for call targets, SKIP for the forward branch target.
     assert_eq!(snap.auto_labels[&a(0x8020)].name, "SUB_008020");
     assert_eq!(snap.auto_labels[&a(0x8040)].name, "SUB_008040");
-    assert_eq!(snap.auto_labels[&a(0x8016)].name, "CODE_008016");
+    assert_eq!(snap.auto_labels[&a(0x8016)].name, "SKIP_008016");
     assert_eq!(snap.auto_labels[&a(0x8000)].name, "RESET_008000");
     assert_eq!(snap.auto_labels[&a(0x8090)].name, "NMI_008090");
     assert_eq!(snap.auto_labels[&a(0x80A0)].name, "IRQ_0080A0");

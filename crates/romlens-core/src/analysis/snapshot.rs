@@ -231,6 +231,20 @@ impl AnalysisSnapshot {
         let off = FileOffset(rec.offset);
         let addr = rom.snes_address_for(off)?;
         let bytes = rom.bytes().get(rec.offset as usize..)?;
-        decode(bytes, addr, off, rec.flags_before())
+        let mut insn = decode(bytes, addr, off, rec.flags_before())?;
+        // A PLP the analyzer paired with its PHP: the widths after it are
+        // the ones the walk went on with.
+        if rec.assumptions & crate::cpu65816::RESTORED_PLP != 0 {
+            insn.assumptions =
+                (insn.assumptions & !crate::cpu65816::ASSUMED_PLP) | crate::cpu65816::RESTORED_PLP;
+            if let Some(next) = self.instruction_at(FileOffset(rec.offset + 1))
+                && next.offset == rec.offset + 1
+            {
+                let after = next.flags_before();
+                insn.flags_after.m = after.m;
+                insn.flags_after.x = after.x;
+            }
+        }
+        Some(insn)
     }
 }

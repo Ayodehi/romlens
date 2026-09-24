@@ -12,7 +12,7 @@ pub mod opcodes;
 
 pub use decode::{
     ASSUMED_DBR, ASSUMED_DP, ASSUMED_PLP, ASSUMED_WIDTHS, ASSUMED_XCE_CARRY, BANK_WRAP,
-    Instruction, Operand, Target, TargetKind, assumption_names, decode,
+    Instruction, Operand, RESTORED_PLP, Target, TargetKind, assumption_names, decode,
 };
 pub use encode::encode;
 pub use flags::FlagState;

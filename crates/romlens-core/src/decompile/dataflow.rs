@@ -328,6 +328,26 @@ impl<'a> Flow<'a> {
     }
 }
 
+/// Whether a statement's reads count at a point where `live` is live after
+/// it: not for an assignment to a register, flag or temporary that nothing
+/// reads and that has no effect, which is dead (strong liveness, so a value
+/// read only by dead code is not live either).
+fn counts(s: &Stmt, info: &Info, live: &LocSet) -> bool {
+    let local = matches!(s, Stmt::Assign { dst, .. } if !matches!(dst, Place::Mem { .. }));
+    !local || info.effect || info.defs.iter().any(|d| live.contains(d))
+}
+
+/// Step `live` back over one statement.
+fn step_back(s: &Stmt, info: &Info, live: &mut LocSet) {
+    if !counts(s, info, live) {
+        return;
+    }
+    for d in &info.defs {
+        live.remove(d);
+    }
+    live.extend(info.uses.iter().copied());
+}
+
 /// Live-out of every block, by fixed point.
 pub fn liveness(flow: &Flow, cfg: &Cfg, lifted: &Lifted) -> Vec<LocSet> {
     let n = cfg.blocks.len();
@@ -360,11 +380,8 @@ pub fn liveness(flow: &Flow, cfg: &Cfg, lifted: &Lifted) -> Vec<LocSet> {
             }
             let mut live = out.clone();
             live.extend(term[b].iter().copied());
-            for i in infos[b].iter().rev() {
-                for d in &i.defs {
-                    live.remove(d);
-                }
-                live.extend(i.uses.iter().copied());
+            for (l, i) in lifted.blocks[b].lines.iter().zip(&infos[b]).rev() {
+                step_back(&l.stmt, i, &mut live);
             }
             if live != live_in[b] {
                 live_in[b] = live;
@@ -395,10 +412,7 @@ pub fn live_after_lines(
     for i in (0..lb.lines.len()).rev() {
         after[i] = live.clone();
         let info = flow.info(&lb.lines[i].stmt);
-        for d in &info.defs {
-            live.remove(d);
-        }
-        live.extend(info.uses.iter().copied());
+        step_back(&lb.lines[i].stmt, &info, &mut live);
     }
     after
 }
@@ -415,10 +429,7 @@ pub fn live_at_entry(flow: &Flow, cfg: &Cfg, lifted: &Lifted, live_out: &[LocSet
     ));
     for l in lb.lines.iter().rev() {
         let info = flow.info(&l.stmt);
-        for d in &info.defs {
-            live.remove(d);
-        }
-        live.extend(info.uses.iter().copied());
+        step_back(&l.stmt, &info, &mut live);
     }
     live
 }
@@ -995,10 +1006,7 @@ fn whole_accumulator(flow: &Flow, cfg: &Cfg, lifted: &mut Lifted, live_out: &[Lo
         let mut after: Vec<LocSet> = vec![LocSet::new(); lb.lines.len()];
         for i in (0..lb.lines.len()).rev() {
             after[i] = live.clone();
-            for d in &infos[i].defs {
-                live.remove(d);
-            }
-            live.extend(infos[i].uses.iter().copied());
+            step_back(&lb.lines[i].stmt, &infos[i], &mut live);
         }
         for (i, line) in lb.lines.iter_mut().enumerate() {
             if let Stmt::Assign {

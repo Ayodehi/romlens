@@ -4,7 +4,7 @@
 void SUB_008020(void); /* Reads nothing; returns X. */
 void SUB_008030(void); /* Reads nothing; returns nothing. */
 void SUB_008040(void); /* Reads nothing; returns nothing. */
-void SUB_008050(void); /* Reads X; returns nothing. */
+void SUB_008050(void); /* Reads X; returns nothing; preserves X. */
 
 /* Reads nothing; returns A, X and the carry (some callers are not known, so returns are assumed). */
 void RESET_008000(void)
@@ -19,8 +19,8 @@ void RESET_008000(void)
     SUB_008040();
     SUB_008050();
 
-L_008016:
-    goto L_008016;
+CODE_008016:
+    goto CODE_008016;
 }
 /* SUB_008020 at $00:8020: 5 instructions, lift level. From Romlens; for reading, not for rebuilding the ROM. */
 #include "snes.h"
@@ -34,12 +34,12 @@ void SUB_008020(void)
     N = (X & 0x80) != 0;
     Z = X == 0;
 
-L_008022:
+LOOP_008022:
     ADDR_7E0200[X] = 0;
     X = (u8)(X - 1);
     N = (X & 0x80) != 0;
     Z = X == 0;
-    if (!N) goto L_008022;
+    if (!N) goto LOOP_008022;
     return;
 }
 /* SUB_008030 at $00:8030: 7 instructions, lift level. From Romlens; for reading, not for rebuilding the ROM. */
@@ -89,12 +89,12 @@ void SUB_008040(void)
     C = (u8)A >= t1;
     Z = (u8)A == t1;
     N = (((u8)A - t1) & 0x80) != 0;
-    if (C) goto L_008048;
+    if (C) goto SKIP_008048;
     A = (A & 0xFF00) | ADDR_7E0021;
     N = ((u8)A & 0x80) != 0;
     Z = (u8)A == 0;
 
-L_008048:
+SKIP_008048:
     ADDR_7E0022 = (u8)A;
     return;
 }
@@ -104,7 +104,7 @@ L_008048:
 extern u8 ADDR_7E0300;
 extern u8 DATA_008070[];
 
-/* Reads X; returns nothing. */
+/* Reads X; returns nothing; preserves X. */
 void SUB_008050(void)
 {
     push8(X);

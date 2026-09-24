@@ -62,6 +62,10 @@ pub const BANK_WRAP: u8 = 0b0001_0000;
 /// (or the alignment of the stream it sits in) rests on M/X values assumed
 /// after a `PLP` or an `XCE` with unknown carry.
 pub const ASSUMED_WIDTHS: u8 = 0b0010_0000;
+/// Set by the analyzer, not the decoder: this `PLP` pulls the status a
+/// `PHP` earlier on the same path pushed, so M and X after it are that
+/// `PHP`'s (the next instruction's record carries them), not assumed.
+pub const RESTORED_PLP: u8 = 0b0100_0000;
 
 pub fn assumption_names(bits: u8) -> Vec<&'static str> {
     let mut out = Vec::new();

@@ -421,6 +421,33 @@ impl<'a> Namer<'a> {
         self.placeholders = out;
     }
 
+    /// A goto label for code at `at`: the listing's label for it (a
+    /// `LOOP_`, a `SKIP_`, the user's name) as an identifier, else `L_`
+    /// and the address. Labels have their own namespace in C.
+    pub fn goto_label(&self, at: SnesAddress) -> String {
+        let at = Project::canonical(self.rom, at);
+        let Some(raw) = self.label(at).filter(|_| self.use_names) else {
+            return format!("L_{:06X}", at.as_u24());
+        };
+        let mut name: String = raw
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+        if name.is_empty() || name.as_bytes()[0].is_ascii_digit() {
+            name.insert(0, '_');
+        }
+        if KEYWORDS.contains(&name.as_str()) {
+            name.push('_');
+        }
+        name
+    }
+
     pub fn declarations(&self) -> Vec<&str> {
         self.decls.values().map(String::as_str).collect()
     }
@@ -992,9 +1019,9 @@ impl GotoLayout<'_> {
         order
     }
 
-    pub fn label(&self, b: BlockId) -> String {
+    pub fn label(&self, e: &Emitter, b: BlockId) -> String {
         let s = &self.f.steps[self.cfg.blocks[b].steps.start].insn;
-        format!("L_{:06X}", s.address.as_u24())
+        e.names.goto_label(s.address)
     }
 
     pub fn print(&self, e: &mut Emitter, asm: &dyn Fn(usize) -> String) {
@@ -1033,7 +1060,8 @@ impl GotoLayout<'_> {
                 }
                 let indent = e.w.indent;
                 e.w.indent = 0;
-                e.w.tok(&self.label(b), CTokenKind::GotoLabel, None);
+                let l = self.label(e, b);
+                e.w.tok(&l, CTokenKind::GotoLabel, None);
                 e.w.w(":");
                 e.w.end(&[block.steps.start]);
                 e.w.indent = indent;
@@ -1066,7 +1094,8 @@ impl GotoLayout<'_> {
                         e.w.w(" ");
                         e.kw("goto");
                         e.w.w(" ");
-                        e.w.tok(&self.label(*taken), CTokenKind::GotoLabel, None);
+                        let l = self.label(e, *taken);
+                        e.w.tok(&l, CTokenKind::GotoLabel, None);
                         e.w.w(";");
                         e.stats.gotos += 1;
                         e.w.end(&ts);
@@ -1097,7 +1126,8 @@ impl GotoLayout<'_> {
                             e.w.w(" ");
                             e.kw("goto");
                             e.w.w(" ");
-                            e.w.tok(&self.label(*c), CTokenKind::GotoLabel, None);
+                            let l = self.label(e, *c);
+                            e.w.tok(&l, CTokenKind::GotoLabel, None);
                             e.w.w(";");
                             e.stats.gotos += 1;
                             e.w.end(&ts);
@@ -1137,7 +1167,8 @@ impl GotoLayout<'_> {
         } else if Some(t) != next {
             e.kw("goto");
             e.w.w(" ");
-            e.w.tok(&self.label(t), CTokenKind::GotoLabel, None);
+            let l = self.label(e, t);
+            e.w.tok(&l, CTokenKind::GotoLabel, None);
             e.w.w(";");
             e.stats.gotos += 1;
             e.w.end(ts);
@@ -1211,9 +1242,9 @@ pub struct TreeLayout<'f> {
 }
 
 impl TreeLayout<'_> {
-    fn label(&self, b: BlockId) -> String {
+    fn label(&self, e: &Emitter, b: BlockId) -> String {
         let s = &self.f.steps[self.cfg.blocks[b].steps.start].insn;
-        format!("L_{:06X}", s.address.as_u24())
+        e.names.goto_label(s.address)
     }
 
     fn ts(&self, b: BlockId) -> Vec<usize> {
@@ -1230,7 +1261,8 @@ impl TreeLayout<'_> {
         }
         let indent = e.w.indent;
         e.w.indent = 0;
-        e.w.tok(&self.label(b), CTokenKind::GotoLabel, None);
+        let l = self.label(e, b);
+        e.w.tok(&l, CTokenKind::GotoLabel, None);
         e.w.w(if empty { ": ;" } else { ":" });
         e.w.end(&[self.cfg.blocks[b].steps.start]);
         e.w.indent = indent;
@@ -1415,7 +1447,8 @@ impl TreeLayout<'_> {
             Node::Goto(t, from) => {
                 e.kw("goto");
                 e.w.w(" ");
-                e.w.tok(&self.label(*t), CTokenKind::GotoLabel, None);
+                let l = self.label(e, *t);
+                e.w.tok(&l, CTokenKind::GotoLabel, None);
                 e.w.w(";");
                 e.stats.gotos += 1;
                 e.w.end(&self.ts(*from));

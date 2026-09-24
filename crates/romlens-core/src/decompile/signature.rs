@@ -66,23 +66,8 @@ impl Program {
             }
         }
         let open = open_routines(snap, &units);
-        let mut preserves: BTreeMap<SnesAddress, LocSet> = BTreeMap::new();
-        // Each routine with its saves of what it preserves blanked, for
-        // working out what it reads.
-        let mut for_reads: BTreeMap<SnesAddress, Lifted> = BTreeMap::new();
-        for (a, u) in &units {
-            let (kept, saves) = preserved(u);
-            preserves.insert(*a, kept);
-            if !saves.is_empty() {
-                let mut l = u.lifted.clone();
-                for i in saves {
-                    if let Stmt::Assign { value, .. } = &mut l.blocks[u.cfg.entry].lines[i].stmt {
-                        *value = crate::decompile::ir::Expr::Const(0);
-                    }
-                }
-                for_reads.insert(*a, l);
-            }
-        }
+        let preserves: BTreeMap<SnesAddress, LocSet> =
+            units.iter().map(|(a, u)| (*a, preserved(u))).collect();
         let base = Conventions::default();
 
         // Writes, growing from nothing.
@@ -137,17 +122,18 @@ impl Program {
             let mut read_after: BTreeMap<SnesAddress, LocSet> =
                 units.keys().map(|&a| (a, LocSet::new())).collect();
             for (a, u) in &units {
+                // What it preserves is not read at its returns: the restore
+                // puts back what the save took, so callers see the entry
+                // value whether or not the routine looked at it.
                 let conv = Conventions {
-                    exit: returns[a].union(&preserves[a]).copied().collect(),
+                    exit: returns[a].clone(),
                     calls: reads.clone(),
                     default_call: base.default_call.clone(),
                     call_defs: writes.clone(),
                 };
                 let flow = Flow::new(rom, &conv);
                 let live_out = dataflow::liveness(&flow, &u.cfg, &u.lifted);
-                let blanked = for_reads.get(a).unwrap_or(&u.lifted);
-                let blanked_out = dataflow::liveness(&flow, &u.cfg, blanked);
-                let mut r = dataflow::live_at_entry(&flow, &u.cfg, blanked, &blanked_out);
+                let mut r = dataflow::live_at_entry(&flow, &u.cfg, &u.lifted, &live_out);
                 r.retain(|l| !matches!(l, Loc::Temp(_)));
                 new_reads.insert(*a, r);
                 for (b, lb) in u.lifted.blocks.iter().enumerate() {
@@ -249,7 +235,7 @@ impl Program {
 
 /// Registers and flags saved to a slot in the entry block before anything
 /// changes them, and restored from it last in every returning block.
-fn preserved(u: &Unit) -> (LocSet, Vec<usize>) {
+fn preserved(u: &Unit) -> LocSet {
     use crate::decompile::ir::{Expr, Place};
     let flow_locs = |e: &Expr| -> Option<LocSet> {
         let inner = match e {
@@ -285,10 +271,9 @@ fn preserved(u: &Unit) -> (LocSet, Vec<usize>) {
     }
     // Saved: temp -> the entry values it holds.
     let mut saved: BTreeMap<u32, LocSet> = BTreeMap::new();
-    let mut save_line: BTreeMap<u32, usize> = BTreeMap::new();
     let mut defined = LocSet::new();
     let entry = &u.lifted.blocks[u.cfg.entry];
-    for (i, l) in entry.lines.iter().enumerate() {
+    for l in &entry.lines {
         if let Stmt::Assign {
             dst: Place::Temp(t),
             value,
@@ -298,7 +283,6 @@ fn preserved(u: &Unit) -> (LocSet, Vec<usize>) {
             && writes_of.get(t) == Some(&1)
         {
             saved.insert(*t, locs);
-            save_line.insert(*t, i);
         }
         if let Stmt::Assign { dst, .. } = &l.stmt
             && let Some(locs) = place_locs(dst)
@@ -310,7 +294,7 @@ fn preserved(u: &Unit) -> (LocSet, Vec<usize>) {
         }
     }
     if saved.is_empty() {
-        return (LocSet::new(), Vec::new());
+        return LocSet::new();
     }
     let mut out: Option<LocSet> = None;
     for (b, block) in u.cfg.blocks.iter().enumerate() {
@@ -318,16 +302,14 @@ fn preserved(u: &Unit) -> (LocSet, Vec<usize>) {
             Term::Return => {}
             Term::Halt => continue,
             // Leaving another way, nothing is known to be restored.
-            Term::Tail(_) | Term::Unknown(_) => return (LocSet::new(), Vec::new()),
+            Term::Tail(_) | Term::Unknown(_) => return LocSet::new(),
             _ => continue,
         }
-        // The last definition of each location in this block, and nothing
-        // reading it after that (else the entry value is really read).
+        // Where the last definition of a location in this block is the
+        // restore of its save.
         let mut here = LocSet::new();
         let mut seen = LocSet::new();
-        let mut read_later = LocSet::new();
         for l in u.lifted.blocks[b].lines.iter().rev() {
-            let reads = stmt_reads(&l.stmt);
             let Stmt::Assign { dst, value } = &l.stmt else {
                 if matches!(l.stmt, Stmt::Call(_) | Stmt::Asm { .. }) {
                     break;
@@ -335,60 +317,23 @@ fn preserved(u: &Unit) -> (LocSet, Vec<usize>) {
                 continue;
             };
             let Some(locs) = place_locs(dst) else {
-                read_later.extend(reads);
                 continue;
             };
             for loc in locs {
                 if seen.insert(loc)
-                    && !read_later.contains(&loc)
                     && let Expr::Temp(t) = value
                     && saved.get(t).is_some_and(|s| s.contains(&loc))
                 {
                     here.insert(loc);
                 }
             }
-            read_later.extend(reads);
         }
         out = Some(match out {
             None => here,
             Some(o) => o.intersection(&here).copied().collect(),
         });
     }
-    let kept = out.unwrap_or_default();
-    // The saves of what is kept: they read it only to put it back.
-    let lines = saved
-        .iter()
-        .filter(|(_, locs)| !locs.is_empty() && locs.is_subset(&kept))
-        .filter_map(|(t, _)| save_line.get(t).copied())
-        .collect();
-    (kept, lines)
-}
-
-/// The registers and flags a statement's expressions read.
-fn stmt_reads(s: &Stmt) -> LocSet {
-    use crate::decompile::ir::{Expr, Place};
-    let mut out = LocSet::new();
-    let mut see = |e: &Expr| {
-        e.walk(&mut |x| match x {
-            Expr::Reg(r, w) => out.extend(reg_locs(*r, *w)),
-            Expr::Flag(f) => {
-                out.insert(flag_loc(*f));
-            }
-            _ => {}
-        })
-    };
-    match s {
-        Stmt::Assign { dst, value } => {
-            if let Place::Mem { addr, .. } = dst {
-                see(addr);
-            }
-            see(value);
-        }
-        Stmt::Effect(_, args) => args.iter().for_each(see),
-        Stmt::Call(CallTarget::Table { index, .. }) => see(index),
-        _ => {}
-    }
-    out
+    out.unwrap_or_default()
 }
 
 fn reg_locs(r: crate::decompile::ir::Reg, w: crate::decompile::ir::Width) -> LocSet {

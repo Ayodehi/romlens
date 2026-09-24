@@ -4,7 +4,7 @@
 void SUB_008020(void); /* Reads nothing; returns X. */
 void SUB_008030(void); /* Reads nothing; returns nothing. */
 void SUB_008040(void); /* Reads nothing; returns nothing. */
-void SUB_008050(void); /* Reads X; returns nothing. */
+void SUB_008050(void); /* Reads X; returns nothing; preserves X. */
 
 /* Reads nothing; returns A, X and the carry (some callers are not known, so returns are assumed). */
 void RESET_008000(void)
@@ -69,7 +69,7 @@ void SUB_008040(void)
 extern u8 ADDR_7E0300;
 extern u8 DATA_008070[];
 
-/* Reads X; returns nothing. */
+/* Reads X; returns nothing; preserves X. */
 void SUB_008050(void)
 {
     ADDR_7E0300 = DATA_008070[X];

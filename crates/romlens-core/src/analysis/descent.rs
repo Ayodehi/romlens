@@ -16,8 +16,8 @@ use crate::analysis::jumptable::Resolution;
 use crate::analysis::snapshot::{InsnRecord, Warning, WarningKind};
 use crate::analysis::xrefs::{vector_slots, xref_for};
 use crate::cpu65816::{
-    ASSUMED_DBR, ASSUMED_WIDTHS, ASSUMED_XCE_CARRY, AddressingMode, BANK_WRAP, FlagState,
-    Instruction, Mnemonic, TargetKind, decode,
+    ASSUMED_DBR, ASSUMED_PLP, ASSUMED_WIDTHS, ASSUMED_XCE_CARRY, AddressingMode, BANK_WRAP,
+    FlagState, Instruction, Mnemonic, RESTORED_PLP, TargetKind, decode,
 };
 use crate::memory::address::{FileOffset, SnesAddress};
 use crate::model::project::{FlagOverride, Project};
@@ -101,6 +101,69 @@ struct Entry {
     /// instead of reporting a conflict.
     soft: bool,
     trust: WidthTrust,
+    saved: SavedP,
+}
+
+/// The processor status each `PHP` on this path pushed, so the `PLP` that
+/// pulls it restores the widths it saved rather than assuming them
+/// unchanged: `PHP; SEP #$30; …; PLP` is back to where it started.
+#[derive(Debug, Clone, Default)]
+struct SavedP {
+    /// Bytes pushed since the walk began (pulls subtract).
+    depth: i32,
+    /// For each `PHP` still on the stack: the depth before it, M and X,
+    /// and whether they were assumed.
+    stack: Vec<(i32, bool, bool, WidthTrust)>,
+}
+
+impl SavedP {
+    /// Follow `insn`'s effect on the stack; at a `PLP` that pulls a `PHP`'s
+    /// byte, the M, X and trust that `PHP` saw.
+    fn step(&mut self, insn: &Instruction, trust: WidthTrust) -> Option<(bool, bool, WidthTrust)> {
+        use Mnemonic::*;
+        let f = insn.flags_before;
+        let m = if f.m || f.e { 1 } else { 2 };
+        let x = if f.x || f.e { 1 } else { 2 };
+        let delta = match insn.mnemonic {
+            PHP => {
+                if self.stack.len() == 8 {
+                    self.stack.remove(0);
+                }
+                self.stack.push((self.depth, f.m, f.x, trust));
+                1
+            }
+            PHB | PHK => 1,
+            PHA => m,
+            PHX | PHY => x,
+            PHD | PEA | PEI | PER => 2,
+            PLP => {
+                self.depth -= 1;
+                let top = self.stack.pop();
+                return match top {
+                    Some((d, m, x, t)) if d == self.depth => Some((m, x, t)),
+                    _ => {
+                        self.stack.clear();
+                        None
+                    }
+                };
+            }
+            PLB => -1,
+            PLA => -m,
+            PLX | PLY => -x,
+            PLD => -2,
+            // The stack moved to somewhere this cannot follow.
+            TCS | TXS => {
+                self.stack.clear();
+                0
+            }
+            _ => 0,
+        };
+        self.depth += delta;
+        // Pulled past a saved status: it is gone.
+        let depth = self.depth;
+        self.stack.retain(|s| s.0 < depth);
+        None
+    }
 }
 
 pub struct Walk<'a> {
@@ -330,6 +393,30 @@ impl<'a> Walk<'a> {
         soft: bool,
         trust: WidthTrust,
     ) {
+        self.push_saved(
+            address,
+            flags,
+            depth,
+            entry_point,
+            soft,
+            trust,
+            SavedP::default(),
+        );
+    }
+
+    /// Queue an entry that goes on with the current path's saved status (a
+    /// branch or jump within the routine).
+    #[allow(clippy::too_many_arguments)]
+    fn push_saved(
+        &mut self,
+        address: SnesAddress,
+        flags: FlagState,
+        depth: u16,
+        entry_point: bool,
+        soft: bool,
+        trust: WidthTrust,
+        saved: SavedP,
+    ) {
         if let Some(off) = self.rom.file_offset_for(address) {
             self.worklist.push_back(Entry {
                 offset: off.0,
@@ -339,6 +426,7 @@ impl<'a> Walk<'a> {
                 entry_point,
                 soft,
                 trust,
+                saved,
             });
         }
     }
@@ -676,6 +764,7 @@ impl<'a> Walk<'a> {
         let mut history: Vec<Instruction> = Vec::with_capacity(3);
         let mut first = entry.entry_point;
         let mut trust = entry.trust;
+        let mut saved = entry.saved;
         let mut ret_adjust = ReturnAdjust::default();
         loop {
             if off >= n {
@@ -729,6 +818,17 @@ impl<'a> Walk<'a> {
                 return;
             };
             refine(&history, &mut insn);
+            // A PLP pulling what a PHP on this path pushed restores its widths.
+            let restored = saved.step(&insn, trust);
+            if let Some((m, x, t)) = restored
+                && !insn.flags_after.e
+            {
+                insn.flags_after.m = m;
+                insn.flags_after.x = x;
+                insn.assumptions = (insn.assumptions & !ASSUMED_PLP) | RESTORED_PLP;
+                trust.m = t.m;
+                trust.x = t.x;
+            }
             // Decoded under an assumed width, or after something that was:
             // the length may be wrong, and so may every length after it.
             if trust.uncertain
@@ -838,7 +938,7 @@ impl<'a> Walk<'a> {
                         trust.x = false;
                     }
                 }
-                Mnemonic::PLP if !after.e => {
+                Mnemonic::PLP if !after.e && insn.assumptions & RESTORED_PLP == 0 => {
                     trust.m = true;
                     trust.x = true;
                 }
@@ -848,7 +948,7 @@ impl<'a> Walk<'a> {
             let mut skip = 0u32;
             if m.is_branch() {
                 if let Some(t) = target {
-                    self.push(t.address, after, depth, false, trust);
+                    self.push_saved(t.address, after, depth, false, false, trust, saved.clone());
                 }
             } else if m.is_call() {
                 match insn.mode {
@@ -932,7 +1032,15 @@ impl<'a> Walk<'a> {
                     }
                     _ => {
                         if let Some(t) = target {
-                            self.push(t.address, after, depth, false, trust);
+                            self.push_saved(
+                                t.address,
+                                after,
+                                depth,
+                                false,
+                                false,
+                                trust,
+                                saved.clone(),
+                            );
                         }
                     }
                 }
