@@ -25,10 +25,10 @@ pub const HELPERS: [&str; 24] = [
     "mvp",
     "bcd_add",
     "bcd_sub",
-    "wai",
-    "stp",
-    "brk",
-    "cop",
+    "WAI",
+    "STP",
+    "BRK",
+    "COP",
     "MEM8",
     "MEM16",
     "MEM24",
@@ -111,10 +111,10 @@ pub fn snes_h() -> String {
          /* Decimal-mode ADC and SBC of `bits` bits; they set C and V. */\n\
          u16 bcd_add(u16 a, u16 b, int bits);\n\
          u16 bcd_sub(u16 a, u16 b, int bits);\n\
-         void wai(void);\n\
-         void stp(void);\n\
-         void brk(u8 n);\n\
-         void cop(u8 n);\n\
+         void WAI(void);\n\
+         void STP(void);\n\
+         void BRK(u8 n);\n\
+         void COP(u8 n);\n\
          \n\
          /* Hardware registers. */\n",
     );

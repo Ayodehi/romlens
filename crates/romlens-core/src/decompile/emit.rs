@@ -413,6 +413,8 @@ pub struct Emitter<'a, 'n> {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Stats {
     pub instructions: u32,
+    /// Statements printed, from the instructions' own lines.
+    pub statements: u32,
     pub blocks: u32,
     pub gotos: u32,
     pub asm_comments: u32,
@@ -710,6 +712,9 @@ impl<'a, 'n> Emitter<'a, 'n> {
 
     /// One statement on its own line.
     pub fn stmt(&mut self, s: &Stmt, steps: &[usize], asm: &dyn Fn(usize) -> String) {
+        if !matches!(s, Stmt::Note(_)) {
+            self.stats.statements += 1;
+        }
         match s {
             Stmt::Assign { dst, value } => {
                 self.place(dst);

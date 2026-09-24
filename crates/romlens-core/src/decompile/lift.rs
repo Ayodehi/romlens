@@ -168,6 +168,17 @@ fn c(v: u32) -> Expr {
 }
 
 /// `N` and `Z` from a result of width `w`.
+/// `N` and `Z` from an index register, whose high byte is already zero
+/// when it is 8 bits wide.
+fn nz_index(out: &mut Vec<Stmt>, r: Reg, w: Width) {
+    let v = Expr::Reg(r, Width::W16);
+    out.push(flag(
+        Flag::N,
+        bin(BinOp::Ne, bin(BinOp::And, v.clone(), c(w.sign())), c(0)),
+    ));
+    out.push(flag(Flag::Z, bin(BinOp::Eq, v, c(0))));
+}
+
 fn nz(out: &mut Vec<Stmt>, v: Expr, w: Width) {
     out.push(flag(
         Flag::N,
@@ -305,7 +316,7 @@ impl Lifter {
                 let r = if insn.mnemonic == LDX { Reg::X } else { Reg::Y };
                 let v = self.source(insn, wx);
                 o.push(set(Place::Reg(r, Width::W16), v));
-                nz(o, Expr::Reg(r, Width::W16), wx);
+                nz_index(o, r, wx);
             }
             STA => o.push(set(self.dest(insn, wa), a)),
             STX => o.push(set(self.dest(insn, wx), x)),
@@ -447,7 +458,7 @@ impl Lifter {
                 };
                 let v = bin(op, Expr::Reg(r, Width::W16), c(1));
                 o.push(set(Place::Reg(r, Width::W16), index_value(v)));
-                nz(o, Expr::Reg(r, Width::W16), wx);
+                nz_index(o, r, wx);
             }
             ASL | LSR | ROL | ROR => {
                 let acc = insn.mode == AddressingMode::Accumulator;
@@ -501,7 +512,7 @@ impl Lifter {
                     Place::Reg(r, Width::W16),
                     index_value(Expr::Reg(Reg::A, Width::W16)),
                 ));
-                nz(o, Expr::Reg(r, Width::W16), wx);
+                nz_index(o, r, wx);
             }
             TXA | TYA => {
                 let r = if insn.mnemonic == TXA {
@@ -519,7 +530,7 @@ impl Lifter {
                     (Reg::Y, Reg::X)
                 };
                 o.push(set(Place::Reg(to, Width::W16), Expr::Reg(from, Width::W16)));
-                nz(o, Expr::Reg(to, Width::W16), wx);
+                nz_index(o, to, wx);
             }
             TCD => {
                 o.push(set(
@@ -545,7 +556,7 @@ impl Lifter {
                     Place::Reg(Reg::X, Width::W16),
                     index_value(Expr::Reg(Reg::S, Width::W16)),
                 ));
-                nz(o, x, wx);
+                nz_index(o, Reg::X, wx);
             }
             TXS => o.push(set(Place::Reg(Reg::S, Width::W16), x)),
             XBA => {
@@ -631,7 +642,7 @@ impl Lifter {
             PLX | PLY => {
                 let r = if insn.mnemonic == PLX { Reg::X } else { Reg::Y };
                 o.push(set(Place::Reg(r, Width::W16), pull(wx)));
-                nz(o, Expr::Reg(r, Width::W16), wx);
+                nz_index(o, r, wx);
             }
             PLB => {
                 o.push(set(Place::Reg(Reg::Dbr, Width::W16), pull(Width::W8)));
@@ -670,10 +681,10 @@ impl Lifter {
                 o.push(Stmt::Effect(helper, vec![c(dst as u32), c(src as u32)]));
                 o.push(set(Place::Reg(Reg::Dbr, Width::W16), c(dst as u32)));
             }
-            WAI => o.push(Stmt::Effect("wai", vec![])),
-            STP => o.push(Stmt::Effect("stp", vec![])),
-            BRK => o.push(Stmt::Effect("brk", vec![c(imm)])),
-            COP => o.push(Stmt::Effect("cop", vec![c(imm)])),
+            WAI => o.push(Stmt::Effect("WAI", vec![])),
+            STP => o.push(Stmt::Effect("STP", vec![])),
+            BRK => o.push(Stmt::Effect("BRK", vec![c(imm)])),
+            COP => o.push(Stmt::Effect("COP", vec![c(imm)])),
             NOP | WDM => {}
             // Control transfers are the block's terminator.
             BCC | BCS | BEQ | BMI | BNE | BPL | BVC | BVS | BRA | BRL | JMP | JML | RTS | RTL

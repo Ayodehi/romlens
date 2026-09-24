@@ -28,13 +28,13 @@ void SUB_008020(void)
 {
     X = 0x0F;
     N = (X & 0x80) != 0;
-    Z = (u8)X == 0;
+    Z = X == 0;
 
 L_008022:
     MEM8(0x0200 + X) = 0;
     X = (u8)(X - 1);
     N = (X & 0x80) != 0;
-    Z = (u8)X == 0;
+    Z = X == 0;
     if (!N) goto L_008022;
     return;
 }
@@ -98,6 +98,6 @@ void SUB_008050(void)
     MEM8(0x0300) = (u8)A;
     X = pull8();
     N = (X & 0x80) != 0;
-    Z = (u8)X == 0;
+    Z = X == 0;
     return;
 }

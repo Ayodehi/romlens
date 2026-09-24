@@ -10,7 +10,7 @@ that tracks against it.
 | T0 this document, the roadmap pointer, the checklist rows | done |
 | T1 functions and control-flow graphs | done: `decompile::function` and `decompile::cfg`. On the development ROM (static analysis only) all 799 entries decompose, 28,500 instructions, 386 loops, 2 routines irreducible, in 5 ms. The snapshot now keeps `inline_args` |
 | T2 lifting, `snes.h`, the `lift` level and `romlens decompile` | done: every opcode lifts in three width states and compiles clean under `-Wall -Wextra` with clang and gcc; the routines fixture (`fixtures::routines_lorom`, `testrom --fixture routines`) is compiled over an array-backed `snes.h` and run, and gives the 65816's results. On the development ROM all 799 routines are valid C at the `lift` level, 28,500 instructions in 26 ms, with 2,796 gotos and 55 asm comments |
-| T3 data flow (the `clean` level) | to do |
+| T3 data flow (the `clean` level) | done: stack slots, liveness with the accumulator's bytes apart, dead code, single-use propagation, simplification. On the development ROM the 799 routines go from 55,716 statements at `lift` to 16,739 at `clean` (−70%), all valid C. A differential test (`tests/decompile_diff.rs`) runs every routine at every level from the same pseudo-random states and compares what each leaves: 6,278 runs, no differences; it found four real bugs on the way (a value carried out of its register's width, reads a call makes through the convention, a table call's index, and a `PEA` return address taken for a slot). Not done: joining multi-byte `ADC` chains into one wider add; each byte's add stays exact but separate |
 | T4 structuring (the `full` level) | to do |
 | T5 signatures | to do |
 | T6 FFI | to do |

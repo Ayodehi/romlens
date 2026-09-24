@@ -906,7 +906,7 @@ fn decompile_commands() {
     let rom = dir.join("routines.sfc");
     std::fs::write(&rom, fixtures::routines_lorom()).unwrap();
     let rom = rom.to_str().unwrap();
-    for level in ["lift"] {
+    for level in ["lift", "clean"] {
         let mut all = String::new();
         for at in ["$00:8000", "$00:8020", "$00:8030", "$00:8040", "$00:8050"] {
             all.push_str(&run(&["decompile", rom, at, "--level", level]));

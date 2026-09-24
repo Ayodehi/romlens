@@ -235,10 +235,10 @@ void mvn(u8 d, u8 s) { do { mem[d << 16 | Y++] = mem[s << 16 | X++]; } while (A-
 void mvp(u8 d, u8 s) { do { mem[d << 16 | Y--] = mem[s << 16 | X--]; } while (A-- != 0); }
 u16 bcd_add(u16 a, u16 b, int bits) { (void)bits; return a + b; }
 u16 bcd_sub(u16 a, u16 b, int bits) { (void)bits; return a - b; }
-void wai(void) {}
-void stp(void) {}
-void brk(u8 n) { (void)n; }
-void cop(u8 n) { (void)n; }
+void WAI(void) {}
+void STP(void) {}
+void BRK(u8 n) { (void)n; }
+void COP(u8 n) { (void)n; }
 /*INCLUDES*/
 static const uint8_t rom[] = {/*ROM*/};
 static int failures;

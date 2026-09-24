@@ -91,8 +91,12 @@ fn print_json(d: &Decompiled) {
     let warnings: Vec<String> = d.warnings.iter().map(|w| json_str(w)).collect();
     println!("  \"warnings\": [{}],", warnings.join(", "));
     println!(
-        "  \"stats\": {{\"instructions\": {}, \"blocks\": {}, \"gotos\": {}, \"asmComments\": {}}}",
-        d.stats.instructions, d.stats.blocks, d.stats.gotos, d.stats.asm_comments
+        "  \"stats\": {{\"instructions\": {}, \"statements\": {}, \"blocks\": {}, \"gotos\": {}, \"asmComments\": {}}}",
+        d.stats.instructions,
+        d.stats.statements,
+        d.stats.blocks,
+        d.stats.gotos,
+        d.stats.asm_comments
     );
     println!("}}");
 }
@@ -119,6 +123,7 @@ fn all(s: &session::Session, opts: &DecompileOptions, check: bool) -> Result<()>
         opts.level.name()
     );
     println!("  instructions:  {}", sum(|d| d.stats.instructions));
+    println!("  statements:    {}", sum(|d| d.stats.statements));
     println!("  gotos:         {}", sum(|d| d.stats.gotos));
     println!("  asm comments:  {}", sum(|d| d.stats.asm_comments));
     println!(

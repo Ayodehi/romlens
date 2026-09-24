@@ -51,10 +51,10 @@ void mvp(u8 dst_bank, u8 src_bank);
 /* Decimal-mode ADC and SBC of `bits` bits; they set C and V. */
 u16 bcd_add(u16 a, u16 b, int bits);
 u16 bcd_sub(u16 a, u16 b, int bits);
-void wai(void);
-void stp(void);
-void brk(u8 n);
-void cop(u8 n);
+void WAI(void);
+void STP(void);
+void BRK(u8 n);
+void COP(u8 n);
 
 /* Hardware registers. */
 #define INIDISP MEM8(0x2100) /* Screen display: force blank and brightness */

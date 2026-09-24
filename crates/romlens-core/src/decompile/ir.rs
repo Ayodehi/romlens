@@ -234,7 +234,32 @@ impl Expr {
     }
 
     pub fn un(op: UnOp, e: Expr) -> Expr {
-        Expr::Un(op, Box::new(e))
+        match (op, e) {
+            (UnOp::LNot, Expr::Const(v)) => Expr::Const((v == 0) as u32),
+            (UnOp::Not, Expr::Const(v)) => Expr::Const(!v),
+            (UnOp::LNot, Expr::Un(UnOp::LNot, inner)) if inner.is_boolean() => *inner,
+            (op, e) => Expr::Un(op, Box::new(e)),
+        }
+    }
+
+    /// Always 0 or 1.
+    pub fn is_boolean(&self) -> bool {
+        match self {
+            Expr::Flag(_) | Expr::Un(UnOp::LNot, _) => true,
+            Expr::Const(v) => *v <= 1,
+            Expr::Bin(op, ..) => matches!(
+                op,
+                BinOp::Eq
+                    | BinOp::Ne
+                    | BinOp::Lt
+                    | BinOp::Le
+                    | BinOp::Gt
+                    | BinOp::Ge
+                    | BinOp::LAnd
+                    | BinOp::LOr
+            ),
+            _ => false,
+        }
     }
 
     pub fn cast(w: Width, e: Expr) -> Expr {
@@ -276,12 +301,19 @@ impl Expr {
             }
             (Add | Sub | Or | Xor | Shl | Shr, _, Expr::Const(0)) => a,
             (Add | Or | Xor, Expr::Const(0), _) => b,
-            // (x + c1) + c2
-            (Add, Expr::Bin(Add, inner, c1), Expr::Const(c2)) => {
-                if let Expr::Const(c1) = **c1 {
-                    Expr::bin(Add, (**inner).clone(), Expr::Const(c1.wrapping_add(*c2)))
-                } else {
-                    Expr::Bin(op, Box::new(a), Box::new(b))
+            // (x ± c1) ± c2
+            (Add | Sub, Expr::Bin(inner_op @ (Add | Sub), inner, c1), Expr::Const(c2))
+                if matches!(**c1, Expr::Const(_)) =>
+            {
+                let Expr::Const(c1) = **c1 else {
+                    unreachable!()
+                };
+                let signed = |op: BinOp, v: u32| if op == Add { v as i64 } else { -(v as i64) };
+                let total = signed(*inner_op, c1) + signed(op, *c2);
+                match total {
+                    0 => (**inner).clone(),
+                    t if t > 0 => Expr::Bin(Add, inner.clone(), Box::new(Expr::Const(t as u32))),
+                    t => Expr::Bin(Sub, inner.clone(), Box::new(Expr::Const((-t) as u32))),
                 }
             }
             // A constant on the right reads better.

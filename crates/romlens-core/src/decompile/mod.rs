@@ -6,6 +6,7 @@
 //! (`emit`) against the declarations in `snes.h` (`header`).
 
 pub mod cfg;
+pub mod dataflow;
 pub mod emit;
 pub mod function;
 pub mod header;
@@ -128,6 +129,10 @@ pub fn render(
             assume_dp: opts.assume_dp,
         },
     );
+    let mut lifted = lifted;
+    if opts.level != Level::Lift {
+        dataflow::clean(rom, f, &cfg, &mut lifted, &dataflow::Conventions::default());
+    }
     let mut warnings = lifted.warnings.clone();
     if f.truncated {
         warnings.push(format!(
@@ -158,9 +163,17 @@ pub fn render(
     let mut body = emit::Emitter::new(&mut names);
     body.w.indent = 1;
     body.stats.instructions = f.steps.len() as u32;
-    if lifted.temps > 0 {
+    let used = used_temps(&lifted);
+    let renames: std::collections::BTreeMap<u32, u32> = used
+        .iter()
+        .enumerate()
+        .map(|(i, &t)| (t, i as u32 + 1))
+        .collect();
+    dataflow::rename_temps(&mut lifted, &renames);
+    let used: Vec<u32> = (1..=renames.len() as u32).collect();
+    if !used.is_empty() {
         body.w.tok("u32", CTokenKind::Type, None);
-        let temps: Vec<String> = (1..=lifted.temps).map(|t| format!("t{t}")).collect();
+        let temps: Vec<String> = used.iter().map(|t| format!("t{t}")).collect();
         body.w.w(" ");
         body.w.w(&temps.join(", "));
         body.w.w(";");
@@ -240,4 +253,43 @@ pub fn render(
         warnings,
         stats,
     }
+}
+
+/// The temporaries the printed code still reads or writes.
+fn used_temps(lifted: &lift::Lifted) -> std::collections::BTreeSet<u32> {
+    use ir::{Expr, Place, Stmt};
+    let mut out = std::collections::BTreeSet::new();
+    let see = |e: &Expr, out: &mut std::collections::BTreeSet<u32>| {
+        e.walk(&mut |x| {
+            if let Expr::Temp(t) = x {
+                out.insert(*t);
+            }
+        })
+    };
+    for b in &lifted.blocks {
+        for l in &b.lines {
+            match &l.stmt {
+                Stmt::Assign { dst, value } => {
+                    match dst {
+                        Place::Temp(t) => {
+                            out.insert(*t);
+                        }
+                        Place::Mem { addr, .. } => see(addr, &mut out),
+                        _ => {}
+                    }
+                    see(value, &mut out);
+                }
+                Stmt::Effect(_, args) => args.iter().for_each(|a| see(a, &mut out)),
+                Stmt::Call(ir::CallTarget::Table { index, .. }) => see(index, &mut out),
+                _ => {}
+            }
+        }
+        if let Some(c) = &b.cond {
+            see(c, &mut out);
+        }
+        if let Some((s, _)) = &b.switch {
+            see(s, &mut out);
+        }
+    }
+    out
 }
