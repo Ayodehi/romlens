@@ -450,6 +450,193 @@ pub fn clean(rom: &RomImage, f: &Function, cfg: &Cfg, lifted: &mut Lifted, conv:
     drop_identities(f, lifted);
     let live_out = liveness(&flow, cfg, lifted);
     whole_accumulator(&flow, cfg, lifted, &live_out);
+    merge_stores(rom, lifted);
+}
+
+/// An address as a base and a constant offset: `0x7E0000 + X` is
+/// (`X`, 0x7E0000), a plain constant has no base.
+fn split_address(e: &Expr) -> (Option<&Expr>, u32) {
+    match e {
+        Expr::Const(a) => (None, *a),
+        Expr::Bin(BinOp::Add, x, y) => match (&**x, &**y) {
+            (b, Expr::Const(a)) | (Expr::Const(a), b) => (Some(b), *a),
+            _ => (Some(e), 0),
+        },
+        _ => (Some(e), 0),
+    }
+}
+
+/// Constant stores that fill adjacent bytes, one after another, become one
+/// wider store: `$00 = 0x00; $01 = 0x80; $02 = 0x0E` is the 24-bit pointer
+/// `0x0E8000` at `$00`. Never to a hardware register, where each write is
+/// its own event.
+fn merge_stores(rom: &RomImage, lifted: &mut Lifted) {
+    let hardware =
+        |a: u32| rom.map().classify(SnesAddress::from_u24(a & 0xFF_FFFF)) == MemoryClass::Hardware;
+    // A register loaded with a constant in this run of statements, and how
+    // much of it is known (an 8-bit load into A sets only its low byte).
+    type Known = BTreeMap<Reg, (u32, Width)>;
+    let read = |r: &Reg, w: Width, known: &Known| -> Option<u32> {
+        let (v, kw) = known.get(r)?;
+        (w <= *kw).then_some(v & w.mask())
+    };
+    let constant = |e: &Expr, known: &Known| -> Option<u32> {
+        match e {
+            Expr::Const(v) => Some(*v),
+            Expr::Reg(r, w) => read(r, *w, known),
+            Expr::Cast(w, x) => match &**x {
+                Expr::Reg(r, rw) => read(r, (*w).min(*rw), known),
+                _ => None,
+            },
+            _ => None,
+        }
+    };
+    // A register set to a constant: kept, and seen through.
+    let load = |s: &Stmt| -> Option<(Reg, (u32, Width))> {
+        match s {
+            Stmt::Assign {
+                dst: Place::Reg(r, w),
+                value: Expr::Const(v),
+            } => Some((*r, (*v, *w))),
+            _ => None,
+        }
+    };
+    // A constant store's base, first byte and bytes.
+    let store = |s: &Stmt, known: &Known| -> Option<(Option<Expr>, u32, Vec<u8>)> {
+        let Stmt::Assign {
+            dst: Place::Mem { addr, width },
+            value,
+        } = s
+        else {
+            return None;
+        };
+        let v = constant(value, known)?;
+        if !matches!(width, Width::W8 | Width::W16) {
+            return None;
+        }
+        let (base, off) = split_address(addr);
+        if hardware(off) {
+            return None;
+        }
+        let bytes = (0..width.bytes()).map(|i| (v >> (8 * i)) as u8).collect();
+        Some((base.cloned(), off, bytes))
+    };
+    for lb in &mut lifted.blocks {
+        let mut out: Vec<Line> = Vec::with_capacity(lb.lines.len());
+        let mut known: Known = BTreeMap::new();
+        let mut i = 0;
+        while i < lb.lines.len() {
+            let Some((base, _, _)) = store(&lb.lines[i].stmt, &known) else {
+                let line = &lb.lines[i];
+                // Follow constants loaded into registers; anything else that
+                // writes one forgets it.
+                match load(&line.stmt) {
+                    Some((r, v)) => {
+                        known.insert(r, v);
+                    }
+                    None => {
+                        if let Stmt::Assign {
+                            dst: Place::Reg(r, _),
+                            ..
+                        } = &line.stmt
+                        {
+                            known.remove(r);
+                        } else if !matches!(line.stmt, Stmt::Assign { .. } | Stmt::Note(_)) {
+                            known.clear();
+                        }
+                    }
+                }
+                out.push(line.clone());
+                i += 1;
+                continue;
+            };
+            // The run: stores to the same base, with only notes and
+            // constant loads between; those go before the merged store.
+            let mut j = i;
+            let mut run_known = known.clone();
+            let mut bytes: BTreeMap<u32, u8> = BTreeMap::new();
+            let mut steps: Vec<usize> = Vec::new();
+            let mut notes: Vec<Line> = Vec::new();
+            let mut overlap = false;
+            let mut stores = 0;
+            let mut end = i;
+            while j < lb.lines.len() {
+                let line = &lb.lines[j];
+                if let Some((b, off, bs)) = store(&line.stmt, &run_known)
+                    && b == base
+                {
+                    for (k, v) in bs.iter().enumerate() {
+                        overlap |= bytes.insert(off.wrapping_add(k as u32), *v).is_some();
+                    }
+                    steps.extend(line.steps());
+                    stores += 1;
+                    j += 1;
+                    end = j;
+                    continue;
+                }
+                if matches!(line.stmt, Stmt::Note(_)) {
+                    notes.push(line.clone());
+                    j += 1;
+                    continue;
+                }
+                if let Some((r, v)) = load(&line.stmt) {
+                    run_known.insert(r, v);
+                    notes.push(line.clone());
+                    j += 1;
+                    continue;
+                }
+                break;
+            }
+            // What follows the last store is not part of the run.
+            let kept = notes.len() - lb.lines[end..j].len();
+            notes.truncate(kept);
+            let j = end;
+            let first = *bytes.keys().next().unwrap();
+            let contiguous = bytes
+                .keys()
+                .enumerate()
+                .all(|(n, a)| *a == first + n as u32);
+            if stores < 2 || overlap || !contiguous || bytes.len() > 4 {
+                out.push(lb.lines[i].clone());
+                i += 1;
+                continue;
+            }
+            known = run_known;
+            out.extend(notes);
+            let values: Vec<u8> = bytes.values().copied().collect();
+            // Greedy pieces: a 24-bit store for three bytes, else words.
+            let mut at = 0;
+            while at < values.len() {
+                let left = values.len() - at;
+                let n = if left == 3 { 3 } else { left.min(2) };
+                let width = match n {
+                    1 => Width::W8,
+                    2 => Width::W16,
+                    _ => Width::W24,
+                };
+                let v = values[at..at + n]
+                    .iter()
+                    .enumerate()
+                    .fold(0u32, |acc, (k, b)| acc | (*b as u32) << (8 * k));
+                let off = Expr::Const(first + at as u32);
+                let addr = match &base {
+                    Some(b) => Expr::sum(b.clone(), off),
+                    None => off,
+                };
+                out.push(Line {
+                    stmt: Stmt::Assign {
+                        dst: Place::Mem { addr, width },
+                        value: Expr::Const(v),
+                    },
+                    step: steps[0],
+                    merged: steps[1..].to_vec(),
+                });
+                at += n;
+            }
+            i = j;
+        }
+        lb.lines = out;
+    }
 }
 
 /// Assignments that change nothing: `X = (u8)X` while X is 8 bits wide,

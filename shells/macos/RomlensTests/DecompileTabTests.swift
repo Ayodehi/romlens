@@ -21,7 +21,7 @@ import Testing
         try await Fixture.settle(until: { m.decompiler.state == .ready })
         let d = try #require(m.decompiler.result)
         #expect(d.name == "SUB_008040")
-        #expect(d.text.contains("if ((u8)A < MEM8(0x21)) {"))
+        #expect(d.text.contains("if ((u8)A < MEM8(0x0021)) {"))
         // The if came from the CMP and the BCS; both find it.
         let line = try #require(d.text.components(separatedBy: "\n").firstIndex { $0.contains("if (") })
         #expect(m.decompiler.lines(forInstructionAt: 0x44).contains(line))

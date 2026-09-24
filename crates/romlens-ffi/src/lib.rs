@@ -513,7 +513,7 @@ mod tests {
         block_on(wb.analyze()).unwrap();
         let d = block_on(wb.decompile(0x008040, DecompileLevel::Full)).unwrap();
         assert_eq!(d.name, "SUB_008040");
-        assert!(d.text.contains("if ((u8)A < MEM8(0x21)) {"), "{}", d.text);
+        assert!(d.text.contains("if ((u8)A < MEM8(0x0021)) {"), "{}", d.text);
         assert_eq!(d.lines.len(), d.text.lines().count());
         // The if line came from the CMP's branch at $00:8044.
         let at = d.text.lines().position(|l| l.contains("if (")).unwrap();

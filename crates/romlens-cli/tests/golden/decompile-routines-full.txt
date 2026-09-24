@@ -38,7 +38,7 @@ void SUB_008020(void)
 void SUB_008030(void)
 {
     /* 16-bit A, 8-bit X and Y */
-    MEM16(0x14) = MEM16(0x10) + MEM16(0x12);
+    MEM16(0x0014) = MEM16(0x0010) + MEM16(0x0012);
     /* 8-bit A, X and Y */
 }
 /* SUB_008040 at $00:8040: 6 instructions, full level. From Romlens; for reading, not for rebuilding the ROM. */
@@ -47,11 +47,11 @@ void SUB_008030(void)
 /* Reads nothing; returns nothing. */
 void SUB_008040(void)
 {
-    A = MEM8(0x20);
-    if ((u8)A < MEM8(0x21)) {
-        A = MEM8(0x21);
+    A = MEM8(0x0020);
+    if ((u8)A < MEM8(0x0021)) {
+        A = MEM8(0x0021);
     }
-    MEM8(0x22) = (u8)A;
+    MEM8(0x0022) = (u8)A;
 }
 /* SUB_008050 at $00:8050: 5 instructions, full level. From Romlens; for reading, not for rebuilding the ROM. */
 #include "snes.h"

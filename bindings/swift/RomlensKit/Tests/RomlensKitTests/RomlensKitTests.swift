@@ -117,7 +117,7 @@ final class EventLog: WorkbenchListener, @unchecked Sendable {
         _ = try await workbench.analyze()
         let d = try await workbench.decompile(snesAddress: 0x008040, level: .full)
         #expect(d.name == "SUB_008040")
-        #expect(d.text.contains("if ((u8)A < MEM8(0x21)) {"))
+        #expect(d.text.contains("if ((u8)A < MEM8(0x0021)) {"))
         #expect(d.lines.count == d.text.split(separator: "\n", omittingEmptySubsequences: false).count - 1)
         let name = d.tokens.first { $0.kind == .function }
         #expect(name?.address == 0x008040)

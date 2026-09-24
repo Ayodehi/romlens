@@ -520,8 +520,43 @@ impl<'a, 'n> Emitter<'a, 'n> {
         }
     }
 
-    /// An address: a base and an index read base first, `0x7F8002 + X`.
+    /// An address to pass as one: a named object's own name where one
+    /// starts there, else the number.
+    fn address_of(&mut self, addr: &Expr) {
+        if self.names.use_names
+            && let Expr::Const(a) = addr
+        {
+            let c = self.names.canonical(*a);
+            if self.names.is_hardware(c).is_none()
+                && let Some((name, shape, 0, start)) = self.names.object(c)
+            {
+                let kind = if self.names.project.variables.contains_key(&start) {
+                    CTokenKind::Variable
+                } else {
+                    CTokenKind::Label
+                };
+                if !matches!(shape, Shape::Bytes) {
+                    self.w.w("&");
+                }
+                self.w.tok(&name, kind, Some(start));
+                return;
+            }
+        }
+        self.address(addr);
+    }
+
+    /// An address: a base and an index read base first, `0x7F8002 + X`;
+    /// a constant as an address, `0x0000` rather than `0`.
     fn address(&mut self, addr: &Expr) {
+        if let Expr::Const(a) = addr {
+            let text = if *a > 0xFFFF {
+                format!("0x{a:06X}")
+            } else {
+                format!("0x{a:04X}")
+            };
+            self.w.tok(&text, CTokenKind::Number, None);
+            return;
+        }
         if let Expr::Bin(BinOp::Add, i, base) = addr
             && let Expr::Const(b) = **base
             && b > 0xFF
@@ -739,6 +774,23 @@ impl<'a, 'n> Emitter<'a, 'n> {
             self.stats.statements += 1;
         }
         match s {
+            // A 24-bit store has no C lvalue: SET24(address, value).
+            Stmt::Assign {
+                dst:
+                    Place::Mem {
+                        addr,
+                        width: Width::W24,
+                    },
+                value,
+            } => {
+                self.w.tok("SET24", CTokenKind::Helper, None);
+                self.w.w("(");
+                self.address_of(addr);
+                self.w.w(", ");
+                self.expr(value);
+                self.w.w(");");
+                self.w.end(steps);
+            }
             Stmt::Assign { dst, value } => {
                 self.place(dst);
                 self.w.w(" = ");

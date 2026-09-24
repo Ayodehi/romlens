@@ -90,6 +90,7 @@ pub fn lift(f: &Function, cfg: &Cfg, opts: LiftOptions) -> Lifted {
         temps: 0,
         warnings: Vec::new(),
         warned_decimal: false,
+        assumed_dbr: std::cell::Cell::new(None),
     };
     let mut blocks = Vec::with_capacity(n);
     for (b, block) in cfg.blocks.iter().enumerate() {
@@ -123,6 +124,11 @@ pub fn lift(f: &Function, cfg: &Cfg, opts: LiftOptions) -> Lifted {
         }
         blocks.push(out);
     }
+    if let Some(bank) = l.assumed_dbr.get() {
+        l.warnings.push(format!(
+            "the data bank is not known everywhere; like the listing, absolute addresses there are read in the program bank (${bank:02X})"
+        ));
+    }
     Lifted {
         blocks,
         temps: l.temps,
@@ -153,6 +159,8 @@ struct Lifter {
     temps: u32,
     warnings: Vec<String>,
     warned_decimal: bool,
+    /// Some instruction's data bank was assumed to be this program bank.
+    assumed_dbr: std::cell::Cell<Option<u8>>,
 }
 
 fn set(dst: Place, value: Expr) -> Stmt {
@@ -216,15 +224,19 @@ impl Lifter {
     }
 
     /// The data bank, shifted into place, or'd onto a 16-bit address.
+    /// Where the data bank is not known, the program bank is assumed, as
+    /// the decoder and the listing assume it: `STA $2142` reads as `APUIO2`
+    /// and `STA $0001` as low RAM, the way the disassembly shows them. The
+    /// routine's notes say so.
     fn in_data_bank(&self, insn: &Instruction, e: Expr) -> Expr {
-        match insn.flags_before.dbr {
-            Some(b) => bin(BinOp::Or, e, c((b as u32) << 16)),
-            None => bin(
-                BinOp::Or,
-                bin(BinOp::Shl, Expr::Reg(Reg::Dbr, Width::W8), c(16)),
-                e,
-            ),
-        }
+        let b = match insn.flags_before.dbr {
+            Some(b) => b,
+            None => {
+                self.assumed_dbr.set(Some(insn.address.bank()));
+                insn.address.bank()
+            }
+        };
+        bin(BinOp::Or, e, c((b as u32) << 16))
     }
 
     /// The 24-bit address a data instruction reads or writes.
