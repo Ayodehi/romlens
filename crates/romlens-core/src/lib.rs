@@ -12,6 +12,7 @@ pub mod cpu65816;
 pub mod decompile;
 pub mod error;
 pub mod fixtures;
+pub mod graph;
 pub mod graphics;
 pub mod io;
 pub mod memory;
