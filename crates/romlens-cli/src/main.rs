@@ -90,6 +90,10 @@ enum Command {
         /// Add the flag state column.
         #[arg(long)]
         verbose: bool,
+        /// Explain each hardware write and note the common idioms
+        /// (docs/20).
+        #[arg(long, conflicts_with = "flags")]
+        explain: bool,
     },
     /// Run the analyzer and report code/data/unknown coverage.
     Analyze {
@@ -943,6 +947,7 @@ fn run() -> Result<()> {
             flags,
             address,
             verbose,
+            explain,
         } => commands::disasm::run(commands::disasm::DisasmArgs {
             rom: &rom,
             from: from.as_deref(),
@@ -951,6 +956,7 @@ fn run() -> Result<()> {
             flags: flags.as_deref(),
             style: address.into(),
             verbose,
+            explain,
         }),
         Command::Analyze {
             rom,

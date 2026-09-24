@@ -1,0 +1,90 @@
+; ==== bank $00 ====
+RESET_008000:
+$00:8000  78           SEI
+$00:8001  18           CLC
+$00:8002  FB           XCE
+$00:8003  4B           PHK
+$00:8004  AB           PLB
+$00:8005  E2 30        SEP #$30
+$00:8007  A9 8F        LDA #$8F
+$00:8009  8D 00 21     STA $2100                                   ; INIDISP = $8F: forced blank, brightness 15
+$00:800C  9C 00 42     STZ $4200                                   ; NMITIMEN = $00: NMI off
+$00:800F  C2 20        REP #$20
+$00:8011  A9 01 18     LDA #$1801
+                       ; ▸ DMA transfer: Channel 0 copies $0800 bytes from $00:9000 to VRAM word $6000.
+$00:8014  8D 00 43     STA $4300                                   ; DMAP0 = $01: 2 registers, alternating; BBAD0 = $18: to…
+$00:8017  A9 00 90     LDA #$9000
+$00:801A  8D 02 43     STA $4302                                   ; A1T0 = $9000: source $9000 in bank A1B
+$00:801D  A9 00 08     LDA #$0800
+$00:8020  8D 05 43     STA $4305                                   ; DAS0 = $0800: 2048 bytes (or an HDMA address)
+$00:8023  A9 00 60     LDA #$6000
+$00:8026  8D 16 21     STA $2116                                   ; VMADD = $6000: VRAM word $6000 (byte $0C000)
+$00:8029  E2 20        SEP #$20
+$00:802B  A9 80        LDA #$80
+$00:802D  8D 15 21     STA $2115                                   ; VMAIN = $80: step after the high byte, step 1 word
+$00:8030  9C 04 43     STZ $4304                                   ; A1B0 = $00: bank $00
+$00:8033  A9 01        LDA #$01
+$00:8035  8D 0B 42     STA $420B                                   ; MDMAEN = $01: start DMA on channel 0
+$00:8038  A9 06        LDA #$06
+                       ; ▸ Hardware multiply: 6 × 7 = 42, unsigned 8 × 8 bits; the 16-bit product is read from RDMPY.
+$00:803A  8D 02 42     STA $4202                                   ; WRMPYA = $06: 6 × WRMPYB
+$00:803D  A9 07        LDA #$07
+$00:803F  8D 03 42     STA $4203                                   ; WRMPYB = $07: WRMPYA × 7, into RDMPY
+$00:8042  EA           NOP
+$00:8043  EA           NOP
+$00:8044  EA           NOP
+$00:8045  EA           NOP
+$00:8046  AD 16 42     LDA $4216                                   ; RDMPYL
+$00:8049  85 10        STA $10
+$00:804B  AD AE 0D     LDA $0DAE
+$00:804E  8D 00 21     STA $2100                                   ; INIDISP ← $7E:0DAE
+$00:8051  A9 81        LDA #$81
+$00:8053  8D 00 42     STA $4200                                   ; NMITIMEN = $81: NMI on, joypad auto-read on
+LOOP_008056:
+                       ; ▸ Wait for vertical blank: Reads HVBJOY until bit 7 is set.
+$00:8056  AD 12 42     LDA $4212                                   ; HVBJOY
+$00:8059  10 FB        BPL LOOP_008056
+$00:805B  A2 0F        LDX #$0F
+LOOP_00805D:
+                       ; ▸ Clear memory: Clears $7E:0200 to $7E:020F: 16 bytes, a byte at a time, indexed by X.
+$00:805D  9E 00 02     STZ $0200,X
+$00:8060  CA           DEX
+$00:8061  10 FA        BPL LOOP_00805D
+                       ; ▸ Decimal arithmetic: With the D flag set, ADC and SBC work on decimal digits: this adds two digits a byte, so $09 + $01 is $10.
+$00:8063  F8           SED
+$00:8064  18           CLC
+$00:8065  AD BE 0D     LDA $0DBE
+$00:8068  69 01        ADC #$01
+$00:806A  8D BE 0D     STA $0DBE
+$00:806D  D8           CLD
+LOOP_00806E:
+                       ; ▸ Wait for the sound CPU: Waits until the sound CPU puts $AA in APUIO0.
+$00:806E  AD 40 21     LDA $2140                                   ; APUIO0
+$00:8071  C9 AA        CMP #$AA
+$00:8073  D0 F9        BNE LOOP_00806E
+$00:8075  20 A0 80     JSR SUB_0080A0
+$00:8078  20 A4 80     JSR SUB_0080A4
+CODE_00807B:
+$00:807B  80 FE        BRA CODE_00807B
+
+; ---- unknown (0%) ----
+$00:807D  00 00 00 00  db $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+$00:808D  00 00 00 00  db $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+$00:809D  00 00 00     db $00,$00,$00
+
+; ---- code (90%) ----
+SUB_0080A0:
+$00:80A0  A9 01        LDA #$01
+$00:80A2  85 7D        STA $7D
+SUB_0080A4:
+                       ; ▸ A second way in: SUB_0080A0 runs on into SUB_0080A4, which other code also calls: entering at SUB_0080A0 runs its first lines, then everything SUB_0080A4 does.
+$00:80A4  A9 0F        LDA #$0F
+$00:80A6  8D 00 21     STA $2100                                   ; INIDISP = $0F: display on, brightness 15
+$00:80A9  60           RTS
+
+; ---- unknown (0%) ----
+$00:80AA  00 00 00 00  db $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+$00:80BA  00 00 00 00  db $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+$00:80CA  00 00 00 00  db $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+$00:80DA  00 00 00 00  db $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+$00:80EA  00 00 00 00  db $00,$00,$00,$00,$00,$00

@@ -2,10 +2,12 @@
 
 use std::fmt::Write as _;
 use std::path::Path;
+use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
 use romlens_core::cpu65816::{FlagState, NoSymbols, decode, format_bytes, format_instruction};
-use romlens_core::{AddressStyle, FileOffset, LineKind, TextOptions, format_lines_text};
+use romlens_core::explain::Explanations;
+use romlens_core::{AddressStyle, FileOffset, LineIndex, LineKind, TextOptions, format_lines_text};
 
 use crate::commands::session::{self, load_rom, rom_offset};
 
@@ -17,6 +19,8 @@ pub struct DisasmArgs<'a> {
     pub flags: Option<&'a str>,
     pub style: AddressStyle,
     pub verbose: bool,
+    /// Explain hardware writes and note idioms (docs/20).
+    pub explain: bool,
 }
 
 pub fn run(args: DisasmArgs<'_>) -> Result<()> {
@@ -35,7 +39,11 @@ pub fn run(args: DisasmArgs<'_>) -> Result<()> {
         );
         return Ok(());
     }
-    let s = session::open(args.rom, args.project, false)?;
+    let mut s = session::open(args.rom, args.project, false)?;
+    if args.explain {
+        let x = Arc::new(Explanations::build(&s.rom, &s.project, &s.snap));
+        s.idx = LineIndex::build_explained(&s.rom, &s.snap, &s.project, x);
+    }
     let start_line = match args.from {
         Some(e) => {
             let off = rom_offset(&s.rom, e)?;

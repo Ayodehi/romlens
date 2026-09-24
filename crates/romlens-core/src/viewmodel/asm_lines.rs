@@ -4,7 +4,8 @@
 //! Lines per address, in order: Section (region kind or confidence class
 //! change, or a bank start), Blank (after a block end when the next content
 //! carries a label or section), Label, one Comment line per block-comment
-//! line, then the Instruction or a Data row of up to 16 bytes (split at
+//! line, one Note line per idiom starting there (with explanations,
+//! docs/20), then the Instruction or a Data row of up to 16 bytes (split at
 //! labelled, referenced or commented addresses and at region ends).
 //!
 //! Batch layout, little-endian:
@@ -34,9 +35,11 @@
 //! ```
 
 use std::fmt::Write as _;
+use std::sync::Arc;
 
 use crate::analysis::snapshot::AnalysisSnapshot;
 use crate::cpu65816::{Token, TokenKind, format_bytes, format_instruction};
+use crate::explain::Explanations;
 use crate::memory::address::{FileOffset, SnesAddress};
 use crate::memory::map::MappingMode;
 use crate::model::comment::CommentKind;
@@ -63,6 +66,8 @@ pub enum LineKind {
     Blank = 4,
     Comment = 5,
     Section = 6,
+    /// An idiom's note (docs/20); `sub` picks which of those starting there.
+    Note = 7,
 }
 
 impl LineKind {
@@ -74,6 +79,7 @@ impl LineKind {
             4 => LineKind::Blank,
             5 => LineKind::Comment,
             6 => LineKind::Section,
+            7 => LineKind::Note,
             _ => return None,
         })
     }
@@ -95,6 +101,9 @@ pub struct LineRef {
 #[derive(Debug, Clone, Default)]
 pub struct LineIndex {
     pub lines: Vec<LineRef>,
+    /// With explanations the listing's automatic comments explain each
+    /// hardware write, and idioms get a note line (docs/20).
+    pub explain: Option<Arc<Explanations>>,
 }
 
 fn confidence_class(c: f32) -> u8 {
@@ -127,6 +136,26 @@ fn row_len(kind: RegionKind) -> u32 {
 
 impl LineIndex {
     pub fn build(rom: &RomImage, snap: &AnalysisSnapshot, project: &Project) -> Self {
+        Self::build_with(rom, snap, project, None)
+    }
+
+    /// The listing with its explanations: explained automatic comments and
+    /// a note line above each idiom.
+    pub fn build_explained(
+        rom: &RomImage,
+        snap: &AnalysisSnapshot,
+        project: &Project,
+        explain: Arc<Explanations>,
+    ) -> Self {
+        Self::build_with(rom, snap, project, Some(explain))
+    }
+
+    fn build_with(
+        rom: &RomImage,
+        snap: &AnalysisSnapshot,
+        project: &Project,
+        explain: Option<Arc<Explanations>>,
+    ) -> Self {
         let n = rom.len() as u32;
         let bank = bank_size(rom);
         // Addresses that force a data-row split: labels, xref targets, comments.
@@ -208,6 +237,16 @@ impl LineIndex {
                         });
                     }
                 }
+                if let Some(x) = &explain {
+                    let n = x.idioms_starting_at(FileOffset(pos)).len();
+                    for k in 0..n.min(256) {
+                        lines.push(LineRef {
+                            offset: pos,
+                            kind: LineKind::Note,
+                            sub: k as u8,
+                        });
+                    }
+                }
                 while rec_i < recs.len() && recs[rec_i].offset < pos {
                     rec_i += 1;
                 }
@@ -245,7 +284,7 @@ impl LineIndex {
                 has_content = true;
             }
         }
-        Self { lines }
+        Self { lines, explain }
     }
 
     pub fn len(&self) -> usize {
@@ -539,6 +578,7 @@ pub fn line_text(
     snap: &AnalysisSnapshot,
     project: &Project,
     symbols: &Symbols<'_>,
+    explain: Option<&Explanations>,
     line: LineRef,
 ) -> LineText {
     let mut out = LineText::default();
@@ -588,7 +628,20 @@ pub fn line_text(
                 push_token(&mut out.tokens, TokenKind::Comment, 0, out.text.len());
             }
         }
+        LineKind::Note => {
+            if let Some(i) = explain.and_then(|x| {
+                x.idioms_starting_at(FileOffset(line.offset))
+                    .get(line.sub as usize)
+                    .copied()
+            }) {
+                let _ = write!(out.text, "; ▸ {}: {}", i.title, i.summary);
+                push_token(&mut out.tokens, TokenKind::Note, 0, out.text.len());
+            }
+        }
         LineKind::Instruction => {
+            let explained = explain
+                .and_then(|x| x.write_at(FileOffset(line.offset)))
+                .map(|e| e.short());
             let auto_comment = if let Some(rec) = snap.instruction_at(FileOffset(line.offset))
                 && let Some(insn) = snap.decode_at(rom, rec)
             {
@@ -602,7 +655,7 @@ pub fn line_text(
                 out.dp = insn.flags_before.dp.unwrap_or(0);
                 out.block_end = insn.mnemonic.is_block_end();
                 out.assumption = insn.assumptions != 0;
-                f.register.map(|r| r.name.to_owned())
+                explained.or_else(|| f.register.map(|r| r.name.to_owned()))
             } else {
                 None
             };
@@ -665,7 +718,7 @@ pub fn encode_lines(
     let mut text_area: Vec<u8> = Vec::with_capacity(n as usize * 24);
     for i in 0..n as usize {
         let line = idx.lines[start_line as usize + i];
-        let lt = line_text(rom, snap, project, &symbols, line);
+        let lt = line_text(rom, snap, project, &symbols, idx.explain.as_deref(), line);
         let rec =
             &mut out[ASM_BATCH_HEADER_LEN + i * stride..ASM_BATCH_HEADER_LEN + (i + 1) * stride];
         let canonical = rom.snes_address_for(FileOffset(line.offset));
@@ -798,11 +851,11 @@ pub fn format_lines_text(
     let mut s = String::with_capacity(n as usize * 64);
     for i in 0..n as usize {
         let line = idx.lines[start_line as usize + i];
-        let lt = line_text(rom, snap, project, &symbols, line);
+        let lt = line_text(rom, snap, project, &symbols, idx.explain.as_deref(), line);
         match line.kind {
             LineKind::Blank => {}
             LineKind::Label | LineKind::Section => s.push_str(&lt.text),
-            LineKind::Comment => {
+            LineKind::Comment | LineKind::Note => {
                 let indent = address_width(style) + 13 + if verbose { 18 } else { 0 };
                 for _ in 0..indent {
                     s.push(' ');

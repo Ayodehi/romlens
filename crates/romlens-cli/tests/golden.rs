@@ -961,6 +961,20 @@ fn explain_commands() {
         "explain-json",
         &run(&["explain", rom, "$00:8009", "--json"]),
     );
+    check(
+        "explain-disasm",
+        &run(&[
+            "disasm",
+            rom,
+            "--from",
+            "$00:8000",
+            "--count",
+            "90",
+            "--address",
+            "snes",
+            "--explain",
+        ]),
+    );
     let _ = std::fs::remove_dir_all(dir);
 }
 

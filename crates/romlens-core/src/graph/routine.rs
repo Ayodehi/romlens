@@ -60,7 +60,9 @@ impl GraphBlock {
         let end = idx.line_for_offset(last.0)? + 1;
         while start > 0 {
             let l = idx.lines[start - 1];
-            if l.offset == first.0 && matches!(l.kind, LineKind::Label | LineKind::Comment) {
+            if l.offset == first.0
+                && matches!(l.kind, LineKind::Label | LineKind::Comment | LineKind::Note)
+            {
                 start -= 1;
             } else {
                 break;

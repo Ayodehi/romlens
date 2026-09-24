@@ -28,6 +28,8 @@ pub enum TokenKind {
     DataValue = 13,
     Section = 14,
     Warning = 15,
+    /// An explanation's note above an idiom (docs/20).
+    Note = 16,
 }
 
 impl TokenKind {
@@ -49,6 +51,7 @@ impl TokenKind {
             13 => DataValue,
             14 => Section,
             15 => Warning,
+            16 => Note,
             _ => return None,
         })
     }
