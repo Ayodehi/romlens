@@ -197,6 +197,35 @@ impl Workbench {
         }
     }
 
+    fn screen_job(
+        &self,
+        file_offset: u32,
+    ) -> impl FnOnce() -> Option<crate::explain::ScreenSetupInfo> + Send + 'static {
+        let image = self.rom.image.clone();
+        let (project, snapshot, explain) = {
+            let inner = self.lock();
+            (
+                inner.project.clone(),
+                Arc::clone(&inner.snapshot),
+                Arc::clone(&inner.explain),
+            )
+        };
+        move || {
+            let uploads = romlens_core::explain::UploadIndex {
+                explain: &explain,
+                rom: &image,
+            };
+            romlens_core::explain::screen::screen_at(
+                &image,
+                &project,
+                &snapshot,
+                FileOffset(file_offset),
+                Some(&uploads),
+            )
+            .map(Into::into)
+        }
+    }
+
     fn graph_job(
         &self,
         snes_address: u32,
@@ -545,6 +574,19 @@ impl Workbench {
 
     pub fn set_c_numbers(&self, style: NumberStyle) {
         self.lock().c_numbers = style;
+    }
+
+    /// What the screen is set up to be when the instruction at
+    /// `file_offset` runs (docs/21), off the calling thread. `None` outside
+    /// every routine.
+    pub async fn screen_at(&self, file_offset: u32) -> Option<crate::explain::ScreenSetupInfo> {
+        let job = self.screen_job(file_offset);
+        crate::future::spawn(Arc::new(AtomicBool::new(false)), job).await
+    }
+
+    /// The same on the calling thread.
+    pub fn screen_at_blocking(&self, file_offset: u32) -> Option<crate::explain::ScreenSetupInfo> {
+        self.screen_job(file_offset)()
     }
 
     /// Whether the listing and the C carry the explanations.

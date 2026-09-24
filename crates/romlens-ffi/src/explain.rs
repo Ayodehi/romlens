@@ -170,3 +170,79 @@ pub fn access_info(address: u16, width: u8, store: bool) -> Option<RegisterAcces
         indexed: false,
     })
 }
+
+/// A graphics view of what a screen row describes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum ScreenLinkInfo {
+    /// Tiles in ROM at this file offset, at this depth (7 for mode 7).
+    Tiles {
+        rom: u32,
+        bpp: u8,
+    },
+    Tilemap {
+        rom: u32,
+    },
+    Palette {
+        rom: u32,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct ScreenRowInfo {
+    pub label: String,
+    pub text: String,
+    /// File offsets of the stores that set it.
+    pub set_at: Vec<u32>,
+    /// A DMA that writes the memory it describes.
+    pub source: Option<String>,
+    pub source_at: Option<u32>,
+    pub link: Option<ScreenLinkInfo>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct ScreenSectionInfo {
+    pub title: String,
+    pub rows: Vec<ScreenRowInfo>,
+}
+
+/// What the screen is set up to be at an instruction (docs/21).
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct ScreenSetupInfo {
+    /// The routine's entry (SNES address).
+    pub routine: u32,
+    pub sections: Vec<ScreenSectionInfo>,
+}
+
+impl From<romlens_core::explain::screen::ScreenSetup> for ScreenSetupInfo {
+    fn from(s: romlens_core::explain::screen::ScreenSetup) -> Self {
+        use romlens_core::explain::screen::Link;
+        ScreenSetupInfo {
+            routine: s.routine.as_u24(),
+            sections: s
+                .sections
+                .into_iter()
+                .map(|sec| ScreenSectionInfo {
+                    title: sec.title,
+                    rows: sec
+                        .rows
+                        .into_iter()
+                        .map(|r| ScreenRowInfo {
+                            label: r.label,
+                            text: r.text,
+                            set_at: r.set_at.iter().map(|o| o.0).collect(),
+                            source: r.source,
+                            source_at: r.source_at.map(|o| o.0),
+                            link: r.link.map(|l| match l {
+                                Link::Tiles { rom, bpp } => {
+                                    ScreenLinkInfo::Tiles { rom: rom.0, bpp }
+                                }
+                                Link::Tilemap { rom } => ScreenLinkInfo::Tilemap { rom: rom.0 },
+                                Link::Palette { rom } => ScreenLinkInfo::Palette { rom: rom.0 },
+                            }),
+                        })
+                        .collect(),
+                })
+                .collect(),
+        }
+    }
+}

@@ -165,5 +165,7 @@ final class EventLog: WorkbenchListener, @unchecked Sendable {
         let lines = workbench.lineCount()
         workbench.setShowExplanations(show: false)
         #expect(workbench.lineCount() < lines)
+        let screen = try #require(await workbench.screenAt(fileOffset: 0x56))
+        #expect(screen.sections.first { $0.title == "Interrupts" }?.rows.first?.text == "NMI on, joypad auto-read on")
     }
 }

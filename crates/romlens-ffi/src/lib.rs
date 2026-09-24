@@ -591,6 +591,13 @@ mod tests {
             .unwrap();
         assert!(c.text.contains("INIDISP = 0b10001111;"), "{}", c.text);
         assert_eq!(format_c_number(0x81, NumberStyle::Decimal), "129");
+        // The screen there: interrupts set, the mode not yet.
+        let s = block_on(wb.screen_at(0x56)).unwrap();
+        assert_eq!(s.routine, 0x008000);
+        let irq = s.sections.iter().find(|x| x.title == "Interrupts").unwrap();
+        assert_eq!(irq.rows[0].text, "NMI on, joypad auto-read on");
+        assert_eq!(irq.rows[0].set_at, [0x53]);
+        assert!(wb.screen_at_blocking(0x7FF0).is_none());
     }
 
     #[test]
