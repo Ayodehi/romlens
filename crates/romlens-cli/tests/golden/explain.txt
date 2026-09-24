@@ -3,7 +3,9 @@ $00:8053  STA $4200
   NMITIMEN = $81: NMI on, joypad auto-read on
 
   Turns interrupts on and off: the NMI at the start of vertical blank, the
-  timer IRQ, and the automatic reading of the controllers each frame.
+  timer IRQ, and the automatic reading of the controllers each frame,
+  which takes about three lines at the start of vertical blank. It is zero
+  after power-on and reset, so every game sets it.
 
   Bits  Field      Value  Meaning
   7     NMI        1      NMI on
@@ -13,26 +15,29 @@ $00:8053  STA $4200
   NMITIMEN = $81: NMI on, joypad auto-read on
 $00:8014  STA $4300
 
-  DMAP0 = $01: 2 registers, alternating; BBAD0 = $18: to…
+  DMAP0 = $01: 2 registers, alternating (VRAM); BBAD0 = $18…
 
   $4300 DMAP0
-  How this DMA channel copies: which way, how the source address moves,
-  and which pattern of B-bus registers it writes.
+  How this DMA channel copies: which way, how the source address moves
+  (up, down, or fixed to fill with one byte), and which pattern of B-bus
+  registers it writes. For HDMA the pattern also sets how many bytes each
+  line gets.
 
   Bits  Field          Value  Meaning
   7     Direction      0      from memory to the B bus
   6     HDMA indirect  0      HDMA direct table
   3–4   Source step    0      source address counts up
-  0–2   Pattern        1      2 registers, alternating
+  0–2   Pattern        1      2 registers, alternating (VRAM)
 
   $4301 BBAD0
   Which B-bus register ($21xx) this channel writes: $18 is VRAM, $22 the
-  palette, $04 sprite memory, $80 work RAM.
+  palette, $04 sprite memory, $80 work RAM. Some CPU revisions fail to
+  start a transfer with $00 here.
 
   Bits  Field     Value  Meaning
   0–7   Register  $18    to $2118 VMDATAL: VRAM
 
-  DMAP0 = $01: 2 registers, alternating
+  DMAP0 = $01: 2 registers, alternating (VRAM)
   BBAD0 = $18: to $2118 VMDATAL: VRAM
 
 ▸ DMA transfer  ($00:8014–$00:8035, 6 instructions)
@@ -49,7 +54,10 @@ $00:804E  STA $2100
 
   Turns the picture on or off and sets its brightness. While forced blank
   is on the screen is black and VRAM, CGRAM and OAM can be written at any
-  time, which is why games set it before loading graphics.
+  time, which is why games set it before loading graphics. Turning forced
+  blank off is best done in vertical blank; mid-frame it glitches the
+  sprites on that line and the next. Many games write $8F rather than $80,
+  so the brightness does not have to change when the screen comes back on.
 
   Bits  Field       
   7     Forced blank

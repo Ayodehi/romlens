@@ -43,6 +43,37 @@ Checked by hand:
 
 Most unknown values in Super Mario World's NMI handler come through the direct page, which the analysis does not know on entry to an interrupt. They are left unexplained rather than guessed.
 
+## The audit of the register tables (24 September 2026)
+
+After E8, every field in `explain::fields` was checked, bit by bit, against two sources:
+
+- the SNESdev wiki's [PPU registers](https://snes.nesdev.org/wiki/PPU_registers), [MMIO registers](https://snes.nesdev.org/wiki/MMIO_registers) and [DMA registers](https://snes.nesdev.org/wiki/DMA_registers) pages, fetched that day;
+- anomie's register document on the Super Famicom Development Wiki ([Registers](https://wiki.superfamicom.org/registers)).
+
+Compared against the SNESdev pages, then spot-checked against anomie:
+
+- **PPU:** INIDISP, OBSEL, OAMADD, BGMODE, MOSAIC, BGnSC, BG12NBA and BG34NBA, the scroll registers, VMAIN, VMADD, VMDATA, the mode 7 registers, CGADD, CGDATA, the window registers, TM, TS, TMW, TSW, CGWSEL, CGADSUB, COLDATA and SETINI.
+- **CPU I/O:** NMITIMEN, WRIO, the multiplier and divider, HTIME and VTIME, MDMAEN, HDMAEN, MEMSEL, RDNMI, TIMEUP, HVBJOY, the joypad latch and the WRAM port.
+- **DMA:** DMAPn, BBADn, A1Tn and A1Bn, DASn and DASBn, A2An and NLTRn.
+
+The two sources agree with each other. No field was decoded wrongly.
+
+What changed:
+
+- **The VRAM byte address.** It is now masked to 15 bits of word address, since VRAM address bit 15 has no effect.
+- **Transfer-pattern names.** Each now carries the usage example the SNESdev page gives: pattern 1 for VRAM, 2 for OAM and CGRAM, 3 for scroll and mode 7 parameters, 4 for windows.
+- **The descriptions** now say what a student trips over:
+  - VRAM and OAM can only be written in vertical or forced blank. The palette can also be written in horizontal blank, and elsewhere a palette write lands on the wrong colour.
+  - A DMA leaves its byte count at zero, so the count must be set again. A transfer cannot cross a bank. A DMA from work RAM to WMDATA does nothing. Some CPU revisions fail to start a DMA with BBADn = $00.
+  - HDMA is read at the top of the frame, so games turn it on in vertical blank.
+  - RDNMI's flag also clears when vertical blank ends.
+  - The multiplier and divider take "up to" 8 and 16 cycles. Dividing by zero gives $FFFF, with the dividend as the remainder.
+  - Many games write INIDISP = $8F rather than $80, because brightness changes are not instant on later consoles.
+  - MEMSEL's speeds are 6 against 8 master cycles.
+  - WRIO bit 7 is also the counter latch, so games leave it at 1.
+  - OBSEL sizes 6 and 7 were not in Nintendo's manual.
+- **The VBlank idiom** says about 37 lines, NTSC, not 38.
+
 ## Context
 
 Romlens is for learning SNES development from real games. Most of what a game

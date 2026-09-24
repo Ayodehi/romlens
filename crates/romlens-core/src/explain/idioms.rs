@@ -1159,7 +1159,7 @@ fn plus(a: SnesAddress, n: u16) -> SnesAddress {
 
 // ---- why games do it ----
 
-const WHY_VBLANK: &str = "The PPU draws the picture line by line, and while it does, VRAM, the palette and sprite memory cannot be changed safely. Vertical blank, the gap of about 38 lines between frames, is the time to update them, so code that is about to change graphics first waits for it.";
+const WHY_VBLANK: &str = "The PPU draws the picture line by line, and while it does, VRAM, the palette and sprite memory cannot be changed safely. Vertical blank, the gap of about 37 lines between frames (NTSC), is the time to update them, so code that is about to change graphics first waits for it.";
 const WHY_VBLANK_END: &str = "Waiting for vertical blank to end makes sure the next wait catches the start of a new blanking period, not the tail of the current one, so the code runs once per frame.";
 const WHY_HBLANK: &str = "Horizontal blank is the short pause at the end of each line. A change made there takes effect from the next line down, which is how a game changes a setting partway down the screen without HDMA.";
 const WHY_JOYPAD: &str = "With NMITIMEN bit 0 set, the hardware reads the controllers at the start of vertical blank, which takes about three lines. JOY1L and the rest are only valid once it has finished.";

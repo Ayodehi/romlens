@@ -18,10 +18,10 @@ u16 RESET_008000(u16 *x_out, bool *c_out)
     INIDISP = 0x8F; /* forced blank, brightness 15 */
     NMITIMEN = 0x00; /* NMI off */
     /* ▸ DMA transfer: Channel 0 copies $0800 bytes from $00:9000 to VRAM word $6000. */
-    *(u16 *)&DMAP0 = 0x1801; /* 2 registers, alternating; to $2118 VMDATAL: VRAM */
+    *(u16 *)&DMAP0 = 0x1801; /* 2 registers, alternating (VRAM); to $2118 VMDATAL: VRAM */
     *(u16 *)&A1T0L = 0x9000; /* source $9000 in bank A1B */
     *(u16 *)&DAS0L = 0x0800; /* 2048 bytes (or an HDMA address) */
-    *(u16 *)&VMADDL = 0x6000; /* VRAM word $6000 (byte $0C000) */
+    *(u16 *)&VMADDL = 0x6000; /* VRAM word $6000 (byte $C000) */
     VMAIN = 0x80; /* step after the high byte, step 1 word */
     A1B0 = 0x00; /* bank $00 */
     MDMAEN = 0x01; /* start DMA on channel 0 */
@@ -72,10 +72,10 @@ u16 RESET_008000(u16 *x_out, bool *c_out)
     INIDISP = 143; /* forced blank, brightness 15 */
     NMITIMEN = 0; /* NMI off */
     /* ▸ DMA transfer: Channel 0 copies $0800 bytes from $00:9000 to VRAM word $6000. */
-    *(u16 *)&DMAP0 = 6145; /* 2 registers, alternating; to $2118 VMDATAL: VRAM */
+    *(u16 *)&DMAP0 = 6145; /* 2 registers, alternating (VRAM); to $2118 VMDATAL: VRAM */
     *(u16 *)&A1T0L = 36864; /* source $9000 in bank A1B */
     *(u16 *)&DAS0L = 2048; /* 2048 bytes (or an HDMA address) */
-    *(u16 *)&VMADDL = 24576; /* VRAM word $6000 (byte $0C000) */
+    *(u16 *)&VMADDL = 24576; /* VRAM word $6000 (byte $C000) */
     VMAIN = 128; /* step after the high byte, step 1 word */
     A1B0 = 0; /* bank $00 */
     MDMAEN = 1; /* start DMA on channel 0 */
@@ -126,10 +126,10 @@ u16 RESET_008000(u16 *x_out, bool *c_out)
     INIDISP = 0b10001111; /* forced blank, brightness 15 */
     NMITIMEN = 0b00000000; /* NMI off */
     /* ▸ DMA transfer: Channel 0 copies $0800 bytes from $00:9000 to VRAM word $6000. */
-    *(u16 *)&DMAP0 = 0b0001100000000001; /* 2 registers, alternating; to $2118 VMDATAL: VRAM */
+    *(u16 *)&DMAP0 = 0b0001100000000001; /* 2 registers, alternating (VRAM); to $2118 VMDATAL: VRAM */
     *(u16 *)&A1T0L = 0b1001000000000000; /* source $9000 in bank A1B */
     *(u16 *)&DAS0L = 0b0000100000000000; /* 2048 bytes (or an HDMA address) */
-    *(u16 *)&VMADDL = 0b0110000000000000; /* VRAM word $6000 (byte $0C000) */
+    *(u16 *)&VMADDL = 0b0110000000000000; /* VRAM word $6000 (byte $C000) */
     VMAIN = 0b10000000; /* step after the high byte, step 1 word */
     A1B0 = 0b00000000; /* bank $00 */
     MDMAEN = 0b00000001; /* start DMA on channel 0 */

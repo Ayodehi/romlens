@@ -1,9 +1,9 @@
 $00:8009  STA $2100        INIDISP = $8F: forced blank, brightness 15
 $00:800C  STZ $4200        NMITIMEN = $00: NMI off
-$00:8014  STA $4300        DMAP0 = $01: 2 registers, alternating; BBAD0 = $18: to…
+$00:8014  STA $4300        DMAP0 = $01: 2 registers, alternating (VRAM); BBAD0 = $18…
 $00:801A  STA $4302        A1T0 = $9000: source $9000 in bank A1B
 $00:8020  STA $4305        DAS0 = $0800: 2048 bytes (or an HDMA address)
-$00:8026  STA $2116        VMADD = $6000: VRAM word $6000 (byte $0C000)
+$00:8026  STA $2116        VMADD = $6000: VRAM word $6000 (byte $C000)
 $00:802D  STA $2115        VMAIN = $80: step after the high byte, step 1 word
 $00:8030  STZ $4304        A1B0 = $00: bank $00
 $00:8035  STA $420B        MDMAEN = $01: start DMA on channel 0
@@ -32,8 +32,8 @@ $00:8053  STA $4200        NMITIMEN = $81: NMI on, joypad auto-read on
 
   The PPU draws the picture line by line, and while it does, VRAM, the
   palette and sprite memory cannot be changed safely. Vertical blank, the
-  gap of about 38 lines between frames, is the time to update them, so
-  code that is about to change graphics first waits for it.
+  gap of about 37 lines between frames (NTSC), is the time to update them,
+  so code that is about to change graphics first waits for it.
 
 ▸ Clear memory  ($00:805D–$00:8061, 3 instructions)
   Clears $7E:0200 to $7E:020F: 16 bytes, a byte at a time, indexed by X.

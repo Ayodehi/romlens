@@ -1,7 +1,9 @@
 $420D  MEMSEL    W   FastROM enable
 
-  FastROM: whether banks $80–$FF are read at 3.58 MHz instead of 2.68 MHz.
-  Only works with a cartridge whose ROM is fast enough.
+  FastROM: whether banks $80–$FF are read in 6 master cycles instead of 8
+  (3.58 MHz instead of 2.68 MHz). Only works with a cartridge whose ROM is
+  fast enough, which is why FastROM games run their code from banks $80
+  and up.
 
   Bits  Field  
   0     FastROM
@@ -10,7 +12,9 @@ Error: no register at $2145
 $4200  NMITIMEN  W   Interrupt enable: NMI, IRQ timers, auto joypad read
 
   Turns interrupts on and off: the NMI at the start of vertical blank, the
-  timer IRQ, and the automatic reading of the controllers each frame.
+  timer IRQ, and the automatic reading of the controllers each frame,
+  which takes about three lines at the start of vertical blank. It is zero
+  after power-on and reset, so every game sets it.
 
   Bits  Field      Value  Meaning
   7     NMI        1      NMI on
@@ -21,23 +25,26 @@ $4200  NMITIMEN  W   Interrupt enable: NMI, IRQ timers, auto joypad read
 $4300  DMAP0     RW  DMA channel 0 parameters
 
   $4300 DMAP0
-  How this DMA channel copies: which way, how the source address moves,
-  and which pattern of B-bus registers it writes.
+  How this DMA channel copies: which way, how the source address moves
+  (up, down, or fixed to fill with one byte), and which pattern of B-bus
+  registers it writes. For HDMA the pattern also sets how many bytes each
+  line gets.
 
   Bits  Field          Value  Meaning
   7     Direction      0      from memory to the B bus
   6     HDMA indirect  0      HDMA direct table
   3–4   Source step    0      source address counts up
-  0–2   Pattern        1      2 registers, alternating
+  0–2   Pattern        1      2 registers, alternating (VRAM)
 
   $4301 BBAD0
   Which B-bus register ($21xx) this channel writes: $18 is VRAM, $22 the
-  palette, $04 sprite memory, $80 work RAM.
+  palette, $04 sprite memory, $80 work RAM. Some CPU revisions fail to
+  start a transfer with $00 here.
 
   Bits  Field     Value  Meaning
   0–7   Register  $18    to $2118 VMDATAL: VRAM
 
-  DMAP0 = $01: 2 registers, alternating
+  DMAP0 = $01: 2 registers, alternating (VRAM)
   BBAD0 = $18: to $2118 VMDATAL: VRAM
 $2107  BG1SC     W   BG1 tilemap address and size
 

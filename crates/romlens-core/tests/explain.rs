@@ -33,10 +33,12 @@ fn constants_reach_their_stores() {
     );
     assert_eq!(at(&rom, &x, 0x800C), "NMITIMEN = $00: NMI off");
     // A 16-bit store to two registers, and one to a pair.
-    assert!(at(&rom, &x, 0x8014).starts_with("DMAP0 = $01: 2 registers, alternating; BBAD0"));
+    assert!(
+        at(&rom, &x, 0x8014).starts_with("DMAP0 = $01: 2 registers, alternating (VRAM); BBAD0")
+    );
     assert_eq!(
         at(&rom, &x, 0x8026),
-        "VMADD = $6000: VRAM word $6000 (byte $0C000)"
+        "VMADD = $6000: VRAM word $6000 (byte $C000)"
     );
     assert!(at(&rom, &x, 0x8020).starts_with("DAS0 = $0800: 2048 bytes"));
     assert_eq!(at(&rom, &x, 0x8030), "A1B0 = $00: bank $00");

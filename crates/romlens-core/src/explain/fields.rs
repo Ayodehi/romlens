@@ -1,8 +1,11 @@
 //! What each hardware register's bits mean (docs/20), so a write reads as
 //! `NMITIMEN = $81: NMI on, joypad auto-read on` rather than just a name.
 //!
-//! The text is our own, checked field by field against fullsnes (Martin
-//! Korth) and the SNESdev wiki's register pages. Registers whose bytes mean
+//! The text is our own. Every field was checked on 24 September 2026
+//! against the SNESdev wiki's "PPU registers", "MMIO registers" and "DMA
+//! registers" pages (snes.nesdev.org), and against anomie's register
+//! document on wiki.superfamicom.org ("Registers"); docs/20 records the
+//! audit. Registers whose bytes mean
 //! whatever the program says (the APU ports, the data ports) have no fields,
 //! only what they are for.
 
@@ -431,8 +434,10 @@ fn char_base(v: u32) -> String {
     format!("tiles at ${:04X}", v << 12)
 }
 
+/// VRAM is 64 KB, so address bit 15 has no effect.
 fn vram_word(v: u32) -> String {
-    format!("VRAM word ${v:04X} (byte ${:05X})", v << 1)
+    let v = v & 0x7FFF;
+    format!("VRAM word ${v:04X} (byte ${:04X})", v << 1)
 }
 
 fn oam_word(v: u32) -> String {
@@ -598,11 +603,11 @@ const A_STEP: &[&str] = &[
 ];
 
 const PATTERNS: &[&str] = &[
-    "1 register",
-    "2 registers, alternating",
-    "1 register, written twice",
-    "2 registers, each twice",
-    "4 registers",
+    "1 register (WRAM, mode 7)",
+    "2 registers, alternating (VRAM)",
+    "1 register, written twice (OAM, CGRAM)",
+    "2 registers, each twice (scroll, mode 7)",
+    "4 registers (windows)",
     "2 registers, alternating twice",
     "1 register, written twice",
     "2 registers, each twice",
@@ -688,7 +693,7 @@ static LAYERS_MASKED: [Field; 5] = layers(&[
 static LAYOUTS: &[Layout] = &[
     settings(
         0x2100,
-        "Turns the picture on or off and sets its brightness. While forced blank is on the screen is black and VRAM, CGRAM and OAM can be written at any time, which is why games set it before loading graphics.",
+        "Turns the picture on or off and sets its brightness. While forced blank is on the screen is black and VRAM, CGRAM and OAM can be written at any time, which is why games set it before loading graphics. Turning forced blank off is best done in vertical blank; mid-frame it glitches the sprites on that line and the next. Many games write $8F rather than $80, so the brightness does not have to change when the screen comes back on.",
         &[
             flag2(7, "Forced blank", "forced blank", "display on"),
             number(3, 0, "Brightness", brightness),
@@ -696,7 +701,7 @@ static LAYOUTS: &[Layout] = &[
     ),
     settings(
         0x2101,
-        "Chooses the two sprite sizes a game can use and where in VRAM the sprite tiles are. Every sprite is one of the two sizes, picked by a bit in OAM.",
+        "Chooses the two sprite sizes a game can use and where in VRAM the sprite tiles are: a first table of 256 tiles at the name base, and a second one after it. Every sprite is one of the two sizes, picked by a bit in OAM. Sizes 6 and 7 were not in Nintendo's manual.",
         &[
             number(7, 5, "Sizes", obj_sizes),
             number(4, 3, "Name select", obj_gap),
@@ -719,7 +724,7 @@ static LAYOUTS: &[Layout] = &[
     ),
     data(
         0x2104,
-        "Writes a byte to sprite memory (OAM) at OAMADD, which then moves on. Usually filled by DMA from a copy in RAM each frame.",
+        "Writes a byte to sprite memory (OAM) at OAMADD, which then moves on; in the main table, bytes take effect in pairs. OAM can only be written in vertical blank or forced blank, so games keep a copy in RAM and send it by DMA each frame.",
     ),
     settings(
         0x2105,
@@ -831,7 +836,7 @@ static LAYOUTS: &[Layout] = &[
     ),
     settings(
         0x2115,
-        "How the VRAM address moves on after each VMDATA write: by how much, and after the low or the high byte. Most games step one word after the high byte, so a 16-bit write fills one word.",
+        "How the VRAM address moves on after each VMDATA write: by how much, and after the low or the high byte. Most games step one word after the high byte, so a 16-bit write, or a DMA with pattern 1, fills one word at a time. Stepping 32 words writes down a column of a tilemap.",
         &[
             flag2(
                 7,
@@ -846,18 +851,18 @@ static LAYOUTS: &[Layout] = &[
     pair(
         0x2116,
         "VMADD",
-        "The VRAM word address the next VMDATA write goes to. VRAM holds 32K words (64 KB): tiles, tilemaps and sprite graphics.",
+        "The VRAM word address the next VMDATA write goes to. VRAM holds 32K words (64 KB): tiles, tilemaps and sprite graphics. Addresses count words, so byte addresses are twice these.",
         &[number(15, 0, "Address", vram_word)],
     ),
     pair(
         0x2118,
         "VMDATA",
-        "Writes a word to VRAM at VMADD; the address then steps as VMAIN says. Usually fed by DMA.",
+        "Writes a word to VRAM at VMADD; the address then steps as VMAIN says. VRAM can only be written in vertical blank or forced blank; other writes are lost, though the address still steps. Usually fed by DMA.",
         &[number(15, 0, "Data", hex16)],
     ),
     settings(
         0x211A,
-        "Mode 7 settings: what shows outside the 1024×1024 map, and whether it is flipped.",
+        "Mode 7 settings: whether the 1024×1024-pixel map repeats forever or what fills the space beyond it (nothing, or tile 0), and whether the screen is flipped.",
         &[
             choice(7, 6, "Outside", M7_OUTSIDE),
             flag(
@@ -900,12 +905,12 @@ static LAYOUTS: &[Layout] = &[
     ),
     settings(
         0x2121,
-        "Picks the palette colour the next CGDATA writes change. Colours 0–127 are for backgrounds and 128–255 for sprites.",
+        "Picks the palette colour the next CGDATA writes change, and starts over at its low byte. Colours 0–127 are for backgrounds and 128–255 for sprites.",
         &[number(7, 0, "Colour", colour_index)],
     ),
     twice(
         0x2122,
-        "Writes a colour to the palette at CGADD. Each colour is 15 bits, blue-green-red, written as two bytes: low, then high.",
+        "Writes a colour to the palette at CGADD. Each colour is 15 bits, blue-green-red, written as two bytes: low, then high; it takes effect on the second. The palette can be written in vertical blank, horizontal blank or forced blank; during drawing the write goes to the wrong colour.",
     ),
     settings(
         0x2123,
@@ -982,7 +987,7 @@ static LAYOUTS: &[Layout] = &[
     ),
     settings(
         0x2130,
-        "Colour math, part one: where it happens and what it blends with. Games use it for transparency, shadows and fades.",
+        "Colour math, part one: where the colour window blacks out the main screen, where colour math is kept out, and whether it blends with the sub screen or the fixed colour. Games use it for transparency, shadows and fades.",
         &[
             choice0(7, 6, "Force black", FORCE_BLACK),
             choice(5, 4, "Math where", MATH_WHERE),
@@ -1050,7 +1055,7 @@ static LAYOUTS: &[Layout] = &[
     data(0x2143, "A byte for the sound CPU (SPC700), through port 3."),
     data(
         0x2180,
-        "Writes a byte to work RAM at WMADD, which then moves on. Mostly used as a DMA target to fill or copy RAM.",
+        "Writes a byte to work RAM at WMADD, which then moves on. Mostly used as a DMA target, to copy ROM into RAM or fill RAM. A DMA from work RAM to this port does nothing: the RAM cannot read and write itself at once.",
     ),
     pair(
         0x2181,
@@ -1075,7 +1080,7 @@ static LAYOUTS: &[Layout] = &[
     ),
     settings(
         0x4200,
-        "Turns interrupts on and off: the NMI at the start of vertical blank, the timer IRQ, and the automatic reading of the controllers each frame.",
+        "Turns interrupts on and off: the NMI at the start of vertical blank, the timer IRQ, and the automatic reading of the controllers each frame, which takes about three lines at the start of vertical blank. It is zero after power-on and reset, so every game sets it.",
         &[
             flag2(7, "NMI", "NMI on", "NMI off"),
             choice0(5, 4, "Timer IRQ", IRQ_MODES),
@@ -1084,7 +1089,7 @@ static LAYOUTS: &[Layout] = &[
     ),
     data(
         0x4201,
-        "The programmable I/O port. Bit 7 also latches the H/V counters when it goes from 1 to 0; light guns use it.",
+        "The programmable I/O port, wired to pin 6 of each controller port. Bit 7 is also the PPU's counter latch: setting it to 0 latches the H/V counters, which light guns rely on, so games leave it at 1.",
     ),
     settings(
         0x4202,
@@ -1093,7 +1098,7 @@ static LAYOUTS: &[Layout] = &[
     ),
     settings(
         0x4203,
-        "The second number for the hardware multiplier. Writing it starts the multiply; the 16-bit product is in RDMPYL/H 8 CPU cycles later.",
+        "The second number for the hardware multiplier. Writing it starts the multiply; the 16-bit product is in RDMPYL/H up to 8 CPU cycles later.",
         &[number(7, 0, "Multiplier", |v| {
             format!("WRMPYA × {v}, into RDMPY")
         })],
@@ -1106,7 +1111,7 @@ static LAYOUTS: &[Layout] = &[
     ),
     settings(
         0x4206,
-        "What to divide WRDIV by. Writing it starts the divide; the quotient is in RDDIVL/H and the remainder in RDMPYL/H 16 CPU cycles later.",
+        "What to divide WRDIV by. Writing it starts the divide; the quotient is in RDDIVL/H and the remainder in RDMPYL/H up to 16 CPU cycles later. Dividing by zero gives a quotient of $FFFF and the dividend as the remainder.",
         &[number(7, 0, "Divisor", |v| {
             format!("WRDIV ÷ {v}, into RDDIV")
         })],
@@ -1114,7 +1119,7 @@ static LAYOUTS: &[Layout] = &[
     pair(
         0x4207,
         "HTIME",
-        "The dot on a line where the timer IRQ fires (0–339), when NMITIMEN asks for it.",
+        "The dot on a line where the timer IRQ fires (0–339), when NMITIMEN asks for it. A larger value never matches.",
         &[number(8, 0, "Dot", h_dot)],
     ),
     pair(
@@ -1125,7 +1130,7 @@ static LAYOUTS: &[Layout] = &[
     ),
     settings(
         0x420B,
-        "Starts a DMA transfer on each channel whose bit is set, one after another. The CPU stops until they are done. Each channel's $43x0–$43x6 say what to copy where.",
+        "Starts a DMA transfer on each channel whose bit is set, lowest first. The CPU stops until they are done. Each channel's $43x0–$43x6 say what to copy where; afterwards its byte count is zero and its source address has moved on, so the count must be set again before the next transfer.",
         &[number(7, 0, "Channels", |v| {
             if v == 0 {
                 "no transfer started".to_owned()
@@ -1136,7 +1141,7 @@ static LAYOUTS: &[Layout] = &[
     ),
     settings(
         0x420C,
-        "Turns HDMA on for each channel whose bit is set. HDMA writes a register at the start of each line, from a table, so a setting can change down the screen (waves, gradients, split scrolling).",
+        "Turns HDMA on for each channel whose bit is set. HDMA writes a register at the start of each line, from a table, so a setting can change down the screen (waves, gradients, split scrolling). The hardware reads each channel's settings at the top of the frame, so games turn it on during vertical blank.",
         &[number(7, 0, "Channels", |v| {
             if v == 0 {
                 "HDMA off".to_owned()
@@ -1147,12 +1152,12 @@ static LAYOUTS: &[Layout] = &[
     ),
     settings(
         0x420D,
-        "FastROM: whether banks $80–$FF are read at 3.58 MHz instead of 2.68 MHz. Only works with a cartridge whose ROM is fast enough.",
+        "FastROM: whether banks $80–$FF are read in 6 master cycles instead of 8 (3.58 MHz instead of 2.68 MHz). Only works with a cartridge whose ROM is fast enough, which is why FastROM games run their code from banks $80 and up.",
         &[flag2(0, "FastROM", "FastROM on", "FastROM off")],
     ),
     settings(
         0x4210,
-        "Bit 7 is set when vertical blank starts, and reading the register clears it. A game waiting for a frame can read it until the bit is set.",
+        "Bit 7 is set when vertical blank starts, and cleared when vertical blank ends or the register is read. A game waiting for a frame can read it until the bit is set; an NMI handler reads it to acknowledge the interrupt.",
         &[
             flag(
                 7,
@@ -1179,7 +1184,7 @@ static LAYOUTS: &[Layout] = &[
     ),
     settings(
         0x4300,
-        "How this DMA channel copies: which way, how the source address moves, and which pattern of B-bus registers it writes.",
+        "How this DMA channel copies: which way, how the source address moves (up, down, or fixed to fill with one byte), and which pattern of B-bus registers it writes. For HDMA the pattern also sets how many bytes each line gets.",
         &[
             flag(
                 7,
@@ -1199,13 +1204,13 @@ static LAYOUTS: &[Layout] = &[
     ),
     settings(
         0x4301,
-        "Which B-bus register ($21xx) this channel writes: $18 is VRAM, $22 the palette, $04 sprite memory, $80 work RAM.",
+        "Which B-bus register ($21xx) this channel writes: $18 is VRAM, $22 the palette, $04 sprite memory, $80 work RAM. Some CPU revisions fail to start a transfer with $00 here.",
         &[number(7, 0, "Register", bbus)],
     ),
     pair(
         0x4302,
         "A1T",
-        "The source address in the bank A1B for this DMA channel, or its HDMA table's start.",
+        "The source address in the bank A1B for this DMA channel, or its HDMA table's start. A transfer cannot cross a bank: the address wraps within it.",
         &[number(15, 0, "Address", |v| {
             format!("source ${v:04X} in bank A1B")
         })],
@@ -1218,7 +1223,7 @@ static LAYOUTS: &[Layout] = &[
     pair(
         0x4305,
         "DAS",
-        "For DMA, how many bytes to copy (0 means 65536). For indirect HDMA, the address the hardware fetched from the table.",
+        "For DMA, how many bytes to copy (0 means 65536); it counts down to zero as the transfer runs. For indirect HDMA, the address the hardware fetched from the table.",
         &[number(15, 0, "Count", byte_count)],
     ),
     settings(
@@ -1322,7 +1327,7 @@ mod tests {
         assert_eq!(w.parts[0].name, "DMAP0");
         assert_eq!(
             w.parts[0].summary.as_deref(),
-            Some("2 registers, alternating")
+            Some("2 registers, alternating (VRAM)")
         );
         assert_eq!(w.parts[1].name, "BBAD0");
         assert_eq!(
@@ -1334,7 +1339,7 @@ mod tests {
         assert_eq!(w.parts.len(), 1);
         assert_eq!(
             w.parts[0].short(),
-            "VMADD = $6000: VRAM word $6000 (byte $0C000)"
+            "VMADD = $6000: VRAM word $6000 (byte $C000)"
         );
         let w = describe(0x4375, Some(0x0800), 2).unwrap();
         assert_eq!(w.parts[0].name, "DAS7");

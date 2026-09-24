@@ -12,13 +12,13 @@ $00:800C  9C 00 42     STZ $4200                                   ; NMITIMEN = 
 $00:800F  C2 20        REP #$20
 $00:8011  A9 01 18     LDA #$1801
                        ; ▸ DMA transfer: Channel 0 copies $0800 bytes from $00:9000 to VRAM word $6000.
-$00:8014  8D 00 43     STA $4300                                   ; DMAP0 = $01: 2 registers, alternating; BBAD0 = $18: to…
+$00:8014  8D 00 43     STA $4300                                   ; DMAP0 = $01: 2 registers, alternating (VRAM); BBAD0 = $18…
 $00:8017  A9 00 90     LDA #$9000
 $00:801A  8D 02 43     STA $4302                                   ; A1T0 = $9000: source $9000 in bank A1B
 $00:801D  A9 00 08     LDA #$0800
 $00:8020  8D 05 43     STA $4305                                   ; DAS0 = $0800: 2048 bytes (or an HDMA address)
 $00:8023  A9 00 60     LDA #$6000
-$00:8026  8D 16 21     STA $2116                                   ; VMADD = $6000: VRAM word $6000 (byte $0C000)
+$00:8026  8D 16 21     STA $2116                                   ; VMADD = $6000: VRAM word $6000 (byte $C000)
 $00:8029  E2 20        SEP #$20
 $00:802B  A9 80        LDA #$80
 $00:802D  8D 15 21     STA $2115                                   ; VMAIN = $80: step after the high byte, step 1 word
