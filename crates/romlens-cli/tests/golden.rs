@@ -934,6 +934,30 @@ fn graph_commands() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// The explain fixture's hardware stores (docs/20): one explained, the
+/// routine's all, and as JSON.
+#[test]
+fn explain_commands() {
+    let dir = temp_dir("explain");
+    let rom = dir.join("explain.sfc");
+    std::fs::write(&rom, fixtures::explain_lorom()).unwrap();
+    let rom = rom.to_str().unwrap();
+    check(
+        "explain",
+        &format!(
+            "{}{}{}{}{}",
+            run(&["explain", rom, "$00:8053"]),
+            run(&["explain", rom, "$00:8014"]),
+            run(&["explain", rom, "$00:804E"]),
+            run(&["explain", rom, "$00:8000"]),
+            run(&["explain", rom, "--stats"]),
+        ),
+    );
+    check("explain-routine", &run(&["explain", rom, "$00:8000", "--routine"]));
+    check("explain-json", &run(&["explain", rom, "$00:8009", "--json"]));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// Pseudo-C for the routines fixture (docs/18), at each level, and the
 /// header every result includes.
 #[test]

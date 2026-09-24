@@ -8,8 +8,8 @@ track progress against it.
 | Task | State |
 |---|---|
 | E0 this document, the roadmap pointer, the checklist rows | done |
-| E1 the register field tables and `describe` | |
-| E2 the value each store writes, `Explanations`, `romlens explain` | |
+| E1 the register field tables and `describe` | done: `explain::fields` covers every writable PPU register, the CPU's I/O registers, the three status registers polling loops read and the DMA channel template; `describe` decodes a one- or two-byte store, and pairs (VMADD, A1Tn, DASn, WRDIV, HTIME, VTIME, OAMADD, WMADD) as one value. `romlens registers <address> [--value v]`. Tests pin the decodes |
+| E2 the value each store writes, `Explanations`, `romlens explain` | done: `explain::values` (bytes of A, X and Y: known, loaded from an address, or unknown; constants loaded from ROM count as known; pushes and pulls followed) and `Explanations::build`. A new fixture, `fixtures::explain_lorom` (`romlens testrom --fixture explain`). `romlens explain <rom> <address> [--routine] [--json] [--stats]`; goldens `explain*.txt`. On the development ROM: 865 hardware stores, 590 (68%) with a known value and 152 (18%) with a known source, in 7.5 ms |
 | E3 the idioms | |
 | E4 the listing: explained comments, idiom notes, the toggle | |
 | E5 the C: the same comments | |

@@ -4,6 +4,7 @@ pub mod accuracy;
 pub mod analyze;
 pub mod decompile;
 pub mod disasm;
+pub mod explain;
 pub mod export;
 pub mod graph;
 pub mod graphics;

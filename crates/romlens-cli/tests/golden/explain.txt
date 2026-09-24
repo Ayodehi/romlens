@@ -1,0 +1,54 @@
+$00:8053  STA $4200
+
+  NMITIMEN = $81: NMI on, joypad auto-read on
+
+  Turns interrupts on and off: the NMI at the start of vertical blank, the
+  timer IRQ, and the automatic reading of the controllers each frame.
+
+  Bits  Field      Value  Meaning
+  7     NMI        1      NMI on
+  4–5   Timer IRQ  0      no timer IRQ
+  0     Joypad     1      joypad auto-read on
+
+  NMITIMEN = $81: NMI on, joypad auto-read on
+$00:8014  STA $4300
+
+  DMAP0 = $01: 2 registers, alternating; BBAD0 = $18: to…
+
+  $4300 DMAP0
+  How this DMA channel copies: which way, how the source address moves,
+  and which pattern of B-bus registers it writes.
+
+  Bits  Field          Value  Meaning
+  7     Direction      0      from memory to the B bus
+  6     HDMA indirect  0      HDMA direct table
+  3–4   Source step    0      source address counts up
+  0–2   Pattern        1      2 registers, alternating
+
+  $4301 BBAD0
+  Which B-bus register ($21xx) this channel writes: $18 is VRAM, $22 the
+  palette, $04 sprite memory, $80 work RAM.
+
+  Bits  Field     Value  Meaning
+  0–7   Register  $18    to $2118 VMDATAL: VRAM
+
+  DMAP0 = $01: 2 registers, alternating
+  BBAD0 = $18: to $2118 VMDATAL: VRAM
+$00:804E  STA $2100
+
+  INIDISP ← $7E:0DAE
+  The value is loaded from $7E:0DAE; its bits are listed without values.
+
+  Turns the picture on or off and sets its brightness. While forced blank
+  is on the screen is black and VRAM, CGRAM and OAM can be written at any
+  time, which is why games set it before loading graphics.
+
+  Bits  Field       
+  7     Forced blank
+  0–3   Brightness
+$00:8000: no store to a hardware register
+routines:          4
+hardware stores:   14
+value known:       13 (93%)
+source known:      1 (7%)
+indexed, unknown:  0 (0%)

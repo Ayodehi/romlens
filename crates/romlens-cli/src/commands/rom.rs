@@ -62,6 +62,7 @@ pub enum Fixture {
     MixedData,
     Graphics,
     Routines,
+    Explain,
 }
 
 impl Fixture {
@@ -73,6 +74,7 @@ impl Fixture {
             Fixture::MixedData => fixtures::mixed_data_lorom(),
             Fixture::Graphics => fixtures::graphics_lorom(),
             Fixture::Routines => fixtures::routines_lorom(),
+            Fixture::Explain => fixtures::explain_lorom(),
         }
     }
 
@@ -84,6 +86,7 @@ impl Fixture {
             Fixture::MixedData => "mixed-data LoROM".to_owned(),
             Fixture::Graphics => "graphics LoROM".to_owned(),
             Fixture::Routines => "routines LoROM".to_owned(),
+            Fixture::Explain => "explain LoROM".to_owned(),
         }
     }
 }

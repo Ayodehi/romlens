@@ -223,6 +223,22 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// What a store to a hardware register does, field by field; with
+    /// `--routine`, every one in the routine there (docs/20).
+    Explain {
+        rom: PathBuf,
+        /// The instruction, or with --routine any address in the routine.
+        expr: Option<String>,
+        #[arg(long)]
+        project: Option<PathBuf>,
+        #[arg(long)]
+        routine: bool,
+        /// How many hardware stores in the ROM have a known value.
+        #[arg(long, conflicts_with_all = ["routine", "json"])]
+        stats: bool,
+        #[arg(long)]
+        json: bool,
+    },
     /// Pseudo-C for the routine entered at an address (docs/18).
     Decompile {
         /// The ROM (not needed with --header alone).
@@ -821,6 +837,8 @@ enum FixtureArg {
     Graphics,
     /// 32 KB LoROM calling small routines for the decompiler.
     Routines,
+    /// 32 KB LoROM whose reset does one of each common setup step.
+    Explain,
 }
 
 impl From<FixtureArg> for commands::rom::Fixture {
@@ -832,6 +850,7 @@ impl From<FixtureArg> for commands::rom::Fixture {
             FixtureArg::MixedData => commands::rom::Fixture::MixedData,
             FixtureArg::Graphics => commands::rom::Fixture::Graphics,
             FixtureArg::Routines => commands::rom::Fixture::Routines,
+            FixtureArg::Explain => commands::rom::Fixture::Explain,
         }
     }
 }
@@ -1040,6 +1059,21 @@ fn run() -> Result<()> {
             project: project.as_deref(),
             calls,
             dot,
+            json,
+        }),
+        Command::Explain {
+            rom,
+            expr,
+            project,
+            routine,
+            stats,
+            json,
+        } => commands::explain::run(commands::explain::ExplainArgs {
+            rom: &rom,
+            expr: expr.as_deref(),
+            project: project.as_deref(),
+            routine,
+            stats,
             json,
         }),
         Command::Decompile {

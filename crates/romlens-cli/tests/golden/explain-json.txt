@@ -1,0 +1,3 @@
+[
+  {"address": "$00:8009", "instruction": "STA $2100", "short": "INIDISP = $8F: forced blank, brightness 15", "value": 143, "source": null, "parts": [{"register": 8448, "name": "INIDISP", "summary": "forced blank, brightness 15", "fields": [{"bits": "7", "name": "Forced blank", "raw": 1, "meaning": "forced blank"}, {"bits": "0–3", "name": "Brightness", "raw": 15, "meaning": "brightness 15"}]}]}
+]

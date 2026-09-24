@@ -279,6 +279,86 @@ pub fn routines_lorom() -> Vec<u8> {
     build_with_code(MappingMode::LoRom, 0x8000, false, &code, ROUTINES_TITLE)
 }
 
+pub const EXPLAIN_TITLE: &str = "ROMLENS EXPLAIN";
+
+/// 32 KB LoROM whose reset handler does what every SNES game's setup code
+/// does, one of each, for the explanations (`docs/20-explanations.md`):
+///
+/// ```text
+/// $00:8000  SEI; CLC; XCE; PHK; PLB; SEP #$30
+/// $00:8007  LDA #$8F / STA $2100      ; forced blank, brightness 15
+/// $00:800C  STZ $4200                 ; interrupts off
+/// $00:800F  REP #$20
+/// $00:8011  LDA #$1801 / STA $4300    ; DMA 0: 2 registers, to VMDATA
+/// $00:8017  LDA #$9000 / STA $4302    ; from $00:9000
+/// $00:801D  LDA #$0800 / STA $4305    ; $0800 bytes
+/// $00:8023  LDA #$6000 / STA $2116    ; to VRAM word $6000
+/// $00:8029  SEP #$20
+/// $00:802B  LDA #$80 / STA $2115      ; step after the high byte
+/// $00:8030  STZ $4304                 ; bank $00
+/// $00:8033  LDA #$01 / STA $420B      ; start channel 0
+/// $00:8038  LDA #$06 / STA $4202      ; 6 × 7 with the multiplier
+/// $00:803D  LDA #$07 / STA $4203
+/// $00:8042  NOP × 4
+/// $00:8046  LDA $4216 / STA $10
+/// $00:804B  LDA $0DAE / STA $2100     ; brightness from RAM
+/// $00:8051  LDA #$81 / STA $4200      ; NMI and joypad auto-read on
+/// $00:8056  LDA $4212 / BPL $8056     ; wait for vertical blank
+/// $00:805B  LDX #$0F                  ; clear $0200-$020F
+/// $00:805D  STZ $0200,X / DEX / BPL $805D
+/// $00:8063  SED; CLC; LDA $0DBE; ADC #$01; STA $0DBE; CLD
+/// $00:806E  LDA $2140 / CMP #$AA / BNE $806E   ; wait for the sound CPU
+/// $00:8075  JSR $80A0; JSR $80A4
+/// $00:807B  BRA $807B
+///
+/// $00:80A0  LDA #$01 / STA $7D        ; a second way in:
+/// $00:80A4  LDA #$0F / STA $2100      ; $80A4 is also called directly
+/// $00:80A9  RTS
+///
+/// $00:80F0  RTI                       ; every other vector
+/// ```
+pub fn explain_lorom() -> Vec<u8> {
+    let mut code = vec![0u8; 0x100];
+    let mut put = |at: u16, bytes: &[u8]| {
+        let i = (at - 0x8000) as usize;
+        code[i..i + bytes.len()].copy_from_slice(bytes);
+    };
+    put(0x8000, &[0x78, 0x18, 0xFB, 0x4B, 0xAB, 0xE2, 0x30]);
+    put(0x8007, &[0xA9, 0x8F, 0x8D, 0x00, 0x21]);
+    put(0x800C, &[0x9C, 0x00, 0x42]);
+    put(0x800F, &[0xC2, 0x20]);
+    put(0x8011, &[0xA9, 0x01, 0x18, 0x8D, 0x00, 0x43]);
+    put(0x8017, &[0xA9, 0x00, 0x90, 0x8D, 0x02, 0x43]);
+    put(0x801D, &[0xA9, 0x00, 0x08, 0x8D, 0x05, 0x43]);
+    put(0x8023, &[0xA9, 0x00, 0x60, 0x8D, 0x16, 0x21]);
+    put(0x8029, &[0xE2, 0x20]);
+    put(0x802B, &[0xA9, 0x80, 0x8D, 0x15, 0x21]);
+    put(0x8030, &[0x9C, 0x04, 0x43]);
+    put(0x8033, &[0xA9, 0x01, 0x8D, 0x0B, 0x42]);
+    put(0x8038, &[0xA9, 0x06, 0x8D, 0x02, 0x42]);
+    put(0x803D, &[0xA9, 0x07, 0x8D, 0x03, 0x42]);
+    put(0x8042, &[0xEA, 0xEA, 0xEA, 0xEA]);
+    put(0x8046, &[0xAD, 0x16, 0x42, 0x85, 0x10]);
+    put(0x804B, &[0xAD, 0xAE, 0x0D, 0x8D, 0x00, 0x21]);
+    put(0x8051, &[0xA9, 0x81, 0x8D, 0x00, 0x42]);
+    put(0x8056, &[0xAD, 0x12, 0x42, 0x10, 0xFB]);
+    put(0x805B, &[0xA2, 0x0F]);
+    put(0x805D, &[0x9E, 0x00, 0x02, 0xCA, 0x10, 0xFA]);
+    put(
+        0x8063,
+        &[0xF8, 0x18, 0xAD, 0xBE, 0x0D, 0x69, 0x01, 0x8D, 0xBE, 0x0D, 0xD8],
+    );
+    put(0x806E, &[0xAD, 0x40, 0x21, 0xC9, 0xAA, 0xD0, 0xF9]);
+    put(0x8075, &[0x20, 0xA0, 0x80, 0x20, 0xA4, 0x80]);
+    put(0x807B, &[0x80, 0xFE]);
+    put(0x80A0, &[0xA9, 0x01, 0x85, 0x7D]);
+    put(0x80A4, &[0xA9, 0x0F, 0x8D, 0x00, 0x21, 0x60]);
+    put(0x80F0, &[0x40]);
+    let mut vectors = [0x80F0; 12];
+    vectors[10] = 0x8000; // emulation RESET
+    build_custom(MappingMode::LoRom, 0x8000, false, &code, EXPLAIN_TITLE, vectors)
+}
+
 pub const MIXED_DATA_TITLE: &str = "ROMLENS DATA";
 
 /// 64 KB LoROM holding one recognisable block per data heuristic, so the
