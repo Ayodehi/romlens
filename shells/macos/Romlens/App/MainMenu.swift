@@ -130,6 +130,7 @@ enum MainMenu {
             item("Hex", #selector(RomWindowController.showHex(_:)), "1", modifiers: [.command, .option]),
             item("Disassembly", #selector(RomWindowController.showDisassembly(_:)), "2", modifiers: [.command, .option]),
             item("Both", #selector(RomWindowController.showBoth(_:)), "3", modifiers: [.command, .option]),
+            item("C", #selector(RomWindowController.showC(_:)), "8", modifiers: [.command, .option]),
             submenu("Graphics", [
                 item("Tile Decoder", #selector(RomWindowController.showTileDecoder(_:)), "4", modifiers: [.command, .option]),
                 item("Palette", #selector(RomWindowController.showPalette(_:)), "5", modifiers: [.command, .option]),
@@ -145,6 +146,7 @@ enum MainMenu {
             item("Show Inspector", #selector(RomWindowController.toggleInspector(_:)), "0", modifiers: [.command, .option]),
             item("Show Overview Strip", #selector(RomWindowController.toggleStrip(_:)), "0", modifiers: [.command, .shift]),
             item("Show Results", #selector(RomWindowController.toggleResults(_:)), "0", modifiers: [.command, .control]),
+            item("Focus on Code", #selector(RomWindowController.toggleFocus(_:)), "f", modifiers: [.command, .option]),
             .separator(),
             item("Enter Full Screen", #selector(NSWindow.toggleFullScreen(_:)), "f", modifiers: [.command, .control]),
         ])

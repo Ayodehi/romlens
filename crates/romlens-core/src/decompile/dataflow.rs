@@ -747,6 +747,8 @@ fn try_propagate(
             return false;
         };
         lb.lines[j].stmt = new;
+        let carried = lb.lines[i].steps();
+        lb.lines[j].merged.extend(carried);
     } else {
         if let Some(c) = &lb.cond {
             let Some(n) = substitute(c, &dst, &v) else {
@@ -760,6 +762,8 @@ fn try_propagate(
             };
             lb.switch = Some((n, vals.clone()));
         }
+        let carried = lb.lines[i].steps();
+        lb.term_merged.extend(carried);
     }
     lb.lines.remove(i);
     true
@@ -938,6 +942,7 @@ pub fn stack_slots(f: &Function, cfg: &Cfg, lifted: &mut Lifted) {
                             ),
                         },
                         step,
+                        merged: Vec::new(),
                     });
                 }
                 Stmt::Effect("PHP", _) if renamed.contains_key(&d) => {
@@ -949,6 +954,7 @@ pub fn stack_slots(f: &Function, cfg: &Cfg, lifted: &mut Lifted) {
                                 value: Expr::Flag(*f),
                             },
                             step,
+                            merged: Vec::new(),
                         });
                     }
                 }
@@ -961,6 +967,7 @@ pub fn stack_slots(f: &Function, cfg: &Cfg, lifted: &mut Lifted) {
                                 value: Expr::Temp(t + k as u32),
                             },
                             step,
+                            merged: Vec::new(),
                         });
                     }
                 }
@@ -974,6 +981,7 @@ pub fn stack_slots(f: &Function, cfg: &Cfg, lifted: &mut Lifted) {
                             value: Expr::Temp(t),
                         },
                         step,
+                        merged: Vec::new(),
                     });
                 }
                 _ => out.push(line),

@@ -17,13 +17,14 @@ final class RomViewModel {
     }
 
     enum EditorTab: String, CaseIterable, Identifiable {
-        case hex, disassembly, both
+        case hex, disassembly, both, c
         var id: String { rawValue }
         var title: String {
             switch self {
             case .hex: "Hex"
             case .disassembly: "Disassembly"
             case .both: "Both"
+            case .c: "C"
             }
         }
     }
@@ -47,6 +48,8 @@ final class RomViewModel {
     let navigator = NavigatorModel()
     let search = SearchModel()
     let references = ReferencesModel()
+    /// The C tab's routine and text (docs/18).
+    let decompiler = DecompileModel()
     @ObservationIgnored let cache: HexRowCache
     @ObservationIgnored let asmCache: AsmLineCache
     let metrics = MonoMetrics()
@@ -87,7 +90,10 @@ final class RomViewModel {
     /// Choosing a text tab closes any graphics view, which is how the
     /// segmented control and the Graphics picker share the editor area.
     var editorTab: EditorTab = .hex {
-        didSet { graphicsTab = nil }
+        didSet {
+            graphicsTab = nil
+            refreshDecompile()
+        }
     }
     /// The graphics view in the editor area, if one is open.
     var graphicsTab: GraphicsModel.Tab?
@@ -102,6 +108,28 @@ final class RomViewModel {
     var resultsKind: ResultsKind = .find
     enum ResultsKind { case find, references }
     var isStripVisible = true
+    /// What Focus on Code hid, to put back when it is turned off.
+    private var unfocused: (navigator: Bool, inspector: Bool, strip: Bool, results: Bool)?
+    /// Only the editor showing: the sidebars, the strip and the results
+    /// pane are hidden.
+    var isFocused: Bool { unfocused != nil }
+
+    /// Focus on Code: hide everything but the editor, or put it all back.
+    func toggleFocus() {
+        if let saved = unfocused {
+            isNavigatorVisible = saved.navigator
+            isInspectorVisible = saved.inspector
+            isStripVisible = saved.strip
+            isResultsVisible = saved.results
+            unfocused = nil
+        } else {
+            unfocused = (isNavigatorVisible, isInspectorVisible, isStripVisible, isResultsVisible)
+            isNavigatorVisible = false
+            isInspectorVisible = false
+            isStripVisible = false
+            isResultsVisible = false
+        }
+    }
     /// Bumped when the strip's data is stale; it re-reduces rather than
     /// redrawing what the last analysis said.
     private(set) var stripGeneration = 0
@@ -176,10 +204,31 @@ final class RomViewModel {
             lineGeneration += 1
             stripGeneration += 1
             refreshSelectionDetails()
+            decompiler.invalidate()
+            refreshDecompile()
             Task { await navigator.reload(workbench: workbench, rom: rom) }
         case .project:
             break
         }
+    }
+
+    // MARK: C
+
+    /// Keep the C tab on the routine at the selection. Only while the tab is
+    /// showing: decompiling costs a summary of every routine the first time
+    /// after an analysis.
+    func refreshDecompile() {
+        guard editorTab == .c, graphicsTab == nil, hasDisassembly else { return }
+        decompiler.follow(
+            workbench: workbench,
+            instructionStart: instruction?.fileOffset ?? selectedOffset,
+            generation: asmGeneration
+        )
+    }
+
+    /// Decompile Routine: the C tab on the routine at the selection.
+    func showDecompiled() {
+        editorTab = .c
     }
 
     // MARK: Selection
@@ -252,6 +301,7 @@ final class RomViewModel {
         selectedOffset = offset
         inspection = rom.inspect(fileOffset: offset)
         refreshSelectionDetails()
+        refreshDecompile()
     }
 
     private func clearDetails() {

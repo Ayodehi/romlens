@@ -126,17 +126,17 @@ are not started.
 
 ## Phase 3
 
-Written from `18-decompiler.md` on 23 September 2026; nothing is built yet.
+Written from `18-decompiler.md` on 23 September 2026. The macOS rows are built and covered by the app test bundle (🧪); the manual pass (steps 34–36) is still to run.
 
 ### 3A — pseudo-C
 
 | # | Capability | Shell must expose | CLI scenario | macOS | Win | Linux |
 |---|---|---|---|---|---|---|
-| 3.1 | Decompile the routine at the cursor to valid C | A C editor tab (View › C, ⌥⌘8) showing the disassembly and the C side by side; Decompile Routine in the context menu | `romlens decompile <rom> [--project P] <address>` | ⬜ | ⬜ | ⬜ |
-| 3.2 | Keep the two sides in step | Selecting a C line highlights its instructions, and selecting an instruction highlights its C line | `romlens decompile … --json` (the line map) | ⬜ | ⬜ | ⬜ |
-| 3.3 | Show each stage | A level picker in the C tab: lift, clean, full | `romlens decompile … --level lift\|clean\|full` | ⬜ | ⬜ | ⬜ |
-| 3.4 | Names follow the project | Renaming a label or defining a variable updates the C at once; a name in the C navigates to it | `romlens decompile` after `romlens project <P> label …` | ⬜ | ⬜ | ⬜ |
-| 3.5 | Export | Export C… writes the `.c` and `snes.h` | `romlens decompile … > f.c`, `romlens decompile --header snes.h` | ⬜ | ⬜ | ⬜ |
+| 3.1 | Decompile the routine at the cursor to valid C | A C editor tab (View › C, ⌥⌘8) showing the disassembly and the C side by side; Decompile Routine in the context menu | `romlens decompile <rom> [--project P] <address>` | 🧪 | ⬜ | ⬜ |
+| 3.2 | Keep the two sides in step | Selecting a C line highlights its instructions, and selecting an instruction highlights its C line | `romlens decompile … --json` (the line map) | 🧪 | ⬜ | ⬜ |
+| 3.3 | Show each stage | A level picker in the C tab: lift, clean, full | `romlens decompile … --level lift\|clean\|full` | 🧪 | ⬜ | ⬜ |
+| 3.4 | Names follow the project | Renaming a label or defining a variable updates the C at once; a name in the C navigates to it | `romlens decompile` after `romlens project <P> label …` | 🧪 | ⬜ | ⬜ |
+| 3.5 | Export | Export C… writes the `.c` and `snes.h` | `romlens decompile … > f.c`, `romlens decompile --header snes.h` | 🧪 | ⬜ | ⬜ |
 | 3.6 | Measure every routine | (n/a) | `romlens decompile <rom> --all --check` | n/a | ⬜ | ⬜ |
 
 ## Manual pass, macOS (to repeat before each release)
@@ -284,4 +284,6 @@ the development ROM.
     name and type at once. Rename a routine it calls: the call and its
     `extern` follow. Click a name in the C: the editor goes there.
 36. Export C…, then `cc -std=c11 -fsyntax-only RESET.c` beside the exported
-    `snes.h`: no errors.
+    `snes.h`: no errors. View › Focus on Code (⌥⌘F) hides the navigator,
+    inspector and overview strip; again brings back the ones that were
+    showing.

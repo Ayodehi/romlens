@@ -414,6 +414,18 @@ pub enum Stmt {
 pub struct Line {
     pub stmt: Stmt,
     pub step: usize,
+    /// Other instructions whose values were carried into this statement,
+    /// for the line map.
+    pub merged: Vec<usize>,
+}
+
+impl Line {
+    /// Every instruction this line stands for.
+    pub fn steps(&self) -> Vec<usize> {
+        let mut v = vec![self.step];
+        v.extend(self.merged.iter().copied());
+        v
+    }
 }
 
 /// A block's lifted statements and how it ends.
@@ -426,4 +438,6 @@ pub struct LiftedBlock {
     pub switch: Option<(Expr, Vec<u32>)>,
     /// The step the terminator came from, for the line map.
     pub term_step: Option<usize>,
+    /// Instructions whose values were carried into the condition.
+    pub term_merged: Vec<usize>,
 }

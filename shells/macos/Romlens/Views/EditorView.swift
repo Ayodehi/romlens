@@ -1,7 +1,7 @@
 import RomlensKit
 import SwiftUI
 
-/// The centre of the window: Hex, Disassembly or Both, or one of the
+/// The centre of the window: Hex, Disassembly, Both or C, or one of the
 /// graphics views.
 struct EditorView: View {
     @Bindable var model: RomViewModel
@@ -28,6 +28,12 @@ struct EditorView: View {
         case .both:
             if model.hasDisassembly {
                 LockstepEditorView(model: model)
+            } else {
+                analyzing
+            }
+        case .c:
+            if model.hasDisassembly {
+                CSplitView(model: model)
             } else {
                 analyzing
             }

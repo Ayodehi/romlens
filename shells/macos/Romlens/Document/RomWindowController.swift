@@ -1,4 +1,5 @@
 import AppKit
+import UniformTypeIdentifiers
 import RomlensKit
 import SwiftUI
 
@@ -67,6 +68,28 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
     @objc func showHex(_ sender: Any?) { model.editorTab = .hex }
     @objc func showDisassembly(_ sender: Any?) { model.editorTab = .disassembly }
     @objc func showBoth(_ sender: Any?) { model.editorTab = .both }
+    @objc func showC(_ sender: Any?) { model.editorTab = .c }
+    @objc func decompileRoutine(_ sender: Any?) { model.showDecompiled() }
+
+    /// Export C…: the routine's translation unit and the snes.h it
+    /// includes, side by side.
+    @objc func exportC(_ sender: Any?) {
+        guard let result = model.decompiler.result, let window else { return }
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "\(result.name).c"
+        panel.allowedContentTypes = [.init(filenameExtension: "c") ?? .sourceCode]
+        panel.message = "snes.h is written beside it."
+        panel.beginSheetModal(for: window) { response in
+            guard response == .OK, let url = panel.url else { return }
+            do {
+                try result.text.write(to: url, atomically: true, encoding: .utf8)
+                let header = url.deletingLastPathComponent().appendingPathComponent("snes.h")
+                try snesHeader().write(to: header, atomically: true, encoding: .utf8)
+            } catch {
+                NSAlert(error: error).beginSheetModal(for: window)
+            }
+        }
+    }
     @objc func showTileDecoder(_ sender: Any?) { model.openGraphics(.tiles) }
     @objc func showPalette(_ sender: Any?) { model.openGraphics(.palette) }
     @objc func showOam(_ sender: Any?) { model.openGraphics(.oam) }
@@ -87,6 +110,7 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
     @objc func toggleNavigator(_ sender: Any?) { withAnimation { model.isNavigatorVisible.toggle() } }
     @objc func toggleInspector(_ sender: Any?) { withAnimation { model.isInspectorVisible.toggle() } }
     @objc func toggleStrip(_ sender: Any?) { withAnimation { model.isStripVisible.toggle() } }
+    @objc func toggleFocus(_ sender: Any?) { withAnimation { model.toggleFocus() } }
     @objc func toggleResults(_ sender: Any?) { withAnimation { model.isResultsVisible.toggle() } }
 
     // MARK: Editing
@@ -163,6 +187,13 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
             item.state = model.graphicsTab == nil && model.editorTab == .disassembly ? .on : .off
         case #selector(showBoth(_:)):
             item.state = model.graphicsTab == nil && model.editorTab == .both ? .on : .off
+        case #selector(showC(_:)):
+            item.state = model.graphicsTab == nil && model.editorTab == .c ? .on : .off
+            return model.hasDisassembly
+        case #selector(decompileRoutine(_:)):
+            return model.hasDisassembly && model.instruction != nil
+        case #selector(exportC(_:)):
+            return model.decompiler.result != nil
         case #selector(showTileDecoder(_:)):
             item.state = model.graphicsTab == .tiles ? .on : .off
         case #selector(showPalette(_:)):
@@ -175,6 +206,8 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
             return model.graphics.hasRecording
         case #selector(toggleLiveSession(_:)):
             item.title = model.graphics.isLive ? "Stop Live Session" : "Start Live Session"
+        case #selector(toggleFocus(_:)):
+            item.state = model.isFocused ? .on : .off
         case #selector(toggleNavigator(_:)):
             item.title = model.isNavigatorVisible ? "Hide Navigator" : "Show Navigator"
         case #selector(toggleInspector(_:)):

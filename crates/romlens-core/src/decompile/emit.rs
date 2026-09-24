@@ -882,9 +882,13 @@ impl GotoLayout<'_> {
                 e.w.indent = indent;
             }
             for line in &lb.lines {
-                e.stmt(&line.stmt, &[line.step], asm);
+                e.stmt(&line.stmt, &line.steps(), asm);
             }
-            let ts: Vec<usize> = lb.term_step.into_iter().collect();
+            let ts: Vec<usize> = lb
+                .term_step
+                .into_iter()
+                .chain(lb.term_merged.iter().copied())
+                .collect();
             let next = next_of[&b];
             match &block.term {
                 Term::Fall(t) | Term::Goto(t) => self.go(e, *t, next, &ts, b, asm),
@@ -1056,7 +1060,11 @@ impl TreeLayout<'_> {
     }
 
     fn ts(&self, b: BlockId) -> Vec<usize> {
-        self.blocks[b].term_step.into_iter().collect()
+        let lb = &self.blocks[b];
+        lb.term_step
+            .into_iter()
+            .chain(lb.term_merged.iter().copied())
+            .collect()
     }
 
     fn put_label(&self, e: &mut Emitter, b: BlockId, empty: bool) {
@@ -1106,7 +1114,7 @@ impl TreeLayout<'_> {
                 let lb = &self.blocks[*b];
                 self.put_label(e, *b, lb.lines.is_empty());
                 for line in &lb.lines {
-                    e.stmt(&line.stmt, &[line.step], asm);
+                    e.stmt(&line.stmt, &line.steps(), asm);
                 }
             }
             Node::If {

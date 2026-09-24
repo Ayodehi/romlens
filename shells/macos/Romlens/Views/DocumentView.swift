@@ -66,6 +66,19 @@ struct DocumentView: View {
                 }
                 .help("Show or hide the navigator (⌘0)")
             }
+            ToolbarItem(placement: .navigation) {
+                Button {
+                    withAnimation { model.toggleFocus() }
+                } label: {
+                    Label(
+                        model.isFocused ? "Show Panels" : "Focus on Code",
+                        systemImage: model.isFocused
+                            ? "arrow.down.right.and.arrow.up.left"
+                            : "arrow.up.left.and.arrow.down.right"
+                    )
+                }
+                .help("Hide or show the navigator, inspector and overview strip together (⌥⌘F)")
+            }
             ToolbarItem(placement: .principal) {
                 Picker("Editor", selection: editorTab) {
                     ForEach(RomViewModel.EditorTab.allCases) { tab in
@@ -74,7 +87,7 @@ struct DocumentView: View {
                 }
                 .pickerStyle(.segmented)
                 .controlSize(.large)
-                .help("Hex (⌥⌘1), Disassembly (⌥⌘2) or Both (⌥⌘3)")
+                .help("Hex (⌥⌘1), Disassembly (⌥⌘2), Both (⌥⌘3) or C (⌥⌘8)")
             }
             ToolbarItem(placement: .principal) {
                 GraphicsMenu(model: model)

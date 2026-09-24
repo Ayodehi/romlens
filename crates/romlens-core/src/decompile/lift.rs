@@ -98,7 +98,11 @@ pub fn lift(f: &Function, cfg: &Cfg, opts: LiftOptions) -> Lifted {
         for i in block.steps.clone() {
             let step = &f.steps[i];
             for stmt in l.insn(&step.insn, &step.transfer, d) {
-                out.lines.push(Line { stmt, step: i });
+                out.lines.push(Line {
+                    stmt,
+                    step: i,
+                    merged: Vec::new(),
+                });
             }
             d = d.after(&step.insn);
         }
