@@ -175,6 +175,23 @@ fn idiom_text(s: &Session, i: &Idiom) -> String {
     for line in wrap(&i.summary, 72) {
         let _ = writeln!(out, "  {line}");
     }
+    if let Some(t) = &i.table {
+        let w = t
+            .rows
+            .iter()
+            .map(|r| r.cells[0].chars().count())
+            .chain([t.columns[0].chars().count()])
+            .max()
+            .unwrap_or(0);
+        out.push('\n');
+        let _ = writeln!(out, "    {:<w$}  {}", t.columns[0], t.columns[1]);
+        for r in &t.rows {
+            let _ = writeln!(out, "    {:<w$}  {}", r.cells[0], r.cells[1]);
+        }
+        if let Some(n) = &t.note {
+            let _ = writeln!(out, "  {n}");
+        }
+    }
     out.push('\n');
     for line in wrap(i.why, 72) {
         let _ = writeln!(out, "  {line}");

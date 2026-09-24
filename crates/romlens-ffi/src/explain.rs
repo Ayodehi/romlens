@@ -97,6 +97,22 @@ pub struct IdiomInfo {
     pub offsets: Vec<u32>,
     /// Where its note line goes.
     pub note_at: u32,
+    /// Details as a table, when they read better that way.
+    pub table: Option<IdiomTableInfo>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct IdiomTableInfo {
+    pub columns: Vec<String>,
+    pub rows: Vec<IdiomRowInfo>,
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct IdiomRowInfo {
+    pub cells: Vec<String>,
+    /// The instructions the row covers (file offsets).
+    pub offsets: Vec<u32>,
 }
 
 impl From<&Idiom> for IdiomInfo {
@@ -108,6 +124,18 @@ impl From<&Idiom> for IdiomInfo {
             why: i.why.to_owned(),
             offsets: i.offsets.iter().map(|o| o.0).collect(),
             note_at: i.first().0,
+            table: i.table.as_ref().map(|t| IdiomTableInfo {
+                columns: t.columns.clone(),
+                rows: t
+                    .rows
+                    .iter()
+                    .map(|r| IdiomRowInfo {
+                        cells: r.cells.clone(),
+                        offsets: r.offsets.iter().map(|o| o.0).collect(),
+                    })
+                    .collect(),
+                note: t.note.clone(),
+            }),
         }
     }
 }

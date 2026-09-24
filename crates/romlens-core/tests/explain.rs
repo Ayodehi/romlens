@@ -362,14 +362,23 @@ fn shadow_copies_of_registers() {
     )
     .unwrap();
     let x = build(&rom, &Project::new(&rom));
-    let shadows: Vec<&str> = x
+    let shadows: Vec<_> = x
         .idioms()
         .iter()
         .filter(|i| i.kind == romlens_core::explain::IdiomKind::ShadowRegister)
-        .map(|i| i.summary.as_str())
         .collect();
+    assert_eq!(shadows.len(), 1);
+    assert_eq!(shadows[0].summary, "Keeps a RAM copy of 2 registers.");
+    let t = shadows[0].table.as_ref().unwrap();
+    let cells: Vec<&[String]> = t.rows.iter().map(|r| r.cells.as_slice()).collect();
     assert_eq!(
-        shadows,
-        ["Keeps copies of 2 registers: TM in $7E:0069, TS in $7E:006B."]
+        cells,
+        [
+            &["TM".to_owned(), "$7E:0069".to_owned()][..],
+            &["TS".to_owned(), "$7E:006B".to_owned()][..]
+        ]
     );
+    assert_eq!(t.note, None);
+    // Each row names its two stores.
+    assert_eq!(t.rows[0].offsets.len(), 2);
 }

@@ -354,6 +354,9 @@ struct IdiomView: View {
                 .foregroundStyle(Color(nsColor: .systemIndigo))
             Text(idiom.summary).font(.callout).textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
+            if let table = idiom.table {
+                IdiomTableView(model: model, table: table)
+            }
             DisclosureGroup("Why games do this", isExpanded: $showWhy) {
                 Text(idiom.why).font(.callout).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -450,6 +453,52 @@ struct ScreenRowView: View {
         case .tilemap: "Show Tilemap"
         case .palette: "Show Palette"
         }
+    }
+}
+
+/// An idiom's details as rows; the row with the selected instruction is
+/// marked, and clicking a row selects its instructions.
+struct IdiomTableView: View {
+    let model: RomViewModel
+    let table: IdiomTableInfo
+
+    var body: some View {
+        let selected = model.instruction?.fileOffset
+        VStack(alignment: .leading, spacing: 4) {
+            Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 2) {
+                GridRow {
+                    ForEach(Array(table.columns.enumerated()), id: \.offset) { _, c in
+                        Text(c)
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                ForEach(Array(table.rows.enumerated()), id: \.offset) { _, row in
+                    let here = selected.map { row.offsets.contains($0) } ?? false
+                    GridRow {
+                        ForEach(Array(row.cells.enumerated()), id: \.offset) { i, cell in
+                            Text(cell)
+                                .font(i == 0 ? .callout : .callout.monospaced())
+                                .fontWeight(here ? .semibold : .regular)
+                        }
+                    }
+                    .foregroundStyle(here ? Color(nsColor: .systemIndigo) : .primary)
+                    .contentShape(Rectangle())
+                    .onTapGesture { select(row) }
+                }
+            }
+            if let note = table.note {
+                Text(note).font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func select(_ row: IdiomRowInfo) {
+        guard let first = row.offsets.min(), let last = row.offsets.max() else { return }
+        let end = last + UInt32(model.workbench.instructionAt(fileOffset: last)?.len ?? 1)
+        model.selectRange(first..<end)
+        model.requestScroll(toOffset: first)
     }
 }
 

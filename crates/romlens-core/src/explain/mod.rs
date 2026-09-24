@@ -15,7 +15,7 @@ pub mod values;
 use std::collections::{BTreeMap, HashMap};
 
 pub use fields::{FieldRow, Part, RegisterWrite, describe};
-pub use idioms::{DmaDest, DmaTransfer, Idiom, IdiomKind};
+pub use idioms::{DmaDest, DmaTransfer, Idiom, IdiomKind, IdiomRow, IdiomTable};
 pub use values::{Byte, State, Store};
 
 use crate::analysis::snapshot::AnalysisSnapshot;

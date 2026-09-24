@@ -71,6 +71,23 @@ pub struct Idiom {
     pub note_at: Option<FileOffset>,
     /// For a DMA, each channel's transfer as data (docs/21).
     pub transfers: Vec<DmaTransfer>,
+    /// Details that read better as a table than a sentence.
+    pub table: Option<IdiomTable>,
+}
+
+/// An idiom's details as rows, each naming the instructions it covers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IdiomTable {
+    pub columns: Vec<String>,
+    pub rows: Vec<IdiomRow>,
+    /// Said once under the table.
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IdiomRow {
+    pub cells: Vec<String>,
+    pub offsets: Vec<FileOffset>,
 }
 
 /// Where a DMA writes.
@@ -377,6 +394,7 @@ impl<'a> Routine<'a> {
             offsets: steps.iter().map(|&i| self.insn(i).file_offset).collect(),
             note_at: None,
             transfers: Vec::new(),
+            table: None,
         })
     }
 
@@ -446,6 +464,7 @@ impl<'a> Routine<'a> {
                 offsets: vec![self.insn(i).file_offset],
                 note_at: None,
                 transfers: Vec::new(),
+                table: None,
             })
             .collect()
     }
@@ -532,6 +551,7 @@ impl<'a> Routine<'a> {
             offsets: steps.iter().map(|&i| self.insn(i).file_offset).collect(),
             note_at: None,
             transfers: Vec::new(),
+            table: None,
         })
     }
 
@@ -658,6 +678,7 @@ impl<'a> Routine<'a> {
             offsets: steps.iter().map(|&i| self.insn(i).file_offset).collect(),
             note_at: None,
             transfers: Vec::new(),
+            table: None,
         })
     }
 
@@ -719,6 +740,7 @@ impl<'a> Routine<'a> {
                 offsets: vec![insn.file_offset],
                 note_at: None,
                 transfers: Vec::new(),
+                table: None,
             });
         }
         out
@@ -801,6 +823,7 @@ impl<'a> Routine<'a> {
                 offsets,
                 note_at: None,
                 transfers,
+                table: None,
             });
         }
         out.sort_by_key(|i| i.offsets[0].0);
@@ -885,6 +908,7 @@ impl<'a> Routine<'a> {
                 offsets,
                 note_at: None,
                 transfers: Vec::new(),
+                table: None,
             });
         }
         out
@@ -948,33 +972,43 @@ impl<'a> Routine<'a> {
             if pairs.is_empty() {
                 continue;
             }
-            let mut list: Vec<String> = Vec::new();
-            for (_, _, reg, at) in &pairs {
-                let item = format!(
-                    "{} in {at}",
-                    hardware_register(*reg).map_or("?", |r| r.name)
-                );
-                if !list.contains(&item) {
-                    list.push(item);
+            // One row per register and copy, in the order written.
+            let mut rows: Vec<IdiomRow> = Vec::new();
+            for (a, b, reg, at) in &pairs {
+                let cells = vec![
+                    hardware_register(*reg).map_or("?", |r| r.name).to_owned(),
+                    at.clone(),
+                ];
+                let offs = [self.insn(*a).file_offset, self.insn(*b).file_offset];
+                match rows.iter_mut().find(|r| r.cells == cells) {
+                    Some(r) => r.offsets.extend(offs),
+                    None => rows.push(IdiomRow {
+                        cells,
+                        offsets: offs.to_vec(),
+                    }),
                 }
             }
+            let on_dp = pairs.iter().any(|(_, _, _, at)| !at.contains(':'));
             let mut offsets: Vec<FileOffset> = pairs
                 .iter()
                 .flat_map(|(a, b, _, _)| [self.insn(*a).file_offset, self.insn(*b).file_offset])
                 .collect();
             offsets.sort_by_key(|o| o.0);
-            let summary = if list.len() == 1 {
-                format!("Keeps a copy of {}.", list[0])
+            let n = rows.len();
+            let summary = if n == 1 {
+                let at = &rows[0].cells[1];
+                let where_ = if at.contains(':') {
+                    at.clone()
+                } else {
+                    format!("{at} on the direct page")
+                };
+                format!("Keeps a RAM copy of {} in {where_}.", rows[0].cells[0])
             } else {
-                format!(
-                    "Keeps copies of {} registers: {}.",
-                    list.len(),
-                    list.join(", ")
-                )
+                format!("Keeps a RAM copy of {n} registers.")
             };
             out.push(Idiom {
                 kind: IdiomKind::ShadowRegister,
-                title: if list.len() == 1 {
+                title: if n == 1 {
                     "A copy of a register".to_owned()
                 } else {
                     "Copies of registers".to_owned()
@@ -984,6 +1018,14 @@ impl<'a> Routine<'a> {
                 offsets,
                 note_at: None,
                 transfers: Vec::new(),
+                table: (n > 1).then(|| IdiomTable {
+                    columns: vec!["Register".into(), "Copy".into()],
+                    rows,
+                    note: on_dp.then(|| {
+                        "Copies without a bank are on the direct page, which is not known here."
+                            .into()
+                    }),
+                }),
             });
         }
         out
@@ -1005,7 +1047,7 @@ impl<'a> Routine<'a> {
         }
         match insn.mode {
             Direct if insn.flags_before.dp.is_none() => {
-                Some(format!("${:02X} on the direct page", insn.operand.value()))
+                Some(format!("${:02X}", insn.operand.value()))
             }
             Direct | Absolute | AbsoluteLong => {
                 let t = insn.target.filter(|t| t.kind == TargetKind::Data)?;
@@ -1110,6 +1152,7 @@ impl<'a> Routine<'a> {
                 offsets,
                 note_at: None,
                 transfers: Vec::new(),
+                table: None,
             });
         }
         out
@@ -1152,6 +1195,7 @@ fn shared_entry(
             offsets: vec![st.insn.file_offset, f.entry_offset],
             note_at: Some(st.insn.file_offset),
             transfers: Vec::new(),
+            table: None,
         });
     }
     out
