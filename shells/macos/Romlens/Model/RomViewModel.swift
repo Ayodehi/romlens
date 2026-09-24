@@ -639,6 +639,13 @@ final class RomViewModel {
         activeSheet = .variable
     }
 
+    /// The Variables list's + button: always a new, empty definition, never
+    /// the variable the selection happens to be in.
+    func beginNewVariable() {
+        variableDraft = VariableDraft()
+        activeSheet = .variable
+    }
+
     /// `$7E:0094`, `7E0094` or `$0094`; four digits or fewer below $2000 is
     /// low RAM (bank $7E), otherwise a register in bank $00.
     nonisolated static func parseAddress(_ text: String) -> UInt32? {

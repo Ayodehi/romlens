@@ -54,6 +54,10 @@ import Testing
         // Opening it again edits that variable; its Remove takes name and type.
         m.beginDefineVariable()
         #expect(m.variableDraft.existing == 0x00_2100)
+        // The Variables list's + starts a new one even so.
+        m.beginNewVariable()
+        #expect(m.variableDraft == RomViewModel.VariableDraft())
+        #expect(m.activeSheet == .variable)
         try m.removeVariable(address: 0x00_2100)
         #expect(m.session.undoTitle == "Remove Variable")
         #expect(m.workbench.variables().isEmpty)

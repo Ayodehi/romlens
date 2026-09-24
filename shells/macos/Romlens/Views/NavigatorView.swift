@@ -119,7 +119,7 @@ struct NavigatorView: View {
             }
             HStack {
                 Button {
-                    model.beginDefineVariable()
+                    model.beginNewVariable()
                 } label: {
                     Label("Define Variable…", systemImage: "plus")
                 }
