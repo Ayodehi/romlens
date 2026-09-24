@@ -162,6 +162,54 @@ impl Workbench {
         }
     }
 
+    fn graph_job(
+        &self,
+        snes_address: u32,
+    ) -> impl FnOnce() -> Result<crate::graphs::RoutineGraphInfo, RomlensError> + Send + 'static
+    {
+        let image = self.rom.image.clone();
+        let (project, snapshot, lines) = {
+            let inner = self.lock();
+            (
+                inner.project.clone(),
+                Arc::clone(&inner.snapshot),
+                Arc::clone(&inner.lines),
+            )
+        };
+        move || {
+            let g = romlens_core::graph::routine_graph(
+                &image,
+                &project,
+                &snapshot,
+                SnesAddress::from_u24(snes_address),
+            )
+            .map_err(|e| RomlensError::BadAddress { msg: e.to_string() })?;
+            Ok(crate::graphs::RoutineGraphInfo::new(g, &lines))
+        }
+    }
+
+    fn calls_job(
+        &self,
+        snes_address: u32,
+    ) -> impl FnOnce() -> Result<crate::graphs::CallNeighbourhoodInfo, RomlensError> + Send + 'static
+    {
+        let image = self.rom.image.clone();
+        let (project, snapshot) = {
+            let inner = self.lock();
+            (inner.project.clone(), Arc::clone(&inner.snapshot))
+        };
+        move || {
+            romlens_core::graph::call_neighbourhood(
+                &image,
+                &project,
+                &snapshot,
+                SnesAddress::from_u24(snes_address),
+            )
+            .map(Into::into)
+            .map_err(|e| RomlensError::BadAddress { msg: e.to_string() })
+        }
+    }
+
     /// Rebuild the line index after a label or comment change.
     fn refresh_lines(&self, inner: &mut Inner) -> u64 {
         inner.lines = Arc::new(LineIndex::build(
@@ -658,6 +706,41 @@ impl Workbench {
         level: DecompileLevel,
     ) -> Result<DecompiledInfo, RomlensError> {
         self.decompile_job(snes_address, level)()
+    }
+
+    /// The control-flow graph of the routine entered at `snes_address`
+    /// (docs/19), off the calling thread; each block names the listing
+    /// lines it covers.
+    pub async fn routine_graph(
+        &self,
+        snes_address: u32,
+    ) -> Result<crate::graphs::RoutineGraphInfo, RomlensError> {
+        let job = self.graph_job(snes_address);
+        crate::future::spawn(Arc::new(AtomicBool::new(false)), job).await
+    }
+
+    pub fn routine_graph_blocking(
+        &self,
+        snes_address: u32,
+    ) -> Result<crate::graphs::RoutineGraphInfo, RomlensError> {
+        self.graph_job(snes_address)()
+    }
+
+    /// The routine entered at `snes_address` with its callers and callees,
+    /// off the calling thread.
+    pub async fn call_neighbourhood(
+        &self,
+        snes_address: u32,
+    ) -> Result<crate::graphs::CallNeighbourhoodInfo, RomlensError> {
+        let job = self.calls_job(snes_address);
+        crate::future::spawn(Arc::new(AtomicBool::new(false)), job).await
+    }
+
+    pub fn call_neighbourhood_blocking(
+        &self,
+        snes_address: u32,
+    ) -> Result<crate::graphs::CallNeighbourhoodInfo, RomlensError> {
+        self.calls_job(snes_address)()
     }
 
     /// The entry of the routine whose instructions include `file_offset`.

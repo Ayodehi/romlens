@@ -30,7 +30,7 @@ import Testing
         #expect(formatSnesAddress(address: 0x80841C) == "$80:841C")
         #expect(formatFileOffset(offset: 0x41C) == "0x00041C")
         #expect(throws: RomlensError.self) { try rom.resolve(text: "$7E:0000") }
-        #expect(apiVersion() == "0.5.0")
+        #expect(apiVersion() == "0.6.0")
     }
 
     @Test func inspectorAndSpans() throws {
@@ -128,5 +128,25 @@ final class EventLog: WorkbenchListener, @unchecked Sendable {
         await #expect(throws: RomlensError.self) {
             try await workbench.decompile(snesAddress: 0x008041, level: .lift)
         }
+    }
+
+    @Test func graphsARoutineAndItsCalls() async throws {
+        let rom = try Rom.fromBytes(bytes: makeRoutinesTestRom(), name: "r.sfc")
+        let workbench = Workbench(rom: rom)
+        _ = try await workbench.analyze()
+        let g = try await workbench.routineGraph(snesAddress: 0x008020)
+        #expect(g.name == "SUB_008020")
+        #expect(g.blocks.count == 3)
+        #expect(g.edges.contains { $0.back && $0.kind == .taken })
+        #expect(g.blocks[1].loopHeader)
+        let calls = try await workbench.callNeighbourhood(snesAddress: 0x008020)
+        #expect(calls.callers.map(\.entry) == [0x008000])
+        let layout = layoutGraph(
+            nodes: g.blocks.map { GraphNodeSize(width: 120, height: 14 * Double(max($0.lineCount, 1))) },
+            edges: g.edges.map { GraphEdgeSpec(from: $0.from, to: $0.to, back: $0.back) },
+            options: GraphLayoutOptions(nodeGap: 20, layerGap: 30, edgeGap: 10)
+        )
+        #expect(layout.rows == [0, 1, 2])
+        #expect(layout.edges.count == g.edges.count)
     }
 }

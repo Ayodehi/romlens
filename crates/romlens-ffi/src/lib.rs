@@ -5,6 +5,7 @@
 
 mod future;
 pub mod graphics;
+pub mod graphs;
 pub mod live;
 pub mod records;
 pub mod workbench;
@@ -17,6 +18,7 @@ use romlens_core::{
 };
 
 pub use graphics::*;
+pub use graphs::*;
 pub use records::*;
 pub use workbench::{Workbench, WorkbenchListener};
 
@@ -531,6 +533,60 @@ mod tests {
                 .is_err()
         );
         assert!(snes_header().contains("#define INIDISP MEM8(0x2100)"));
+    }
+
+    #[test]
+    fn graphs_a_routine_and_its_calls() {
+        let rom = Rom::from_bytes(make_routines_test_rom(), "r.sfc".into()).unwrap();
+        let wb = Workbench::new(rom);
+        block_on(wb.analyze()).unwrap();
+        let g = block_on(wb.routine_graph(0x008020)).unwrap();
+        assert_eq!(g.name, "SUB_008020");
+        assert_eq!(g.blocks.len(), 3);
+        assert_eq!(g.loops.len(), 1);
+        assert!(
+            g.edges
+                .iter()
+                .any(|e| e.back && e.kind == GraphEdgeKind::Taken)
+        );
+        // The loop block's lines start at its label.
+        let b = &g.blocks[1];
+        let first = b.first_line.unwrap();
+        assert_eq!(b.line_count, 4, "LOOP_008022: and three instructions");
+        assert_eq!(wb.line_for_offset(0x22), Some(first + 1));
+        let calls = wb.call_neighbourhood_blocking(0x008020).unwrap();
+        assert_eq!(calls.callers.len(), 1);
+        assert_eq!(calls.callers[0].sites[0].how, CallHowKind::Call);
+        assert!(wb.routine_graph_blocking(0x008021).is_err());
+
+        let sizes = g
+            .blocks
+            .iter()
+            .map(|b| GraphNodeSize {
+                width: 100.0,
+                height: 14.0 * b.line_count.max(1) as f64,
+            })
+            .collect();
+        let edges = g
+            .edges
+            .iter()
+            .map(|e| GraphEdgeSpec {
+                from: e.from,
+                to: e.to,
+                back: e.back,
+            })
+            .collect();
+        let l = layout_graph(
+            sizes,
+            edges,
+            GraphLayoutOptions {
+                node_gap: 20.0,
+                layer_gap: 30.0,
+                edge_gap: 10.0,
+            },
+        );
+        assert_eq!(l.rows, vec![0, 1, 2]);
+        assert_eq!(l.edges.len(), g.edges.len());
     }
 
     #[test]

@@ -11,7 +11,7 @@ that tracks against it.
 | G1 the routine graph and the call neighbourhood in the core | done: `graph::routine_graph` (blocks in reverse post-order, edge kinds, back edges from a depth-first walk, loops, stubs for tail calls and unknown jumps, each block's listing lines) and `graph::call_neighbourhood` (callers found by turning every routine's callees around, so both ends agree); `graph::Counts` matches an execution log by ROM offset, so mirrors add up. Tests: `tests/graph.rs` |
 | G2 the layered layout | done: `graph::layout`, as designed. On the development ROM all 799 routines lay out with no box on another: 5,077 blocks, 6,299 edges, the largest routine 82 blocks, the slowest layout 0.3 ms |
 | G3 `romlens graph` | done: text, `--dot` and `--json` (the graph with a layout in character cells), `--calls` for the neighbourhood; goldens `graph-routines*.txt` |
-| G4 FFI | to do |
+| G4 FFI | done: `Workbench::routine_graph` and `call_neighbourhood` (async on their own threads, with `_blocking` forms), each block naming the listing lines it covers; the free function `layout_graph`. `API_VERSION` 0.6.0. Tested from Rust and from RomlensKit |
 | G5 macOS Graph tab: blocks | to do |
 | G6 macOS Graph tab: calls | to do |
 | G7 measure and record | to do |
