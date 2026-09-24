@@ -262,6 +262,7 @@ enum EditorContextMenu {
         // Titled and enabled by `RomWindowController.validateMenuItem`.
         item("Find References", #selector(RomWindowController.findReferences(_:)))
         item("Decompile Routine", #selector(RomWindowController.decompileRoutine(_:)))
+        item("Show Graph", #selector(RomWindowController.showGraph(_:)))
         menu.addItem(.separator())
         item("Rename Label…", #selector(RomWindowController.renameLabel(_:)))
         item("Remove Label", #selector(RomWindowController.removeLabel(_:)))

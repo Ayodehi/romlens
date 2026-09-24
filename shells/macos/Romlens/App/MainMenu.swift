@@ -131,6 +131,7 @@ enum MainMenu {
             item("Disassembly", #selector(RomWindowController.showDisassembly(_:)), "2", modifiers: [.command, .option]),
             item("Both", #selector(RomWindowController.showBoth(_:)), "3", modifiers: [.command, .option]),
             item("C", #selector(RomWindowController.showC(_:)), "8", modifiers: [.command, .option]),
+            item("Graph", #selector(RomWindowController.showGraph(_:)), "9", modifiers: [.command, .option]),
             submenu("Graphics", [
                 item("Tile Decoder", #selector(RomWindowController.showTileDecoder(_:)), "4", modifiers: [.command, .option]),
                 item("Palette", #selector(RomWindowController.showPalette(_:)), "5", modifiers: [.command, .option]),
@@ -147,6 +148,10 @@ enum MainMenu {
             item("Show Overview Strip", #selector(RomWindowController.toggleStrip(_:)), "0", modifiers: [.command, .shift]),
             item("Show Results", #selector(RomWindowController.toggleResults(_:)), "0", modifiers: [.command, .control]),
             item("Focus on Code", #selector(RomWindowController.toggleFocus(_:)), "f", modifiers: [.command, .option]),
+            .separator(),
+            item("Zoom In", #selector(RomWindowController.zoomGraphIn(_:)), "="),
+            item("Zoom Out", #selector(RomWindowController.zoomGraphOut(_:)), "-"),
+            item("Zoom to Fit", #selector(RomWindowController.zoomGraphToFit(_:)), "0", modifiers: [.command, .option, .shift]),
             .separator(),
             item("Enter Full Screen", #selector(NSWindow.toggleFullScreen(_:)), "f", modifiers: [.command, .control]),
         ])

@@ -70,6 +70,10 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
     @objc func showBoth(_ sender: Any?) { model.editorTab = .both }
     @objc func showC(_ sender: Any?) { model.editorTab = .c }
     @objc func decompileRoutine(_ sender: Any?) { model.showDecompiled() }
+    @objc func showGraph(_ sender: Any?) { model.showGraph() }
+    @objc func zoomGraphIn(_ sender: Any?) { model.graph.requestZoom(.zoomIn) }
+    @objc func zoomGraphOut(_ sender: Any?) { model.graph.requestZoom(.zoomOut) }
+    @objc func zoomGraphToFit(_ sender: Any?) { model.graph.requestZoom(.fit) }
 
     /// Export C…: the routine's translation unit and the snes.h it
     /// includes, side by side.
@@ -190,6 +194,11 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
         case #selector(showC(_:)):
             item.state = model.graphicsTab == nil && model.editorTab == .c ? .on : .off
             return model.hasDisassembly
+        case #selector(showGraph(_:)):
+            item.state = model.graphicsTab == nil && model.editorTab == .graph ? .on : .off
+            return model.hasDisassembly
+        case #selector(zoomGraphIn(_:)), #selector(zoomGraphOut(_:)), #selector(zoomGraphToFit(_:)):
+            return model.graphicsTab == nil && model.editorTab == .graph
         case #selector(decompileRoutine(_:)):
             return model.hasDisassembly && model.instruction != nil
         case #selector(exportC(_:)):

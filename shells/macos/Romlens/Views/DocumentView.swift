@@ -87,7 +87,7 @@ struct DocumentView: View {
                 }
                 .pickerStyle(.segmented)
                 .controlSize(.large)
-                .help("Hex (⌥⌘1), Disassembly (⌥⌘2), Both (⌥⌘3) or C (⌥⌘8)")
+                .help("Hex (⌥⌘1), Disassembly (⌥⌘2), Both (⌥⌘3), C (⌥⌘8) or Graph (⌥⌘9)")
             }
             ToolbarItem(placement: .principal) {
                 GraphicsMenu(model: model)

@@ -17,7 +17,7 @@ final class RomViewModel {
     }
 
     enum EditorTab: String, CaseIterable, Identifiable {
-        case hex, disassembly, both, c
+        case hex, disassembly, both, c, graph
         var id: String { rawValue }
         var title: String {
             switch self {
@@ -25,6 +25,7 @@ final class RomViewModel {
             case .disassembly: "Disassembly"
             case .both: "Both"
             case .c: "C"
+            case .graph: "Graph"
             }
         }
     }
@@ -50,6 +51,7 @@ final class RomViewModel {
     let references = ReferencesModel()
     /// The C tab's routine and text (docs/18).
     let decompiler = DecompileModel()
+    let graph = GraphModel()
     @ObservationIgnored let cache: HexRowCache
     @ObservationIgnored let asmCache: AsmLineCache
     let metrics = MonoMetrics()
@@ -205,6 +207,7 @@ final class RomViewModel {
             stripGeneration += 1
             refreshSelectionDetails()
             decompiler.invalidate()
+            graph.invalidate()
             refreshDecompile()
             Task { await navigator.reload(workbench: workbench, rom: rom) }
         case .project:
@@ -212,18 +215,34 @@ final class RomViewModel {
         }
     }
 
-    // MARK: C
+    // MARK: C and Graph
 
-    /// Keep the C tab on the routine at the selection. Only while the tab is
-    /// showing: decompiling costs a summary of every routine the first time
-    /// after an analysis.
+    /// Keep the C and Graph tabs on the routine at the selection. Only while
+    /// a tab is showing: decompiling costs a summary of every routine the
+    /// first time after an analysis.
     func refreshDecompile() {
+        refreshGraph()
         guard editorTab == .c, graphicsTab == nil, hasDisassembly else { return }
         decompiler.follow(
             workbench: workbench,
             instructionStart: instruction?.fileOffset ?? selectedOffset,
             generation: asmGeneration
         )
+    }
+
+    /// Keep the Graph tab on the routine at the selection, while it shows.
+    func refreshGraph() {
+        guard editorTab == .graph, graphicsTab == nil, hasDisassembly else { return }
+        graph.follow(
+            workbench: workbench,
+            instructionStart: instruction?.fileOffset ?? selectedOffset,
+            generation: asmGeneration
+        )
+    }
+
+    /// Show Graph: the Graph tab on the routine at the selection.
+    func showGraph() {
+        editorTab = .graph
     }
 
     /// Decompile Routine: the C tab on the routine at the selection.

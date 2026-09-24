@@ -12,8 +12,8 @@ that tracks against it.
 | G2 the layered layout | done: `graph::layout`, as designed. On the development ROM all 799 routines lay out with no box on another: 5,077 blocks, 6,299 edges, the largest routine 82 blocks, the slowest layout 0.3 ms |
 | G3 `romlens graph` | done: text, `--dot` and `--json` (the graph with a layout in character cells), `--calls` for the neighbourhood; goldens `graph-routines*.txt` |
 | G4 FFI | done: `Workbench::routine_graph` and `call_neighbourhood` (async on their own threads, with `_blocking` forms), each block naming the listing lines it covers; the free function `layout_graph`. `API_VERSION` 0.6.0. Tested from Rust and from RomlensKit |
-| G5 macOS Graph tab: blocks | to do |
-| G6 macOS Graph tab: calls | to do |
+| G5 macOS Graph tab: blocks | done: View › Graph (⌥⌘9), Show Graph in the context menu, the tab in the editor picker. `GraphModel` follows the cursor like the C tab, one build at a time with the text kept up while a newer one is built; `GraphView` draws the listing's own records in boxes (labels, comments, colours), edges by kind with rounded corners and arrowheads, loop tint and header borders, run counts above each box and on each edge, never-run blocks dimmed, dashed stubs that double-click to the routine they continue in. Click a line to select it, right-click for the listing's context menu, and a selection elsewhere scrolls its line into view. Zoom: pinch, View › Zoom In (⌘=), Zoom Out (⌘−), Zoom to Fit (⌥⇧⌘0), and the header's buttons. App tests: `GraphTabTests` |
+| G6 macOS Graph tab: calls | done: the same tab's Calls mode. Drawn sideways (the core's layout with the axes swapped): callers in a column on the left, callees on the right, so sixty callers stack down the page rather than across it. Each box names the routine, its address and its call sites with how they call and, with a log, how often; edges are coloured by how (call, table, tail call, dashed for one only the log saw). Double-click re-centres by moving the cursor there, so Back and Forward are the editor's own |
 | G7 measure and record | to do |
 
 ## Context
@@ -52,7 +52,7 @@ is anything else.
    blocks that never ran are dimmed. Without a log nothing is shown, rather
    than zeros.
 5. **Calls is a neighbourhood, not the whole program.** The routine sits in
-   the middle, its callers above and its callees below, each with the number
+   the middle, its callers to the left and its callees to the right (see G6), each with the number
    of call sites and whether they are direct, through a table, a tail call,
    or an indirect call only the recording saw. Double-clicking a routine
    re-centres on it; Back and Forward walk the trail, as they do in the

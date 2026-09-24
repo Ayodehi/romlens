@@ -146,10 +146,10 @@ Written from `19-graphs.md` on 24 September 2026.
 
 | # | Capability | Shell must expose | CLI scenario | macOS | Win | Linux |
 |---|---|---|---|---|---|---|
-| 3.8 | The routine at the cursor as a control-flow graph | A Graph editor tab (View › Graph, ⌥⌘9), Blocks mode: the listing's lines in boxes, edges coloured by kind, back edges and loop bodies marked, stubs naming where control goes; zoom and Fit | `romlens graph <rom> [--project P] <address> [--dot\|--json]` | ⬜ | ⬜ | ⬜ |
-| 3.9 | The graph and the listing in step | Clicking a line in a block selects its instruction; selecting an instruction elsewhere highlights its line and scrolls its block into view | (n/a) | ⬜ | ⬜ | ⬜ |
-| 3.10 | What the recording saw | With an execution log, each block's run count and each edge's count; blocks that never ran dimmed | `romlens graph … --json` with a project that has a log | ⬜ | ⬜ | ⬜ |
-| 3.11 | Who calls this, and what it calls | Calls mode: callers above, callees below, with sites and how they call; double-click re-centres; Back and Forward | `romlens graph … --calls [--dot\|--json]` | ⬜ | ⬜ | ⬜ |
+| 3.8 | The routine at the cursor as a control-flow graph | A Graph editor tab (View › Graph, ⌥⌘9), Blocks mode: the listing's lines in boxes, edges coloured by kind, back edges and loop bodies marked, stubs naming where control goes; zoom and Fit | `romlens graph <rom> [--project P] <address> [--dot\|--json]` | 🧪 | ⬜ | ⬜ |
+| 3.9 | The graph and the listing in step | Clicking a line in a block selects its instruction; selecting an instruction elsewhere highlights its line and scrolls its block into view | (n/a) | 🧪 | ⬜ | ⬜ |
+| 3.10 | What the recording saw | With an execution log, each block's run count and each edge's count; blocks that never ran dimmed | `romlens graph … --json` with a project that has a log | 🧪 | ⬜ | ⬜ |
+| 3.11 | Who calls this, and what it calls | Calls mode: callers on the left, callees on the right, with sites and how they call; double-click re-centres; Back and Forward | `romlens graph … --calls [--dot\|--json]` | 🧪 | ⬜ | ⬜ |
 
 ## Manual pass, macOS (to repeat before each release)
 
@@ -314,6 +314,6 @@ the development ROM.
 40. With a live session or an imported execution log, the blocks show how
     many times they ran and the branches how many times each way; a block
     the game never reached is dimmed.
-41. Pick Calls on `SUB_008079`: its callers sit above it and its callees
-    below, each with its call sites. Double-click a caller: it moves to the
+41. Pick Calls on `SUB_008079`: its callers sit to its left and its
+    callees to its right, each with its call sites. Double-click a caller: it moves to the
     middle. Back returns to `SUB_008079`.
