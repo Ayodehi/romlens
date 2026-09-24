@@ -145,3 +145,74 @@ fn the_setup_reads_as_a_screen() {
     );
     assert_eq!(row(&s, "BG3", "Tilemap").text, "not set yet");
 }
+
+/// A routine only jumped to through a pointer the analysis cannot follow,
+/// like a game's mode dispatcher, but which a recording saw: it is still a
+/// routine, and its instructions have a screen.
+#[test]
+fn a_routine_only_jumped_to_is_found() {
+    use romlens_core::model::exec_log::{ExecInsn, ExecLog, Flow, FlowKind, MemKind};
+    use std::sync::Arc;
+    let mut code = vec![0u8; 0x100];
+    let mut put = |at: usize, b: &[u8]| code[at..at + b.len()].copy_from_slice(b);
+    // SEI; CLC; XCE; SEP #$30; LDX #$00; JMP ($0010,X): a pointer in RAM.
+    put(
+        0x00,
+        &[0x78, 0x18, 0xFB, 0xE2, 0x30, 0xA2, 0x00, 0x7C, 0x10, 0x00],
+    );
+    put(0x40, &[0xA9, 0x01, 0x8D, 0x05, 0x21, 0xEA, 0x80, 0xFE]); // mode 1; NOP
+    put(0xF0, &[0x40]);
+    let mut vectors = [0x80F0; 12];
+    vectors[10] = 0x8000;
+    let rom = RomImage::from_bytes(
+        fixtures::build_custom(MappingMode::LoRom, 0x8000, false, &code, "JUMPED", vectors),
+        "j.sfc",
+    )
+    .unwrap();
+    // `states` has bit M + 2X + 4E set: emulation mode before the XCE,
+    // native with 8-bit A and X after.
+    let insn = |pc: u32| ExecInsn {
+        pc,
+        abs: (pc & 0x7FFF) as i32,
+        kind: MemKind::PrgRom,
+        states: if pc < 0x8003 { 1 << 7 } else { 1 << 3 },
+        count: 1,
+    };
+    let mut log = ExecLog {
+        rom_crc32: 0,
+        rom_size: 0x8000,
+        insns: [
+            0x8000, 0x8001, 0x8002, 0x8003, 0x8005, 0x8007, 0x8040, 0x8042, 0x8045, 0x8046,
+        ]
+        .into_iter()
+        .map(insn)
+        .collect(),
+        accesses: Vec::new(),
+        flows: vec![Flow {
+            from: 0x008007,
+            to: 0x008040,
+            kind: FlowKind::IndirectJump,
+            count: 1,
+        }],
+        dma: Vec::new(),
+    };
+    log.normalize();
+    let mut project = Project::new(&rom);
+    // As an import does: the log's coverage, then the log.
+    let coverage = log.to_coverage(rom.bytes());
+    project.add_trace(
+        romlens_core::model::TraceRecord {
+            source: "j.mxlog".into(),
+            format: "mxlog".into(),
+            executed_bytes: 0,
+            read_bytes: 0,
+        },
+        coverage,
+    );
+    project.exec_log = Some(Arc::new(log));
+    let snap = analyze(&rom, &project, &AnalysisControl::silent()).unwrap();
+    let s = screen_at(&rom, &project, &snap, off(&rom, 0x8045), None).unwrap();
+    assert_eq!(s.routine, SnesAddress::new(0, 0x8040));
+    let t = &row(&s, "Background mode", "Mode").text;
+    assert!(t.starts_with("mode 1:"), "{t}");
+}

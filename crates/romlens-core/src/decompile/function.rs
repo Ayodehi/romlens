@@ -227,6 +227,33 @@ pub fn containing(
             return Some(f);
         }
     }
+    // Code only jumped to: a dispatcher's `JMP (abs,X)` or `JMP (abs)`
+    // target, such as a game-mode routine. A jump target counts as the
+    // start of a routine when the jump comes from outside it.
+    let mut jumped: Vec<(u32, SnesAddress, Option<FileOffset>)> = snap
+        .xrefs_by_target
+        .iter()
+        .filter(|x| x.kind == XRefKind::Jump)
+        .filter_map(|x| x.to_offset.map(|o| (o.0, x.to, Some(x.from))))
+        .chain(
+            snap.jump_tables
+                .iter()
+                .filter(|t| !t.call)
+                .flat_map(|t| t.targets.iter())
+                .filter_map(|(a, _)| rom.file_offset_for(*a).map(|o| (o.0, *a, None))),
+        )
+        .filter(|(o, _, _)| *o <= off.0)
+        .collect();
+    jumped.sort_unstable_by_key(|(o, _, _)| std::cmp::Reverse(*o));
+    jumped.dedup_by_key(|(o, _, _)| *o);
+    for (_, a, from) in jumped.into_iter().take(TRIES) {
+        if let Ok(f) = discover(rom, snap, entries, a)
+            && f.step_containing(off).is_some()
+            && from.is_none_or(|from| f.step_containing(from).is_none())
+        {
+            return Some(f);
+        }
+    }
     None
 }
 
