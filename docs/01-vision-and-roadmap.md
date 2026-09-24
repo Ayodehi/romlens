@@ -180,6 +180,9 @@ recorded width states to settle flag conflicts.
 Deliverable: functions, control-flow graphs, call graph, and a first
 pseudo-C rendering of a chosen routine.
 
+The pseudo-C work is planned in `18-decompiler.md` (23 September 2026):
+valid C per routine, shown beside the disassembly.
+
 - Function boundaries from analysis and user marks; basic blocks; CFG view.
 - Call graph with drill-down; "who calls this" and "what does this call".
 - Data-flow: register/flag state at each instruction, direct-page and data-bank
