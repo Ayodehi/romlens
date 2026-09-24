@@ -17,6 +17,7 @@ pub mod project;
 pub mod rec;
 pub mod registers;
 pub mod rom;
+pub mod screen;
 pub mod search;
 pub mod session;
 pub mod tables;

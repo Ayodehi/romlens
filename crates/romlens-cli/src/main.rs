@@ -249,6 +249,15 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// What the screen is set up to be when an instruction runs: mode,
+    /// layers, sprites and where their graphics came from (docs/21).
+    Screen {
+        rom: PathBuf,
+        /// The instruction.
+        expr: String,
+        #[arg(long)]
+        project: Option<PathBuf>,
+    },
     /// Pseudo-C for the routine entered at an address (docs/18).
     Decompile {
         /// The ROM (not needed with --header alone).
@@ -1097,6 +1106,9 @@ fn run() -> Result<()> {
             idioms: idioms.as_deref(),
             json,
         }),
+        Command::Screen { rom, expr, project } => {
+            commands::screen::run(&rom, &expr, project.as_deref())
+        }
         Command::Decompile {
             rom,
             expr,

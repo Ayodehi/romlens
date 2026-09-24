@@ -66,6 +66,38 @@ pub struct Idiom {
     pub offsets: Vec<FileOffset>,
     /// Where its note goes, when not the first of `offsets`.
     pub note_at: Option<FileOffset>,
+    /// For a DMA, each channel's transfer as data (docs/21).
+    pub transfers: Vec<DmaTransfer>,
+}
+
+/// Where a DMA writes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DmaDest {
+    /// VRAM, from this word address when known.
+    Vram(Option<u16>),
+    /// The palette, from this colour when known.
+    Cgram(Option<u8>),
+    Oam,
+    /// Work RAM through WMDATA, from this address when known.
+    Wram(Option<SnesAddress>),
+    /// Another B-bus register (`$21xx`).
+    Other(u8),
+    Unknown,
+}
+
+/// One channel of a DMA, as far as the code says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DmaTransfer {
+    pub channel: u8,
+    pub dest: DmaDest,
+    pub source: Option<SnesAddress>,
+    pub bytes: Option<u32>,
+    /// The source address is fixed: a fill with one byte.
+    pub fill: bool,
+    /// From the B bus to memory.
+    pub reverse: bool,
+    /// The instruction that started it.
+    pub at: FileOffset,
 }
 
 impl Idiom {
@@ -340,6 +372,7 @@ impl<'a> Routine<'a> {
             why,
             offsets: steps.iter().map(|&i| self.insn(i).file_offset).collect(),
             note_at: None,
+            transfers: Vec::new(),
         })
     }
 
@@ -408,6 +441,7 @@ impl<'a> Routine<'a> {
                 why: WHY_WAI,
                 offsets: vec![self.insn(i).file_offset],
                 note_at: None,
+                transfers: Vec::new(),
             })
             .collect()
     }
@@ -493,6 +527,7 @@ impl<'a> Routine<'a> {
             },
             offsets: steps.iter().map(|&i| self.insn(i).file_offset).collect(),
             note_at: None,
+            transfers: Vec::new(),
         })
     }
 
@@ -618,6 +653,7 @@ impl<'a> Routine<'a> {
             why: WHY_CLEAR,
             offsets: steps.iter().map(|&i| self.insn(i).file_offset).collect(),
             note_at: None,
+            transfers: Vec::new(),
         })
     }
 
@@ -678,6 +714,7 @@ impl<'a> Routine<'a> {
                 why: WHY_BLOCK_MOVE,
                 offsets: vec![insn.file_offset],
                 note_at: None,
+                transfers: Vec::new(),
             });
         }
         out
@@ -700,6 +737,7 @@ impl<'a> Routine<'a> {
             let w = self.written_before(i);
             let mut offsets = vec![s.offset];
             let mut parts = Vec::new();
+            let mut transfers = Vec::new();
             for c in (0..8u16).filter(|c| mask & (1 << c) != 0) {
                 let base = 0x4300 + c * 0x10;
                 let o = &mut offsets;
@@ -712,6 +750,36 @@ impl<'a> Routine<'a> {
                 } else {
                     let das = w.val(&[base + 5, base + 6], o);
                     let dest = destination(bbad, &w, o, name);
+                    let mut scratch = Vec::new();
+                    let known =
+                        |regs: &[u16], scratch: &mut Vec<FileOffset>| w.val(regs, scratch).known();
+                    transfers.push(DmaTransfer {
+                        channel: c as u8,
+                        dest: match bbad.known() {
+                            Some(0x18 | 0x19) => DmaDest::Vram(
+                                known(&[0x2116, 0x2117], &mut scratch).map(|v| v as u16),
+                            ),
+                            Some(0x22) => {
+                                DmaDest::Cgram(known(&[0x2121], &mut scratch).map(|v| v as u8))
+                            }
+                            Some(0x04) => DmaDest::Oam,
+                            Some(0x80) => DmaDest::Wram(
+                                known(&[0x2181, 0x2182], &mut scratch)
+                                    .zip(known(&[0x2183], &mut scratch))
+                                    .map(|(a, b)| SnesAddress::new(0x7E + (b as u8 & 1), a as u16)),
+                            ),
+                            Some(b) => DmaDest::Other(b as u8),
+                            None => DmaDest::Unknown,
+                        },
+                        source: a1t
+                            .known()
+                            .zip(a1b.known())
+                            .map(|(a, b)| SnesAddress::new(b as u8, a as u16)),
+                        bytes: das.known().map(|n| if n == 0 { 0x10000 } else { n }),
+                        fill: dmap.is_some_and(|d| d & 0x08 != 0),
+                        reverse: dmap.is_some_and(|d| d & 0x80 != 0),
+                        at: s.offset,
+                    });
                     dma_text(c, dmap, dest, a1t, a1b, das, &w, name)
                 };
                 parts.push(text);
@@ -728,6 +796,7 @@ impl<'a> Routine<'a> {
                 why,
                 offsets,
                 note_at: None,
+                transfers,
             });
         }
         out.sort_by_key(|i| i.offsets[0].0);
@@ -811,6 +880,7 @@ impl<'a> Routine<'a> {
                 why,
                 offsets,
                 note_at: None,
+                transfers: Vec::new(),
             });
         }
         out
@@ -878,6 +948,7 @@ impl<'a> Routine<'a> {
                 why: WHY_DECIMAL,
                 offsets,
                 note_at: None,
+                transfers: Vec::new(),
             });
         }
         out
@@ -919,6 +990,7 @@ fn shared_entry(
             why: WHY_SHARED,
             offsets: vec![st.insn.file_offset, f.entry_offset],
             note_at: Some(st.insn.file_offset),
+            transfers: Vec::new(),
         });
     }
     out

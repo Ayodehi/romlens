@@ -8,9 +8,9 @@ to track progress against it.
 | Task | State |
 |---|---|
 | S0 this document, the roadmap pointer, the checklist rows | done |
-| S1 the registers reaching an instruction, through calls | |
-| S2 the setup, decoded; `romlens screen` | |
-| S3 where VRAM and the palette were filled from | |
+| S1 the registers reaching an instruction, through calls | done: `explain::setup::registers_at`. A walk back that joins paths (a register set differently, or on only some paths, is `Varies`) and takes a call as its routine's writes on every way out (memoised, six calls deep, a cycle counts as nothing). Tests: `tests/screen.rs` |
+| S2 the setup, decoded; `romlens screen` | done: `explain::screen::screen_at`. Each row names the stores that set it, and a register not set says why: "not set yet" in RESET, "the code it interrupted set it" in an interrupt handler, "its callers may set it" elsewhere. A layer section with nothing set collapses to one line. Golden `screen.txt` |
+| S3 where VRAM and the palette were filled from | done: DMA idioms carry `DmaTransfer` records. `UploadIndex` finds the DMAs that write a VRAM word or the palette, preferring one from ROM, and says "VRAM here is written by the DMA at …". It does not say "uploaded these tiles": the DMA is found anywhere in the ROM, not on this path. A row links to its ROM source |
 | S4 FFI | |
 | S5 macOS: the Screen section | |
 | S6 measure and record | |

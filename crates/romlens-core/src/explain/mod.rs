@@ -8,12 +8,14 @@
 
 pub mod fields;
 pub mod idioms;
+pub mod screen;
+pub mod setup;
 pub mod values;
 
 use std::collections::{BTreeMap, HashMap};
 
 pub use fields::{FieldRow, Part, RegisterWrite, describe};
-pub use idioms::{Idiom, IdiomKind};
+pub use idioms::{DmaDest, DmaTransfer, Idiom, IdiomKind};
 pub use values::{Byte, State, Store};
 
 use crate::analysis::snapshot::AnalysisSnapshot;
@@ -209,7 +211,7 @@ pub fn routine(
 
 /// An address as a summary says it: `Brightness ($7E:0DAE)`, an automatic
 /// name alone (it already says where it is), or `$7E:0DAE`.
-fn address_name(rom: &RomImage, symbols: &Symbols, a: SnesAddress) -> String {
+pub(crate) fn address_name(rom: &RomImage, symbols: &Symbols, a: SnesAddress) -> String {
     let a = Project::canonical(rom, a);
     match symbols.name_for(a) {
         Some(n) if !n.user => n.name,
@@ -250,4 +252,78 @@ fn explain(rom: &RomImage, symbols: &Symbols, s: &Store) -> Option<Explained> {
         source_name,
         indexed: s.indexed,
     })
+}
+
+impl Explanations {
+    /// The DMA transfers the idioms found, with a known destination.
+    fn transfers(&self) -> impl Iterator<Item = &DmaTransfer> {
+        self.idioms.iter().flat_map(|i| i.transfers.iter())
+    }
+
+    fn upload(
+        &self,
+        rom: &RomImage,
+        matching: &[&DmaTransfer],
+        what: &str,
+    ) -> Option<(String, Option<FileOffset>, FileOffset)> {
+        // Prefer a transfer from ROM, which a viewer can show.
+        let in_rom = |t: &&&DmaTransfer| t.source.is_some_and(|a| rom.file_offset_for(a).is_some());
+        let t = matching.iter().find(in_rom).or(matching.first())?;
+        let at = rom
+            .snes_address_for(t.at)
+            .map_or_else(|| format!("{}", t.at), |a| format!("{a}"));
+        let mut text = match (t.source, t.bytes) {
+            (Some(s), Some(n)) => format!("{what} by the DMA at {at}: ${n:04X} bytes from {s}"),
+            (Some(s), None) => format!("{what} by the DMA at {at}, from {s}"),
+            _ => format!("{what} by the DMA at {at}"),
+        };
+        if matching.len() > 1 {
+            let others = matching.len() - 1;
+            text.push_str(&format!(
+                "; {others} other transfer{} also write{} here",
+                if others == 1 { "" } else { "s" },
+                if others == 1 { "s" } else { "" }
+            ));
+        }
+        let src = t.source.and_then(|a| rom.file_offset_for(a));
+        Some((text, src, t.at))
+    }
+}
+
+/// `Explanations` with the ROM, to say where VRAM and the palette were
+/// filled from (docs/21).
+pub struct UploadIndex<'a> {
+    pub explain: &'a Explanations,
+    pub rom: &'a RomImage,
+}
+
+impl screen::Uploads for UploadIndex<'_> {
+    fn vram(&self, word: u16) -> Option<(String, Option<FileOffset>, FileOffset)> {
+        let w = u32::from(word & 0x7FFF);
+        let matching: Vec<&DmaTransfer> = self
+            .explain
+            .transfers()
+            .filter(|t| !t.reverse && !t.fill)
+            .filter(|t| match (t.dest, t.bytes) {
+                (DmaDest::Vram(Some(start)), Some(n)) => {
+                    let s = u32::from(start & 0x7FFF);
+                    w >= s && w < s + n.div_ceil(2)
+                }
+                (DmaDest::Vram(Some(start)), None) => u32::from(start & 0x7FFF) == w,
+                _ => false,
+            })
+            .collect();
+        self.explain
+            .upload(self.rom, &matching, "VRAM here is written")
+    }
+
+    fn palette(&self) -> Option<(String, Option<FileOffset>, FileOffset)> {
+        let matching: Vec<&DmaTransfer> = self
+            .explain
+            .transfers()
+            .filter(|t| !t.reverse && !t.fill && matches!(t.dest, DmaDest::Cgram(Some(_))))
+            .collect();
+        self.explain
+            .upload(self.rom, &matching, "The palette is written")
+    }
 }

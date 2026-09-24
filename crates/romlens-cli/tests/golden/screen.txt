@@ -1,0 +1,18 @@
+The screen when $00:8056 runs (in the routine at $00:8000):
+
+Display
+  Picture  from $7E:0DAE  [$00:804E]
+
+Background mode
+  Mode  not set yet
+
+Layers
+  BG1–BG4  not set yet
+
+Sprites (16 colours)
+  Sizes     not set yet
+  Tiles     not set yet
+  Shown on  not set yet
+
+Interrupts
+  NMITIMEN  NMI on, joypad auto-read on  [$00:8053]

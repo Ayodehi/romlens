@@ -961,6 +961,7 @@ fn explain_commands() {
         "explain-json",
         &run(&["explain", rom, "$00:8009", "--json"]),
     );
+    check("screen", &run(&["screen", rom, "$00:8056"]));
     check(
         "decompile-numbers",
         &format!(
