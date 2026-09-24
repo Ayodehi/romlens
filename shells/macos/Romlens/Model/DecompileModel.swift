@@ -29,6 +29,8 @@ final class DecompileModel {
     /// For each file offset an instruction starts at, the C lines it made.
     @ObservationIgnored private var linesByOffset: [UInt32: [Int]] = [:]
     @ObservationIgnored private var key: Key?
+    /// The key `result` was made for.
+    @ObservationIgnored private var shown: Key?
     @ObservationIgnored private var task: Task<Void, Never>?
 
     private struct Key: Equatable {
@@ -40,6 +42,11 @@ final class DecompileModel {
     /// Show the routine containing `instructionStart` (an instruction's file
     /// offset), decompiling it if the key changed. `generation` changes
     /// with every analysis, rename or variable.
+    ///
+    /// One decompile runs at a time. A new key while one runs waits for it
+    /// and follows it: cancelling it instead meant that a live session,
+    /// which re-analyses every few seconds, could cancel every run of a
+    /// large routine and the tab never left "Decompiling…".
     func follow(workbench: Workbench, instructionStart: UInt32?, generation: Int) {
         guard let start = instructionStart else { return }
         // Still inside the routine shown: nothing to do.
@@ -48,9 +55,9 @@ final class DecompileModel {
         }
         guard let entry = workbench.functionContaining(fileOffset: start) else {
             if linesByOffset[start] == nil {
-                task?.cancel()
                 self.key = nil
                 self.entry = nil
+                shown = nil
                 result = nil
                 linesByOffset = [:]
                 resultGeneration += 1
@@ -62,27 +69,51 @@ final class DecompileModel {
         guard next != key else { return }
         key = next
         self.entry = entry
-        state = .loading
-        task?.cancel()
+        // The same routine at the same level again, as after an analysis:
+        // the text shown stays up until the new one is ready.
+        if shown?.entry != entry || shown?.level != next.level || result == nil {
+            state = .loading
+        }
+        if task == nil {
+            begin(next, workbench: workbench)
+        }
+    }
+
+    private func begin(_ run: Key, workbench: Workbench) {
         task = Task { [weak self] in
+            let outcome: Result<DecompiledInfo, Error>
             do {
-                let d = try await workbench.decompile(snesAddress: entry, level: next.level)
-                guard let self, !Task.isCancelled, self.key == next else { return }
-                self.install(d)
+                outcome = .success(try await workbench.decompile(snesAddress: run.entry, level: run.level))
             } catch {
-                guard let self, !Task.isCancelled, self.key == next else { return }
-                self.state = .failed("\(error)")
+                outcome = .failure(error)
+            }
+            guard let self else { return }
+            self.task = nil
+            guard let key = self.key else { return }
+            // A result for the routine and level wanted is shown even if the
+            // analysis moved on meanwhile; the next run brings it up to date.
+            if key.entry == run.entry, key.level == run.level {
+                switch outcome {
+                case .success(let d):
+                    self.install(d, for: run)
+                case .failure(let error):
+                    if key == run { self.state = .failed("\(error)") }
+                }
+            }
+            if key != run {
+                self.begin(key, workbench: workbench)
             }
         }
     }
 
-    /// Forget the key so the next `follow` decompiles again.
+    /// Forget the key so the next `follow` decompiles again. The text shown
+    /// and its line map stay until the new text replaces them.
     func invalidate() {
         key = nil
-        linesByOffset = [:]
     }
 
-    private func install(_ d: DecompiledInfo) {
+    private func install(_ d: DecompiledInfo, for run: Key) {
+        shown = run
         result = d
         var map: [UInt32: [Int]] = [:]
         for (line, offsets) in d.lines.enumerated() {

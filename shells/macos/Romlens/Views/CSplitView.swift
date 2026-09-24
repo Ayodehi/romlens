@@ -98,6 +98,8 @@ final class CPaneController: NSObject, NSTextViewDelegate {
     private var selectingFromText = false
     /// The text is being replaced: the selection moves, but nobody clicked.
     private var replacingText = false
+    /// The routine whose C is shown.
+    private var shownEntry: UInt32?
 
     init(model: RomViewModel) {
         self.model = model
@@ -215,6 +217,12 @@ final class CPaneController: NSObject, NSTextViewDelegate {
 
     private func setText(_ result: DecompiledInfo?) {
         let text = result?.text ?? ""
+        // A live session re-analyses every few seconds and the routine's C
+        // usually comes back the same: leave the caret and the scroll alone.
+        if text == textView.string, result?.entry == shownEntry { return }
+        let sameRoutine = result != nil && result?.entry == shownEntry
+        shownEntry = result?.entry
+        let origin = scrollView.contentView.bounds.origin
         let s = NSMutableAttributedString(
             string: text,
             attributes: [.font: model.metrics.font, .foregroundColor: NSColor.labelColor]
@@ -230,6 +238,10 @@ final class CPaneController: NSObject, NSTextViewDelegate {
         textView.textStorage?.setAttributedString(s)
         textView.setSelectedRange(NSRange(location: 0, length: 0))
         replacingText = false
+        if sameRoutine {
+            scrollView.contentView.scroll(to: origin)
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+        }
         let ns = text as NSString
         var starts = [0]
         var at = 0

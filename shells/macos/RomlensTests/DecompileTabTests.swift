@@ -39,6 +39,28 @@ import Testing
         try await Fixture.settle(until: { m.decompiler.state == .ready && m.decompiler.result?.text.contains("lift level") == true })
     }
 
+    @Test func newAnalysesKeepTheTextUpAndFinish() async throws {
+        let m = try await model()
+        m.select(offset: 0x44)
+        m.editorTab = .c
+        try await Fixture.settle(until: { m.decompiler.state == .ready })
+        let first = m.decompiler.resultGeneration
+        // A live session: changes arrive faster than a large routine
+        // decompiles. The C shown stays up, and a run still lands.
+        var sawLoading = false
+        for name in ["One", "Two", "Three"] {
+            try m.session.setLabel(address: 0x008020, name: name)
+            if m.decompiler.state != .ready { sawLoading = true }
+        }
+        try await Fixture.settle(until: {
+            if m.decompiler.state != .ready { sawLoading = true }
+            return m.decompiler.resultGeneration > first
+        })
+        #expect(!sawLoading, "the text stays up while it refreshes")
+        #expect(m.decompiler.result?.name == "SUB_008040")
+        #expect(m.decompiler.state == .ready)
+    }
+
     @Test func outsideARoutineSaysSo() async throws {
         let m = try await model()
         m.editorTab = .c
