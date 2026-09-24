@@ -203,6 +203,82 @@ pub fn dispatch_lorom() -> Vec<u8> {
     build_with_code(MappingMode::LoRom, 0x8000, false, &code, DISPATCH_TITLE)
 }
 
+pub const ROUTINES_TITLE: &str = "ROMLENS ROUTINES";
+
+/// 32 KB LoROM whose boot calls small routines, one per shape the
+/// decompiler has to recover (`docs/18-decompiler.md`). The goldens and the
+/// semantic tests run on it.
+///
+/// ```text
+/// $00:8000  SEI; CLC; XCE; SEP #$30   ; native, 8-bit A, X, Y
+/// $00:8005  JSR $8020; JSR $8030
+/// $00:800B  BRA $8010
+/// $00:800E  RTI                       ; the catch-all vector target
+/// $00:8010  JSR $8040; JSR $8050
+/// $00:8016  BRA $8016                 ; spin
+///
+/// $00:8020  LDX #$0F                  ; clear $0200-$020F, a counted loop
+/// $00:8022  STZ $0200,X
+/// $00:8025  DEX
+/// $00:8026  BPL $8022
+/// $00:8028  RTS
+///
+/// $00:8030  REP #$20                  ; $14 = $10 + $12, 16-bit
+/// $00:8032  LDA $10
+/// $00:8034  CLC
+/// $00:8035  ADC $12
+/// $00:8037  STA $14
+/// $00:8039  SEP #$20
+/// $00:803B  RTS
+///
+/// $00:8040  LDA $20                   ; $22 = the larger of $20 and $21
+/// $00:8042  CMP $21
+/// $00:8044  BCS $8048
+/// $00:8046  LDA $21
+/// $00:8048  STA $22
+/// $00:804A  RTS
+///
+/// $00:8050  PHX                       ; $0300 = bit X, from a table
+/// $00:8051  LDA $8070,X
+/// $00:8054  STA $0300
+/// $00:8057  PLX
+/// $00:8058  RTS
+///
+/// $00:8070  01 02 04 08 10 20 40 80
+/// ```
+pub fn routines_lorom() -> Vec<u8> {
+    let mut code = vec![0u8; 0x78];
+    let mut put = |at: usize, bytes: &[u8]| code[at..at + bytes.len()].copy_from_slice(bytes);
+    put(0x00, &[0x78, 0x18, 0xFB, 0xE2, 0x30]);
+    put(
+        0x05,
+        &[0x20, 0x20, 0x80, 0x20, 0x30, 0x80, 0x80, 0x03, 0xEA, 0x40],
+    );
+    put(0x10, &[0x20, 0x40, 0x80, 0x20, 0x50, 0x80, 0x80, 0xFE]);
+    put(
+        0x20,
+        &[0xA2, 0x0F, 0x9E, 0x00, 0x02, 0xCA, 0x10, 0xFA, 0x60],
+    );
+    put(
+        0x30,
+        &[
+            0xC2, 0x20, 0xA5, 0x10, 0x18, 0x65, 0x12, 0x85, 0x14, 0xE2, 0x20, 0x60,
+        ],
+    );
+    put(
+        0x40,
+        &[
+            0xA5, 0x20, 0xC5, 0x21, 0xB0, 0x02, 0xA5, 0x21, 0x85, 0x22, 0x60,
+        ],
+    );
+    put(
+        0x50,
+        &[0xDA, 0xBD, 0x70, 0x80, 0x8D, 0x00, 0x03, 0xFA, 0x60],
+    );
+    put(0x70, &[0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80]);
+    build_with_code(MappingMode::LoRom, 0x8000, false, &code, ROUTINES_TITLE)
+}
+
 pub const MIXED_DATA_TITLE: &str = "ROMLENS DATA";
 
 /// 64 KB LoROM holding one recognisable block per data heuristic, so the

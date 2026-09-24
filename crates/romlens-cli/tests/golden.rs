@@ -897,3 +897,40 @@ fn dev_rom_golden() {
     check("xrefs-supermetroid", &run(&["xrefs", rom, "$80:8573"]));
     check("inspect-supermetroid", &run(&["inspect", rom, "$80:8427"]));
 }
+
+/// Pseudo-C for the routines fixture (docs/18), at each level, and the
+/// header every result includes.
+#[test]
+fn decompile_commands() {
+    let dir = temp_dir("decompile");
+    let rom = dir.join("routines.sfc");
+    std::fs::write(&rom, fixtures::routines_lorom()).unwrap();
+    let rom = rom.to_str().unwrap();
+    for level in ["lift"] {
+        let mut all = String::new();
+        for at in ["$00:8000", "$00:8020", "$00:8030", "$00:8040", "$00:8050"] {
+            all.push_str(&run(&["decompile", rom, at, "--level", level]));
+        }
+        check(&format!("decompile-routines-{level}"), &all);
+    }
+    check(
+        "decompile-routines-json",
+        &run(&["decompile", rom, "$00:8040", "--level", "lift", "--json"]),
+    );
+    check(
+        "decompile-errors",
+        &format!(
+            "{}{}",
+            run(&["decompile", rom, "$00:8021"]),
+            run(&["decompile", rom, "$7E:0000"]),
+        ),
+    );
+    let header = dir.join("snes.h");
+    let wrote = run(&["decompile", "--header", header.to_str().unwrap()]);
+    assert!(wrote.starts_with("wrote "), "{wrote}");
+    check(
+        "decompile-snes-h",
+        &std::fs::read_to_string(&header).unwrap(),
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}

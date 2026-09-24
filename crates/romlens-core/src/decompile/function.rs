@@ -119,6 +119,8 @@ impl std::fmt::Display for FunctionError {
     }
 }
 
+impl std::error::Error for FunctionError {}
+
 impl Function {
     pub fn index_of(&self, off: FileOffset) -> Option<usize> {
         self.steps

@@ -1,0 +1,261 @@
+/* snes.h: declarations for the pseudo-C Romlens writes.
+*
+* The code is for reading. It is valid C, but it is not the game's
+* source, and it does not rebuild the ROM.
+*/
+#ifndef ROMLENS_SNES_H
+#define ROMLENS_SNES_H
+
+#include <stdint.h>
+
+typedef uint8_t u8;
+typedef uint16_t u16;
+typedef uint32_t u32;
+typedef int8_t s8;
+typedef int16_t s16;
+typedef int32_t s32;
+
+/* The CPU. A holds all 16 bits of the accumulator; with 8-bit A only
+* its low byte changes. Flags are 0 or 1. */
+extern u16 A, X, Y, S, D;
+extern u8 DBR;
+extern u8 N, V, Z, C;
+
+/* Memory by 24-bit address. Define MEM8 and MEM16 before including
+* this to run the code over an array. */
+#ifndef MEM8
+#define MEM8(a) (*(volatile u8 *)(uintptr_t)(a))
+#endif
+#ifndef MEM16
+#define MEM16(a) (*(volatile u16 *)(uintptr_t)(a))
+#endif
+#define MEM24(a) ((u32)MEM16(a) | (u32)MEM8((a) + 2) << 16)
+/* A 24-bit value held in a three-byte array. */
+#define LONG(p) ((u32)(p)[0] | (u32)(p)[1] << 8 | (u32)(p)[2] << 16)
+
+/* Instructions with no C equivalent. */
+void SEI(void);
+void CLI(void);
+void SED(void);
+void CLD(void);
+void native_mode(void);    /* CLC; XCE */
+void emulation_mode(void); /* SEC; XCE */
+void push8(u8 v);
+void push16(u16 v);
+u8 pull8(void);
+u16 pull16(void);
+void PHP(void);
+void PLP(void);
+void mvn(u8 dst_bank, u8 src_bank); /* copies A + 1 bytes from X to Y */
+void mvp(u8 dst_bank, u8 src_bank);
+/* Decimal-mode ADC and SBC of `bits` bits; they set C and V. */
+u16 bcd_add(u16 a, u16 b, int bits);
+u16 bcd_sub(u16 a, u16 b, int bits);
+void wai(void);
+void stp(void);
+void brk(u8 n);
+void cop(u8 n);
+
+/* Hardware registers. */
+#define INIDISP MEM8(0x2100) /* Screen display: force blank and brightness */
+#define OBSEL MEM8(0x2101) /* Object size and tile base */
+#define OAMADDL MEM8(0x2102) /* OAM address, low */
+#define OAMADDH MEM8(0x2103) /* OAM address, high and priority rotation */
+#define OAMDATA MEM8(0x2104) /* OAM data write */
+#define BGMODE MEM8(0x2105) /* Background mode and tile sizes */
+#define MOSAIC MEM8(0x2106) /* Mosaic size and enable */
+#define BG1SC MEM8(0x2107) /* BG1 tilemap address and size */
+#define BG2SC MEM8(0x2108) /* BG2 tilemap address and size */
+#define BG3SC MEM8(0x2109) /* BG3 tilemap address and size */
+#define BG4SC MEM8(0x210A) /* BG4 tilemap address and size */
+#define BG12NBA MEM8(0x210B) /* BG1 and BG2 character base */
+#define BG34NBA MEM8(0x210C) /* BG3 and BG4 character base */
+#define BG1HOFS MEM8(0x210D) /* BG1 horizontal scroll (write twice) */
+#define BG1VOFS MEM8(0x210E) /* BG1 vertical scroll (write twice) */
+#define BG2HOFS MEM8(0x210F) /* BG2 horizontal scroll */
+#define BG2VOFS MEM8(0x2110) /* BG2 vertical scroll */
+#define BG3HOFS MEM8(0x2111) /* BG3 horizontal scroll */
+#define BG3VOFS MEM8(0x2112) /* BG3 vertical scroll */
+#define BG4HOFS MEM8(0x2113) /* BG4 horizontal scroll */
+#define BG4VOFS MEM8(0x2114) /* BG4 vertical scroll */
+#define VMAIN MEM8(0x2115) /* VRAM address increment mode */
+#define VMADDL MEM8(0x2116) /* VRAM address, low */
+#define VMADDH MEM8(0x2117) /* VRAM address, high */
+#define VMDATAL MEM8(0x2118) /* VRAM data write, low */
+#define VMDATAH MEM8(0x2119) /* VRAM data write, high */
+#define M7SEL MEM8(0x211A) /* Mode 7 settings */
+#define M7A MEM8(0x211B) /* Mode 7 matrix A (also multiplicand) */
+#define M7B MEM8(0x211C) /* Mode 7 matrix B (also multiplier) */
+#define M7C MEM8(0x211D) /* Mode 7 matrix C */
+#define M7D MEM8(0x211E) /* Mode 7 matrix D */
+#define M7X MEM8(0x211F) /* Mode 7 centre X */
+#define M7Y MEM8(0x2120) /* Mode 7 centre Y */
+#define CGADD MEM8(0x2121) /* CGRAM (palette) address */
+#define CGDATA MEM8(0x2122) /* CGRAM data write */
+#define W12SEL MEM8(0x2123) /* Window mask settings for BG1 and BG2 */
+#define W34SEL MEM8(0x2124) /* Window mask settings for BG3 and BG4 */
+#define WOBJSEL MEM8(0x2125) /* Window mask settings for OBJ and colour */
+#define WH0 MEM8(0x2126) /* Window 1 left position */
+#define WH1 MEM8(0x2127) /* Window 1 right position */
+#define WH2 MEM8(0x2128) /* Window 2 left position */
+#define WH3 MEM8(0x2129) /* Window 2 right position */
+#define WBGLOG MEM8(0x212A) /* Window mask logic for backgrounds */
+#define WOBJLOG MEM8(0x212B) /* Window mask logic for OBJ and colour */
+#define TM MEM8(0x212C) /* Main screen layer enable */
+#define TS MEM8(0x212D) /* Sub screen layer enable */
+#define TMW MEM8(0x212E) /* Window mask enable, main screen */
+#define TSW MEM8(0x212F) /* Window mask enable, sub screen */
+#define CGWSEL MEM8(0x2130) /* Colour math control A */
+#define CGADSUB MEM8(0x2131) /* Colour math control B */
+#define COLDATA MEM8(0x2132) /* Fixed colour data */
+#define SETINI MEM8(0x2133) /* Screen mode select (interlace, overscan, pseudo-hires) */
+#define MPYL MEM8(0x2134) /* Multiplication result, low */
+#define MPYM MEM8(0x2135) /* Multiplication result, middle */
+#define MPYH MEM8(0x2136) /* Multiplication result, high */
+#define SLHV MEM8(0x2137) /* Latch H/V counters */
+#define RDOAM MEM8(0x2138) /* OAM data read */
+#define RDVRAML MEM8(0x2139) /* VRAM data read, low */
+#define RDVRAMH MEM8(0x213A) /* VRAM data read, high */
+#define RDCGRAM MEM8(0x213B) /* CGRAM data read */
+#define OPHCT MEM8(0x213C) /* Horizontal counter latch */
+#define OPVCT MEM8(0x213D) /* Vertical counter latch */
+#define STAT77 MEM8(0x213E) /* PPU1 status and version */
+#define STAT78 MEM8(0x213F) /* PPU2 status and version */
+#define APUIO0 MEM8(0x2140) /* APU I/O port 0 */
+#define APUIO1 MEM8(0x2141) /* APU I/O port 1 */
+#define APUIO2 MEM8(0x2142) /* APU I/O port 2 */
+#define APUIO3 MEM8(0x2143) /* APU I/O port 3 */
+#define WMDATA MEM8(0x2180) /* WRAM data port */
+#define WMADDL MEM8(0x2181) /* WRAM address, low */
+#define WMADDM MEM8(0x2182) /* WRAM address, middle */
+#define WMADDH MEM8(0x2183) /* WRAM address, high */
+#define JOYSER0 MEM8(0x4016) /* Joypad serial port 0 (write: latch) */
+#define JOYSER1 MEM8(0x4017) /* Joypad serial port 1 */
+#define NMITIMEN MEM8(0x4200) /* Interrupt enable: NMI, IRQ timers, auto joypad read */
+#define WRIO MEM8(0x4201) /* Programmable I/O port, write */
+#define WRMPYA MEM8(0x4202) /* Multiplicand A */
+#define WRMPYB MEM8(0x4203) /* Multiplier B (starts the multiply) */
+#define WRDIVL MEM8(0x4204) /* Dividend, low */
+#define WRDIVH MEM8(0x4205) /* Dividend, high */
+#define WRDIVB MEM8(0x4206) /* Divisor (starts the divide) */
+#define HTIMEL MEM8(0x4207) /* H-count timer, low */
+#define HTIMEH MEM8(0x4208) /* H-count timer, high */
+#define VTIMEL MEM8(0x4209) /* V-count timer, low */
+#define VTIMEH MEM8(0x420A) /* V-count timer, high */
+#define MDMAEN MEM8(0x420B) /* General DMA enable (channel bits) */
+#define HDMAEN MEM8(0x420C) /* HDMA enable (channel bits) */
+#define MEMSEL MEM8(0x420D) /* FastROM enable */
+#define RDNMI MEM8(0x4210) /* NMI flag and CPU version */
+#define TIMEUP MEM8(0x4211) /* IRQ flag */
+#define HVBJOY MEM8(0x4212) /* H/V blank flags and joypad status */
+#define RDIO MEM8(0x4213) /* Programmable I/O port, read */
+#define RDDIVL MEM8(0x4214) /* Quotient, low */
+#define RDDIVH MEM8(0x4215) /* Quotient, high */
+#define RDMPYL MEM8(0x4216) /* Product or remainder, low */
+#define RDMPYH MEM8(0x4217) /* Product or remainder, high */
+#define JOY1L MEM8(0x4218) /* Joypad 1, low */
+#define JOY1H MEM8(0x4219) /* Joypad 1, high */
+#define JOY2L MEM8(0x421A) /* Joypad 2, low */
+#define JOY2H MEM8(0x421B) /* Joypad 2, high */
+#define JOY3L MEM8(0x421C) /* Joypad 3, low */
+#define JOY3H MEM8(0x421D) /* Joypad 3, high */
+#define JOY4L MEM8(0x421E) /* Joypad 4, low */
+#define JOY4H MEM8(0x421F) /* Joypad 4, high */
+#define DMAP0 MEM8(0x4300) /* DMA channel 0 parameters */
+#define BBAD0 MEM8(0x4301) /* DMA channel 0 B-bus address ($21xx) */
+#define A1T0L MEM8(0x4302) /* DMA channel 0 A-bus address, low */
+#define A1T0H MEM8(0x4303) /* DMA channel 0 A-bus address, high */
+#define A1B0 MEM8(0x4304) /* DMA channel 0 A-bus bank */
+#define DAS0L MEM8(0x4305) /* DMA channel 0 byte count / HDMA indirect address, low */
+#define DAS0H MEM8(0x4306) /* DMA channel 0 byte count / HDMA indirect address, high */
+#define DASB0 MEM8(0x4307) /* DMA channel 0 HDMA indirect bank */
+#define A2A0L MEM8(0x4308) /* DMA channel 0 HDMA table address, low */
+#define A2A0H MEM8(0x4309) /* DMA channel 0 HDMA table address, high */
+#define NTRL0 MEM8(0x430A) /* DMA channel 0 HDMA line counter */
+#define UNUSED0 MEM8(0x430B) /* DMA channel 0 unused byte */
+#define DMAP1 MEM8(0x4310) /* DMA channel 1 parameters */
+#define BBAD1 MEM8(0x4311) /* DMA channel 1 B-bus address ($21xx) */
+#define A1T1L MEM8(0x4312) /* DMA channel 1 A-bus address, low */
+#define A1T1H MEM8(0x4313) /* DMA channel 1 A-bus address, high */
+#define A1B1 MEM8(0x4314) /* DMA channel 1 A-bus bank */
+#define DAS1L MEM8(0x4315) /* DMA channel 1 byte count / HDMA indirect address, low */
+#define DAS1H MEM8(0x4316) /* DMA channel 1 byte count / HDMA indirect address, high */
+#define DASB1 MEM8(0x4317) /* DMA channel 1 HDMA indirect bank */
+#define A2A1L MEM8(0x4318) /* DMA channel 1 HDMA table address, low */
+#define A2A1H MEM8(0x4319) /* DMA channel 1 HDMA table address, high */
+#define NTRL1 MEM8(0x431A) /* DMA channel 1 HDMA line counter */
+#define UNUSED1 MEM8(0x431B) /* DMA channel 1 unused byte */
+#define DMAP2 MEM8(0x4320) /* DMA channel 2 parameters */
+#define BBAD2 MEM8(0x4321) /* DMA channel 2 B-bus address ($21xx) */
+#define A1T2L MEM8(0x4322) /* DMA channel 2 A-bus address, low */
+#define A1T2H MEM8(0x4323) /* DMA channel 2 A-bus address, high */
+#define A1B2 MEM8(0x4324) /* DMA channel 2 A-bus bank */
+#define DAS2L MEM8(0x4325) /* DMA channel 2 byte count / HDMA indirect address, low */
+#define DAS2H MEM8(0x4326) /* DMA channel 2 byte count / HDMA indirect address, high */
+#define DASB2 MEM8(0x4327) /* DMA channel 2 HDMA indirect bank */
+#define A2A2L MEM8(0x4328) /* DMA channel 2 HDMA table address, low */
+#define A2A2H MEM8(0x4329) /* DMA channel 2 HDMA table address, high */
+#define NTRL2 MEM8(0x432A) /* DMA channel 2 HDMA line counter */
+#define UNUSED2 MEM8(0x432B) /* DMA channel 2 unused byte */
+#define DMAP3 MEM8(0x4330) /* DMA channel 3 parameters */
+#define BBAD3 MEM8(0x4331) /* DMA channel 3 B-bus address ($21xx) */
+#define A1T3L MEM8(0x4332) /* DMA channel 3 A-bus address, low */
+#define A1T3H MEM8(0x4333) /* DMA channel 3 A-bus address, high */
+#define A1B3 MEM8(0x4334) /* DMA channel 3 A-bus bank */
+#define DAS3L MEM8(0x4335) /* DMA channel 3 byte count / HDMA indirect address, low */
+#define DAS3H MEM8(0x4336) /* DMA channel 3 byte count / HDMA indirect address, high */
+#define DASB3 MEM8(0x4337) /* DMA channel 3 HDMA indirect bank */
+#define A2A3L MEM8(0x4338) /* DMA channel 3 HDMA table address, low */
+#define A2A3H MEM8(0x4339) /* DMA channel 3 HDMA table address, high */
+#define NTRL3 MEM8(0x433A) /* DMA channel 3 HDMA line counter */
+#define UNUSED3 MEM8(0x433B) /* DMA channel 3 unused byte */
+#define DMAP4 MEM8(0x4340) /* DMA channel 4 parameters */
+#define BBAD4 MEM8(0x4341) /* DMA channel 4 B-bus address ($21xx) */
+#define A1T4L MEM8(0x4342) /* DMA channel 4 A-bus address, low */
+#define A1T4H MEM8(0x4343) /* DMA channel 4 A-bus address, high */
+#define A1B4 MEM8(0x4344) /* DMA channel 4 A-bus bank */
+#define DAS4L MEM8(0x4345) /* DMA channel 4 byte count / HDMA indirect address, low */
+#define DAS4H MEM8(0x4346) /* DMA channel 4 byte count / HDMA indirect address, high */
+#define DASB4 MEM8(0x4347) /* DMA channel 4 HDMA indirect bank */
+#define A2A4L MEM8(0x4348) /* DMA channel 4 HDMA table address, low */
+#define A2A4H MEM8(0x4349) /* DMA channel 4 HDMA table address, high */
+#define NTRL4 MEM8(0x434A) /* DMA channel 4 HDMA line counter */
+#define UNUSED4 MEM8(0x434B) /* DMA channel 4 unused byte */
+#define DMAP5 MEM8(0x4350) /* DMA channel 5 parameters */
+#define BBAD5 MEM8(0x4351) /* DMA channel 5 B-bus address ($21xx) */
+#define A1T5L MEM8(0x4352) /* DMA channel 5 A-bus address, low */
+#define A1T5H MEM8(0x4353) /* DMA channel 5 A-bus address, high */
+#define A1B5 MEM8(0x4354) /* DMA channel 5 A-bus bank */
+#define DAS5L MEM8(0x4355) /* DMA channel 5 byte count / HDMA indirect address, low */
+#define DAS5H MEM8(0x4356) /* DMA channel 5 byte count / HDMA indirect address, high */
+#define DASB5 MEM8(0x4357) /* DMA channel 5 HDMA indirect bank */
+#define A2A5L MEM8(0x4358) /* DMA channel 5 HDMA table address, low */
+#define A2A5H MEM8(0x4359) /* DMA channel 5 HDMA table address, high */
+#define NTRL5 MEM8(0x435A) /* DMA channel 5 HDMA line counter */
+#define UNUSED5 MEM8(0x435B) /* DMA channel 5 unused byte */
+#define DMAP6 MEM8(0x4360) /* DMA channel 6 parameters */
+#define BBAD6 MEM8(0x4361) /* DMA channel 6 B-bus address ($21xx) */
+#define A1T6L MEM8(0x4362) /* DMA channel 6 A-bus address, low */
+#define A1T6H MEM8(0x4363) /* DMA channel 6 A-bus address, high */
+#define A1B6 MEM8(0x4364) /* DMA channel 6 A-bus bank */
+#define DAS6L MEM8(0x4365) /* DMA channel 6 byte count / HDMA indirect address, low */
+#define DAS6H MEM8(0x4366) /* DMA channel 6 byte count / HDMA indirect address, high */
+#define DASB6 MEM8(0x4367) /* DMA channel 6 HDMA indirect bank */
+#define A2A6L MEM8(0x4368) /* DMA channel 6 HDMA table address, low */
+#define A2A6H MEM8(0x4369) /* DMA channel 6 HDMA table address, high */
+#define NTRL6 MEM8(0x436A) /* DMA channel 6 HDMA line counter */
+#define UNUSED6 MEM8(0x436B) /* DMA channel 6 unused byte */
+#define DMAP7 MEM8(0x4370) /* DMA channel 7 parameters */
+#define BBAD7 MEM8(0x4371) /* DMA channel 7 B-bus address ($21xx) */
+#define A1T7L MEM8(0x4372) /* DMA channel 7 A-bus address, low */
+#define A1T7H MEM8(0x4373) /* DMA channel 7 A-bus address, high */
+#define A1B7 MEM8(0x4374) /* DMA channel 7 A-bus bank */
+#define DAS7L MEM8(0x4375) /* DMA channel 7 byte count / HDMA indirect address, low */
+#define DAS7H MEM8(0x4376) /* DMA channel 7 byte count / HDMA indirect address, high */
+#define DASB7 MEM8(0x4377) /* DMA channel 7 HDMA indirect bank */
+#define A2A7L MEM8(0x4378) /* DMA channel 7 HDMA table address, low */
+#define A2A7H MEM8(0x4379) /* DMA channel 7 HDMA table address, high */
+#define NTRL7 MEM8(0x437A) /* DMA channel 7 HDMA line counter */
+#define UNUSED7 MEM8(0x437B) /* DMA channel 7 unused byte */
+
+#endif

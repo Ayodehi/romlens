@@ -61,6 +61,7 @@ pub enum Fixture {
     Dispatch,
     MixedData,
     Graphics,
+    Routines,
 }
 
 impl Fixture {
@@ -71,6 +72,7 @@ impl Fixture {
             Fixture::Dispatch => fixtures::dispatch_lorom(),
             Fixture::MixedData => fixtures::mixed_data_lorom(),
             Fixture::Graphics => fixtures::graphics_lorom(),
+            Fixture::Routines => fixtures::routines_lorom(),
         }
     }
 
@@ -81,6 +83,7 @@ impl Fixture {
             Fixture::Dispatch => "dispatch-table LoROM".to_owned(),
             Fixture::MixedData => "mixed-data LoROM".to_owned(),
             Fixture::Graphics => "graphics LoROM".to_owned(),
+            Fixture::Routines => "routines LoROM".to_owned(),
         }
     }
 }

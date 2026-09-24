@@ -205,6 +205,35 @@ enum Command {
         #[arg(long)]
         project: Option<PathBuf>,
     },
+    /// Pseudo-C for the routine entered at an address (docs/18).
+    Decompile {
+        /// The ROM (not needed with --header alone).
+        rom: Option<PathBuf>,
+        /// The routine's entry.
+        expr: Option<String>,
+        #[arg(long)]
+        project: Option<PathBuf>,
+        /// lift, clean or full.
+        #[arg(long, default_value = "full")]
+        level: String,
+        #[arg(long)]
+        json: bool,
+        /// Write snes.h, which every result includes.
+        #[arg(long)]
+        header: Option<PathBuf>,
+        /// Every routine, with counts.
+        #[arg(long)]
+        all: bool,
+        /// With --all: check each result with the C compiler.
+        #[arg(long)]
+        check: bool,
+        /// Every memory access as MEM8(...), without the project's names.
+        #[arg(long)]
+        no_names: bool,
+        /// The direct page where the analysis does not know it (hex).
+        #[arg(long)]
+        assume_dp: Option<String>,
+    },
     /// Export an assembly listing or a symbol file.
     Export {
         #[command(subcommand)]
@@ -765,6 +794,8 @@ enum FixtureArg {
     MixedData,
     /// 64 KB LoROM with tiles, a palette, OAM, a tilemap and a compressed block.
     Graphics,
+    /// 32 KB LoROM calling small routines for the decompiler.
+    Routines,
 }
 
 impl From<FixtureArg> for commands::rom::Fixture {
@@ -775,6 +806,7 @@ impl From<FixtureArg> for commands::rom::Fixture {
             FixtureArg::Dispatch => commands::rom::Fixture::Dispatch,
             FixtureArg::MixedData => commands::rom::Fixture::MixedData,
             FixtureArg::Graphics => commands::rom::Fixture::Graphics,
+            FixtureArg::Routines => commands::rom::Fixture::Routines,
         }
     }
 }
@@ -970,6 +1002,29 @@ fn run() -> Result<()> {
         Command::Xrefs { rom, expr, project } => {
             commands::xrefs::run(&rom, &expr, project.as_deref())
         }
+        Command::Decompile {
+            rom,
+            expr,
+            project,
+            level,
+            json,
+            header,
+            all,
+            check,
+            no_names,
+            assume_dp,
+        } => commands::decompile::run(commands::decompile::DecompileArgs {
+            rom: rom.as_deref(),
+            expr: expr.as_deref(),
+            project: project.as_deref(),
+            level: &level,
+            json,
+            header: header.as_deref(),
+            all,
+            check,
+            no_names,
+            assume_dp: assume_dp.as_deref(),
+        }),
         Command::Export { what } => match what {
             ExportCommand::Asm {
                 rom,

@@ -1,0 +1,4 @@
+[exit code 1]
+Error: no instruction the analysis found starts at $00:8021
+[exit code 1]
+Error: $7E:0000 is not in ROM
