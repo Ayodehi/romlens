@@ -1,0 +1,21 @@
+digraph "SUB_008020" {
+  node [shape=box, fontname="Menlo", fontsize=10];
+  b0 [label="SUB_008020:\l$00:8020  A2 0F        LDX #$0F\l"];
+  b1 [label="LOOP_008022:\l$00:8022  9E 00 02     STZ $0200,X\l$00:8025  CA           DEX\l$00:8026  10 FA        BPL LOOP_008022\l", style=filled, fillcolor="#e8f0ff"];
+  b2 [label="$00:8028  60           RTS\l"];
+  b0 -> b1 [color=gray40];
+  b1 -> b1 [color=blue];
+  b1 -> b2 [color=red];
+}
+digraph "RESET_008000 calls" {
+  node [shape=box, fontname="Menlo", fontsize=10];
+  c [label="RESET_008000\n$00:8000", style=bold];
+  out0 [label="SUB_008020\n$00:8020"];
+  c -> out0 [label="1× call"];
+  out1 [label="SUB_008030\n$00:8030"];
+  c -> out1 [label="1× call"];
+  out2 [label="SUB_008040\n$00:8040"];
+  c -> out2 [label="1× call"];
+  out3 [label="SUB_008050\n$00:8050"];
+  c -> out3 [label="1× call"];
+}

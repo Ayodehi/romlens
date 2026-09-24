@@ -5,6 +5,7 @@ pub mod analyze;
 pub mod decompile;
 pub mod disasm;
 pub mod export;
+pub mod graph;
 pub mod graphics;
 pub mod heuristics;
 pub mod import;

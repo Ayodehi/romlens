@@ -898,6 +898,39 @@ fn dev_rom_golden() {
     check("inspect-supermetroid", &run(&["inspect", rom, "$80:8427"]));
 }
 
+/// The routines fixture's graphs (docs/19): blocks and calls, as text, DOT
+/// and JSON with a layout.
+#[test]
+fn graph_commands() {
+    let dir = temp_dir("graph");
+    let rom = dir.join("routines.sfc");
+    std::fs::write(&rom, fixtures::routines_lorom()).unwrap();
+    let rom = rom.to_str().unwrap();
+    let mut text = String::new();
+    for at in ["$00:8000", "$00:8020", "$00:8030", "$00:8040", "$00:8050"] {
+        text.push_str(&run(&["graph", rom, at]));
+        text.push_str(&run(&["graph", rom, at, "--calls"]));
+    }
+    check("graph-routines", &text);
+    check(
+        "graph-routines-dot",
+        &format!(
+            "{}{}",
+            run(&["graph", rom, "$00:8020", "--dot"]),
+            run(&["graph", rom, "$00:8000", "--calls", "--dot"]),
+        ),
+    );
+    check(
+        "graph-routines-json",
+        &format!(
+            "{}{}",
+            run(&["graph", rom, "$00:8040", "--json"]),
+            run(&["graph", rom, "$00:8020", "--calls", "--json"]),
+        ),
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// Pseudo-C for the routines fixture (docs/18), at each level, and the
 /// header every result includes.
 #[test]

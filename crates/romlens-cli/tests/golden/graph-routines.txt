@@ -1,0 +1,53 @@
+RESET_008000 at $00:8000: 3 blocks, 3 edges, 1 loop
+block 0   $00:8000  7 instructions, runs on
+    → block 1 (jump)
+block 1   $00:8010  2 instructions, runs on
+    → block 2 (fall)
+block 2   $00:8016  1 instruction, runs on, loop header, loop depth 1
+    → block 2 (jump, back)
+RESET_008000 at $00:8000
+callers:
+  (none the analysis found)
+callees:
+  SUB_008020 $00:8020  1 site: $00:8005 call
+  SUB_008030 $00:8030  1 site: $00:8008 call
+  SUB_008040 $00:8040  1 site: $00:8010 call
+  SUB_008050 $00:8050  1 site: $00:8013 call
+SUB_008020 at $00:8020: 3 blocks, 3 edges, 1 loop
+block 0   $00:8020  1 instruction, runs on
+    → block 1 (fall)
+block 1   $00:8022  3 instructions, branches, loop header, loop depth 1
+    → block 1 (taken, back)
+    → block 2 (not taken)
+block 2   $00:8028  1 instruction, returns
+SUB_008020 at $00:8020
+callers:
+  RESET_008000 $00:8000  1 site: $00:8005 call
+callees:
+  (none)
+SUB_008030 at $00:8030: 1 block, 0 edges, 0 loops
+block 0   $00:8030  7 instructions, returns
+SUB_008030 at $00:8030
+callers:
+  RESET_008000 $00:8000  1 site: $00:8008 call
+callees:
+  (none)
+SUB_008040 at $00:8040: 3 blocks, 3 edges, 0 loops
+block 0   $00:8040  3 instructions, branches
+    → block 2 (taken)
+    → block 1 (not taken)
+block 1   $00:8046  1 instruction, runs on
+    → block 2 (fall)
+block 2   $00:8048  2 instructions, returns
+SUB_008040 at $00:8040
+callers:
+  RESET_008000 $00:8000  1 site: $00:8010 call
+callees:
+  (none)
+SUB_008050 at $00:8050: 1 block, 0 edges, 0 loops
+block 0   $00:8050  5 instructions, returns
+SUB_008050 at $00:8050
+callers:
+  RESET_008000 $00:8000  1 site: $00:8013 call
+callees:
+  (none)

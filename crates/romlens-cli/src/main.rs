@@ -205,6 +205,24 @@ enum Command {
         #[arg(long)]
         project: Option<PathBuf>,
     },
+    /// A routine's control-flow graph, or its callers and callees
+    /// (docs/19).
+    Graph {
+        rom: PathBuf,
+        /// The routine's entry.
+        expr: String,
+        #[arg(long)]
+        project: Option<PathBuf>,
+        /// Callers and callees instead of blocks.
+        #[arg(long)]
+        calls: bool,
+        /// Graphviz DOT (`dot -Tsvg`).
+        #[arg(long, conflicts_with = "json")]
+        dot: bool,
+        /// JSON, with a layout in character cells.
+        #[arg(long)]
+        json: bool,
+    },
     /// Pseudo-C for the routine entered at an address (docs/18).
     Decompile {
         /// The ROM (not needed with --header alone).
@@ -1002,6 +1020,21 @@ fn run() -> Result<()> {
         Command::Xrefs { rom, expr, project } => {
             commands::xrefs::run(&rom, &expr, project.as_deref())
         }
+        Command::Graph {
+            rom,
+            expr,
+            project,
+            calls,
+            dot,
+            json,
+        } => commands::graph::run(commands::graph::GraphArgs {
+            rom: &rom,
+            expr: &expr,
+            project: project.as_deref(),
+            calls,
+            dot,
+            json,
+        }),
         Command::Decompile {
             rom,
             expr,
