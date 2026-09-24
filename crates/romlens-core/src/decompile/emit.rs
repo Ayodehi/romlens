@@ -144,6 +144,10 @@ pub struct Namer<'a> {
     reserved: BTreeSet<&'static str>,
     /// What each routine reads and returns, for its declaration.
     pub summaries: Option<&'a BTreeMap<SnesAddress, crate::decompile::signature::Summary>>,
+    /// RAM nothing names yet, by address: its width in bytes, or `None`
+    /// where it is only ever indexed (an array). Printed as `ADDR_7E0000`
+    /// until a variable names it.
+    pub placeholders: BTreeMap<SnesAddress, Option<u32>>,
 }
 
 const KEYWORDS: [&str; 44] = [
@@ -215,6 +219,7 @@ impl<'a> Namer<'a> {
             decls: BTreeMap::new(),
             reserved,
             summaries: None,
+            placeholders: BTreeMap::new(),
         }
     }
 
@@ -325,7 +330,9 @@ impl<'a> Namer<'a> {
             self.decls.insert((2, name.clone()), decl);
             return Some((name, shape, (c.offset() - start.offset()) as u32, start));
         }
-        let raw = self.label(c)?.to_owned();
+        let Some(raw) = self.label(c).map(str::to_owned) else {
+            return self.placeholder(c);
+        };
         // A label on code is a routine, not data.
         if let Some(off) = self.rom.file_offset_for(c)
             && self
@@ -339,6 +346,79 @@ impl<'a> Namer<'a> {
         self.decls
             .insert((3, name.clone()), format!("extern u8 {name}[];"));
         Some((name, Shape::Bytes, 0, c))
+    }
+
+    /// `ADDR_7E0000`: RAM the code uses that nothing names yet, typed by
+    /// how it is used, covering `c`.
+    fn placeholder(&mut self, c: SnesAddress) -> Option<(String, Shape, u32, SnesAddress)> {
+        let (&start, &len) = self.placeholders.range(..=c).next_back()?;
+        if start.bank() != c.bank() {
+            return None;
+        }
+        let k = (c.offset() - start.offset()) as u32;
+        let (shape, ty) = match len {
+            Some(n) if k < n => (Shape::Scalar(n), n),
+            None if k == 0 => (Shape::Bytes, 0),
+            _ => return None,
+        };
+        let name = self.claim(&format!("ADDR_{:06X}", start.as_u24()), start, Kind::Object);
+        let decl = match ty {
+            0 => format!("extern u8 {name}[];"),
+            1 => format!("extern u8 {name};"),
+            2 => format!("extern u16 {name};"),
+            _ => format!("extern u32 {name}; /* 24-bit */"),
+        };
+        self.decls.insert((3, name.clone()), decl);
+        Some((name, shape, k, start))
+    }
+
+    /// Work out the placeholders a routine needs from the addresses it
+    /// uses: each exact address at its widest access, an indexed base as an
+    /// array, and an address inside a wider one left to that one.
+    pub fn plan_placeholders(&mut self, uses: &[(u32, Width, bool)]) {
+        if !self.use_names {
+            return;
+        }
+        let mut exact: BTreeMap<SnesAddress, u32> = BTreeMap::new();
+        let mut indexed: BTreeSet<SnesAddress> = BTreeSet::new();
+        for &(a, w, is_indexed) in uses {
+            let c = self.canonical(a);
+            if !matches!(
+                self.rom.map().classify(c),
+                MemoryClass::Wram | MemoryClass::LowRam | MemoryClass::Sram
+            ) || self.project.variable_containing(c).is_some()
+                || self.label(c).is_some()
+            {
+                continue;
+            }
+            if is_indexed {
+                indexed.insert(c);
+            } else {
+                let e = exact.entry(c).or_insert(0);
+                *e = (*e).max(w.bytes().min(3));
+            }
+        }
+        let mut out: BTreeMap<SnesAddress, Option<u32>> = BTreeMap::new();
+        let mut covered_to: Option<(u8, u16)> = None;
+        for (a, n) in exact {
+            if let Some((bank, end)) = covered_to
+                && bank == a.bank()
+                && a.offset() < end
+            {
+                continue;
+            }
+            out.insert(a, Some(n));
+            covered_to = Some((a.bank(), a.offset().saturating_add(n as u16)));
+        }
+        for a in indexed {
+            let inside = out.range(..=a).next_back().is_some_and(|(s, n)| {
+                s.bank() == a.bank() && n.is_some_and(|n| (a.offset() - s.offset()) < n as u16)
+            });
+            if !inside {
+                out.entry(a).or_insert(None);
+            }
+        }
+        self.placeholders = out;
     }
 
     pub fn declarations(&self) -> Vec<&str> {
@@ -355,6 +435,8 @@ impl<'a> Namer<'a> {
 fn var_decl(name: &str, ty: VarType) -> (Shape, String) {
     let ew = ty.width.bytes();
     match (ty.width, ty.count) {
+        // C has no 24-bit type: a u32 holds it.
+        (VarWidth::Long, 1) => (Shape::Scalar(3), format!("extern u32 {name}; /* 24-bit */")),
         (VarWidth::Long, n) => (
             Shape::Bytes,
             format!(
@@ -518,6 +600,20 @@ impl<'a, 'n> Emitter<'a, 'n> {
                 self.args(args);
             }
         }
+    }
+
+    /// Whether a 24-bit store to `addr` can be a plain assignment: a u32
+    /// variable or placeholder starts there.
+    fn names_24(&mut self, addr: &Expr) -> bool {
+        if !self.names.use_names {
+            return false;
+        }
+        let Expr::Const(a) = addr else {
+            return false;
+        };
+        let c = self.names.canonical(*a);
+        self.names.is_hardware(c).is_none()
+            && matches!(self.names.object(c), Some((_, Shape::Scalar(3), 0, _)))
     }
 
     /// An address to pass as one: a named object's own name where one
@@ -774,7 +870,7 @@ impl<'a, 'n> Emitter<'a, 'n> {
             self.stats.statements += 1;
         }
         match s {
-            // A 24-bit store has no C lvalue: SET24(address, value).
+            // A 24-bit store with no 24-bit name to assign to: SET24.
             Stmt::Assign {
                 dst:
                     Place::Mem {
@@ -782,7 +878,7 @@ impl<'a, 'n> Emitter<'a, 'n> {
                         width: Width::W24,
                     },
                 value,
-            } => {
+            } if !self.names_24(addr) => {
                 self.w.tok("SET24", CTokenKind::Helper, None);
                 self.w.w("(");
                 self.address_of(addr);

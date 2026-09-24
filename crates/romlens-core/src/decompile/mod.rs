@@ -196,6 +196,7 @@ pub fn render_with(
 
     let mut names = emit::Namer::new(rom, project, snap, opts.names);
     names.summaries = program.map(|p| &p.summaries);
+    names.plan_placeholders(&memory_uses(&lifted));
     let name = names.own(f.entry);
     // The body first, so every name it uses is known for the declarations.
     let mut body = emit::Emitter::new(&mut names);
@@ -408,6 +409,55 @@ fn used_temps(lifted: &lift::Lifted) -> std::collections::BTreeSet<u32> {
         }
         if let Some((s, _)) = &b.switch {
             see(s, &mut out);
+        }
+    }
+    out
+}
+
+/// Every memory access at a constant address (or a constant base plus an
+/// index): the address, the width, and whether it is indexed.
+fn memory_uses(lifted: &lift::Lifted) -> Vec<(u32, ir::Width, bool)> {
+    use ir::{BinOp, Expr, Place, Stmt};
+    fn at(addr: &Expr, w: ir::Width, out: &mut Vec<(u32, ir::Width, bool)>) {
+        match addr {
+            Expr::Const(a) => out.push((*a, w, false)),
+            Expr::Bin(BinOp::Add, x, y) => {
+                if let (_, Expr::Const(a)) | (Expr::Const(a), _) = (&**x, &**y) {
+                    out.push((*a, w, true));
+                }
+            }
+            _ => {}
+        }
+    }
+    fn expr(e: &Expr, out: &mut Vec<(u32, ir::Width, bool)>) {
+        e.walk(&mut |x| {
+            if let Expr::Mem { addr, width } = x {
+                at(addr, *width, out);
+            }
+        })
+    }
+    let mut out = Vec::new();
+    for b in &lifted.blocks {
+        for l in &b.lines {
+            match &l.stmt {
+                Stmt::Assign { dst, value } => {
+                    if let Place::Mem { addr, width } = dst {
+                        at(addr, *width, &mut out);
+                        expr(addr, &mut out);
+                    }
+                    expr(value, &mut out);
+                }
+                Stmt::Effect(_, args) => args.iter().for_each(|a| expr(a, &mut out)),
+                Stmt::Eval(e) => expr(e, &mut out),
+                Stmt::Call(ir::CallTarget::Table { index, .. }) => expr(index, &mut out),
+                _ => {}
+            }
+        }
+        if let Some(c) = &b.cond {
+            expr(c, &mut out);
+        }
+        if let Some((s, _)) = &b.switch {
+            expr(s, &mut out);
         }
     }
     out

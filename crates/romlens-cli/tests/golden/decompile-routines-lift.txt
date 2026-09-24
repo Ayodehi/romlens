@@ -25,6 +25,8 @@ L_008016:
 /* SUB_008020 at $00:8020: 5 instructions, lift level. From Romlens; for reading, not for rebuilding the ROM. */
 #include "snes.h"
 
+extern u8 ADDR_7E0200[];
+
 /* Reads nothing; returns X. */
 void SUB_008020(void)
 {
@@ -33,7 +35,7 @@ void SUB_008020(void)
     Z = X == 0;
 
 L_008022:
-    MEM8(0x0200 + X) = 0;
+    ADDR_7E0200[X] = 0;
     X = (u8)(X - 1);
     N = (X & 0x80) != 0;
     Z = X == 0;
@@ -43,54 +45,63 @@ L_008022:
 /* SUB_008030 at $00:8030: 7 instructions, lift level. From Romlens; for reading, not for rebuilding the ROM. */
 #include "snes.h"
 
+extern u16 ADDR_7E0010;
+extern u16 ADDR_7E0012;
+extern u16 ADDR_7E0014;
+
 /* Reads nothing; returns nothing. */
 void SUB_008030(void)
 {
     u32 t1, t2;
 
     /* 16-bit A, 8-bit X and Y */
-    A = MEM16(0x0010);
+    A = ADDR_7E0010;
     N = (A & 0x8000) != 0;
     Z = A == 0;
     C = 0;
-    t1 = MEM16(0x0012);
+    t1 = ADDR_7E0012;
     t2 = A + t1 + C;
     V = (~(A ^ t1) & (A ^ t2) & 0x8000) != 0;
     C = t2 > 0xFFFF;
     A = t2;
     N = (A & 0x8000) != 0;
     Z = A == 0;
-    MEM16(0x0014) = A;
+    ADDR_7E0014 = A;
     /* 8-bit A, X and Y */
     return;
 }
 /* SUB_008040 at $00:8040: 6 instructions, lift level. From Romlens; for reading, not for rebuilding the ROM. */
 #include "snes.h"
 
+extern u8 ADDR_7E0020;
+extern u8 ADDR_7E0021;
+extern u8 ADDR_7E0022;
+
 /* Reads nothing; returns nothing. */
 void SUB_008040(void)
 {
     u32 t1;
 
-    A = (A & 0xFF00) | MEM8(0x0020);
+    A = (A & 0xFF00) | ADDR_7E0020;
     N = ((u8)A & 0x80) != 0;
     Z = (u8)A == 0;
-    t1 = MEM8(0x0021);
+    t1 = ADDR_7E0021;
     C = (u8)A >= t1;
     Z = (u8)A == t1;
     N = (((u8)A - t1) & 0x80) != 0;
     if (C) goto L_008048;
-    A = (A & 0xFF00) | MEM8(0x0021);
+    A = (A & 0xFF00) | ADDR_7E0021;
     N = ((u8)A & 0x80) != 0;
     Z = (u8)A == 0;
 
 L_008048:
-    MEM8(0x0022) = (u8)A;
+    ADDR_7E0022 = (u8)A;
     return;
 }
 /* SUB_008050 at $00:8050: 5 instructions, lift level. From Romlens; for reading, not for rebuilding the ROM. */
 #include "snes.h"
 
+extern u8 ADDR_7E0300;
 extern u8 DATA_008070[];
 
 /* Reads X; returns nothing. */
@@ -100,7 +111,7 @@ void SUB_008050(void)
     A = (A & 0xFF00) | DATA_008070[X];
     N = ((u8)A & 0x80) != 0;
     Z = (u8)A == 0;
-    MEM8(0x0300) = (u8)A;
+    ADDR_7E0300 = (u8)A;
     X = pull8();
     N = (X & 0x80) != 0;
     Z = X == 0;

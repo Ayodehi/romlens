@@ -1,5 +1,6 @@
 //! What makes the C read like C: registers by name even where the data
-//! bank is not known, and a pointer built a byte at a time as one store.
+//! bank is not known, a pointer built a byte at a time as one store, and
+//! unnamed RAM as `ADDR_7E0000` until a variable names it.
 
 use romlens_core::analysis::{AnalysisControl, analyze};
 use romlens_core::decompile::{self, DecompileOptions};
@@ -54,7 +55,11 @@ fn c(project: &Project, rom: &RomImage) -> String {
 fn registers_are_named_and_a_pointer_is_one_store() {
     let rom = rom();
     let text = c(&Project::new(&rom), &rom);
-    assert!(text.contains("SET24(0x0000, 0x0E8000);"), "{text}");
+    assert!(text.contains("ADDR_7E0000 = 0x0E8000;"), "{text}");
+    assert!(
+        text.contains("extern u32 ADDR_7E0000; /* 24-bit */"),
+        "{text}"
+    );
     assert!(text.contains("APUIO0 = 0;\n    APUIO1 = 0;"), "{text}");
     assert!(text.contains("the data bank is not known"), "{text}");
 }
@@ -80,6 +85,13 @@ fn a_long_variable_names_the_pointer() {
         )
         .unwrap();
     let text = c(&project, &rom);
-    assert!(text.contains("SET24(SpcSource, 0x0E8000);"), "{text}");
-    assert!(text.contains("extern u8 SpcSource[3];"), "{text}");
+    assert!(text.contains("SpcSource = 0x0E8000;"), "{text}");
+    assert!(
+        text.contains("extern u32 SpcSource; /* 24-bit */"),
+        "{text}"
+    );
+    assert!(
+        !text.contains("ADDR_7E0000"),
+        "the variable replaces the placeholder: {text}"
+    );
 }

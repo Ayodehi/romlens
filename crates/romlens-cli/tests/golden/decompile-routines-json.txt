@@ -1,8 +1,8 @@
 {
   "name": "SUB_008040",
   "entry": "$00:8040",
-  "text": "/* SUB_008040 at $00:8040: 6 instructions, lift level. From Romlens; for reading, not for rebuilding the ROM. */\n#include \"snes.h\"\n\n/* Reads nothing; returns nothing. */\nvoid SUB_008040(void)\n{\n    u32 t1;\n\n    A = (A & 0xFF00) | MEM8(0x0020);\n    N = ((u8)A & 0x80) != 0;\n    Z = (u8)A == 0;\n    t1 = MEM8(0x0021);\n    C = (u8)A >= t1;\n    Z = (u8)A == t1;\n    N = (((u8)A - t1) & 0x80) != 0;\n    if (C) goto L_008048;\n    A = (A & 0xFF00) | MEM8(0x0021);\n    N = ((u8)A & 0x80) != 0;\n    Z = (u8)A == 0;\n\nL_008048:\n    MEM8(0x0022) = (u8)A;\n    return;\n}\n",
-  "lines": [[], [], [], [], [64], [], [], [], [64], [64], [64], [66], [66], [66], [66], [68], [70], [70], [70], [], [72], [72], [74], []],
+  "text": "/* SUB_008040 at $00:8040: 6 instructions, lift level. From Romlens; for reading, not for rebuilding the ROM. */\n#include \"snes.h\"\n\nextern u8 ADDR_7E0020;\nextern u8 ADDR_7E0021;\nextern u8 ADDR_7E0022;\n\n/* Reads nothing; returns nothing. */\nvoid SUB_008040(void)\n{\n    u32 t1;\n\n    A = (A & 0xFF00) | ADDR_7E0020;\n    N = ((u8)A & 0x80) != 0;\n    Z = (u8)A == 0;\n    t1 = ADDR_7E0021;\n    C = (u8)A >= t1;\n    Z = (u8)A == t1;\n    N = (((u8)A - t1) & 0x80) != 0;\n    if (C) goto L_008048;\n    A = (A & 0xFF00) | ADDR_7E0021;\n    N = ((u8)A & 0x80) != 0;\n    Z = (u8)A == 0;\n\nL_008048:\n    ADDR_7E0022 = (u8)A;\n    return;\n}\n",
+  "lines": [[], [], [], [], [], [], [], [], [64], [], [], [], [64], [64], [64], [66], [66], [66], [66], [68], [70], [70], [70], [], [72], [72], [74], []],
   "warnings": [],
   "stats": {"instructions": 6, "statements": 11, "blocks": 3, "gotos": 1, "asmComments": 0}
 }
