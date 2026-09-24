@@ -439,6 +439,23 @@ impl<'a> Namer<'a> {
         self.placeholders = out;
     }
 
+    /// Names for bytes of RAM: each object that holds some of them once,
+    /// `MEM8(0x7E0000)` for a byte nothing names.
+    pub fn ram_names(&mut self, bytes: &BTreeSet<u32>) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for &b in bytes {
+            let c = SnesAddress::from_u24(b);
+            let name = match self.use_names.then(|| self.object(c)).flatten() {
+                Some((name, ..)) => name,
+                None => format!("MEM8(0x{b:06X})"),
+            };
+            if !out.contains(&name) {
+                out.push(name);
+            }
+        }
+        out
+    }
+
     /// A goto label for code at `at`: the listing's label for it (a
     /// `LOOP_`, a `SKIP_`, the user's name) as an identifier, else `L_`
     /// and the address. Labels have their own namespace in C.
@@ -561,6 +578,8 @@ pub struct Emitter<'a, 'n> {
     pub vars: Vec<VarDecl>,
     /// Print as C is written (`x++`, `a |= 4`), not statement by statement.
     pub modern: bool,
+    /// The RAM each call's caller passes, by the call's step.
+    pub mem_args: BTreeMap<usize, BTreeSet<u32>>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -581,6 +600,7 @@ impl<'a, 'n> Emitter<'a, 'n> {
             stats: Stats::default(),
             vars: Vec::new(),
             modern: false,
+            mem_args: BTreeMap::new(),
         }
     }
 
@@ -1000,7 +1020,9 @@ impl<'a, 'n> Emitter<'a, 'n> {
                     CallTarget::Direct(a) => {
                         let name = self.names.function(*a);
                         self.w.tok(&name, CTokenKind::Function, Some(*a));
-                        self.w.w("();");
+                        self.w.w("(");
+                        self.passed_in_memory(steps, true);
+                        self.w.w(");");
                     }
                     CallTarget::Table { table, index, .. } => {
                         let name = self.names.table(*table);
@@ -1072,10 +1094,31 @@ impl<'a, 'n> Emitter<'a, 'n> {
                     self.w.w("&");
                     self.place(o);
                 }
+                self.passed_in_memory(steps, first);
                 self.w.w(");");
                 self.w.end(steps);
             }
         }
+    }
+
+    /// The RAM this call's caller stored for it, as a comment among the
+    /// arguments: `SUB_8079(/* ADDR_7E0000 */)`.
+    fn passed_in_memory(&mut self, steps: &[usize], first: bool) {
+        let Some(bytes) = steps.first().and_then(|s| self.mem_args.get(s)).cloned() else {
+            return;
+        };
+        let names = self.names.ram_names(&bytes);
+        if names.is_empty() {
+            return;
+        }
+        if !first {
+            self.w.w(" ");
+        }
+        self.w.tok(
+            &format!("/* {} */", safe_comment(&names.join(", "))),
+            CTokenKind::Comment,
+            None,
+        );
     }
 
     /// `x = x + 1` as `x++`, `ADDR = ADDR | 4` as `ADDR |= 4`: the operator

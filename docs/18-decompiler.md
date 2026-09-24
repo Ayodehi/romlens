@@ -16,6 +16,8 @@ that tracks against it.
 | T6 FFI | done: `Workbench::decompile` (async, on its own thread, with its own cancel flag so dropping it never cancels an analysis) and `decompile_blocking`, `function_containing`, `snes_header()` and `make_routines_test_rom()`. Every routine's summary is built on the first decompile after an analysis and reused until the next. Tokens come back in UTF-16 units for the shell's string APIs. `API_VERSION` 0.5.0 (the bump planned after 2C had not been made, so it moves once). Tested from Rust and from RomlensKit |
 | T7 macOS C tab | done: the C tab (View › C, ⌥⌘8) splits the disassembly and the routine at the selection as C; the header names the routine, carries the level picker and Export C… (the `.c` and `snes.h` beside it). Selecting an instruction highlights the C lines it made, including values carried into a later line, and clicking a C line selects its instructions; double-clicking a routine's or a label's name goes there. Decompile Routine in the context menu. Renames and variables show at once. Also View › Focus on Code (⌥⌘F, and a toolbar button), which hides the navigator, inspector and overview strip together and puts them back as they were. App tests: `DecompileTabTests` |
 | T8 measure and record | done, 23 September 2026: see Measurements below. Running Super Mario World with its project through the differential test found four more problems, one in the output and three in the harness, all fixed (below) |
+| T9 names for code | done, 24 September 2026: auto labels say what reaches code, `LOOP_` where a branch comes back up to it and `SKIP_` where only forward branches do (`CODE_` stays for jump targets); the C's goto labels are the listing's |
+| T10 the `full` level as C | done, 24 September 2026: see "Reading like C" below. Registers are typed variables per web, routines take and return them (`a = SUB_8123(x, &y);`), counted loops are `for` with an `int` counter where it stands alone, byte-wise adds are one 16-bit add, values passed in RAM are shown at the call, and the direct page is worked out for the whole program. `lift` and `clean` keep their form |
 
 ## Context
 
@@ -210,6 +212,137 @@ function, variable and data label it uses. `header.rs` generates `snes.h`:
 `assume_dp` sets D for a routine whose D the analysis does not know. Where an
 execution log saw an instruction run with more than one width, the result warns
 ("ran with 8- and 16-bit A; showing the recorded state").
+
+## Reading like C (24 September 2026)
+
+The first `full` level was faithful but read as the CPU: every register a
+16-bit global, `(u8)A` wherever 8-bit code read the accumulator,
+`A = (A & 0xFF00) | …` wherever it wrote it, `X = (u8)(X - 1)` for `DEX`.
+The C need not rebuild the ROM, only mean what it does, so the `full` level
+now uses what C has instead of spelling out the widths. The three levels are
+kept as three steps: `lift` says every instruction, `clean` is that after
+data flow over the CPU's registers, `full` is C.
+
+`SUB_049037` in Super Mario World, before and after:
+
+```c
+void SUB_049037(void)            /* before */
+{
+    push16(X);
+    push16(Y);
+    PHP();
+    A = ADDR_7E13CA;
+    if ((u8)A != 0) {
+        X = 0x5F;
+        do {
+            ADDR_7E1F49[X] = ADDR_7E1EA2[X];
+            X = (u8)(X - 1);
+        } while ((s8)X >= 0);
+        …
+    PLP();
+    Y = pull8();
+    X = pull8();
+}
+
+u8 SUB_049037(void)              /* after */
+{
+    u8 a;
+
+    a = ADDR_7E13CA;
+    if (a != 0) {
+        for (int i = 0x5F; i >= 0; i--) {
+            ADDR_7E1F49[i] = ADDR_7E1EA2[i];
+        }
+        ADDR_7E13CA = 0;
+        a = 5;
+        ADDR_7E1B87 = a;
+    }
+    return a;
+}
+```
+
+What does it:
+
+- **Variables** (`decompile/canon.rs`). Each register's definitions and uses
+  are joined into webs: every definition that reaches a use is in that use's
+  web. A web is `u8` where every definition is an 8-bit value or every use
+  reads only the low byte, `u16` otherwise, and `bool` for a flag. The webs
+  of one register and type share a variable, since one register never holds
+  two at once: `x`, or `x8` and `x16` where X is both. C's conversions do the
+  truncation the widths did. A result stored through a pointer takes the
+  result's exact type; where two results of different types meet, one goes
+  through a variable of its own and a copy.
+- **Signatures** (`signature::Abi`, from the summaries). A parameter for each
+  register or flag the routine reads; the first result returned (A, then X,
+  Y, the carry, N, V, Z) and the rest through pointers, `u8 *y_out`. S, D and
+  DBR stay the globals of `snes.h`. X and Y are `u8` parameters only where
+  every call is made with 8-bit index registers, and `u8` results where the
+  routine returns so or every caller goes on so. A result that is only A's
+  low byte, from a routine that leaves the high byte alone, is merged into the
+  caller's A. Code that reads the registers themselves (a call through a
+  table, `mvn`, a `PHP` nothing pairs, a routine nothing analysed) gets them
+  through the globals: `X = x;` before, `x = X;` after. A register a routine
+  preserves is not put back: its callers keep their own.
+- **Counted loops** (`decompile/loops.rs`). A variable set to a constant just
+  before a loop, changed only by a constant step at the end of its body, and
+  all the loop's test reads, makes a `for`. The test is the simplest one that
+  agrees with the original at every value the counter takes: the loop is run,
+  value by value, to check. Where nothing reads the counter afterwards and the
+  body sees the same values, it is an `int` of its own:
+  `for (int i = 0x5F; i >= 0; i--)` for `LDX #$5F … DEX; BPL`.
+- **Wide adds** (`dataflow::wide_adds`). A 16-bit add done a byte at a time
+  (`CLC; LDA $1C; ADC $1888; STA …; LDA $1D; ADC $1889`) is one add of 16
+  bits, `t2 = ADDR_7E001C + ADDR_7E1888;`, and the high byte `t2 >> 8`. Only
+  where nothing between the bytes can change them.
+- **Memory arguments** (`signature::MemoryArgs`). The RAM each routine reads
+  before it writes, through its callees too, and at each call the stores its
+  caller makes to that RAM since its last call. They show among the call's
+  arguments, `SUB_008079(&y /* ADDR_7E0000 */);`, and above the routine,
+  `/* Its callers pass ADDR_7E0000 in memory. */`.
+- **The direct page.** Where every write of D the program makes (every one a
+  trace saw, when there is a trace) sets it to its reset value, the direct
+  page is that value wherever the analysis lost it, with a note. Super Mario
+  World's 6,077 `ADDR_7E0094[D]` became `ADDR_7E0094`.
+- **As C writes it.** `x++`, `ADDR_7E05BA += 1`, `a |= 4`; no width notes.
+
+Getting the summaries tight enough for signatures changed them too:
+
+- a `PLP` restores the widths its `PHP` saved (the analysis now pairs them on
+  each path, `RESTORED_PLP`), so `PHP; SEP #$30; …; PLP` pulls what it pushed;
+- liveness is strong (a read by dead code does not count), and a `PHP` copies
+  each flag to a saved copy a `PLP` reads back (`Loc::Saved`), so a status
+  byte pushed and never pulled reads nothing;
+- stack pairs are matched byte for byte, so unrelated pushes at one depth no
+  longer spoil each other, and `TCS`/`TSX` with nothing pushed are allowed;
+- preserves is a forward must-analysis, so a register left alone on an early
+  return is still preserved;
+- reads and returns are least fixed points that run until they settle;
+- the lift now clears X's and Y's high bytes where the hardware does (`SEP
+  #$10`, a `PLP` back to 8-bit X, emulation mode), and moves with 8-bit index
+  registers through `mvn8`/`mvp8`.
+
+The differential test runs the `full` level through each routine's
+signature (a shim moves the registers from and to the globals it compares,
+`Abi::global_shim`) and checks only what a routine returns, since what it
+preserves its callers keep. Super Metroid 9,414 runs, Super Mario World with
+its project 10,230: no differences. On the way it found, besides the lifter
+gaps above, an 8-bit parameter a 16-bit call truncated, a result pointer of
+the wrong width, and results an open routine's known callers read but its
+default left out.
+
+| | Level | Statements | Gotos | `for` | of which `int` | Calls passing RAM | Valid C |
+|---|---|---|---|---|---|---|---|
+| Super Metroid | clean | 15,835 | 2,796 | | | | 799 / 799 |
+| | full | 14,075 | 440 | 189 | 50 | 232 | 799 / 799 |
+| Super Mario World | clean | 19,598 | 4,559 | | | | 869 / 869 |
+| | full | 20,115 | 775 | 224 | 96 | 159 | 869 / 869 |
+
+At `full` the statements include the hand-overs to code that reads the
+registers as globals (563 and 511) and the stores of results through
+pointers. Still to do: routines reached only through tables and pointers
+keep the every-register guess for their results, so they return more than
+they need to; carries tested by a branch (`if (t1 > 0xFF)`) stay as they
+are; a pair of loops over one counter is not joined.
 
 ## Surfaces
 

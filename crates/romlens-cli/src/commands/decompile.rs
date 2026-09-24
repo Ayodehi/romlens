@@ -104,7 +104,7 @@ fn print_json(d: &Decompiled) {
 /// Decompile every routine; with `check`, run each through the C compiler.
 fn all(s: &session::Session, opts: &DecompileOptions, check: bool) -> Result<()> {
     let started = std::time::Instant::now();
-    let program = decompile::program(&s.rom, &s.snap, opts);
+    let program = decompile::program(&s.rom, &s.project, &s.snap, opts);
     let mut done: Vec<(SnesAddress, Decompiled)> = Vec::new();
     let refused = program.entries.len() - program.units.len();
     for (e, u) in &program.units {

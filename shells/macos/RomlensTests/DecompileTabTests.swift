@@ -31,7 +31,7 @@ import Testing
         // Another routine: the text follows.
         m.select(offset: 0x22)
         try await Fixture.settle(until: { m.decompiler.result?.name == "SUB_008020" })
-        #expect(m.decompiler.result?.text.contains("do {") == true)
+        #expect(m.decompiler.result?.text.contains("for (x = 0x0F; (s8)x >= 0; x--) {") == true)
 
         // The level picker.
         m.decompiler.level = .lift

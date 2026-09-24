@@ -143,7 +143,7 @@ impl Workbench {
             let program = match cached {
                 Some(p) => p,
                 None => {
-                    let p = Arc::new(decompile::program(&image, &snapshot, &opts));
+                    let p = Arc::new(decompile::program(&image, &project, &snapshot, &opts));
                     *cache.lock().unwrap_or_else(|e| e.into_inner()) =
                         Some((generation, Arc::clone(&p)));
                     p

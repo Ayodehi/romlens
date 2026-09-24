@@ -115,25 +115,31 @@ pub fn decompile(
     at: SnesAddress,
     opts: &DecompileOptions,
 ) -> Result<Decompiled, FunctionError> {
-    let program = Program::build(
-        rom,
-        snap,
-        lift::LiftOptions {
-            assume_dp: opts.assume_dp,
-        },
-    );
+    let program = self::program(rom, project, snap, opts);
     let f = discover(rom, snap, &program.entries, at)?;
     Ok(render_with(rom, project, snap, &f, opts, Some(&program)))
 }
 
-/// Every routine's summary, for `render_with`.
-pub fn program(rom: &RomImage, snap: &AnalysisSnapshot, opts: &DecompileOptions) -> Program {
+/// Every routine's summary, for `render_with`. The project's trace, where
+/// it has one, says which instructions ran.
+pub fn program(
+    rom: &RomImage,
+    project: &Project,
+    snap: &AnalysisSnapshot,
+    opts: &DecompileOptions,
+) -> Program {
+    let ran = |off: u32| match &project.coverage {
+        Some(c) => c.opcode_start.get(off),
+        None => true,
+    };
     Program::build(
         rom,
         snap,
         lift::LiftOptions {
             assume_dp: opts.assume_dp,
+            dp_inferred: false,
         },
+        &ran,
     )
 }
 
@@ -160,13 +166,12 @@ pub fn render_with(
     program: Option<&Program>,
 ) -> Decompiled {
     let cfg = Cfg::build(f);
-    let lifted = lift::lift(
-        f,
-        &cfg,
-        lift::LiftOptions {
-            assume_dp: opts.assume_dp,
-        },
-    );
+    // As the program was lifted: with the direct page it worked out.
+    let lift_opts = program.map(|p| p.lift).unwrap_or(lift::LiftOptions {
+        assume_dp: opts.assume_dp,
+        dp_inferred: false,
+    });
+    let lifted = lift::lift(f, &cfg, lift_opts);
     let mut lifted = lifted;
     // At `full` the registers become each routine's own variables.
     let canonical = opts.level == Level::Full && program.is_some();
@@ -216,6 +221,13 @@ pub fn render_with(
     let mut body = emit::Emitter::new(&mut names);
     body.vars = lifted.vars.clone();
     body.modern = canonical;
+    if canonical && let Some(p) = program {
+        for (i, st) in f.steps.iter().enumerate() {
+            if let Some(b) = p.memory.at_call.get(&(f.entry, st.insn.file_offset.0)) {
+                body.mem_args.insert(i, b.clone());
+            }
+        }
+    }
     body.w.indent = 1;
     body.stats.instructions = f.steps.len() as u32;
     // A temporary nothing reads is a value kept only for its read.
@@ -328,6 +340,17 @@ pub fn render_with(
     w.blank();
     if let Some(s) = program.and_then(|p| p.summaries.get(&f.entry)) {
         w.comment_line(&signature::describe(s), &[]);
+    }
+    if canonical
+        && let Some(bytes) = program.and_then(|p| p.memory.params.get(&f.entry))
+        && !bytes.is_empty()
+    {
+        let passed = names.ram_names(bytes);
+        let list = match passed.len() {
+            1 => passed[0].clone(),
+            n => format!("{} and {}", passed[..n - 1].join(", "), passed[n - 1]),
+        };
+        w.comment_line(&format!("Its callers pass {list} in memory."), &[]);
     }
     match &lifted.abi {
         Some(abi) => {

@@ -180,7 +180,7 @@ fn the_routines_mean_what_the_code_does() {
             // from the globals the checks read.
             let entry = SnesAddress::new(0, at);
             let shim = format!("call_{at:04X}");
-            let program = decompile::program(&rom, &snap, &opts);
+            let program = decompile::program(&rom, &project, &snap, &opts);
             match program.abis.get(&entry).filter(|_| level == Level::Full) {
                 Some(abi) => shims.push_str(&abi.global_shim(&shim, &d.name)),
                 None => shims.push_str(&format!("static void {shim}(void) {{ {}(); }}\n", d.name)),
@@ -236,7 +236,7 @@ fn every_routine_on_the_development_rom_is_valid_c() {
             level,
             ..Default::default()
         };
-        let program = decompile::program(&rom, &snap, &opts);
+        let program = decompile::program(&rom, &project, &snap, &opts);
         let dir = scratch(&format!("devrom-{}", level.name()));
         std::fs::write(dir.join("snes.h"), decompile::snes_h()).unwrap();
         let files: Vec<PathBuf> = program

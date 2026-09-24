@@ -138,6 +138,7 @@ Written from `18-decompiler.md` on 23 September 2026. The macOS rows are built a
 | 3.4 | Names follow the project | Renaming a label or defining a variable updates the C at once; a name in the C navigates to it | `romlens decompile` after `romlens project <P> label …` | 🧪 | ⬜ | ⬜ |
 | 3.5 | Export | Export C… writes the `.c` and `snes.h` | `romlens decompile … > f.c`, `romlens decompile --header snes.h` | 🧪 | ⬜ | ⬜ |
 | 3.6 | Measure every routine | (n/a) | `romlens decompile <rom> --all --check` | n/a | ⬜ | ⬜ |
+| 3.7 | The `full` level reads as C | Registers are typed variables (`u8 a`), routines take and return them (`a = SUB_8123(x, &y);`), counted loops are `for (int i = …)`, byte-wise adds one 16-bit add, RAM a caller passes shown at the call | `romlens decompile <rom> [--project P] <address>` | 🧪 | ⬜ | ⬜ |
 
 ## Manual pass, macOS (to repeat before each release)
 
@@ -287,3 +288,10 @@ the development ROM.
     `snes.h`: no errors. View › Focus on Code (⌥⌘F) hides the navigator,
     inspector and overview strip; again brings back the ones that were
     showing.
+37. Put the cursor in Super Mario World's `SUB_049037` and pick Full: the
+    routine reads `u8 SUB_049037(void)` with `for (int i = 0x5F; i >= 0;
+    i--)`, and no `(u8)` casts; pick Clean and Lift: the same routine over
+    the CPU's registers, step by step. In the listing, the loop's top is
+    `LOOP_049043`.
+38. Open `SUB_0080E8`: the call reads `SUB_008079(&y /* ADDR_7E0000 */);`,
+    and `SUB_008079` says "Its callers pass ADDR_7E0000 in memory."

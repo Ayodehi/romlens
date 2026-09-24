@@ -20,7 +20,7 @@ use crate::decompile::dataflow::{
     self, Conventions, FLAGS, Flow, Loc, LocSet, REGISTERS, all_fixed,
 };
 use crate::decompile::function::{self, Callee, Function, Transfer};
-use crate::decompile::ir::{CType, CallTarget, Slot, Stmt};
+use crate::decompile::ir::{CType, CallTarget, Slot, Stmt, Width};
 use crate::decompile::lift::{self, LiftOptions, Lifted};
 use crate::memory::address::SnesAddress;
 use crate::model::xref::XRefKind;
@@ -52,6 +52,23 @@ pub struct Program {
     pub summaries: BTreeMap<SnesAddress, Summary>,
     /// Each routine's C signature at the `full` level.
     pub abis: BTreeMap<SnesAddress, Abi>,
+    /// How the routines were lifted, with the direct page `direct_page`
+    /// worked out where none was given.
+    pub lift: LiftOptions,
+    /// Values passed in RAM (`memory_args`).
+    pub memory: MemoryArgs,
+}
+
+/// Values passed in memory: RAM a caller stores just before a call, which
+/// the routine it calls reads before it writes (the pointer at `$00` set
+/// for a copy routine). Canonical addresses, a byte each.
+#[derive(Debug, Clone, Default)]
+pub struct MemoryArgs {
+    /// Per routine: the bytes its callers pass it.
+    pub params: BTreeMap<SnesAddress, BTreeSet<u32>>,
+    /// Per call, by the caller's entry and the call's file offset: the bytes
+    /// it passes.
+    pub at_call: BTreeMap<(SnesAddress, u32), BTreeSet<u32>>,
 }
 
 /// A routine's C signature at the `full` level, from its summary: a
@@ -162,6 +179,255 @@ impl Abi {
     }
 }
 
+/// The one value the program ever gives the direct page, where it has
+/// one: every write of D (`TCD`, `PLD`) sets the reset value 0 again, from
+/// a constant loaded into A just before or from a saved copy of D itself.
+/// Where the analysis does not know D, D is then that value. With a trace,
+/// only the writes it saw run count: data decoded as code, which never
+/// runs, can hold any `TCD`.
+fn direct_page(units: &BTreeMap<SnesAddress, Unit>, ran: &dyn Fn(u32) -> bool) -> Option<u16> {
+    use crate::decompile::ir::{Expr, Place, Reg};
+    const RESET: u32 = 0;
+    for u in units.values() {
+        // Temporaries that hold a copy of D (a PHD the stack pairs made
+        // one), or the reset value.
+        let mut copies: BTreeMap<u32, bool> = BTreeMap::new();
+        for lb in &u.lifted.blocks {
+            for l in &lb.lines {
+                if let Stmt::Assign {
+                    dst: Place::Temp(t),
+                    value,
+                } = &l.stmt
+                {
+                    let ok = matches!(value, Expr::Reg(Reg::D, _) | Expr::Const(RESET));
+                    let e = copies.entry(*t).or_insert(true);
+                    *e &= ok;
+                }
+            }
+        }
+        for lb in &u.lifted.blocks {
+            // A constant loaded into all of A in this block, so far.
+            let mut a: Option<u32> = None;
+            for l in &lb.lines {
+                match &l.stmt {
+                    Stmt::Assign {
+                        dst: Place::Reg(Reg::D, _),
+                        value,
+                    } => {
+                        if !ran(u.f.steps[l.step].insn.file_offset.0) {
+                            continue;
+                        }
+                        let ok = match value {
+                            Expr::Reg(Reg::A, Width::W16) => a == Some(RESET),
+                            Expr::Const(v) => *v == RESET,
+                            Expr::Temp(t) => copies.get(t) == Some(&true),
+                            _ => false,
+                        };
+                        if !ok {
+                            return None;
+                        }
+                    }
+                    Stmt::Assign {
+                        dst: Place::Reg(Reg::A, Width::W16),
+                        value: Expr::Const(v),
+                    } => a = Some(*v),
+                    Stmt::Assign {
+                        dst: Place::Reg(Reg::A, _),
+                        ..
+                    }
+                    | Stmt::Call(_)
+                    | Stmt::Asm { .. } => a = None,
+                    Stmt::Effect("mvn" | "mvp" | "mvn8" | "mvp8" | "BRK" | "COP", _) => a = None,
+                    _ => {}
+                }
+            }
+        }
+    }
+    Some(RESET as u16)
+}
+
+/// The bytes of RAM at constant addresses that `e` reads, canonical.
+fn ram_reads(rom: &RomImage, e: &crate::decompile::ir::Expr, out: &mut BTreeSet<u32>) {
+    use crate::decompile::ir::Expr;
+    e.walk(&mut |x| {
+        if let Expr::Mem { addr: inner, width } = x
+            && let Expr::Const(a) = **inner
+        {
+            out.extend(ram_bytes(rom, a, width.bytes()));
+        }
+    })
+}
+
+/// The canonical RAM bytes `n` bytes from `a`; none outside RAM.
+fn ram_bytes(rom: &RomImage, a: u32, n: u32) -> Vec<u32> {
+    use crate::memory::map::MemoryClass;
+    (0..n)
+        .filter_map(|k| {
+            let c = crate::model::project::Project::canonical(
+                rom,
+                SnesAddress::from_u24(a.wrapping_add(k) & 0xFF_FFFF),
+            );
+            matches!(
+                rom.map().classify(c),
+                MemoryClass::Wram | MemoryClass::LowRam | MemoryClass::Sram
+            )
+            .then_some(c.as_u24())
+        })
+        .collect()
+}
+
+/// Values passed in memory (`MemoryArgs`): each routine's RAM read before
+/// it is written on some path from the entry (through its callees too),
+/// then at each call the stores the caller makes to those bytes after its
+/// last call before it.
+fn memory_args(rom: &RomImage, units: &BTreeMap<SnesAddress, Unit>) -> MemoryArgs {
+    use crate::decompile::ir::{Expr, Place};
+    let callees = |s: &Stmt| -> Vec<SnesAddress> {
+        match s {
+            Stmt::Call(CallTarget::Direct(t)) => vec![*t],
+            Stmt::Call(CallTarget::Table { targets, .. }) => targets.clone(),
+            _ => vec![],
+        }
+    };
+    let stored = |s: &Stmt| -> Vec<u32> {
+        match s {
+            Stmt::Assign {
+                dst:
+                    Place::Mem {
+                        addr: Expr::Const(a),
+                        width,
+                    },
+                ..
+            } => ram_bytes(rom, *a, width.bytes()),
+            _ => vec![],
+        }
+    };
+    let reads_of = |s: &Stmt, out: &mut BTreeSet<u32>| match s {
+        Stmt::Assign { dst, value } => {
+            ram_reads(rom, value, out);
+            if let Place::Mem { addr, .. } = dst {
+                ram_reads(rom, addr, out);
+            }
+        }
+        Stmt::Effect(_, args) => args.iter().for_each(|a| ram_reads(rom, a, out)),
+        Stmt::Eval(e) => ram_reads(rom, e, out),
+        _ => {}
+    };
+    // What each routine reads before writing, growing to a fixed point.
+    let mut reads_first: BTreeMap<SnesAddress, BTreeSet<u32>> =
+        units.keys().map(|a| (*a, BTreeSet::new())).collect();
+    for _ in 0..MAX_ROUNDS {
+        let mut changed = false;
+        for (a, u) in units {
+            let n = u.cfg.blocks.len();
+            // Bytes written on every path to each block.
+            let mut state_in: Vec<Option<BTreeSet<u32>>> = vec![None; n];
+            state_in[u.cfg.entry] = Some(BTreeSet::new());
+            let mut again = true;
+            while again {
+                again = false;
+                for &b in &u.cfg.rpo {
+                    let Some(mut st) = state_in[b].clone() else {
+                        continue;
+                    };
+                    for l in &u.lifted.blocks[b].lines {
+                        st.extend(stored(&l.stmt));
+                    }
+                    for s in u.cfg.succs(b) {
+                        let new = match &state_in[s] {
+                            None => st.clone(),
+                            Some(old) => old.intersection(&st).copied().collect(),
+                        };
+                        if state_in[s].as_ref() != Some(&new) {
+                            state_in[s] = Some(new);
+                            again = true;
+                        }
+                    }
+                }
+            }
+            let mut first = reads_first[a].clone();
+            for (b, block) in u.cfg.blocks.iter().enumerate() {
+                let Some(mut st) = state_in[b].clone() else {
+                    continue;
+                };
+                let lb = &u.lifted.blocks[b];
+                for l in &lb.lines {
+                    let mut r = BTreeSet::new();
+                    reads_of(&l.stmt, &mut r);
+                    for t in callees(&l.stmt) {
+                        if let Some(c) = reads_first.get(&t) {
+                            r.extend(c.iter().copied());
+                        }
+                    }
+                    first.extend(r.difference(&st).copied());
+                    st.extend(stored(&l.stmt));
+                }
+                let mut r = BTreeSet::new();
+                if let Some(c) = &lb.cond {
+                    ram_reads(rom, c, &mut r);
+                }
+                if let Term::Tail(t) = &block.term
+                    && let Some(c) = reads_first.get(t)
+                {
+                    r.extend(c.iter().copied());
+                }
+                first.extend(r.difference(&st).copied());
+            }
+            if first != reads_first[a] {
+                reads_first.insert(*a, first);
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    // The stores just before each call that it reads first.
+    let mut out = MemoryArgs::default();
+    for (a, u) in units {
+        for lb in &u.lifted.blocks {
+            for (i, l) in lb.lines.iter().enumerate() {
+                let targets = callees(&l.stmt);
+                if targets.is_empty() {
+                    continue;
+                }
+                let wanted: BTreeSet<u32> = targets
+                    .iter()
+                    .filter_map(|t| reads_first.get(t))
+                    .flatten()
+                    .copied()
+                    .collect();
+                let mut passed = BTreeSet::new();
+                for before in lb.lines[..i].iter().rev() {
+                    if !callees(&before.stmt).is_empty() {
+                        break;
+                    }
+                    passed.extend(
+                        stored(&before.stmt)
+                            .into_iter()
+                            .filter(|b| wanted.contains(b)),
+                    );
+                }
+                if passed.is_empty() {
+                    continue;
+                }
+                for t in &targets {
+                    let reads = reads_first.get(t);
+                    out.params.entry(*t).or_default().extend(
+                        passed
+                            .iter()
+                            .filter(|b| reads.is_some_and(|r| r.contains(b)))
+                            .copied(),
+                    );
+                }
+                let off = u.f.steps[l.step].insn.file_offset.0;
+                out.at_call.insert((*a, off), passed);
+            }
+        }
+    }
+    out
+}
+
 /// Whether X is 8 bits wide at the routine's entry, and at every return.
 pub fn index_widths(u: &Unit) -> (bool, bool) {
     let f = &u.f;
@@ -187,7 +453,14 @@ pub fn index_widths(u: &Unit) -> (bool, bool) {
 const MAX_ROUNDS: usize = 400;
 
 impl Program {
-    pub fn build(rom: &RomImage, snap: &AnalysisSnapshot, opts: LiftOptions) -> Program {
+    /// `ran`: whether the instruction at a file offset is known to run (a
+    /// trace saw it), or may (there is none).
+    pub fn build(
+        rom: &RomImage,
+        snap: &AnalysisSnapshot,
+        opts: LiftOptions,
+        ran: &dyn Fn(u32) -> bool,
+    ) -> Program {
         let entries = function::entries(snap);
         let mut units = BTreeMap::new();
         for &e in &entries {
@@ -196,6 +469,22 @@ impl Program {
                 let mut lifted = lift::lift(&f, &cfg, opts);
                 dataflow::stack_slots(&f, &cfg, &mut lifted);
                 units.insert(f.entry, Unit { f, cfg, lifted });
+            }
+        }
+        // Where nothing gave the direct page and the program only ever
+        // sets it to one value, that is the direct page.
+        let mut opts = opts;
+        if opts.assume_dp.is_none()
+            && let Some(dp) = direct_page(&units, ran)
+        {
+            opts = LiftOptions {
+                assume_dp: Some(dp),
+                dp_inferred: true,
+            };
+            for u in units.values_mut() {
+                let mut lifted = lift::lift(&u.f, &u.cfg, opts);
+                dataflow::stack_slots(&u.f, &u.cfg, &mut lifted);
+                u.lifted = lifted;
             }
         }
         let open = open_routines(snap, &units);
@@ -412,11 +701,14 @@ impl Program {
                 (*a, Abi::of(&summaries[a], entry_x8, exit_x8))
             })
             .collect();
+        let memory = memory_args(rom, &units);
         Program {
             entries,
             units,
             summaries,
             abis,
+            lift: opts,
+            memory,
         }
     }
 

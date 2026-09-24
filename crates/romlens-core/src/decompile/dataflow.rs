@@ -521,6 +521,236 @@ pub fn clean(rom: &RomImage, f: &Function, cfg: &Cfg, lifted: &mut Lifted, conv:
     merge_stores(rom, lifted);
 }
 
+/// Byte-by-byte adds and subtracts joined into one of 16 bits.
+///
+/// 8-bit code adds a 16-bit value a byte at a time, the carry out of the low
+/// byte going into the high:
+///
+/// ```text
+/// t = MEM8(p) + MEM8(q);   store t;   hi = MEM8(p + 1) + MEM8(q + 1) + (t > 0xFF);
+/// ```
+///
+/// With `p`, `p + 1` (and `q`, `q + 1`, or a constant, or a byte with no
+/// high byte) adjacent, that is `t = MEM16(p) + MEM16(q)` with the high byte
+/// `t >> 8`, as C would write it: the low byte is still `t`'s, the high byte
+/// is bits 8 to 15 of the sum, and the carry out of it (`> 0xFF`) is the
+/// carry out of the 16 bits. The same holds for a subtraction and its
+/// borrow. Only where `t` is read nowhere else but as a byte.
+pub fn wide_adds(lifted: &mut Lifted) {
+    for lb in &mut lifted.blocks {
+        for i in 0..lb.lines.len() {
+            let Stmt::Assign {
+                dst: Place::Temp(t),
+                value,
+            } = &lb.lines[i].stmt
+            else {
+                continue;
+            };
+            let t = *t;
+            let Some((op, x_lo, y_lo, carry_in)) = low_half(value) else {
+                continue;
+            };
+            // Where the high byte is computed, and every other read of t
+            // takes only its low byte.
+            let mut high: Option<(usize, Expr)> = None;
+            let mut ok = true;
+            for (j, l) in lb.lines.iter().enumerate().skip(i + 1) {
+                let mut found = false;
+                for_each_expr(&l.stmt, &mut |e| {
+                    e.walk(&mut |x| {
+                        if let Some(h) = high_half(x, t, op)
+                            && high.is_none()
+                        {
+                            high = Some((j, h.clone()));
+                            found = true;
+                        }
+                    })
+                });
+                if !found && reads_temp_wide(&l.stmt, t) {
+                    ok = false;
+                }
+            }
+            if lb.cond.as_ref().is_some_and(|c| mentions_temp(c, t))
+                || lb.switch.as_ref().is_some_and(|(c, _)| mentions_temp(c, t))
+            {
+                ok = false;
+            }
+            let Some((j, hi_operands)) = high.filter(|_| ok) else {
+                continue;
+            };
+            let Expr::Bin(_, x_hi, y_hi) = hi_operands else {
+                continue;
+            };
+            let (Some(x16), Some(y16)) = (join(&x_lo, &x_hi), join(&y_lo, &y_hi)) else {
+                continue;
+            };
+            // The high bytes are now read with the low ones: nothing in
+            // between may change them.
+            let highs: Vec<&Expr> = [&*x_hi, &*y_hi]
+                .into_iter()
+                .filter_map(|h| match h {
+                    Expr::Mem { addr, .. } => Some(&**addr),
+                    _ => None,
+                })
+                .collect();
+            let calm = lb.lines[i + 1..j].iter().all(|l| match &l.stmt {
+                Stmt::Assign {
+                    dst: Place::Mem { addr, .. },
+                    ..
+                } => !highs.contains(&addr),
+                Stmt::Assign { .. } | Stmt::Note(_) => true,
+                _ => false,
+            });
+            if !calm {
+                continue;
+            }
+            let mut wide = Expr::bin(op, x16, y16);
+            if let Some(c) = carry_in {
+                wide = Expr::bin(op, wide, c);
+            }
+            lb.lines[i].stmt = Stmt::Assign {
+                dst: Place::Temp(t),
+                value: wide,
+            };
+            let shifted = Expr::bin(BinOp::Shr, Expr::Temp(t), Expr::Const(8));
+            for_each_expr_mut(&mut lb.lines[j].stmt, &mut |e| {
+                *e = replace_high(e.clone(), t, op, &shifted);
+            });
+        }
+    }
+}
+
+/// `a ± b [± carry]` of two bytes: the operation, the operands and the
+/// carry going in.
+fn low_half(e: &Expr) -> Option<(BinOp, Expr, Expr, Option<Expr>)> {
+    let byte = |x: &Expr| {
+        matches!(
+            x,
+            Expr::Mem {
+                width: Width::W8,
+                ..
+            } | Expr::Const(0..=0xFF)
+        )
+    };
+    match e {
+        Expr::Bin(op @ (BinOp::Add | BinOp::Sub), a, b) => {
+            if byte(a) && byte(b) {
+                return Some((*op, (**a).clone(), (**b).clone(), None));
+            }
+            // (a ± b) ± carry
+            if let Expr::Bin(inner, x, y) = &**a
+                && inner == op
+                && byte(x)
+                && byte(y)
+                && b.is_boolean()
+            {
+                return Some((*op, (**x).clone(), (**y).clone(), Some((**b).clone())));
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+/// `x_hi ± y_hi ± (t > 0xFF)`, or `x_hi ± (t > 0xFF)`: the high bytes, as
+/// `x_hi op y_hi` (a missing one is 0).
+fn high_half(e: &Expr, t: u32, op: BinOp) -> Option<Expr> {
+    let carry = |c: &Expr| {
+        matches!(c, Expr::Bin(BinOp::Gt, x, k)
+            if matches!(**x, Expr::Temp(u) if u == t) && k.as_const() == Some(0xFF))
+    };
+    let Expr::Bin(o, a, b) = e else {
+        return None;
+    };
+    if *o != op || !carry(b) {
+        return None;
+    }
+    match &**a {
+        Expr::Bin(o2, x, y) if *o2 == op => Some(Expr::Bin(op, x.clone(), y.clone())),
+        x => Some(Expr::Bin(op, Box::new(x.clone()), Box::new(Expr::Const(0)))),
+    }
+}
+
+fn replace_high(e: Expr, t: u32, op: BinOp, with: &Expr) -> Expr {
+    if high_half(&e, t, op).is_some() {
+        return with.clone();
+    }
+    match e {
+        Expr::Mem { addr, width } => Expr::mem(replace_high(*addr, t, op, with), width),
+        Expr::Un(o, x) => Expr::Un(o, Box::new(replace_high(*x, t, op, with))),
+        Expr::Bin(o, a, b) => Expr::Bin(
+            o,
+            Box::new(replace_high(*a, t, op, with)),
+            Box::new(replace_high(*b, t, op, with)),
+        ),
+        Expr::Cast(w, x) => Expr::Cast(w, Box::new(replace_high(*x, t, op, with))),
+        Expr::Signed(w, x) => Expr::Signed(w, Box::new(replace_high(*x, t, op, with))),
+        e => e,
+    }
+}
+
+/// Two bytes that are one 16-bit value: `MEM8(p)` and `MEM8(p + 1)`, two
+/// constants, or a byte and a zero high byte.
+fn join(lo: &Expr, hi: &Expr) -> Option<Expr> {
+    match (lo, hi) {
+        (Expr::Const(l), Expr::Const(h)) => Some(Expr::Const(h << 8 | l)),
+        (
+            Expr::Mem {
+                addr: a,
+                width: Width::W8,
+            },
+            Expr::Mem {
+                addr: b,
+                width: Width::W8,
+            },
+        ) => {
+            let (ba, oa) = split_address(a);
+            let (bb, ob) = split_address(b);
+            (ba == bb && ob == oa.wrapping_add(1)).then(|| Expr::mem((**a).clone(), Width::W16))
+        }
+        (
+            lo @ Expr::Mem {
+                width: Width::W8, ..
+            },
+            Expr::Const(0),
+        ) => Some(lo.clone()),
+        _ => None,
+    }
+}
+
+fn mentions_temp(e: &Expr, t: u32) -> bool {
+    let mut hit = false;
+    e.walk(&mut |x| hit |= matches!(x, Expr::Temp(u) if *u == t));
+    hit
+}
+
+/// Whether a statement reads `t` other than as its low byte (a store of it
+/// to a byte, or `(u8)t`).
+fn reads_temp_wide(s: &Stmt, t: u32) -> bool {
+    let Stmt::Assign { dst, value } = s else {
+        let mut hit = false;
+        for_each_expr(s, &mut |e| hit |= mentions_temp(e, t));
+        return hit;
+    };
+    if let Place::Mem { addr, .. } = dst
+        && mentions_temp(addr, t)
+    {
+        return true;
+    }
+    let byte_dst = matches!(
+        dst,
+        Place::Mem {
+            width: Width::W8,
+            ..
+        } | Place::Reg(Reg::A, Width::W8)
+    );
+    match value {
+        Expr::Temp(u) if *u == t => !byte_dst,
+        Expr::Cast(Width::W8, x) if matches!(**x, Expr::Temp(u) if u == t) => false,
+        v => mentions_temp(v, t),
+    }
+}
+
 /// An address as a base and a constant offset: `0x7E0000 + X` is
 /// (`X`, 0x7E0000), a plain constant has no base.
 fn split_address(e: &Expr) -> (Option<&Expr>, u32) {

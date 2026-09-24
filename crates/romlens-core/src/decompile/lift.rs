@@ -16,6 +16,8 @@ use crate::decompile::ir::{
 pub struct LiftOptions {
     /// The direct page to use where the analysis does not know it.
     pub assume_dp: Option<u16>,
+    /// `assume_dp` was worked out from the program, not given.
+    pub dp_inferred: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -95,6 +97,7 @@ pub fn lift(f: &Function, cfg: &Cfg, opts: LiftOptions) -> Lifted {
         warnings: Vec::new(),
         warned_decimal: false,
         assumed_dbr: std::cell::Cell::new(None),
+        assumed_dp: std::cell::Cell::new(false),
     };
     let mut blocks = Vec::with_capacity(n);
     for (b, block) in cfg.blocks.iter().enumerate() {
@@ -127,6 +130,17 @@ pub fn lift(f: &Function, cfg: &Cfg, opts: LiftOptions) -> Lifted {
             }
         }
         blocks.push(out);
+    }
+    if l.assumed_dp.get()
+        && let Some(dp) = opts.assume_dp
+    {
+        l.warnings.push(if opts.dp_inferred {
+            format!(
+                "the direct page is not known everywhere; nothing in the program sets it to anything but ${dp:04X}, so it is taken as ${dp:04X} there"
+            )
+        } else {
+            format!("the direct page is not known everywhere; it is taken as ${dp:04X} there")
+        });
     }
     if let Some(bank) = l.assumed_dbr.get() {
         l.warnings.push(format!(
@@ -167,6 +181,8 @@ struct Lifter {
     warned_decimal: bool,
     /// Some instruction's data bank was assumed to be this program bank.
     assumed_dbr: std::cell::Cell<Option<u8>>,
+    /// Some instruction's direct page was `opts.assume_dp`.
+    assumed_dp: std::cell::Cell<bool>,
 }
 
 fn set(dst: Place, value: Expr) -> Stmt {
@@ -223,6 +239,9 @@ impl Lifter {
     }
 
     fn dp_base(&self, insn: &Instruction) -> Expr {
+        if insn.flags_before.dp.is_none() && self.opts.assume_dp.is_some() {
+            self.assumed_dp.set(true);
+        }
         match insn.flags_before.dp.or(self.opts.assume_dp) {
             Some(d) => c(d as u32),
             None => Expr::Reg(Reg::D, Width::W16),

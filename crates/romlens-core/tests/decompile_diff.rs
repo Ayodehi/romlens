@@ -396,7 +396,7 @@ fn compare(
     std::fs::create_dir_all(&dir).unwrap();
     let rom_path = dir.join("rom.sfc");
     std::fs::write(&rom_path, rom.bytes()).unwrap();
-    let program = decompile::program(rom, snap, &DecompileOptions::default());
+    let program = decompile::program(rom, project, snap, &DecompileOptions::default());
     let lift = build(
         &cc,
         &dir,

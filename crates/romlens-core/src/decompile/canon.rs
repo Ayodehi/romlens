@@ -403,6 +403,7 @@ pub fn canonicalize(
     let Some(own) = program.abis.get(&f.entry).cloned() else {
         return;
     };
+    dataflow::wide_adds(lifted);
     let ctx = Ctx {
         abis: &program.abis,
     };
