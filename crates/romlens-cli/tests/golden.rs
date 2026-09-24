@@ -953,8 +953,14 @@ fn explain_commands() {
             run(&["explain", rom, "--stats"]),
         ),
     );
-    check("explain-routine", &run(&["explain", rom, "$00:8000", "--routine"]));
-    check("explain-json", &run(&["explain", rom, "$00:8009", "--json"]));
+    check(
+        "explain-routine",
+        &run(&["explain", rom, "$00:8000", "--routine"]),
+    );
+    check(
+        "explain-json",
+        &run(&["explain", rom, "$00:8009", "--json"]),
+    );
     let _ = std::fs::remove_dir_all(dir);
 }
 

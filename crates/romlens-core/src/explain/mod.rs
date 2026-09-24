@@ -7,17 +7,19 @@
 //! say the same thing.
 
 pub mod fields;
+pub mod idioms;
 pub mod values;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 pub use fields::{FieldRow, Part, RegisterWrite, describe};
+pub use idioms::{Idiom, IdiomKind};
 pub use values::{Byte, State, Store};
 
 use crate::analysis::snapshot::AnalysisSnapshot;
 use crate::cpu65816::SymbolLookup;
 use crate::decompile::cfg::Cfg;
-use crate::decompile::function::{self, Function};
+use crate::decompile::function;
 use crate::memory::address::{FileOffset, SnesAddress};
 use crate::model::project::Project;
 use crate::model::symbols::Symbols;
@@ -61,42 +63,98 @@ impl Explained {
 #[derive(Debug, Clone, Default)]
 pub struct Explanations {
     writes: HashMap<u32, Explained>,
+    /// Ascending by first offset.
+    idioms: Vec<Idiom>,
+    /// The idioms covering each instruction, by index.
+    covering: HashMap<u32, Vec<usize>>,
     routines: usize,
 }
 
 /// Counts for measuring (docs/20 E8).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Stats {
     pub routines: usize,
     pub stores: usize,
     pub known: usize,
     pub sourced: usize,
     pub indexed: usize,
+    /// Idioms found, by kind.
+    pub idioms: Vec<(IdiomKind, usize)>,
 }
 
 impl Explanations {
     pub fn build(rom: &RomImage, project: &Project, snap: &AnalysisSnapshot) -> Explanations {
         let entries = function::entries(snap);
+        let symbols = Symbols::new(rom, project, &snap.auto_labels);
+        let name = |a: SnesAddress| {
+            let a = Project::canonical(rom, a);
+            match symbols.name_for(a) {
+                // An automatic name already says where it is.
+                Some(n) if !n.user => n.name,
+                Some(n) => format!("{} ({a})", n.name),
+                None => format!("{a}"),
+            }
+        };
         let mut stores: HashMap<u32, Store> = HashMap::new();
+        let mut idioms: BTreeMap<(u32, IdiomKind), Idiom> = BTreeMap::new();
         let mut routines = 0;
         for &e in &entries {
             let Ok(f) = function::discover(rom, snap, &entries, e) else {
                 continue;
             };
             routines += 1;
-            for s in routine_stores(rom, &f) {
+            let cfg = Cfg::build(&f);
+            let v = values::values(rom, &f, &cfg);
+            for i in idioms::find(rom, &f, &cfg, &v, &entries, &name) {
+                // A shared tail is found from each routine that reaches it:
+                // the first one found stands.
+                idioms.entry((i.first().0, i.kind)).or_insert(i);
+            }
+            for s in v.stores {
                 stores
                     .entry(s.offset.0)
                     .and_modify(|old| *old = merge(old, &s))
                     .or_insert(s);
             }
         }
-        let symbols = Symbols::new(rom, project, &snap.auto_labels);
         let writes = stores
             .into_values()
             .filter_map(|s| explain(rom, &symbols, &s).map(|e| (s.offset.0, e)))
             .collect();
-        Explanations { writes, routines }
+        let idioms: Vec<Idiom> = idioms.into_values().collect();
+        let mut covering: HashMap<u32, Vec<usize>> = HashMap::new();
+        for (k, i) in idioms.iter().enumerate() {
+            for o in &i.offsets {
+                covering.entry(o.0).or_default().push(k);
+            }
+        }
+        Explanations {
+            writes,
+            idioms,
+            covering,
+            routines,
+        }
+    }
+
+    /// Every idiom, ascending by where it starts.
+    pub fn idioms(&self) -> &[Idiom] {
+        &self.idioms
+    }
+
+    /// The idioms an instruction is part of.
+    pub fn idioms_at(&self, offset: FileOffset) -> Vec<&Idiom> {
+        self.covering
+            .get(&offset.0)
+            .map(|v| v.iter().map(|&k| &self.idioms[k]).collect())
+            .unwrap_or_default()
+    }
+
+    /// The idioms whose note goes above the instruction at `offset`.
+    pub fn idioms_starting_at(&self, offset: FileOffset) -> Vec<&Idiom> {
+        self.idioms_at(offset)
+            .into_iter()
+            .filter(|i| i.first() == offset)
+            .collect()
     }
 
     /// The store at `offset`, explained.
@@ -117,6 +175,11 @@ impl Explanations {
             stores: self.writes.len(),
             ..Stats::default()
         };
+        let mut kinds: BTreeMap<IdiomKind, usize> = BTreeMap::new();
+        for i in &self.idioms {
+            *kinds.entry(i.kind).or_default() += 1;
+        }
+        s.idioms = kinds.into_iter().collect();
         for e in self.writes.values() {
             if e.indexed {
                 s.indexed += 1;
@@ -128,12 +191,6 @@ impl Explanations {
         }
         s
     }
-}
-
-/// The hardware stores in one routine, with their values.
-pub fn routine_stores(rom: &RomImage, f: &Function) -> Vec<Store> {
-    let cfg = Cfg::build(f);
-    values::values(rom, f, &cfg).stores
 }
 
 /// Two routines reach the same store (a shared tail): keep what they agree

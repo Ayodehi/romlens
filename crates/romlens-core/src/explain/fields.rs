@@ -1094,7 +1094,9 @@ static LAYOUTS: &[Layout] = &[
     settings(
         0x4203,
         "The second number for the hardware multiplier. Writing it starts the multiply; the 16-bit product is in RDMPYL/H 8 CPU cycles later.",
-        &[number(7, 0, "Multiplier", |v| format!("WRMPYA × {v}, into RDMPY"))],
+        &[number(7, 0, "Multiplier", |v| {
+            format!("WRMPYA × {v}, into RDMPY")
+        })],
     ),
     pair(
         0x4204,
@@ -1105,7 +1107,9 @@ static LAYOUTS: &[Layout] = &[
     settings(
         0x4206,
         "What to divide WRDIV by. Writing it starts the divide; the quotient is in RDDIVL/H and the remainder in RDMPYL/H 16 CPU cycles later.",
-        &[number(7, 0, "Divisor", |v| format!("WRDIV ÷ {v}, into RDDIV"))],
+        &[number(7, 0, "Divisor", |v| {
+            format!("WRDIV ÷ {v}, into RDDIV")
+        })],
     ),
     pair(
         0x4207,
@@ -1198,7 +1202,9 @@ static LAYOUTS: &[Layout] = &[
         0x4302,
         "A1T",
         "The source address in the bank A1B for this DMA channel, or its HDMA table's start.",
-        &[number(15, 0, "Address", |v| format!("source ${v:04X} in bank A1B"))],
+        &[number(15, 0, "Address", |v| {
+            format!("source ${v:04X} in bank A1B")
+        })],
     ),
     settings(
         0x4304,
@@ -1220,7 +1226,9 @@ static LAYOUTS: &[Layout] = &[
         0x4308,
         "A2A",
         "The HDMA table's current address; the hardware moves it on each line.",
-        &[number(15, 0, "Address", |v| format!("table now at ${v:04X}"))],
+        &[number(15, 0, "Address", |v| {
+            format!("table now at ${v:04X}")
+        })],
     ),
     settings(
         0x430A,

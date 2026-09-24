@@ -140,7 +140,9 @@ pub fn values(rom: &RomImage, f: &Function, cfg: &Cfg) -> Values {
         changed = false;
         rounds += 1;
         for &b in &cfg.rpo {
-            let Some(mut s) = at_entry[b].clone() else { continue };
+            let Some(mut s) = at_entry[b].clone() else {
+                continue;
+            };
             for i in cfg.blocks[b].steps.clone() {
                 s = after(rom, &s, &f.steps[i].insn);
             }
@@ -160,7 +162,9 @@ pub fn values(rom: &RomImage, f: &Function, cfg: &Cfg) -> Values {
     let mut before = vec![None; f.steps.len()];
     let mut stores = Vec::new();
     for (b, block) in cfg.blocks.iter().enumerate() {
-        let Some(mut s) = at_entry[b].clone() else { continue };
+        let Some(mut s) = at_entry[b].clone() else {
+            continue;
+        };
         for i in block.steps.clone() {
             let insn = &f.steps[i].insn;
             if let Some(st) = store(insn, &s) {
@@ -180,17 +184,14 @@ pub fn values(rom: &RomImage, f: &Function, cfg: &Cfg) -> Values {
 pub fn hardware_target(insn: &Instruction, s: &State) -> Option<(u16, bool)> {
     use AddressingMode::*;
     let t = insn.target.filter(|t| t.kind == TargetKind::Data)?;
-    let base = if register_for(insn).is_some() {
-        t.address.offset()
-    } else if matches!(insn.mode, Direct | DirectX | DirectY)
+    let direct = matches!(insn.mode, Direct | DirectX | DirectY)
         && insn.flags_before.dp.is_some()
         && hardware_register(t.address.offset()).is_some()
-        && crate::model::is_system_bank(t.address.bank())
-    {
-        t.address.offset()
-    } else {
+        && crate::model::is_system_bank(t.address.bank());
+    if register_for(insn).is_none() && !direct {
         return None;
-    };
+    }
+    let base = t.address.offset();
     let index = match insn.mode {
         AbsoluteX | AbsoluteLongX | DirectX => Some(s.x),
         AbsoluteY | DirectY => Some(s.y),
@@ -264,7 +265,7 @@ fn load(rom: &RomImage, insn: &Instruction, wide: bool) -> [Byte; 2] {
 }
 
 /// The state after `insn`.
-fn after(rom: &RomImage, s: &State, insn: &Instruction) -> State {
+pub fn after(rom: &RomImage, s: &State, insn: &Instruction) -> State {
     use Mnemonic::*;
     let m8 = insn.flags_before.m;
     let x8 = insn.flags_before.x;
@@ -277,9 +278,7 @@ fn after(rom: &RomImage, s: &State, insn: &Instruction) -> State {
             o.a[1] = v[1];
         }
     };
-    let set_index = |v: [Byte; 2]| -> [Byte; 2] {
-        if x8 { [v[0], Byte::Known(0)] } else { v }
-    };
+    let set_index = |v: [Byte; 2]| -> [Byte; 2] { if x8 { [v[0], Byte::Known(0)] } else { v } };
     let arith = |bytes: [Byte; 2], wide: bool, f: &dyn Fn(u32) -> u32| -> [Byte; 2] {
         let n = if wide { 2 } else { 1 };
         match State::value(&bytes[..n]) {
@@ -303,7 +302,9 @@ fn after(rom: &RomImage, s: &State, insn: &Instruction) -> State {
         // These always move 16 bits.
         TDC => {
             let d = insn.flags_before.dp;
-            o.a = d.map_or([U; 2], |d| [Byte::Known(d as u8), Byte::Known((d >> 8) as u8)]);
+            o.a = d.map_or([U; 2], |d| {
+                [Byte::Known(d as u8), Byte::Known((d >> 8) as u8)]
+            });
         }
         TSC => o.a = [U; 2],
         TSX => o.x = set_index([U; 2]),
@@ -330,16 +331,15 @@ fn after(rom: &RomImage, s: &State, insn: &Instruction) -> State {
         PHA => push(&mut o, &s.a[..if m8 { 1 } else { 2 }]),
         PHX => push(&mut o, &s.x[..if x8 { 1 } else { 2 }]),
         PHY => push(&mut o, &s.y[..if x8 { 1 } else { 2 }]),
-        PHB => push(
-            &mut o,
-            &[insn.flags_before.dbr.map_or(U, Byte::Known)],
-        ),
+        PHB => push(&mut o, &[insn.flags_before.dbr.map_or(U, Byte::Known)]),
         PHK => push(&mut o, &[Byte::Known(insn.address.bank())]),
         PHD => {
             let d = insn.flags_before.dp;
             push(
                 &mut o,
-                &d.map_or([U; 2], |d| [Byte::Known(d as u8), Byte::Known((d >> 8) as u8)]),
+                &d.map_or([U; 2], |d| {
+                    [Byte::Known(d as u8), Byte::Known((d >> 8) as u8)]
+                }),
             );
         }
         PHP => push(&mut o, &[U]),

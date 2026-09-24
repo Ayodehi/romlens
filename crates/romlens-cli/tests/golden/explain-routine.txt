@@ -11,3 +11,48 @@ $00:803A  STA $4202        WRMPYA = $06: 6 × WRMPYB
 $00:803F  STA $4203        WRMPYB = $07: WRMPYA × 7, into RDMPY
 $00:804E  STA $2100        INIDISP ← $7E:0DAE
 $00:8053  STA $4200        NMITIMEN = $81: NMI on, joypad auto-read on
+
+▸ DMA transfer  ($00:8014–$00:8035, 6 instructions)
+  Channel 0 copies $0800 bytes from $00:9000 to VRAM word $6000.
+
+  The CPU copying a byte at a time is slow. DMA moves data between memory
+  and the PPU at about 2.7 MB a second while the CPU waits, which is the
+  only practical way to fill VRAM, the palette or sprite memory in the
+  short vertical blank.
+
+▸ Hardware multiply  ($00:803A–$00:8046, 3 instructions)
+  6 × 7 = 42, unsigned 8 × 8 bits; the 16-bit product is read from RDMPY.
+
+  The 65816 has no multiply instruction. The SNES adds an 8 × 8
+  multiplier: write the two numbers, wait 8 cycles, read the product.
+  Anything done in the meantime is free.
+
+▸ Wait for vertical blank  ($00:8056–$00:8059, 2 instructions)
+  Reads HVBJOY until bit 7 is set.
+
+  The PPU draws the picture line by line, and while it does, VRAM, the
+  palette and sprite memory cannot be changed safely. Vertical blank, the
+  gap of about 38 lines between frames, is the time to update them, so
+  code that is about to change graphics first waits for it.
+
+▸ Clear memory  ($00:805D–$00:8061, 3 instructions)
+  Clears $7E:0200 to $7E:020F: 16 bytes, a byte at a time, indexed by X.
+
+  Memory holds leftovers at power-on, so games clear their variables
+  before using them. A small loop like this is the simplest way; larger
+  areas are often filled by DMA instead.
+
+▸ Decimal arithmetic  ($00:8063–$00:806D, 6 instructions)
+  With the D flag set, ADC and SBC work on decimal digits: this adds two
+  digits a byte, so $09 + $01 is $10.
+
+  In decimal mode each byte holds two decimal digits, one per nibble.
+  Games keep scores, timers and lives this way so each digit can be drawn
+  straight from its nibble, without dividing by ten.
+
+▸ Wait for the sound CPU  ($00:806E–$00:8073, 3 instructions)
+  Waits until the sound CPU puts $AA in APUIO0.
+
+  At power-on the sound CPU's boot ROM puts $AA and $BB in ports 0 and 1
+  to say it is ready. A game waits for them before uploading its sound
+  driver a byte at a time through the same ports.

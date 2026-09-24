@@ -233,9 +233,15 @@ enum Command {
         project: Option<PathBuf>,
         #[arg(long)]
         routine: bool,
-        /// How many hardware stores in the ROM have a known value.
-        #[arg(long, conflicts_with_all = ["routine", "json"])]
+        /// How many hardware stores in the ROM have a known value, and the
+        /// idioms found.
+        #[arg(long, conflicts_with_all = ["routine", "json", "idioms"])]
         stats: bool,
+        /// Every idiom in the ROM, or only those of one kind (wait, dma,
+        /// hdma, multiply, divide, clear-memory, block-move, apu-handshake,
+        /// decimal, shared-entry).
+        #[arg(long, num_args = 0..=1, default_missing_value = "all", conflicts_with = "routine")]
+        idioms: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -1067,6 +1073,7 @@ fn run() -> Result<()> {
             project,
             routine,
             stats,
+            idioms,
             json,
         } => commands::explain::run(commands::explain::ExplainArgs {
             rom: &rom,
@@ -1074,6 +1081,7 @@ fn run() -> Result<()> {
             project: project.as_deref(),
             routine,
             stats,
+            idioms: idioms.as_deref(),
             json,
         }),
         Command::Decompile {

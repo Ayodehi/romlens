@@ -27,15 +27,24 @@ fn at(rom: &RomImage, x: &Explanations, addr: u16) -> String {
 fn constants_reach_their_stores() {
     let rom = rom();
     let x = build(&rom, &Project::new(&rom));
-    assert_eq!(at(&rom, &x, 0x8009), "INIDISP = $8F: forced blank, brightness 15");
+    assert_eq!(
+        at(&rom, &x, 0x8009),
+        "INIDISP = $8F: forced blank, brightness 15"
+    );
     assert_eq!(at(&rom, &x, 0x800C), "NMITIMEN = $00: NMI off");
     // A 16-bit store to two registers, and one to a pair.
     assert!(at(&rom, &x, 0x8014).starts_with("DMAP0 = $01: 2 registers, alternating; BBAD0"));
-    assert_eq!(at(&rom, &x, 0x8026), "VMADD = $6000: VRAM word $6000 (byte $0C000)");
+    assert_eq!(
+        at(&rom, &x, 0x8026),
+        "VMADD = $6000: VRAM word $6000 (byte $0C000)"
+    );
     assert!(at(&rom, &x, 0x8020).starts_with("DAS0 = $0800: 2048 bytes"));
     assert_eq!(at(&rom, &x, 0x8030), "A1B0 = $00: bank $00");
     assert_eq!(at(&rom, &x, 0x8035), "MDMAEN = $01: start DMA on channel 0");
-    assert_eq!(at(&rom, &x, 0x8053), "NMITIMEN = $81: NMI on, joypad auto-read on");
+    assert_eq!(
+        at(&rom, &x, 0x8053),
+        "NMITIMEN = $81: NMI on, joypad auto-read on"
+    );
 }
 
 #[test]
@@ -63,7 +72,10 @@ fn a_store_reached_two_ways_keeps_what_they_agree_on() {
     let x = build(&rom, &Project::new(&rom));
     // $80A6 is reached from $80A0 and from its own entry at $80A4: A is
     // $0F either way.
-    assert_eq!(at(&rom, &x, 0x80A6), "INIDISP = $0F: display on, brightness 15");
+    assert_eq!(
+        at(&rom, &x, 0x80A6),
+        "INIDISP = $0F: display on, brightness 15"
+    );
     let s = x.stats();
     assert!(s.stores >= 12, "{s:?}");
     assert_eq!(x.write_at(FileOffset::new(0)), None);
@@ -100,7 +112,10 @@ fn joins_calls_and_the_stack() {
     let x = build(&rom, &Project::new(&rom));
     assert_eq!(at(&rom, &x, 0x800D), "INIDISP");
     assert_eq!(at(&rom, &x, 0x8015), "INIDISP");
-    assert_eq!(at(&rom, &x, 0x801E), "INIDISP = $04: display on, brightness 4");
+    assert_eq!(
+        at(&rom, &x, 0x801E),
+        "INIDISP = $04: display on, brightness 4"
+    );
 }
 
 mod common;
@@ -116,4 +131,93 @@ fn dev_rom_explains_without_panicking() {
     let s = x.stats();
     eprintln!("{s:?} in {:?}", started.elapsed());
     assert!(s.stores > 100, "{s:?}");
+}
+
+fn titles(rom: &RomImage, x: &Explanations, addr: u16) -> Vec<String> {
+    let off = rom.file_offset_for(SnesAddress::new(0, addr)).unwrap();
+    x.idioms_starting_at(off)
+        .iter()
+        .map(|i| format!("{}: {}", i.title, i.summary))
+        .collect()
+}
+
+#[test]
+fn the_fixture_s_idioms() {
+    let rom = rom();
+    let x = build(&rom, &Project::new(&rom));
+    assert_eq!(
+        titles(&rom, &x, 0x8014),
+        ["DMA transfer: Channel 0 copies $0800 bytes from $00:9000 to VRAM word $6000."]
+    );
+    assert_eq!(
+        titles(&rom, &x, 0x803A),
+        [
+            "Hardware multiply: 6 × 7 = 42, unsigned 8 × 8 bits; the 16-bit product is read from RDMPY."
+        ]
+    );
+    assert_eq!(
+        titles(&rom, &x, 0x8056),
+        ["Wait for vertical blank: Reads HVBJOY until bit 7 is set."]
+    );
+    assert_eq!(
+        titles(&rom, &x, 0x805D),
+        ["Clear memory: Clears $7E:0200 to $7E:020F: 16 bytes, a byte at a time, indexed by X."]
+    );
+    assert_eq!(titles(&rom, &x, 0x8063).len(), 1);
+    assert!(titles(&rom, &x, 0x8063)[0].starts_with("Decimal arithmetic"));
+    assert_eq!(
+        titles(&rom, &x, 0x806E),
+        ["Wait for the sound CPU: Waits until the sound CPU puts $AA in APUIO0."]
+    );
+    assert!(
+        titles(&rom, &x, 0x80A4)[0]
+            .starts_with("A second way in: SUB_0080A0 runs on into SUB_0080A4")
+    );
+    // Every instruction of the DMA's setup is part of it.
+    let off = rom.file_offset_for(SnesAddress::new(0, 0x8026)).unwrap();
+    assert_eq!(x.idioms_at(off).len(), 1);
+}
+
+/// Look-alikes that are not the idiom.
+#[test]
+fn near_misses_are_not_idioms() {
+    let mut code = vec![0u8; 0x60];
+    let mut put = |at: usize, b: &[u8]| code[at..at + b.len()].copy_from_slice(b);
+    put(0x00, &[0x78, 0x18, 0xFB, 0x4B, 0xAB, 0xE2, 0x30]);
+    // A loop on a RAM flag, not the hardware.
+    put(0x07, &[0xA5, 0x10, 0xF0, 0xFC]);
+    // HVBJOY masked with two bits: which one it waits for is not clear.
+    put(0x0B, &[0xAD, 0x12, 0x42, 0x29, 0x03, 0xF0, 0xF9]);
+    // A loop storing two things: not a clear.
+    put(
+        0x12,
+        &[
+            0xA2, 0x0F, 0x9E, 0x00, 0x02, 0x9E, 0x00, 0x03, 0xCA, 0x10, 0xF7,
+        ],
+    );
+    // MDMAEN = 0 starts nothing.
+    put(0x1D, &[0x9C, 0x0B, 0x42]);
+    // SED with no arithmetic before CLD.
+    put(0x20, &[0xF8, 0xEA, 0xD8]);
+    // A multiply whose product is never read.
+    put(0x23, &[0xA9, 0x02, 0x8D, 0x02, 0x42, 0x8D, 0x03, 0x42]);
+    put(0x2B, &[0x80, 0xFE]);
+    let mut vectors = [0x8040; 12];
+    vectors[10] = 0x8000;
+    put(0x40, &[0x40]);
+    let rom = RomImage::from_bytes(
+        fixtures::build_custom(
+            romlens_core::MappingMode::LoRom,
+            0x8000,
+            false,
+            &code,
+            "MISSES",
+            vectors,
+        ),
+        "m.sfc",
+    )
+    .unwrap();
+    let x = build(&rom, &Project::new(&rom));
+    let found: Vec<String> = x.idioms().iter().map(|i| i.title.clone()).collect();
+    assert!(found.is_empty(), "{found:?}");
 }

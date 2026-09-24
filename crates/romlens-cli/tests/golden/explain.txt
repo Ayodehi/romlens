@@ -34,6 +34,14 @@ $00:8014  STA $4300
 
   DMAP0 = $01: 2 registers, alternating
   BBAD0 = $18: to $2118 VMDATAL: VRAM
+
+▸ DMA transfer  ($00:8014–$00:8035, 6 instructions)
+  Channel 0 copies $0800 bytes from $00:9000 to VRAM word $6000.
+
+  The CPU copying a byte at a time is slow. DMA moves data between memory
+  and the PPU at about 2.7 MB a second while the CPU waits, which is the
+  only practical way to fill VRAM, the palette or sprite memory in the
+  short vertical blank.
 $00:804E  STA $2100
 
   INIDISP ← $7E:0DAE
@@ -46,9 +54,16 @@ $00:804E  STA $2100
   Bits  Field       
   7     Forced blank
   0–3   Brightness
-$00:8000: no store to a hardware register
+$00:8000: nothing to explain
 routines:          4
 hardware stores:   14
 value known:       13 (93%)
 source known:      1 (7%)
 indexed, unknown:  0 (0%)
+idiom wait:          1
+idiom dma:           1
+idiom multiply:      1
+idiom clear-memory:  1
+idiom apu-handshake: 1
+idiom decimal:       1
+idiom shared-entry:  1

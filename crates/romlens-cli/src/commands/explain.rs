@@ -7,11 +7,11 @@ use std::path::Path;
 use anyhow::{Context, Result, anyhow};
 use romlens_core::cpu65816::format_instruction;
 use romlens_core::decompile::function;
-use romlens_core::explain::{Explained, Explanations};
+use romlens_core::explain::{Explained, Explanations, Idiom};
 use romlens_core::model::symbols::Symbols;
 use romlens_core::{AddressExpr, FileOffset};
 
-use crate::commands::registers::write_text;
+use crate::commands::registers::{wrap, write_text};
 use crate::commands::rom::json_str;
 use crate::commands::session::{self, Session, any_address};
 
@@ -21,8 +21,22 @@ pub struct ExplainArgs<'a> {
     pub project: Option<&'a Path>,
     pub routine: bool,
     pub stats: bool,
+    pub idioms: Option<&'a str>,
     pub json: bool,
 }
+
+const KINDS: &[&str] = &[
+    "wait",
+    "dma",
+    "hdma",
+    "multiply",
+    "divide",
+    "clear-memory",
+    "block-move",
+    "apu-handshake",
+    "decimal",
+    "shared-entry",
+];
 
 pub fn run(args: ExplainArgs) -> Result<()> {
     let s = session::open(args.rom, args.project, false)?;
@@ -39,11 +53,45 @@ pub fn run(args: ExplainArgs) -> Result<()> {
         println!("routines:          {}", st.routines);
         println!("hardware stores:   {}", st.stores);
         println!("value known:       {} ({:.0}%)", st.known, pct(st.known));
-        println!("source known:      {} ({:.0}%)", st.sourced, pct(st.sourced));
-        println!("indexed, unknown:  {} ({:.0}%)", st.indexed, pct(st.indexed));
+        println!(
+            "source known:      {} ({:.0}%)",
+            st.sourced,
+            pct(st.sourced)
+        );
+        println!(
+            "indexed, unknown:  {} ({:.0}%)",
+            st.indexed,
+            pct(st.indexed)
+        );
+        for (kind, n) in &st.idioms {
+            println!("idiom {:<15}{n}", format!("{}:", kind.as_str()));
+        }
         return Ok(());
     }
-    let expr = args.expr.ok_or_else(|| anyhow!("give an address, or --stats"))?;
+    if let Some(kind) = args.idioms {
+        let all: Vec<&Idiom> = x
+            .idioms()
+            .iter()
+            .filter(|i| kind == "all" || i.kind.as_str() == kind)
+            .collect();
+        if all.is_empty() && kind != "all" && !KINDS.contains(&kind) {
+            return Err(anyhow!(
+                "no idiom kind {kind:?}: use one of {}",
+                KINDS.join(", ")
+            ));
+        }
+        if args.json {
+            print!("{}", json(&s, &[], &all));
+        } else {
+            for i in all {
+                print!("{}", idiom_text(&s, i));
+            }
+        }
+        return Ok(());
+    }
+    let expr = args
+        .expr
+        .ok_or_else(|| anyhow!("give an address, or --stats"))?;
     let off = match any_address(expr)? {
         AddressExpr::Snes(a) => s
             .rom
@@ -51,23 +99,32 @@ pub fn run(args: ExplainArgs) -> Result<()> {
             .with_context(|| format!("{a} is not in ROM"))?,
         AddressExpr::File(off) => off,
     };
-    let writes: Vec<&Explained> = if args.routine {
+    let (writes, idioms): (Vec<&Explained>, Vec<&Idiom>) = if args.routine {
         let entries = function::entries(&s.snap);
         let f = function::containing(&s.rom, &s.snap, &entries, off)
             .with_context(|| format!("{off} is not in a routine the analysis found"))?;
-        f.steps
-            .iter()
-            .filter_map(|st| x.write_at(st.insn.file_offset))
-            .collect()
+        let mut idioms: Vec<&Idiom> = Vec::new();
+        for st in &f.steps {
+            for i in x.idioms_starting_at(st.insn.file_offset) {
+                idioms.push(i);
+            }
+        }
+        (
+            f.steps
+                .iter()
+                .filter_map(|st| x.write_at(st.insn.file_offset))
+                .collect(),
+            idioms,
+        )
     } else {
-        x.write_at(off).into_iter().collect()
+        (x.write_at(off).into_iter().collect(), x.idioms_at(off))
     };
     if args.json {
-        print!("{}", json(&s, &writes));
+        print!("{}", json(&s, &writes, &idioms));
         return Ok(());
     }
-    if writes.is_empty() {
-        println!("{}: no store to a hardware register", address(&s, off));
+    if writes.is_empty() && idioms.is_empty() {
+        println!("{}: nothing to explain", address(&s, off));
         return Ok(());
     }
     if args.routine {
@@ -79,6 +136,14 @@ pub fn run(args: ExplainArgs) -> Result<()> {
                 e.short()
             );
         }
+        for i in &idioms {
+            print!("{}", idiom_text(&s, i));
+        }
+    } else if writes.is_empty() {
+        println!("{}  {}", address(&s, off), instruction(&s, off));
+        for i in &idioms {
+            print!("{}", idiom_text(&s, i));
+        }
     } else {
         let e = writes[0];
         println!("{}  {}", address(&s, e.offset), instruction(&s, e.offset));
@@ -87,8 +152,33 @@ pub fn run(args: ExplainArgs) -> Result<()> {
             println!("  The value is loaded from {a}; its bits are listed without values.");
         }
         print!("{}", write_text(&e.write, "  "));
+        for i in &idioms {
+            print!("{}", idiom_text(&s, i));
+        }
     }
     Ok(())
+}
+
+/// An idiom: its title, where it spans, what it does here and why.
+fn idiom_text(s: &Session, i: &Idiom) -> String {
+    let mut out = String::new();
+    let last = *i.offsets.last().unwrap_or(&i.first());
+    let _ = writeln!(
+        out,
+        "\n▸ {}  ({}–{}, {} instructions)",
+        i.title,
+        address(s, i.first()),
+        address(s, last),
+        i.offsets.len()
+    );
+    for line in wrap(&i.summary, 72) {
+        let _ = writeln!(out, "  {line}");
+    }
+    out.push('\n');
+    for line in wrap(i.why, 72) {
+        let _ = writeln!(out, "  {line}");
+    }
+    out
 }
 
 fn address(s: &Session, off: FileOffset) -> String {
@@ -106,8 +196,8 @@ fn instruction(s: &Session, off: FileOffset) -> String {
         .unwrap_or_default()
 }
 
-fn json(s: &Session, writes: &[&Explained]) -> String {
-    let mut out = String::from("[");
+fn json(s: &Session, writes: &[&Explained], idioms: &[&Idiom]) -> String {
+    let mut out = String::from("{\"writes\": [");
     for (i, e) in writes.iter().enumerate() {
         if i > 0 {
             out.push(',');
@@ -150,6 +240,27 @@ fn json(s: &Session, writes: &[&Explained]) -> String {
         }
         out.push_str("]}");
     }
-    out.push_str(if writes.is_empty() { "]\n" } else { "\n]\n" });
+    out.push_str(if writes.is_empty() { "]" } else { "\n]" });
+    out.push_str(", \"idioms\": [");
+    for (k, i) in idioms.iter().enumerate() {
+        if k > 0 {
+            out.push(',');
+        }
+        let offsets: Vec<String> = i
+            .offsets
+            .iter()
+            .map(|o| json_str(&address(s, *o)))
+            .collect();
+        let _ = write!(
+            out,
+            "\n  {{\"kind\": {}, \"title\": {}, \"summary\": {}, \"why\": {}, \"instructions\": [{}]}}",
+            json_str(i.kind.as_str()),
+            json_str(&i.title),
+            json_str(&i.summary),
+            json_str(i.why),
+            offsets.join(", ")
+        );
+    }
+    out.push_str(if idioms.is_empty() { "]}\n" } else { "\n]}\n" });
     out
 }
