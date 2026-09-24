@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use romlens_core::analysis::heuristics::EntropyProfile;
 use romlens_core::analysis::{AnalysisControl, AnalysisOptions, AnalysisSnapshot, analyze_cached};
 use romlens_core::cpu65816::{self, NoSymbols};
+use romlens_core::explain::Explanations;
 use romlens_core::io;
 use romlens_core::model::{self, Project, Symbols, UndoStack};
 use romlens_core::viewmodel::asm_lines::NONE_ADDRESS;
@@ -19,6 +20,7 @@ use romlens_core::{
     FileOffset, LineIndex, SnesAddress, TextOptions, encode_lines, encode_rows, format_lines_text,
 };
 
+use crate::explain::ExplanationInfo;
 use crate::records::*;
 use crate::{Rom, RomlensError};
 
@@ -31,9 +33,32 @@ pub trait WorkbenchListener: Send + Sync {
 /// Every routine's summary, and the analysis generation it was built from.
 type ProgramCache = (u64, Arc<romlens_core::decompile::Program>);
 
+/// What an analysis produces: the snapshot, its explanations and the lines.
+type Analysed = (AnalysisSnapshot, Arc<Explanations>, LineIndex);
+
+/// The line index, with or without the explanations.
+fn lines_for(
+    image: &romlens_core::RomImage,
+    snapshot: &AnalysisSnapshot,
+    project: &Project,
+    explain: &Arc<Explanations>,
+    show: bool,
+) -> LineIndex {
+    if show {
+        LineIndex::build_explained(image, snapshot, project, Arc::clone(explain))
+    } else {
+        LineIndex::build(image, snapshot, project)
+    }
+}
+
 struct Inner {
     project: Project,
     snapshot: Arc<AnalysisSnapshot>,
+    /// What each hardware write does and the idioms (docs/20), for this
+    /// snapshot and the project's names.
+    explain: Arc<Explanations>,
+    /// Explanations in the listing and the C.
+    show_explanations: bool,
     lines: Arc<LineIndex>,
     undo: UndoStack,
     analysis_generation: u64,
@@ -82,6 +107,8 @@ impl Workbench {
             inner: Mutex::new(Inner {
                 project,
                 snapshot: Arc::new(AnalysisSnapshot::default()),
+                explain: Arc::new(Explanations::default()),
+                show_explanations: true,
                 lines: Arc::new(LineIndex::default()),
                 undo: UndoStack::default(),
                 analysis_generation: 0,
@@ -95,11 +122,12 @@ impl Workbench {
         })
     }
 
-    fn install(&self, snapshot: AnalysisSnapshot, lines: LineIndex) -> AnalysisStats {
+    fn install(&self, (snapshot, explain, lines): Analysed) -> AnalysisStats {
         let stats = snapshot.stats.into();
         let generation = {
             let mut inner = self.lock();
             inner.snapshot = Arc::new(snapshot);
+            inner.explain = explain;
             inner.lines = Arc::new(lines);
             inner.analysis_generation += 1;
             inner.view_generation += 1;
@@ -120,18 +148,20 @@ impl Workbench {
     ) -> impl FnOnce() -> Result<DecompiledInfo, RomlensError> + Send + 'static {
         use romlens_core::decompile::{self, DecompileOptions};
         let image = self.rom.image.clone();
-        let (project, snapshot, generation) = {
+        let (project, snapshot, generation, explain) = {
             let inner = self.lock();
             (
                 inner.project.clone(),
                 Arc::clone(&inner.snapshot),
                 inner.analysis_generation,
+                inner.show_explanations,
             )
         };
         let cache = Arc::clone(&self.decompiler);
         move || {
             let opts = DecompileOptions {
                 level: level.into(),
+                explain,
                 ..Default::default()
             };
             let cached = cache
@@ -210,12 +240,25 @@ impl Workbench {
         }
     }
 
-    /// Rebuild the line index after a label or comment change.
+    /// Rebuild the explanations and the line index after a label or
+    /// comment change: the explanations name what the project names.
     fn refresh_lines(&self, inner: &mut Inner) -> u64 {
-        inner.lines = Arc::new(LineIndex::build(
+        inner.explain = Arc::new(Explanations::build(
+            &self.rom.image,
+            &inner.project,
+            &inner.snapshot,
+        ));
+        self.relist(inner)
+    }
+
+    /// Rebuild the line index alone.
+    fn relist(&self, inner: &mut Inner) -> u64 {
+        inner.lines = Arc::new(lines_for(
             &self.rom.image,
             &inner.snapshot,
             &inner.project,
+            &inner.explain,
+            inner.show_explanations,
         ));
         inner.view_generation += 1;
         inner.view_generation
@@ -232,11 +275,13 @@ impl Workbench {
 
     fn analysis_job(
         &self,
-    ) -> impl FnOnce() -> Result<(AnalysisSnapshot, LineIndex), romlens_core::analysis::Cancelled>
-    + Send
-    + 'static {
+    ) -> impl FnOnce() -> Result<Analysed, romlens_core::analysis::Cancelled> + Send + 'static
+    {
         let image = self.rom.image.clone();
-        let project = self.lock().project.clone();
+        let (project, show) = {
+            let inner = self.lock();
+            (inner.project.clone(), inner.show_explanations)
+        };
         let entropy = Arc::clone(
             self.entropy
                 .get_or_init(|| Arc::new(EntropyProfile::build(&self.rom.image))),
@@ -269,9 +314,10 @@ impl Workbench {
                 Some(&entropy),
             )?;
             control.report(romlens_core::analysis::AnalysisPhase::Lines, 0, 1);
-            let lines = LineIndex::build(&image, &snapshot, &project);
+            let explain = Arc::new(Explanations::build(&image, &project, &snapshot));
+            let lines = lines_for(&image, &snapshot, &project, &explain, show);
             control.report(romlens_core::analysis::AnalysisPhase::Lines, 1, 1);
-            Ok((snapshot, lines))
+            Ok((snapshot, explain, lines))
         }
     }
 }
@@ -320,7 +366,7 @@ impl Workbench {
         let job = self.analysis_job();
         let result = crate::future::spawn(Arc::clone(&self.cancel), job).await;
         match result {
-            Ok((snapshot, lines)) => Ok(self.install(snapshot, lines)),
+            Ok(done) => Ok(self.install(done)),
             Err(_) => Err(RomlensError::Cancelled),
         }
     }
@@ -329,7 +375,7 @@ impl Workbench {
     pub fn analyze_blocking(&self) -> Result<AnalysisStats, RomlensError> {
         let job = self.analysis_job();
         match job() {
-            Ok((snapshot, lines)) => Ok(self.install(snapshot, lines)),
+            Ok(done) => Ok(self.install(done)),
             Err(_) => Err(RomlensError::Cancelled),
         }
     }
@@ -452,6 +498,54 @@ impl Workbench {
         let insn = inner.snapshot.decode_at(&self.rom.image, rec)?;
         let symbols = Symbols::new(&self.rom.image, &inner.project, &inner.snapshot.auto_labels);
         Some(instruction_info(&self.rom.image, &insn, &symbols))
+    }
+
+    /// What the instruction at `file_offset` does to the hardware, and the
+    /// idioms it is part of (docs/20).
+    pub fn explain_at(&self, file_offset: u32) -> ExplanationInfo {
+        let inner = self.lock();
+        let off = FileOffset(file_offset);
+        let register = match inner.explain.write_at(off) {
+            Some(e) => Some(crate::explain::store_info(e)),
+            None => inner
+                .snapshot
+                .instruction_at(off)
+                .and_then(|r| inner.snapshot.decode_at(&self.rom.image, r))
+                .and_then(|insn| {
+                    let r = cpu65816::register_for(&insn)?;
+                    use cpu65816::Mnemonic::*;
+                    let (store, wide) = match insn.mnemonic {
+                        STA | STZ => (true, !insn.flags_before.m),
+                        STX | STY => (true, !insn.flags_before.x),
+                        LDX | LDY | CPX | CPY => (false, !insn.flags_before.x),
+                        _ => (false, !insn.flags_before.m),
+                    };
+                    crate::explain::access_info(r.address, if wide { 2 } else { 1 }, store)
+                }),
+        };
+        ExplanationInfo {
+            register,
+            idioms: inner.explain.idioms_at(off).into_iter().map(Into::into).collect(),
+        }
+    }
+
+    /// Whether the listing and the C carry the explanations.
+    pub fn show_explanations(&self) -> bool {
+        self.lock().show_explanations
+    }
+
+    pub fn set_show_explanations(&self, show: bool) {
+        let generation = {
+            let mut inner = self.lock();
+            if inner.show_explanations == show {
+                return;
+            }
+            inner.show_explanations = show;
+            self.relist(&mut inner)
+        };
+        self.emit(WorkbenchEvent::ViewChanged {
+            view_generation: generation,
+        });
     }
 
     /// Instructions from `file_offset`: the analysis's, or with `flags` a raw

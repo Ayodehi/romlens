@@ -3,6 +3,7 @@
 //! core never depends on `uniffi`. Hot paths (`hex_rows`) return flat buffers
 //! (docs/10); everything else returns typed records.
 
+pub mod explain;
 mod future;
 pub mod graphics;
 pub mod graphs;
@@ -17,6 +18,7 @@ use romlens_core::{
     SpanIndex, encode_rows, fixtures, header_spans, interpret,
 };
 
+pub use explain::*;
 pub use graphics::*;
 pub use graphs::*;
 pub use records::*;
@@ -439,6 +441,13 @@ pub fn make_routines_test_rom() -> Vec<u8> {
     fixtures::routines_lorom()
 }
 
+/// A test ROM whose reset does one of each common setup step, for the
+/// explanations (docs/20).
+#[uniffi::export]
+pub fn make_explain_test_rom() -> Vec<u8> {
+    fixtures::explain_lorom()
+}
+
 /// `$80:841C`
 #[uniffi::export]
 pub fn format_snes_address(address: u32) -> String {
@@ -536,6 +545,38 @@ mod tests {
     }
 
     #[test]
+    fn explains_hardware_writes_and_idioms() {
+        let rom = Rom::from_bytes(make_explain_test_rom(), "e.sfc".into()).unwrap();
+        let wb = Workbench::new(rom);
+        block_on(wb.analyze()).unwrap();
+        let x = wb.explain_at(0x53);
+        let r = x.register.unwrap();
+        assert!(r.store);
+        assert_eq!(r.short, "NMITIMEN = $81: NMI on, joypad auto-read on");
+        assert_eq!(r.parts[0].fields[0].meaning.as_deref(), Some("NMI on"));
+        // A read: the register's fields, no values.
+        let r = wb.explain_at(0x56).register.unwrap();
+        assert!(!r.store);
+        assert_eq!(r.parts[0].name, "HVBJOY");
+        assert!(r.parts[0].fields.iter().all(|f| f.raw.is_none()));
+        let idioms = wb.explain_at(0x56).idioms;
+        assert_eq!(idioms[0].kind, IdiomKindInfo::Wait);
+        assert_eq!(idioms[0].title, "Wait for vertical blank");
+        // The listing carries a note line; turned off, it does not.
+        let with = wb.line_count();
+        let note = wb.line_for_offset(0x56).unwrap() - 1;
+        assert!(wb.asm_lines_text(note, 1, AddressStyle::Snes).contains("▸ Wait for vertical blank"));
+        wb.set_show_explanations(false);
+        assert!(wb.line_count() < with);
+        assert!(!wb.asm_lines_text(0, wb.line_count(), AddressStyle::Snes).contains('▸'));
+        let c = wb.decompile_blocking(0x008000, DecompileLevel::Full).unwrap();
+        assert!(!c.text.contains('▸'));
+        wb.set_show_explanations(true);
+        let c = wb.decompile_blocking(0x008000, DecompileLevel::Full).unwrap();
+        assert!(c.text.contains("/* ▸ DMA transfer"));
+    }
+
+    #[test]
     fn graphs_a_routine_and_its_calls() {
         let rom = Rom::from_bytes(make_routines_test_rom(), "r.sfc".into()).unwrap();
         let wb = Workbench::new(rom);
@@ -549,11 +590,11 @@ mod tests {
                 .iter()
                 .any(|e| e.back && e.kind == GraphEdgeKind::Taken)
         );
-        // The loop block's lines start at its label.
+        // The loop block's lines start at its label, then the idiom's note.
         let b = &g.blocks[1];
         let first = b.first_line.unwrap();
-        assert_eq!(b.line_count, 4, "LOOP_008022: and three instructions");
-        assert_eq!(wb.line_for_offset(0x22), Some(first + 1));
+        assert_eq!(b.line_count, 5, "LOOP_008022:, a note and three instructions");
+        assert_eq!(wb.line_for_offset(0x22), Some(first + 2));
         let calls = wb.call_neighbourhood_blocking(0x008020).unwrap();
         assert_eq!(calls.callers.len(), 1);
         assert_eq!(calls.callers[0].sites[0].how, CallHowKind::Call);
