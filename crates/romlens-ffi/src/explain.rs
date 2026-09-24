@@ -64,6 +64,7 @@ pub enum IdiomKindInfo {
     ApuHandshake,
     Decimal,
     SharedEntry,
+    ShadowRegister,
 }
 
 impl From<IdiomKind> for IdiomKindInfo {
@@ -79,6 +80,7 @@ impl From<IdiomKind> for IdiomKindInfo {
             IdiomKind::ApuHandshake => Self::ApuHandshake,
             IdiomKind::Decimal => Self::Decimal,
             IdiomKind::SharedEntry => Self::SharedEntry,
+            IdiomKind::ShadowRegister => Self::ShadowRegister,
         }
     }
 }

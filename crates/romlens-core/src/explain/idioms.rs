@@ -34,6 +34,8 @@ pub enum IdiomKind {
     Decimal,
     /// A routine that runs on into another routine's entry.
     SharedEntry,
+    /// A write-only register stored twice: to the hardware and to RAM.
+    ShadowRegister,
 }
 
 impl IdiomKind {
@@ -49,6 +51,7 @@ impl IdiomKind {
             IdiomKind::ApuHandshake => "apu-handshake",
             IdiomKind::Decimal => "decimal",
             IdiomKind::SharedEntry => "shared-entry",
+            IdiomKind::ShadowRegister => "shadow-register",
         }
     }
 }
@@ -132,6 +135,7 @@ pub fn find(
     out.extend(r.block_moves(name));
     out.extend(r.decimal());
     out.extend(shared_entry(rom, f, entries, name));
+    out.extend(r.shadows());
     for i in &mut out {
         i.offsets.sort_by_key(|o| o.0);
         i.offsets.dedup();
@@ -886,6 +890,163 @@ impl<'a> Routine<'a> {
         out
     }
 
+    // ---- shadow registers ----
+
+    /// Stores of one value to a write-only register and to RAM, a few
+    /// instructions apart in a block: the RAM keeps a copy the game can
+    /// read back. Runs of them in a block make one idiom.
+    fn shadows(&self) -> Vec<Idiom> {
+        const NEAR: usize = 4;
+        let mut out = Vec::new();
+        for blk in &self.cfg.blocks {
+            let steps: Vec<usize> = blk.steps.clone().collect();
+            let mut pairs: Vec<(usize, usize, u16, String)> = Vec::new();
+            let mut used: BTreeSet<usize> = BTreeSet::new();
+            for (k, &i) in steps.iter().enumerate() {
+                let Some(s) = self.store_at.get(&i) else {
+                    continue;
+                };
+                if s.indexed {
+                    continue;
+                }
+                let write_only = hardware_register(s.register)
+                    .is_some_and(|r| r.access == crate::model::hardware::Access::Write);
+                if !write_only {
+                    continue;
+                }
+                let hw = self.insn(i);
+                // The copy is usually written just after the register, else
+                // just before; never past another register's store, and a
+                // RAM store is one register's copy at most.
+                let after = (k + 1..(k + NEAR + 1).min(steps.len())).map(|m| steps[m]);
+                let before = (k.saturating_sub(NEAR)..k).rev().map(|m| steps[m]);
+                let mut copy = None;
+                for side in [after.collect::<Vec<_>>(), before.collect::<Vec<_>>()] {
+                    for j in side {
+                        if self.store_at.contains_key(&j) {
+                            break;
+                        }
+                        if !used.contains(&j)
+                            && self.ram_copy(hw, j).is_some()
+                            && self.unchanged(hw.mnemonic, i.min(j), i.max(j))
+                        {
+                            copy = Some(j);
+                            break;
+                        }
+                    }
+                    if copy.is_some() {
+                        break;
+                    }
+                }
+                if let Some(j) = copy
+                    && let Some(at) = self.ram_copy(hw, j)
+                {
+                    used.insert(j);
+                    pairs.push((i.min(j), i.max(j), s.register, at));
+                }
+            }
+            if pairs.is_empty() {
+                continue;
+            }
+            let mut list: Vec<String> = Vec::new();
+            for (_, _, reg, at) in &pairs {
+                let item = format!(
+                    "{} in {at}",
+                    hardware_register(*reg).map_or("?", |r| r.name)
+                );
+                if !list.contains(&item) {
+                    list.push(item);
+                }
+            }
+            let mut offsets: Vec<FileOffset> = pairs
+                .iter()
+                .flat_map(|(a, b, _, _)| [self.insn(*a).file_offset, self.insn(*b).file_offset])
+                .collect();
+            offsets.sort_by_key(|o| o.0);
+            let summary = if list.len() == 1 {
+                format!("Keeps a copy of {}.", list[0])
+            } else {
+                format!(
+                    "Keeps copies of {} registers: {}.",
+                    list.len(),
+                    list.join(", ")
+                )
+            };
+            out.push(Idiom {
+                kind: IdiomKind::ShadowRegister,
+                title: if list.len() == 1 {
+                    "A copy of a register".to_owned()
+                } else {
+                    "Copies of registers".to_owned()
+                },
+                summary,
+                why: WHY_SHADOW,
+                offsets,
+                note_at: None,
+                transfers: Vec::new(),
+            });
+        }
+        out
+    }
+
+    /// Where step `j` stores the same register `hw` stores, to RAM: its
+    /// address, or its direct-page offset when the direct page is unknown.
+    fn ram_copy(&self, hw: &Instruction, j: usize) -> Option<String> {
+        use AddressingMode::*;
+        let insn = self.insn(j);
+        if insn.mnemonic != hw.mnemonic
+            || insn.flags_before.m != hw.flags_before.m
+            || insn.flags_before.x != hw.flags_before.x
+        {
+            return None;
+        }
+        if values::hardware_target(insn, self.state(j)?).is_some() {
+            return None;
+        }
+        match insn.mode {
+            Direct if insn.flags_before.dp.is_none() => {
+                Some(format!("${:02X} on the direct page", insn.operand.value()))
+            }
+            Direct | Absolute | AbsoluteLong => {
+                let t = insn.target.filter(|t| t.kind == TargetKind::Data)?;
+                match self.rom.map().classify(t.address) {
+                    crate::memory::map::MemoryClass::Rom
+                    | crate::memory::map::MemoryClass::Hardware => None,
+                    _ => {
+                        let a = crate::model::project::Project::canonical(self.rom, t.address);
+                        Some(format!("{a}"))
+                    }
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Nothing between steps `a` and `b` changes what `store` stores.
+    fn unchanged(&self, store: Mnemonic, a: usize, b: usize) -> bool {
+        use Mnemonic::*;
+        (a + 1..b).all(|k| {
+            let insn = self.insn(k);
+            let acc = insn.mode == AddressingMode::Accumulator;
+            let m = insn.mnemonic;
+            if m.is_call() || matches!(m, MVN | MVP | PLP | REP | SEP | XCE) {
+                return false;
+            }
+            match store {
+                STA => {
+                    !(matches!(
+                        m,
+                        LDA | PLA | TXA | TYA | TDC | TSC | XBA | ADC | SBC | AND | ORA | EOR
+                    ) || (acc && matches!(m, ASL | LSR | ROL | ROR | INC | DEC)))
+                }
+                STX => !matches!(m, LDX | PLX | TAX | TYX | TSX | INX | DEX),
+                STY => !matches!(m, LDY | PLY | TAY | TXY | INY | DEY),
+                STZ => true,
+                _ => false,
+            }
+        })
+    }
+
     // ---- decimal mode ----
 
     fn decimal(&self) -> Vec<Idiom> {
@@ -1248,6 +1409,7 @@ const WHY_BLOCK_MOVE: &str = "MVN and MVP copy a block of memory in one instruct
 const WHY_APU: &str = "The sound CPU (an SPC700 with its own 64 KB of RAM) runs on its own, and the four APUIO ports are the only link. A game writes a command and waits for the sound driver to echo it, so both sides stay in step.";
 const WHY_APU_BOOT: &str = "At power-on the sound CPU's boot ROM puts $AA and $BB in ports 0 and 1 to say it is ready. A game waits for them before uploading its sound driver a byte at a time through the same ports.";
 const WHY_DECIMAL: &str = "In decimal mode each byte holds two decimal digits, one per nibble. Games keep scores, timers and lives this way so each digit can be drawn straight from its nibble, without dividing by ten.";
+const WHY_SHADOW: &str = "Most PPU registers are write-only: reading them back gives nothing useful. So games keep a copy of each setting in RAM, a \"shadow\" of the register, and write both. Later code reads the copy to see the current setting, or changes one bit of it and writes the whole value back.";
 const WHY_SHARED: &str = "In assembly a routine can have more than one entry point: code that needs one extra step first starts a few instructions earlier and runs on into the shared part. It saves the bytes of a call or a copy.";
 
 #[cfg(test)]

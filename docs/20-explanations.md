@@ -43,6 +43,12 @@ Checked by hand:
 
 Most unknown values in Super Mario World's NMI handler come through the direct page, which the analysis does not know on entry to an interrupt. They are left unexplained rather than guessed.
 
+## Shadow registers (24 September 2026)
+
+A ninth idiom, added after E8. A store to a write-only register paired with a store of the same value to RAM names the RAM as that register's copy: "Keeps copies of 28 registers: …, W12SEL in $7E:0060, …". The copy is looked for just after the register store, then just before. The search never goes past another register's store or anything that changes the value, and a RAM store is at most one register's copy.
+
+On the development ROM: 21 such groups, among them the routine at `$82:81DD`, which keeps a copy of every PPU setting it writes in `$7E:0053–$0077`.
+
 ## The audit of the register tables (24 September 2026)
 
 After E8, every field in `explain::fields` was checked, bit by bit, against two sources:

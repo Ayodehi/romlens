@@ -205,7 +205,10 @@ pub fn screen_at(
             }
             rows.push(tiles);
             let size_field = format!("BG{bg} tiles");
-            rows.push(s.field_row("Tile size", 0x2105, &[size_field.as_str()]));
+            let mut size = s.field_row("Tile size", 0x2105, &[size_field.as_str()]);
+            // The heading already names the layer.
+            size.text = size.text.replace(&format!("BG{bg} "), "");
+            rows.push(size);
         }
         rows.push(s.screens(bg as u8 - 1));
         sections.push(Section { title, rows });

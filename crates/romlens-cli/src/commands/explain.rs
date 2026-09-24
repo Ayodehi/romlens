@@ -36,6 +36,7 @@ const KINDS: &[&str] = &[
     "apu-handshake",
     "decimal",
     "shared-entry",
+    "shadow-register",
 ];
 
 pub fn run(args: ExplainArgs) -> Result<()> {
@@ -64,7 +65,7 @@ pub fn run(args: ExplainArgs) -> Result<()> {
             pct(st.indexed)
         );
         for (kind, n) in &st.idioms {
-            println!("idiom {:<15}{n}", format!("{}:", kind.as_str()));
+            println!("idiom {:<17}{n}", format!("{}:", kind.as_str()));
         }
         return Ok(());
     }

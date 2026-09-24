@@ -330,3 +330,46 @@ fn a_dma_set_up_on_two_paths() {
         ]
     );
 }
+
+/// A write-only register stored with a copy in RAM names the copy; a read
+/// back register, or a store with something else in between, does not.
+#[test]
+fn shadow_copies_of_registers() {
+    let mut code = vec![0u8; 0x40];
+    let mut put = |at: usize, b: &[u8]| code[at..at + b.len()].copy_from_slice(b);
+    put(0x00, &[0x78, 0x18, 0xFB, 0x4B, 0xAB, 0xE2, 0x30]);
+    put(0x07, &[0xA9, 0x17, 0x8D, 0x2C, 0x21, 0x8D, 0x69, 0x00]); // TM, then $0069
+    put(0x0F, &[0x9C, 0x2D, 0x21, 0x9C, 0x6B, 0x00]); // TS = 0, then $006B
+    put(0x15, &[0xA9, 0x01, 0x8D, 0x40, 0x21, 0x8D, 0x10, 0x00]); // APUIO0: not write-only
+    put(
+        0x1D,
+        &[0xA9, 0x0F, 0x8D, 0x00, 0x21, 0x1A, 0x8D, 0x11, 0x00],
+    ); // INC between
+    put(0x26, &[0x80, 0xFE]);
+    put(0x30, &[0x40]);
+    let mut vectors = [0x8030; 12];
+    vectors[10] = 0x8000;
+    let rom = RomImage::from_bytes(
+        fixtures::build_custom(
+            romlens_core::MappingMode::LoRom,
+            0x8000,
+            false,
+            &code,
+            "SHADOW",
+            vectors,
+        ),
+        "s.sfc",
+    )
+    .unwrap();
+    let x = build(&rom, &Project::new(&rom));
+    let shadows: Vec<&str> = x
+        .idioms()
+        .iter()
+        .filter(|i| i.kind == romlens_core::explain::IdiomKind::ShadowRegister)
+        .map(|i| i.summary.as_str())
+        .collect();
+    assert_eq!(
+        shadows,
+        ["Keeps copies of 2 registers: TM in $7E:0069, TS in $7E:006B."]
+    );
+}
