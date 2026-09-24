@@ -96,6 +96,8 @@ final class CPaneController: NSObject, NSTextViewDelegate {
     private var lineStarts: [Int] = []
     /// A click in the C moved the selection: the C need not scroll to it.
     private var selectingFromText = false
+    /// The text is being replaced: the selection moves, but nobody clicked.
+    private var replacingText = false
 
     init(model: RomViewModel) {
         self.model = model
@@ -222,7 +224,12 @@ final class CPaneController: NSObject, NSTextViewDelegate {
             guard NSMaxRange(range) <= s.length else { continue }
             s.addAttribute(.foregroundColor, value: CTokenPalette.color(for: t.kind), range: range)
         }
+        // A new text keeps the old caret's character index, which falls on
+        // some line of the new routine; that must not read as a click there.
+        replacingText = true
         textView.textStorage?.setAttributedString(s)
+        textView.setSelectedRange(NSRange(location: 0, length: 0))
+        replacingText = false
         let ns = text as NSString
         var starts = [0]
         var at = 0
@@ -290,8 +297,8 @@ final class CPaneController: NSObject, NSTextViewDelegate {
 
     // A click in the C selects the instructions its line came from.
     func textViewDidChangeSelection(_ notification: Notification) {
+        guard !replacingText, !lineStarts.isEmpty else { return }
         let at = textView.selectedRange().location
-        guard !lineStarts.isEmpty else { return }
         let offsets = model.decompiler.offsets(forLine: line(at: at))
         guard let first = offsets.min() else { return }
         guard first != (model.instruction?.fileOffset ?? model.selectedOffset) else { return }

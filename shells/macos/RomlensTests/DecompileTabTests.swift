@@ -74,6 +74,15 @@ import Testing
         let at = ns.range(of: "if (").location
         text.setSelectedRange(NSRange(location: at, length: 0))
         #expect(m.selectedOffset == 0x42)
+
+        // Another routine replaces the text; the old caret must not select
+        // whatever instruction its line maps to now.
+        m.select(offset: 0x22)
+        try await Fixture.settle(until: {
+            content.layoutSubtreeIfNeeded()
+            return text.string.contains("SUB_008020")
+        })
+        #expect(m.selectedOffset == 0x22)
     }
 
     @Test func focusHidesThePanelsAndPutsThemBack() async throws {
