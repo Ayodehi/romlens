@@ -263,6 +263,9 @@ enum EditorContextMenu {
         item("Find References", #selector(RomWindowController.findReferences(_:)))
         menu.addItem(.separator())
         item("Rename Label…", #selector(RomWindowController.renameLabel(_:)))
+        item("Remove Label", #selector(RomWindowController.removeLabel(_:)))
+        // Titled by `validateMenuItem` with the operand's address.
+        item("Define Variable…", #selector(RomWindowController.defineVariable(_:)))
         item("Comment…", #selector(RomWindowController.editComment(_:)))
         menu.addItem(.separator())
         item("Mark as Code", #selector(RomWindowController.markAsCode(_:)))

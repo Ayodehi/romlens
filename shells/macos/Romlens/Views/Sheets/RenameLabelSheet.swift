@@ -35,9 +35,9 @@ struct RenameLabelSheet: View {
                 .foregroundStyle(validation == nil ? Color.secondary : Color.red)
                 .frame(minHeight: 20, alignment: .leading)
             HStack {
-                if model.label?.source == .user {
+                if model.canRemoveLabel {
                     Button("Remove", role: .destructive) {
-                        try? model.setLabel(name: nil)
+                        try? model.removeLabel()
                         dismiss()
                     }
                 }

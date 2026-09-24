@@ -58,6 +58,8 @@ pub enum ProjectError {
     RomMismatch { expected: String, found: String },
     #[error("{0}")]
     InvalidLabelName(String),
+    #[error("{0}")]
+    InvalidVariable(String),
     #[error("range {0} is outside the ROM or empty")]
     BadRange(String),
     #[error("{0}: preview options need a marked range that starts there")]

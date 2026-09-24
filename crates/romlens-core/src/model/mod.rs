@@ -11,6 +11,7 @@ pub mod project;
 pub mod region;
 pub mod symbols;
 pub mod undo;
+pub mod variable;
 pub mod xref;
 
 pub use command::{Command, Origin, UndoEntry};
@@ -27,4 +28,5 @@ pub use region::{
 };
 pub use symbols::Symbols;
 pub use undo::{UNDO_CAP, UndoStack};
+pub use variable::{VarType, VarWidth};
 pub use xref::{XRef, XRefKind};

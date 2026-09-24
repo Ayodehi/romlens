@@ -129,6 +129,7 @@ struct DocumentView: View {
             case .flags: FlagOverrideSheet(model: model)
             case .find: FindSheet(model: model)
             case .dataType: DataTypeSheet(model: model)
+            case .variable: VariableSheet(model: model)
             }
         }
     }

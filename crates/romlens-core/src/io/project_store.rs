@@ -22,6 +22,7 @@ use crate::model::project::{
 use crate::model::region::{
     BankRule, DataKind, OverrideKind, RegionOverride, RegionParams, TableElem,
 };
+use crate::model::variable::{VarType, VarWidth};
 use crate::rom::image::RomImage;
 use crate::viewmodel::hex_rows::AddressStyle;
 
@@ -32,6 +33,10 @@ pub const PROJECT_FORMAT: &str = "romlens-project";
 /// still opens — `v1_package_still_opens` in `tests/project_store.rs` pins that
 /// against a literal v1 package rather than one this code wrote.
 pub const PROJECT_VERSION: u32 = 2;
+/// Variable types. Optional: a package without it has none, and older
+/// Romlens builds ignore it.
+pub const VARIABLES_FILE: &str = "variables.json";
+
 /// Where the merged coverage lives inside a package.
 pub const COVERAGE_FILE: &str = "traces/coverage.cdl";
 /// Where the merged execution log lives, in the format the fork writes.
@@ -125,6 +130,16 @@ struct LabelDto {
     address: String,
     name: String,
     source: String,
+}
+
+/// One variable's type; its name is the label at the same address.
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct VariableDto {
+    address: String,
+    #[serde(rename = "type")]
+    width: String,
+    count: u16,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -296,6 +311,20 @@ pub fn to_files(rom: &RomImage, project: &Project) -> BTreeMap<String, Vec<u8>> 
         })
         .collect();
     files.insert("labels.json".to_owned(), to_bytes(&labels));
+    // Only when there are any: a project with none keeps the five files it
+    // has always had.
+    if !project.variables.is_empty() {
+        let variables: Vec<VariableDto> = project
+            .variables
+            .iter()
+            .map(|(a, t)| VariableDto {
+                address: a.to_string(),
+                width: t.width.name().to_owned(),
+                count: t.count,
+            })
+            .collect();
+        files.insert(VARIABLES_FILE.to_owned(), to_bytes(&variables));
+    }
     let comments: Vec<CommentDto> = project
         .comments
         .values()
@@ -473,6 +502,21 @@ pub fn from_files(
                 source,
             },
         );
+    }
+    for v in read_list::<VariableDto>(files, VARIABLES_FILE)? {
+        let address = Project::canonical(rom, parse_snes(VARIABLES_FILE, &v.address)?);
+        let width = VarWidth::parse(&v.width).ok_or_else(|| {
+            ProjectError::InvalidVariable(format!(
+                "{VARIABLES_FILE}: {:?} is not byte, word or long",
+                v.width
+            ))
+        })?;
+        let ty = VarType {
+            width,
+            count: v.count,
+        };
+        ty.validate()?;
+        project.variables.insert(address, ty);
     }
     for c in read_list::<CommentDto>(files, "comments.json")? {
         let address = Project::canonical(rom, parse_snes("comments.json", &c.address)?);

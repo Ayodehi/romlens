@@ -5,6 +5,7 @@ use crate::model::comment::CommentKind;
 use crate::model::label::{Label, LabelSource};
 use crate::model::project::FlagOverride;
 use crate::model::region::{OverrideKind, RegionParams};
+use crate::model::variable::VarType;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
@@ -51,6 +52,12 @@ pub enum Command {
         offset: FileOffset,
         flags: Option<FlagOverride>,
     },
+    /// The type of the variable at `address`; `None` removes it. Its name is
+    /// the label at the same address, set by a `SetLabel` in the same batch.
+    SetVariable {
+        address: SnesAddress,
+        ty: Option<VarType>,
+    },
 }
 
 impl Command {
@@ -89,6 +96,8 @@ impl Command {
             Command::SetRegionParams { .. } => "Set Preview Options",
             Command::SetFlagOverride { flags: Some(_), .. } => "Set Flags",
             Command::SetFlagOverride { flags: None, .. } => "Remove Flags",
+            Command::SetVariable { ty: Some(_), .. } => "Define Variable",
+            Command::SetVariable { ty: None, .. } => "Remove Variable",
         }
     }
 }
@@ -128,6 +137,10 @@ impl Origin {
         match self {
             Origin::User => match commands {
                 [one] => one.menu_title().to_owned(),
+                // A variable is its name and its type, set together.
+                [Command::SetLabel { .. }, v @ Command::SetVariable { .. }] => {
+                    v.menu_title().to_owned()
+                }
                 other => format!("{} Changes", other.len()),
             },
             Origin::Import(source) => format!("Import from {source}"),

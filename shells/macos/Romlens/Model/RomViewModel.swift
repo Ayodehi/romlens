@@ -29,7 +29,7 @@ final class RomViewModel {
     }
 
     enum Sheet: Identifiable {
-        case jump, renameLabel, comment, flags, find, dataType
+        case jump, renameLabel, comment, flags, find, dataType, variable
         var id: Self { self }
     }
 
@@ -509,6 +509,90 @@ final class RomViewModel {
     func setLabel(name: String?) throws {
         guard let address = selectedAddress else { return }
         try session.setLabel(address: address, name: name)
+        refreshSelectionDetails()
+    }
+
+    /// A label a person or an import chose, which Remove Label takes away.
+    var canRemoveLabel: Bool {
+        guard let label else { return false }
+        return label.source == .user || label.source == .imported
+    }
+
+    /// Remove the selected item's label. A variable's label goes with its
+    /// type, as one step, since a type without a name names nothing.
+    func removeLabel() throws {
+        guard let address = selectedAddress, canRemoveLabel else { return }
+        if workbench.variables().contains(where: { $0.address == workbench.canonicalAddress(snesAddress: address) }) {
+            try session.removeVariable(address: address)
+        } else {
+            try session.setLabel(address: address, name: nil)
+        }
+        refreshSelectionDetails()
+    }
+
+    // MARK: Variables
+
+    /// What the Define Variable sheet edits.
+    struct VariableDraft: Equatable {
+        var address = ""
+        var name = ""
+        var width: VarWidth = .byte
+        var count: UInt16 = 1
+        /// The variable being edited, if any; its address cannot change.
+        var existing: UInt32?
+    }
+
+    var variableDraft = VariableDraft()
+
+    /// The data address the selected instruction's operand names, canonical:
+    /// `STA $0094` run from bank $80 gives $7E:0094.
+    var operandAddress: UInt32? {
+        guard let target = instruction?.target, instruction?.targetKind != .code else { return nil }
+        return workbench.canonicalAddress(snesAddress: target)
+    }
+
+    /// Open Define Variable for `address`, or for the selected operand, or
+    /// empty. An address inside a variable edits that variable.
+    func beginDefineVariable(at address: UInt32? = nil) {
+        let at = address ?? operandAddress
+        var draft = VariableDraft()
+        if let at {
+            if let v = workbench.variableContaining(snesAddress: at) {
+                draft = VariableDraft(
+                    address: formatSnesAddress(address: v.address), name: v.name,
+                    width: v.width, count: v.count, existing: v.address)
+            } else {
+                draft.address = formatSnesAddress(address: at)
+                draft.name = workbench.labelAt(snesAddress: at).flatMap { $0.source == .auto ? nil : $0.name } ?? ""
+            }
+        }
+        variableDraft = draft
+        activeSheet = .variable
+    }
+
+    /// `$7E:0094`, `7E0094` or `$0094`; four digits or fewer below $2000 is
+    /// low RAM (bank $7E), otherwise a register in bank $00.
+    nonisolated static func parseAddress(_ text: String) -> UInt32? {
+        let hex = text.filter { $0 != "$" && $0 != ":" && !$0.isWhitespace }
+        guard !hex.isEmpty, hex.count <= 6, let v = UInt32(hex, radix: 16) else { return nil }
+        if hex.count <= 4 { return v < 0x2000 ? 0x7E_0000 | v : v }
+        return v
+    }
+
+    /// Define (or redefine) the variable the draft describes.
+    func defineVariable(_ draft: VariableDraft) throws {
+        guard let address = draft.existing ?? Self.parseAddress(draft.address) else {
+            throw RomlensError.BadAddress(msg: "\(draft.address) is not an address; use a form like $7E:0094")
+        }
+        try session.defineVariable(
+            address: address,
+            name: draft.name.trimmingCharacters(in: .whitespaces),
+            type: VarTypeInfo(width: draft.width, count: max(1, draft.count)))
+        refreshSelectionDetails()
+    }
+
+    func removeVariable(address: UInt32) throws {
+        try session.removeVariable(address: address)
         refreshSelectionDetails()
     }
 

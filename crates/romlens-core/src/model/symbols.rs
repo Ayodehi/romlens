@@ -48,10 +48,22 @@ impl<'a> Symbols<'a> {
 }
 
 impl SymbolLookup for Symbols<'_> {
+    /// The label at the address, or else the variable spanning it with the
+    /// distance in: a store to the second byte of a word `PlayerX` reads as
+    /// `PlayerX+1`.
     fn name_for(&self, address: SnesAddress) -> Option<Symbol> {
-        self.label_at(address).map(|l| Symbol {
-            name: l.name.clone(),
-            user: matches!(l.source, LabelSource::User | LabelSource::Imported(_)),
+        if let Some(l) = self.label_at(address) {
+            return Some(Symbol {
+                name: l.name.clone(),
+                user: matches!(l.source, LabelSource::User | LabelSource::Imported(_)),
+            });
+        }
+        let addr = Project::canonical(self.rom, address);
+        let (start, _) = self.project.variable_containing(addr)?;
+        let label = self.project.labels.get(&start)?;
+        Some(Symbol {
+            name: format!("{}+{}", label.name, addr.offset() - start.offset()),
+            user: true,
         })
     }
 }

@@ -14,6 +14,7 @@ use crate::model::coverage::Coverage;
 use crate::model::exec_log::ExecLog;
 use crate::model::label::{Label, validate_label_name};
 use crate::model::region::{OverrideKind, RegionOverride, RegionParams};
+use crate::model::variable::VarType;
 use crate::rom::image::RomImage;
 use crate::viewmodel::hex_rows::AddressStyle;
 
@@ -128,6 +129,9 @@ pub struct Project {
     /// Sorted, non-overlapping.
     pub region_overrides: Vec<RegionOverride>,
     pub flag_overrides: BTreeMap<FileOffset, FlagOverride>,
+    /// Variable types by canonical address; each one's name is the label at
+    /// the same address.
+    pub variables: BTreeMap<SnesAddress, VarType>,
     /// Every imported trace, merged.
     ///
     /// Not a `Command`, and deliberately so: an import is not an edit with an
@@ -157,6 +161,7 @@ impl Project {
             comments: BTreeMap::new(),
             region_overrides: Vec::new(),
             flag_overrides: BTreeMap::new(),
+            variables: BTreeMap::new(),
             coverage: None,
             exec_log: None,
             traces: Vec::new(),
@@ -206,12 +211,30 @@ impl Project {
         self.recordings.len() != before
     }
 
-    /// The one address every mirror of a ROM byte is stored under; RAM and
-    /// hardware addresses are kept as written.
+    /// The one address every mirror is stored under: a ROM byte's canonical
+    /// address, `$7E` for the low 8 KB of WRAM that the system banks mirror
+    /// at `$0000-$1FFF`, and bank `$00` for the hardware registers. So
+    /// `STA $0094` run from bank `$80` and `STA $7E0094` name one variable.
     pub fn canonical(rom: &RomImage, addr: SnesAddress) -> SnesAddress {
-        rom.file_offset_for(addr)
+        use crate::memory::map::MemoryClass;
+        if let Some(a) = rom
+            .file_offset_for(addr)
             .and_then(|off| rom.snes_address_for(off))
-            .unwrap_or(addr)
+        {
+            return a;
+        }
+        match rom.map().classify(addr) {
+            MemoryClass::LowRam => SnesAddress::new(0x7E, addr.offset()),
+            MemoryClass::Hardware => SnesAddress::new(0x00, addr.offset()),
+            _ => addr,
+        }
+    }
+
+    /// The variable spanning `addr`, with its start, when one does.
+    pub fn variable_containing(&self, addr: SnesAddress) -> Option<(SnesAddress, VarType)> {
+        let (&start, &ty) = self.variables.range(..=addr).next_back()?;
+        (start.bank() == addr.bank() && ((addr.offset() - start.offset()) as u32) < ty.len())
+            .then_some((start, ty))
     }
 
     pub fn label_at(&self, addr: SnesAddress) -> Option<&Label> {
@@ -398,6 +421,26 @@ impl Project {
                 vec![Command::SetRegionParams {
                     start: *start,
                     params: previous,
+                }]
+            }
+            Command::SetVariable { address, ty } => {
+                let address = Self::canonical(rom, *address);
+                if let Some(ty) = ty {
+                    ty.validate()?;
+                    if address.offset() as u32 + ty.len() > 0x1_0000 {
+                        return Err(ProjectError::InvalidVariable(format!(
+                            "{} bytes from {address} run past the end of the bank",
+                            ty.len()
+                        )));
+                    }
+                }
+                let previous = match ty {
+                    Some(ty) => self.variables.insert(address, *ty),
+                    None => self.variables.remove(&address),
+                };
+                vec![Command::SetVariable {
+                    address,
+                    ty: previous,
                 }]
             }
             Command::SetFlagOverride { offset, flags } => {

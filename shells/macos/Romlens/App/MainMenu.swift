@@ -88,6 +88,8 @@ enum MainMenu {
             item("Select All", #selector(NSText.selectAll(_:)), "a"),
             .separator(),
             item("Rename Label…", #selector(RomWindowController.renameLabel(_:))),
+            item("Remove Label", #selector(RomWindowController.removeLabel(_:))),
+            item("Define Variable…", #selector(RomWindowController.defineVariable(_:)), "v", modifiers: [.command, .option]),
             item("Comment…", #selector(RomWindowController.editComment(_:))),
             .separator(),
             markAsMenu(),

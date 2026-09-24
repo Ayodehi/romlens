@@ -833,6 +833,67 @@ impl From<model::RegionParams> for RegionParamsInfo {
 }
 
 /// An edit. Addresses are 24-bit SNES addresses; ranges are file offsets.
+/// The width of one element of a variable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum VarWidth {
+    Byte,
+    Word,
+    Long,
+}
+
+impl From<VarWidth> for model::VarWidth {
+    fn from(w: VarWidth) -> Self {
+        match w {
+            VarWidth::Byte => model::VarWidth::Byte,
+            VarWidth::Word => model::VarWidth::Word,
+            VarWidth::Long => model::VarWidth::Long,
+        }
+    }
+}
+
+impl From<model::VarWidth> for VarWidth {
+    fn from(w: model::VarWidth) -> Self {
+        match w {
+            model::VarWidth::Byte => VarWidth::Byte,
+            model::VarWidth::Word => VarWidth::Word,
+            model::VarWidth::Long => VarWidth::Long,
+        }
+    }
+}
+
+/// What a variable holds: `count` elements of `width`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
+pub struct VarTypeInfo {
+    pub width: VarWidth,
+    pub count: u16,
+}
+
+impl From<VarTypeInfo> for model::VarType {
+    fn from(t: VarTypeInfo) -> Self {
+        model::VarType {
+            width: t.width.into(),
+            count: t.count,
+        }
+    }
+}
+
+/// A variable: a named address and its type.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct VariableInfo {
+    /// Canonical: WRAM's own address for a low-RAM mirror.
+    pub address: u32,
+    /// Empty when the label was removed but the type kept.
+    pub name: String,
+    pub width: VarWidth,
+    pub count: u16,
+    /// Bytes spanned.
+    pub len: u32,
+    /// `word`, `byte[16]`.
+    pub description: String,
+    /// Where it is, in words: WRAM, SRAM, a register, ROM.
+    pub memory: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
 pub enum Command {
     SetLabel {
@@ -869,6 +930,11 @@ pub enum Command {
     SetFlagOverride {
         offset: u32,
         flags: Option<FlagOverride>,
+    },
+    /// The type of the variable at `address`; `None` removes it.
+    SetVariable {
+        address: u32,
+        ty: Option<VarTypeInfo>,
     },
 }
 
@@ -923,6 +989,10 @@ impl From<Command> for model::Command {
             Command::SetFlagOverride { offset, flags } => model::Command::SetFlagOverride {
                 offset: FileOffset(offset),
                 flags: flags.map(Into::into),
+            },
+            Command::SetVariable { address, ty } => model::Command::SetVariable {
+                address: SnesAddress::from_u24(address),
+                ty: ty.map(Into::into),
             },
         }
     }

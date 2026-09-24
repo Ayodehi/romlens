@@ -8,11 +8,12 @@ import RomlensKit
 @Observable
 final class NavigatorModel {
     enum Tab: String, CaseIterable, Identifiable {
-        case labels, regions, banks
+        case labels, variables, regions, banks
         var id: String { rawValue }
         var title: String {
             switch self {
             case .labels: "Labels"
+            case .variables: "Variables"
             case .regions: "Regions"
             case .banks: "Banks"
             }
@@ -31,6 +32,8 @@ final class NavigatorModel {
         didSet { scheduleFilter() }
     }
     private(set) var labels: [LabelInfo] = []
+    private(set) var variables: [VariableInfo] = []
+    private(set) var filteredVariables: [VariableInfo] = []
     private(set) var regions: [RegionInfo] = []
     private(set) var banks: [Bank] = []
     private(set) var filteredLabels: [LabelInfo] = []
@@ -55,15 +58,17 @@ final class NavigatorModel {
     func reload(workbench: Workbench, rom: Rom) async {
         isLoading = true
         let limit = Self.regionLimit
-        let (labels, regions, banks) = await Task.detached(priority: .userInitiated) {
+        let (labels, regions, banks, variables) = await Task.detached(priority: .userInitiated) {
             let labels = workbench.labels()
+            let variables = workbench.variables()
             var regions = workbench.regionsOfKind(kind: .code, limit: limit)
             regions.append(contentsOf: workbench.regionsOfKind(kind: .data, limit: limit))
             regions.sort { $0.start < $1.start }
             let banks = Self.banks(rom: rom)
-            return (labels, regions, banks)
+            return (labels, regions, banks, variables)
         }.value
         self.labels = labels
+        self.variables = variables
         self.regions = regions
         regionsTruncated = regions.count >= Int(limit)
         self.banks = banks
@@ -105,6 +110,7 @@ final class NavigatorModel {
         filteredLabels = Self.filter(labels, query: filter)
         let q = filter.trimmingCharacters(in: .whitespaces).lowercased()
         filteredRegions = q.isEmpty ? regions : regions.filter { $0.name.lowercased().contains(q) }
+        filteredVariables = q.isEmpty ? variables : variables.filter { $0.name.lowercased().contains(q) }
     }
 
     /// Case-insensitive contains, or an address prefix when the query starts

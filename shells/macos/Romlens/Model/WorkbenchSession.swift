@@ -128,6 +128,18 @@ final class WorkbenchSession {
         try execute(.setLabel(address: address, name: nil))
     }
 
+    /// Name and type an address as one undo step ("Define Variable").
+    func defineVariable(address: UInt32, name: String, type: VarTypeInfo) throws {
+        try workbench.defineVariable(snesAddress: address, name: name, ty: type)
+        finishCommand(affectsAnalysis: false)
+    }
+
+    /// Remove a variable's name and type as one undo step.
+    func removeVariable(address: UInt32) throws {
+        try workbench.removeVariable(snesAddress: address)
+        finishCommand(affectsAnalysis: false)
+    }
+
     func setComment(address: UInt32, kind: CommentKind, text: String?) throws {
         try execute(.setComment(address: address, kind: kind, text: text))
     }
@@ -221,7 +233,7 @@ final class WorkbenchSession {
 
     static func affectsAnalysis(_ command: Command) -> Bool {
         switch command {
-        case .setLabel, .setComment, .setRegionParams: false
+        case .setLabel, .setComment, .setRegionParams, .setVariable: false
         case .markRegion, .clearRegionOverride, .setFlagOverride: true
         }
     }

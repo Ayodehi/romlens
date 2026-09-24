@@ -94,6 +94,8 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
     @objc func undo(_ sender: Any?) { model.undo() }
     @objc func redo(_ sender: Any?) { model.redo() }
     @objc func renameLabel(_ sender: Any?) { if model.selectedOffset != nil { model.activeSheet = .renameLabel } }
+    @objc func removeLabel(_ sender: Any?) { try? model.removeLabel() }
+    @objc func defineVariable(_ sender: Any?) { model.beginDefineVariable() }
     @objc func editComment(_ sender: Any?) { if model.selectedOffset != nil { model.activeSheet = .comment } }
     @objc func markAsCode(_ sender: Any?) { model.mark(.code) }
     @objc func markAsData(_ sender: Any?) { model.mark(.data) }
@@ -199,6 +201,24 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
             return hasSelection
         case #selector(findNext(_:)), #selector(findPrevious(_:)):
             return model.search.hasResults
+        case #selector(removeLabel(_:)):
+            if let label = model.label, model.canRemoveLabel {
+                item.title = "Remove Label \(label.name)"
+                return true
+            }
+            item.title = "Remove Label"
+            return false
+        case #selector(defineVariable(_:)):
+            // From an instruction that reads or writes memory, name that
+            // address; otherwise start from an empty sheet.
+            if let at = model.operandAddress {
+                let existing = model.workbench.variableContaining(snesAddress: at)
+                item.title = existing.map { "Edit Variable \($0.name)…" }
+                    ?? "Define Variable at \(formatSnesAddress(address: at))…"
+            } else {
+                item.title = "Define Variable…"
+            }
+            return true
         case #selector(findReferences(_:)):
             // Named for what it will look for, so a right-click on a line
             // says whose references it lists and how many there are.

@@ -19,6 +19,7 @@ struct NavigatorView: View {
             Group {
                 switch nav.tab {
                 case .labels: labels
+                case .variables: variables
                 case .regions: regions
                 case .banks: banks
                 }
@@ -64,6 +65,71 @@ struct NavigatorView: View {
             .buttonStyle(.plain)
         }
         .listStyle(.sidebar)
+    }
+
+    /// Variables are mostly RAM, which the editor cannot scroll to, so a row
+    /// lists what uses the variable; double-click edits it.
+    private var variables: some View {
+        VStack(spacing: 0) {
+            List(model.navigator.filteredVariables, id: \.address) { v in
+                Button {
+                    model.references.find(to: v.address, in: model.workbench)
+                    model.resultsKind = .references
+                    model.isResultsVisible = true
+                } label: {
+                    HStack {
+                        Text(v.name.isEmpty ? "(unnamed)" : v.name)
+                            .font(.callout.monospaced())
+                            .lineLimit(1)
+                        Text(v.description)
+                            .font(.caption2)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(Color.accentColor.opacity(0.2)))
+                        Spacer()
+                        Text(formatSnesAddress(address: v.address))
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.tertiary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("\(v.memory), \(v.len) byte\(v.len == 1 ? "" : "s"). Click for what uses it; double-click to edit.")
+                .simultaneousGesture(TapGesture(count: 2).onEnded { model.beginDefineVariable(at: v.address) })
+                .contextMenu {
+                    Button("Edit…") { model.beginDefineVariable(at: v.address) }
+                    Button("Find References") {
+                        model.references.find(to: v.address, in: model.workbench)
+                        model.resultsKind = .references
+                        model.isResultsVisible = true
+                    }
+                    Divider()
+                    Button("Remove", role: .destructive) { try? model.removeVariable(address: v.address) }
+                }
+            }
+            .listStyle(.sidebar)
+            .overlay {
+                if model.navigator.variables.isEmpty {
+                    Text("No variables. Name a RAM address with Define Variable…, or right-click an instruction to name what it reads or writes.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding()
+                }
+            }
+            HStack {
+                Button {
+                    model.beginDefineVariable()
+                } label: {
+                    Label("Define Variable…", systemImage: "plus")
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+                Spacer()
+            }
+            .padding(.horizontal, 10)
+            .padding(.top, 4)
+        }
     }
 
     private var regions: some View {

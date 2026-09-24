@@ -518,6 +518,69 @@ impl Workbench {
             .map(|l| label_info(&self.rom.image, l))
     }
 
+    // ---- variables -----------------------------------------------------------
+
+    /// Name `snes_address` and give it a type, as one undo step titled
+    /// "Define Variable". Replaces a variable or label already there.
+    pub fn define_variable(
+        &self,
+        snes_address: u32,
+        name: String,
+        ty: VarTypeInfo,
+    ) -> Result<(), RomlensError> {
+        let address = SnesAddress::from_u24(snes_address);
+        self.apply_user_batch(vec![
+            model::Command::SetLabel {
+                address,
+                name: Some(name),
+            },
+            model::Command::SetVariable {
+                address,
+                ty: Some(ty.into()),
+            },
+        ])
+    }
+
+    /// Remove the variable at `snes_address`, name and type, as one step.
+    pub fn remove_variable(&self, snes_address: u32) -> Result<(), RomlensError> {
+        let address = SnesAddress::from_u24(snes_address);
+        self.apply_user_batch(vec![
+            model::Command::SetLabel {
+                address,
+                name: None,
+            },
+            model::Command::SetVariable { address, ty: None },
+        ])
+    }
+
+    /// Every variable, by address.
+    pub fn variables(&self) -> Vec<VariableInfo> {
+        let inner = self.lock();
+        inner
+            .project
+            .variables
+            .iter()
+            .map(|(a, t)| variable_info(&self.rom.image, &inner.project, *a, *t))
+            .collect()
+    }
+
+    /// The variable spanning `snes_address`, if any: the one an instruction's
+    /// operand falls in.
+    pub fn variable_containing(&self, snes_address: u32) -> Option<VariableInfo> {
+        let inner = self.lock();
+        let addr = Project::canonical(&self.rom.image, SnesAddress::from_u24(snes_address));
+        inner
+            .project
+            .variable_containing(addr)
+            .map(|(a, t)| variable_info(&self.rom.image, &inner.project, a, t))
+    }
+
+    /// The canonical address of `snes_address`: WRAM's own for a low-RAM
+    /// mirror, bank `$00` for a register, the canonical mirror for ROM.
+    pub fn canonical_address(&self, snes_address: u32) -> u32 {
+        Project::canonical(&self.rom.image, SnesAddress::from_u24(snes_address)).as_u24()
+    }
+
     pub fn xrefs_to(&self, snes_address: u32) -> Vec<XRefInfo> {
         let inner = self.lock();
         let addr = Project::canonical(&self.rom.image, SnesAddress::from_u24(snes_address));
@@ -1195,4 +1258,54 @@ fn exec_log_summary(log: &romlens_core::model::exec_log::ExecLog) -> String {
         log.flows.len(),
         log.dma.len()
     )
+}
+
+fn variable_info(
+    rom: &romlens_core::RomImage,
+    project: &Project,
+    address: SnesAddress,
+    ty: model::VarType,
+) -> VariableInfo {
+    use romlens_core::memory::map::MemoryClass;
+    let memory = match rom.map().classify(address) {
+        MemoryClass::Wram | MemoryClass::LowRam => "WRAM",
+        MemoryClass::Sram => "SRAM",
+        MemoryClass::Hardware => "register",
+        MemoryClass::Rom => "ROM",
+        MemoryClass::OpenBus => "unmapped",
+    };
+    VariableInfo {
+        address: address.as_u24(),
+        name: project
+            .labels
+            .get(&address)
+            .map(|l| l.name.clone())
+            .unwrap_or_default(),
+        width: ty.width.into(),
+        count: ty.count,
+        len: ty.len(),
+        description: ty.describe(),
+        memory: memory.to_owned(),
+    }
+}
+
+impl Workbench {
+    /// Apply `commands` as one undo step of the user's.
+    fn apply_user_batch(&self, commands: Vec<model::Command>) -> Result<(), RomlensError> {
+        let affects = commands.iter().any(model::Command::affects_analysis);
+        let (generation, dirty) = {
+            let mut inner = self.lock();
+            let entry =
+                inner
+                    .project
+                    .apply_batch(&self.rom.image, commands, model::Origin::User)?;
+            inner.undo.push(entry);
+            self.after_edit(&mut inner, affects)
+        };
+        self.emit(WorkbenchEvent::ProjectChanged { dirty });
+        self.emit(WorkbenchEvent::ViewChanged {
+            view_generation: generation,
+        });
+        Ok(())
+    }
 }

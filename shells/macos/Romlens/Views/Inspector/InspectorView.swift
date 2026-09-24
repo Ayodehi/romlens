@@ -333,8 +333,8 @@ struct LabelSection: View {
                     .textFieldStyle(.roundedBorder)
                     .font(.body.monospaced())
                     .onSubmit(commit)
-                if model.label?.source == .user {
-                    Button("Remove") { try? model.setLabel(name: nil) }.controlSize(.small)
+                if model.canRemoveLabel {
+                    Button("Remove") { try? model.removeLabel() }.controlSize(.small)
                 }
             }
             if let label = model.label, label.source != .user {
