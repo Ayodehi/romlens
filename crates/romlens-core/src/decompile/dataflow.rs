@@ -42,7 +42,14 @@ pub enum Loc {
     Z,
     C,
     Temp(u32),
+    /// A flag's copy in a status byte a `PHP` pushed (N, V, Z, C as 0-3),
+    /// read back by a `PLP`. A `PHP` reads a flag only where a `PLP` that
+    /// may pull its byte puts that flag back and something reads it.
+    Saved(u8),
 }
+
+/// The flags a status byte holds, in `Loc::Saved` order.
+const SAVED_FLAGS: [Loc; 4] = [Loc::N, Loc::V, Loc::Z, Loc::C];
 
 pub type LocSet = BTreeSet<Loc>;
 
@@ -256,13 +263,21 @@ impl<'a> Flow<'a> {
                         i.defs.insert(Loc::S);
                         i.writes_mem = true;
                     }
+                    // Which flag each copies is liveness's business
+                    // (`step_back`): the saved copies are `Loc::Saved`.
                     "PHP" => {
                         i.uses.extend([Loc::S, Loc::N, Loc::V, Loc::Z, Loc::C]);
                         i.defs.insert(Loc::S);
                         i.writes_mem = true;
                     }
                     "PLP" => {
-                        i.uses.insert(Loc::S);
+                        i.uses.extend([
+                            Loc::S,
+                            Loc::Saved(0),
+                            Loc::Saved(1),
+                            Loc::Saved(2),
+                            Loc::Saved(3),
+                        ]);
                         i.defs.extend([Loc::S, Loc::N, Loc::V, Loc::Z, Loc::C]);
                         i.reads_mem = true;
                     }
@@ -311,7 +326,8 @@ impl<'a> Flow<'a> {
                     self.expr_info(s, &mut i);
                 }
             }
-            Term::Return => i.uses.extend(self.conv.exit.iter().copied()),
+            // The C returns after a halt too (`STP(); return;`).
+            Term::Return | Term::Halt => i.uses.extend(self.conv.exit.iter().copied()),
             // A tail call returns to this routine's callers: what they read
             // and the callee leaves alone passes straight through it.
             Term::Tail(a) => {
@@ -321,8 +337,14 @@ impl<'a> Flow<'a> {
                 i.uses
                     .extend(self.conv.exit.iter().filter(|l| !defs.contains(l)).copied());
             }
-            Term::Unknown(_) => i.uses.extend(all_fixed()),
-            Term::Fall(_) | Term::Goto(_) | Term::Halt => {}
+            // Wherever it goes is read as a call's inputs are (the
+            // registers and the carry, not N, V or Z), and returns to this
+            // routine's callers, so what they read passes through it.
+            Term::Unknown(_) => {
+                i.uses.extend(self.conv.default_call.iter().copied());
+                i.uses.extend(self.conv.exit.iter().copied());
+            }
+            Term::Fall(_) | Term::Goto(_) => {}
         }
         i.uses
     }
@@ -339,6 +361,30 @@ fn counts(s: &Stmt, info: &Info, live: &LocSet) -> bool {
 
 /// Step `live` back over one statement.
 fn step_back(s: &Stmt, info: &Info, live: &mut LocSet) {
+    match s {
+        // Each flag goes to its copy and comes back from it. A `PHP` does
+        // not kill the copies: another `PHP` on the way may be the one
+        // pulled, so each only may be.
+        Stmt::Effect("PHP", _) => {
+            for (k, f) in SAVED_FLAGS.iter().enumerate() {
+                if live.contains(&Loc::Saved(k as u8)) {
+                    live.insert(*f);
+                }
+            }
+            live.insert(Loc::S);
+            return;
+        }
+        Stmt::Effect("PLP", _) => {
+            for (k, f) in SAVED_FLAGS.iter().enumerate() {
+                if live.remove(f) {
+                    live.insert(Loc::Saved(k as u8));
+                }
+            }
+            live.insert(Loc::S);
+            return;
+        }
+        _ => {}
+    }
     if !counts(s, info, live) {
         return;
     }
@@ -436,8 +482,8 @@ pub fn live_at_entry(flow: &Flow, cfg: &Cfg, lifted: &Lifted, live_out: &[LocSet
 
 /// Run every clean-up to a fixed point.
 pub fn clean(rom: &RomImage, f: &Function, cfg: &Cfg, lifted: &mut Lifted, conv: &Conventions) {
-    let flow = Flow::new(rom, conv);
     stack_slots(f, cfg, lifted);
+    let flow = Flow::new(rom, conv);
     for _ in 0..32 {
         let before = lifted.blocks.iter().map(|b| b.lines.len()).sum::<usize>();
         drop_identities(f, lifted);
@@ -711,10 +757,7 @@ fn dead_code(flow: &Flow, cfg: &Cfg, lifted: &mut Lifted, live_out: &[LocSet]) -
                 changed = true;
                 continue;
             }
-            for d in &info.defs {
-                live.remove(d);
-            }
-            live.extend(info.uses.iter().copied());
+            step_back(&line.stmt, &info, &mut live);
         }
         let mut it = keep.iter();
         lb.lines.retain(|_| *it.next().unwrap());
@@ -1026,22 +1069,24 @@ fn whole_accumulator(flow: &Flow, cfg: &Cfg, lifted: &mut Lifted, live_out: &[Lo
 
 /// Pushes and pulls that pair at one depth become temporaries.
 ///
-/// Only where the routine never reads or sets `S`, never addresses the
-/// stack directly, and the depth agrees on every path and is back to zero
-/// at every return. A push nothing in the routine pulls (an argument for a
-/// callee, a bank for `PLB` in a different width) stays a push.
+/// Only where the routine never addresses the stack directly, reads or
+/// sets `S` only with nothing pushed (a `TCS` that sets the stack up, a
+/// `TSX` that looks at it), and the depth agrees on every path and is back
+/// to zero at every return. A push nothing in the routine pulls (an
+/// argument for a callee, a bank for `PLB` in a different width) stays a
+/// push.
 pub fn stack_slots(f: &Function, cfg: &Cfg, lifted: &mut Lifted) {
     use Mnemonic::*;
-    let touches_s = f.steps.iter().any(|s| {
-        matches!(s.insn.mnemonic, TSC | TSX | TCS | TXS)
-            || matches!(
-                s.insn.mode,
-                AddressingMode::StackRelative | AddressingMode::StackRelativeIndirectIndexed
-            )
+    let stack_relative = f.steps.iter().any(|s| {
+        matches!(
+            s.insn.mode,
+            AddressingMode::StackRelative | AddressingMode::StackRelativeIndirectIndexed
+        )
     });
-    if touches_s {
+    if stack_relative {
         return;
     }
+    let moves_s = |step: usize| matches!(f.steps[step].insn.mnemonic, TSC | TSX | TCS | TXS);
     // Stack effect of a line: pushed bytes (positive) or pulled (negative).
     fn delta(s: &Stmt) -> i32 {
         match s {
@@ -1069,6 +1114,11 @@ pub fn stack_slots(f: &Function, cfg: &Cfg, lifted: &mut Lifted) {
         let mut d = depth_in[b].unwrap();
         for (i, l) in lifted.blocks[b].lines.iter().enumerate() {
             before.insert((b, i), d);
+            // With something pushed, S is not what it was at lift once the
+            // slots are temporaries.
+            if d != 0 && moves_s(l.step) {
+                return;
+            }
             d += delta(&l.stmt);
             if d < 0 {
                 return;
@@ -1095,113 +1145,175 @@ pub fn stack_slots(f: &Function, cfg: &Cfg, lifted: &mut Lifted) {
             }
         }
     }
-    // Slots by their lowest byte's depth: which widths push and pull there
-    // (1 and 2 bytes, or P's byte, marked 3).
+    // Which push put each byte on the stack, followed forward through the
+    // graph: a pull pairs with the pushes whose bytes it takes off. A push
+    // is 1 or 2 bytes, or P's byte (kind 3); pairs must agree on the kind
+    // and line up byte for byte.
     const P: i32 = 3;
-    let mut pushes: BTreeMap<i32, BTreeSet<i32>> = BTreeMap::new();
-    let mut pulls: BTreeMap<i32, BTreeSet<i32>> = BTreeMap::new();
-    for (&(b, i), &d) in &before {
-        let s = &lifted.blocks[b].lines[i].stmt;
+    let kind_of = |s: &Stmt| -> Option<(bool, i32)> {
         match s {
-            Stmt::Effect("push8" | "push16", _) => {
-                pushes.entry(d).or_default().insert(delta(s));
-            }
-            Stmt::Effect("PHP", _) => {
-                pushes.entry(d).or_default().insert(P);
-            }
-            Stmt::Effect("PLP", _) => {
-                pulls.entry(d - 1).or_default().insert(P);
-            }
-            Stmt::Assign { .. } if delta(s) < 0 => {
-                pulls.entry(d + delta(s)).or_default().insert(-delta(s));
-            }
-            _ => {}
+            Stmt::Effect("push8", _) => Some((true, 1)),
+            Stmt::Effect("push16", _) => Some((true, 2)),
+            Stmt::Effect("PHP", _) => Some((true, P)),
+            Stmt::Effect("PLP", _) => Some((false, P)),
+            Stmt::Assign { .. } if delta(s) < 0 => Some((false, -delta(s))),
+            _ => None,
+        }
+    };
+    let bytes_of = |k: i32| if k == 2 { 2 } else { 1 };
+    // Push and pull lines, numbered.
+    let mut ids: BTreeMap<(BlockId, usize), usize> = BTreeMap::new();
+    let mut kinds: Vec<(bool, i32)> = Vec::new();
+    for &(b, i) in before.keys() {
+        if let Some(k) = kind_of(&lifted.blocks[b].lines[i].stmt) {
+            ids.insert((b, i), kinds.len());
+            kinds.push(k);
         }
     }
-    // A slot is renamed when one width pushes and pulls it; P's takes a
-    // temporary per flag.
+    // The stack as bytes, bottom first: for each, the pushes that may have
+    // put it there and which of their bytes it is.
+    type Stack = Vec<BTreeSet<(usize, i32)>>;
+    let mut parent: Vec<usize> = (0..kinds.len()).collect();
+    fn find(p: &mut [usize], x: usize) -> usize {
+        let mut r = x;
+        while p[r] != r {
+            r = p[r];
+        }
+        let mut y = x;
+        while p[y] != r {
+            let n = p[y];
+            p[y] = r;
+            y = n;
+        }
+        r
+    }
+    // Pulls whose bytes did not line up with one kind of push.
+    let mut spoiled: BTreeSet<usize> = BTreeSet::new();
+    let mut stack_in: Vec<Option<Stack>> = vec![None; n];
+    stack_in[cfg.entry] = Some(Vec::new());
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for &b in &cfg.rpo {
+            let Some(mut st) = stack_in[b].clone() else {
+                continue;
+            };
+            for (i, l) in lifted.blocks[b].lines.iter().enumerate() {
+                let Some(&id) = ids.get(&(b, i)) else {
+                    continue;
+                };
+                let (push, k) = kinds[id];
+                let w = bytes_of(k) as usize;
+                if push {
+                    for j in 0..w {
+                        st.push([(id, j as i32)].into_iter().collect());
+                    }
+                } else {
+                    let base = st.len() - w;
+                    for (j, byte) in st.drain(base..).enumerate() {
+                        for (p, pj) in byte {
+                            if kinds[p].1 != k || pj != j as i32 {
+                                spoiled.insert(id);
+                                spoiled.insert(p);
+                            }
+                            let (x, y) = (find(&mut parent, id), find(&mut parent, p));
+                            parent[x] = y;
+                        }
+                    }
+                }
+                let _ = l;
+            }
+            for s in cfg.succs(b) {
+                let new = match &stack_in[s] {
+                    None => st.clone(),
+                    Some(old) => old
+                        .iter()
+                        .zip(&st)
+                        .map(|(x, y)| x.union(y).copied().collect())
+                        .collect(),
+                };
+                if stack_in[s].as_ref() != Some(&new) {
+                    stack_in[s] = Some(new);
+                    changed = true;
+                }
+            }
+        }
+    }
+    // A group of pushes and pulls becomes one temporary (P's, four) when it
+    // has both, all of one kind, and nothing in it was spoiled.
+    let mut groups: BTreeMap<usize, (bool, bool, bool)> = BTreeMap::new();
+    for (id, kind) in kinds.iter().enumerate() {
+        let r = find(&mut parent, id);
+        let g = groups.entry(r).or_insert((false, false, false));
+        if kind.0 {
+            g.0 = true;
+        } else {
+            g.1 = true;
+        }
+        if spoiled.contains(&id) {
+            g.2 = true;
+        }
+    }
     let mut next = lifted.temps;
-    let mut renamed: BTreeMap<i32, (u32, i32)> = BTreeMap::new();
-    for (d, widths) in &pushes {
-        if widths.len() == 1 && pulls.get(d) == Some(widths) {
-            let w = *widths.iter().next().unwrap();
-            renamed.insert(*d, (next + 1, w));
-            next += if w == P { 4 } else { 1 };
+    let mut temp_of: BTreeMap<usize, u32> = BTreeMap::new();
+    for (&r, &(pushed, pulled, bad)) in &groups {
+        if pushed && pulled && !bad {
+            temp_of.insert(r, next + 1);
+            next += if kinds[r].1 == P { 4 } else { 1 };
         }
     }
-    // A word slot must not straddle another.
-    for (&d, &(_, w)) in &renamed {
-        if w == 2 && (pushes.contains_key(&(d + 1)) || pulls.contains_key(&(d + 1))) {
-            return;
-        }
-    }
-    if renamed.is_empty() {
+    if temp_of.is_empty() {
         return;
+    }
+    let mut renamed: BTreeMap<(BlockId, usize), (u32, i32)> = BTreeMap::new();
+    for (&line, &id) in &ids {
+        let r = find(&mut parent, id);
+        if let Some(&t) = temp_of.get(&r) {
+            renamed.insert(line, (t, kinds[id].1));
+        }
     }
     lifted.temps = next;
     const PFLAGS: [Flag; 4] = [Flag::N, Flag::V, Flag::Z, Flag::C];
     for (b, block) in lifted.blocks.iter_mut().enumerate() {
         let mut out: Vec<Line> = Vec::with_capacity(block.lines.len());
         for (i, line) in block.lines.drain(..).enumerate() {
-            let Some(&d) = before.get(&(b, i)) else {
+            let Some(&(t, w)) = renamed.get(&(b, i)) else {
                 out.push(line);
                 continue;
             };
             let step = line.step;
+            let mut put = |stmt| {
+                out.push(Line {
+                    stmt,
+                    step,
+                    merged: Vec::new(),
+                })
+            };
             match &line.stmt {
-                Stmt::Effect("push8" | "push16", args) if renamed.contains_key(&d) => {
-                    let (t, w) = renamed[&d];
-                    out.push(Line {
-                        stmt: Stmt::Assign {
-                            dst: Place::Temp(t),
-                            value: Expr::cast(
-                                if w == 1 { Width::W8 } else { Width::W16 },
-                                args[0].clone(),
-                            ),
-                        },
-                        step,
-                        merged: Vec::new(),
-                    });
-                }
-                Stmt::Effect("PHP", _) if renamed.contains_key(&d) => {
-                    let (t, _) = renamed[&d];
+                Stmt::Effect("push8" | "push16", args) => put(Stmt::Assign {
+                    dst: Place::Temp(t),
+                    value: Expr::cast(if w == 1 { Width::W8 } else { Width::W16 }, args[0].clone()),
+                }),
+                Stmt::Effect("PHP", _) => {
                     for (k, f) in PFLAGS.iter().enumerate() {
-                        out.push(Line {
-                            stmt: Stmt::Assign {
-                                dst: Place::Temp(t + k as u32),
-                                value: Expr::Flag(*f),
-                            },
-                            step,
-                            merged: Vec::new(),
+                        put(Stmt::Assign {
+                            dst: Place::Temp(t + k as u32),
+                            value: Expr::Flag(*f),
                         });
                     }
                 }
-                Stmt::Effect("PLP", _) if renamed.contains_key(&(d - 1)) => {
-                    let (t, _) = renamed[&(d - 1)];
+                Stmt::Effect("PLP", _) => {
                     for (k, f) in PFLAGS.iter().enumerate() {
-                        out.push(Line {
-                            stmt: Stmt::Assign {
-                                dst: Place::Flag(*f),
-                                value: Expr::Temp(t + k as u32),
-                            },
-                            step,
-                            merged: Vec::new(),
+                        put(Stmt::Assign {
+                            dst: Place::Flag(*f),
+                            value: Expr::Temp(t + k as u32),
                         });
                     }
                 }
-                Stmt::Assign { dst, .. }
-                    if delta(&line.stmt) < 0 && renamed.contains_key(&(d + delta(&line.stmt))) =>
-                {
-                    let (t, _) = renamed[&(d + delta(&line.stmt))];
-                    out.push(Line {
-                        stmt: Stmt::Assign {
-                            dst: dst.clone(),
-                            value: Expr::Temp(t),
-                        },
-                        step,
-                        merged: Vec::new(),
-                    });
-                }
+                Stmt::Assign { dst, .. } => put(Stmt::Assign {
+                    dst: dst.clone(),
+                    value: Expr::Temp(t),
+                }),
                 _ => out.push(line),
             }
         }

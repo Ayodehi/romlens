@@ -3,10 +3,11 @@
 //! - **Writes** is the least fixed point: a routine writes what its own
 //!   statements write, plus what its callees and tail calls write.
 //! - **Reads** is what is live at its entry, and **returns** is what its
-//!   callers read after it returns (only what it writes). Both start from the
-//!   assumption `dataflow::Conventions::default()` makes (every register and
-//!   the carry) and shrink together until nothing changes, so every step is
-//!   a safe over-approximation.
+//!   callers read after it returns (only what it writes). Both are least
+//!   fixed points too: they start empty and grow together until nothing
+//!   changes. Each is a monotone function of the other (more read after a
+//!   call is more returned; more returned is more live at a return), so the
+//!   growth ends, at the smallest answer every routine's code agrees with.
 //! - A routine something reaches in a way this cannot see (a vector, a
 //!   table, a pointer, code outside every routine) is **open**: its returns
 //!   stay the default.
@@ -51,7 +52,8 @@ pub struct Program {
     pub summaries: BTreeMap<SnesAddress, Summary>,
 }
 
-const ROUNDS: usize = 24;
+/// Growing sets always stop; this only bounds a pathological program.
+const MAX_ROUNDS: usize = 400;
 
 impl Program {
     pub fn build(rom: &RomImage, snap: &AnalysisSnapshot, opts: LiftOptions) -> Program {
@@ -66,14 +68,15 @@ impl Program {
             }
         }
         let open = open_routines(snap, &units);
-        let preserves: BTreeMap<SnesAddress, LocSet> =
-            units.iter().map(|(a, u)| (*a, preserved(u))).collect();
         let base = Conventions::default();
+        let mut preserves: BTreeMap<SnesAddress, LocSet> =
+            units.keys().map(|&a| (a, LocSet::new())).collect();
 
         // Writes, growing from nothing.
         let mut writes: BTreeMap<SnesAddress, LocSet> =
             units.keys().map(|&a| (a, LocSet::new())).collect();
-        for _ in 0..ROUNDS {
+        let mut settled = false;
+        for _ in 0..MAX_ROUNDS {
             let mut changed = false;
             let conv = Conventions {
                 call_defs: writes.clone(),
@@ -81,6 +84,9 @@ impl Program {
             };
             let flow = Flow::new(rom, &conv);
             for (a, u) in &units {
+                // What it keeps depends on what its callees write, so it is
+                // worked out again each round.
+                preserves.insert(*a, preserved(u, &flow, &writes));
                 let mut w = LocSet::new();
                 for lb in &u.lifted.blocks {
                     for l in &lb.lines {
@@ -104,20 +110,37 @@ impl Program {
                 }
             }
             if !changed {
+                settled = true;
                 break;
             }
         }
+        // Stopped short, a routine may write more than it says.
+        if !settled {
+            for (a, w) in writes.iter_mut() {
+                *w = all_fixed();
+                preserves.insert(*a, LocSet::new());
+            }
+        }
 
-        // Reads and returns, shrinking from the default.
-        let mut reads: BTreeMap<SnesAddress, LocSet> = units
-            .keys()
-            .map(|&a| (a, base.default_call.clone()))
-            .collect();
+        // Reads and returns, growing from nothing (an open routine's
+        // returns are the default from the start).
+        let open_returns =
+            |a: &SnesAddress| -> LocSet { base.exit.intersection(&writes[a]).copied().collect() };
+        let mut reads: BTreeMap<SnesAddress, LocSet> =
+            units.keys().map(|&a| (a, LocSet::new())).collect();
         let mut returns: BTreeMap<SnesAddress, LocSet> = units
             .keys()
-            .map(|&a| (a, base.exit.intersection(&writes[&a]).copied().collect()))
+            .map(|a| {
+                let r = if open.contains(a) {
+                    open_returns(a)
+                } else {
+                    LocSet::new()
+                };
+                (*a, r)
+            })
             .collect();
-        for _ in 0..ROUNDS {
+        let mut converged = false;
+        for _ in 0..MAX_ROUNDS {
             let mut new_reads = BTreeMap::new();
             let mut read_after: BTreeMap<SnesAddress, LocSet> =
                 units.keys().map(|&a| (a, LocSet::new())).collect();
@@ -135,6 +158,7 @@ impl Program {
                 let live_out = dataflow::liveness(&flow, &u.cfg, &u.lifted);
                 let mut r = dataflow::live_at_entry(&flow, &u.cfg, &u.lifted, &live_out);
                 r.retain(|l| !matches!(l, Loc::Temp(_)));
+                r.extend(reads[a].iter().copied());
                 new_reads.insert(*a, r);
                 for (b, lb) in u.lifted.blocks.iter().enumerate() {
                     let calls: Vec<(usize, SnesAddress)> = lb
@@ -176,6 +200,7 @@ impl Program {
                     };
                     let mut r: LocSet = seen.intersection(&writes[a]).copied().collect();
                     r.retain(|l| !matches!(l, Loc::Temp(_)));
+                    r.extend(returns[a].iter().copied());
                     (*a, r)
                 })
                 .collect();
@@ -183,7 +208,16 @@ impl Program {
             reads = new_reads;
             returns = new_returns;
             if done {
+                converged = true;
                 break;
+            }
+        }
+        // Stopped short, the sets may be too small: fall back to the
+        // assumption every call and return reads everything.
+        if !converged {
+            for a in units.keys() {
+                reads.insert(*a, base.default_call.clone());
+                returns.insert(*a, open_returns(a));
             }
         }
 
@@ -233,11 +267,18 @@ impl Program {
     }
 }
 
-/// Registers and flags saved to a slot in the entry block before anything
-/// changes them, and restored from it last in every returning block.
-fn preserved(u: &Unit) -> LocSet {
+/// The registers and flags that hold their entry value again wherever the
+/// routine returns, among those it writes: saved and restored (`PHX` …
+/// `PLX`), or left alone on the paths that return early. A forward
+/// must-analysis: a location keeps its entry value until something writes
+/// it, and gets it back from a temporary that holds a copy of it (a slot
+/// written once, from the location while it still held its entry value). A
+/// call writes what `flow` says the callee writes; a tail call returns what
+/// is still the entry value and not written by the callee.
+fn preserved(u: &Unit, flow: &Flow, writes: &BTreeMap<SnesAddress, LocSet>) -> LocSet {
     use crate::decompile::ir::{Expr, Place};
-    let flow_locs = |e: &Expr| -> Option<LocSet> {
+    let tracked: LocSet = all_fixed().into_iter().filter(|l| *l != Loc::S).collect();
+    let value_locs = |e: &Expr| -> Option<LocSet> {
         let inner = match e {
             Expr::Cast(_, x) => &**x,
             x => x,
@@ -248,16 +289,10 @@ fn preserved(u: &Unit) -> LocSet {
             _ => None,
         }
     };
-    let place_locs = |p: &Place| -> Option<LocSet> {
-        match p {
-            Place::Reg(r, w) => Some(reg_locs(*r, *w)),
-            Place::Flag(f) => Some([flag_loc(*f)].into_iter().collect()),
-            _ => None,
-        }
-    };
-    // How often each temporary is written: a save must be its only write,
-    // or the slot may hold something else by the time it is restored.
+    // A save must be its temporary's only write, or the slot may hold
+    // something else by the time it is restored.
     let mut writes_of: BTreeMap<u32, usize> = BTreeMap::new();
+    let mut written = LocSet::new();
     for lb in &u.lifted.blocks {
         for l in &lb.lines {
             if let Stmt::Assign {
@@ -267,73 +302,111 @@ fn preserved(u: &Unit) -> LocSet {
             {
                 *writes_of.entry(*t).or_default() += 1;
             }
+            written.extend(flow.info(&l.stmt).defs);
         }
     }
-    // Saved: temp -> the entry values it holds.
-    let mut saved: BTreeMap<u32, LocSet> = BTreeMap::new();
-    let mut defined = LocSet::new();
-    let entry = &u.lifted.blocks[u.cfg.entry];
-    for l in &entry.lines {
-        if let Stmt::Assign {
-            dst: Place::Temp(t),
-            value,
-        } = &l.stmt
-            && let Some(locs) = flow_locs(value)
-            && locs.is_disjoint(&defined)
-            && writes_of.get(t) == Some(&1)
-        {
-            saved.insert(*t, locs);
+    written.retain(|l| tracked.contains(l));
+    if written.is_empty() {
+        return LocSet::new();
+    }
+    // What each saving temporary holds the entry value of; recomputed on
+    // every pass, since a save counts only if its source still held the
+    // entry value on every path to it.
+    let n = u.cfg.blocks.len();
+    let mut state_in: Vec<Option<LocSet>> = vec![None; n];
+    state_in[u.cfg.entry] = Some(tracked.clone());
+    let mut holds: BTreeMap<u32, LocSet> = BTreeMap::new();
+    let step = |state: &mut LocSet, l: &Stmt, holds: &mut BTreeMap<u32, LocSet>| {
+        if let Stmt::Assign { dst, value } = l {
+            match dst {
+                Place::Temp(t) => {
+                    if writes_of.get(t) == Some(&1) {
+                        let h = value_locs(value)
+                            .filter(|locs| locs.is_subset(state))
+                            .unwrap_or_default();
+                        holds.insert(*t, h);
+                    }
+                    return;
+                }
+                Place::Reg(..) | Place::Flag(_) => {
+                    let defs = flow.info(l).defs;
+                    for d in &defs {
+                        state.remove(d);
+                    }
+                    if let Expr::Temp(t) = value
+                        && let Some(h) = holds.get(t)
+                    {
+                        for d in defs {
+                            if h.contains(&d) {
+                                state.insert(d);
+                            }
+                        }
+                    }
+                    return;
+                }
+                Place::Mem { .. } => {}
+            }
         }
-        if let Stmt::Assign { dst, .. } = &l.stmt
-            && let Some(locs) = place_locs(dst)
-        {
-            defined.extend(locs);
+        for d in flow.info(l).defs {
+            state.remove(&d);
         }
-        if matches!(l.stmt, Stmt::Call(_) | Stmt::Asm { .. }) {
-            break;
+    };
+    let mut changed = true;
+    let mut rounds = 0;
+    while changed && rounds < 64 {
+        changed = false;
+        rounds += 1;
+        for &b in &u.cfg.rpo {
+            let Some(mut st) = state_in[b].clone() else {
+                continue;
+            };
+            for l in &u.lifted.blocks[b].lines {
+                step(&mut st, &l.stmt, &mut holds);
+            }
+            for s in u.cfg.succs(b) {
+                let new = match &state_in[s] {
+                    None => st.clone(),
+                    Some(old) => old.intersection(&st).copied().collect(),
+                };
+                if state_in[s].as_ref() != Some(&new) {
+                    state_in[s] = Some(new);
+                    changed = true;
+                }
+            }
         }
     }
-    if saved.is_empty() {
+    if changed {
         return LocSet::new();
     }
     let mut out: Option<LocSet> = None;
     for (b, block) in u.cfg.blocks.iter().enumerate() {
-        match block.term {
-            Term::Return => {}
-            Term::Halt => continue,
-            // Leaving another way, nothing is known to be restored.
-            Term::Tail(_) | Term::Unknown(_) => return LocSet::new(),
+        let Some(mut st) = state_in[b].clone() else {
+            continue;
+        };
+        match &block.term {
+            // The C returns after a halt (`STP(); return;`), so it counts.
+            Term::Return | Term::Tail(_) | Term::Halt => {}
+            // Leaving in a way nothing follows: nothing is known to be kept.
+            Term::Unknown(_) => return LocSet::new(),
             _ => continue,
         }
-        // Where the last definition of a location in this block is the
-        // restore of its save.
-        let mut here = LocSet::new();
-        let mut seen = LocSet::new();
-        for l in u.lifted.blocks[b].lines.iter().rev() {
-            let Stmt::Assign { dst, value } = &l.stmt else {
-                if matches!(l.stmt, Stmt::Call(_) | Stmt::Asm { .. }) {
-                    break;
-                }
-                continue;
-            };
-            let Some(locs) = place_locs(dst) else {
-                continue;
-            };
-            for loc in locs {
-                if seen.insert(loc)
-                    && let Expr::Temp(t) = value
-                    && saved.get(t).is_some_and(|s| s.contains(&loc))
-                {
-                    here.insert(loc);
-                }
+        for l in &u.lifted.blocks[b].lines {
+            step(&mut st, &l.stmt, &mut holds);
+        }
+        if let Term::Tail(t) = &block.term {
+            match writes.get(t) {
+                Some(w) => st.retain(|l| !w.contains(l)),
+                None => return LocSet::new(),
             }
         }
         out = Some(match out {
-            None => here,
-            Some(o) => o.intersection(&here).copied().collect(),
+            None => st,
+            Some(o) => o.intersection(&st).copied().collect(),
         });
     }
-    out.unwrap_or_default()
+    let mut kept = out.unwrap_or_default();
+    kept.retain(|l| written.contains(l));
+    kept
 }
 
 fn reg_locs(r: crate::decompile::ir::Reg, w: crate::decompile::ir::Width) -> LocSet {
