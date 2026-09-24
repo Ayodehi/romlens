@@ -77,6 +77,9 @@ final class RomViewModel {
     private(set) var selectionAnchor: UInt32?
     private(set) var inspection: ByteInterpretation?
     private(set) var instruction: InstructionInfo?
+    /// What the selected instruction does to the hardware, and the idioms
+    /// it is part of (docs/20).
+    private(set) var explanation: ExplanationInfo?
     private(set) var region: RegionInfo?
     private(set) var label: LabelInfo?
     private(set) var lineComment: CommentInfo?
@@ -159,9 +162,43 @@ final class RomViewModel {
         session.onChange = { [weak self] kind in self?.handleChange(kind) }
         graphics.selectBytes = { [weak self] range in self?.selectRange(range) }
         graphics.revealTile = { [weak self] in self?.graphicsTab = .tiles }
+        // The workbench shows them unless told otherwise.
+        if !explanationsShown {
+            workbench.setShowExplanations(show: false)
+        }
         if startAnalysis {
             session.startAnalysis()
         }
+    }
+
+    /// Where View › Show Explanations remembers being turned off.
+    static let hideExplanationsKey = "HideExplanations"
+
+    /// Explanations in the listing and the C: explained comments on
+    /// hardware writes, and a note above each idiom (docs/20).
+    var showExplanations: Bool {
+        get { explanationsShown }
+        set {
+            guard newValue != explanationsShown else { return }
+            explanationsShown = newValue
+            workbench.setShowExplanations(show: newValue)
+            // The listing has new lines and the C new text.
+            handleChange(.view)
+        }
+    }
+    private var explanationsShown = !UserDefaults.standard.bool(forKey: RomViewModel.hideExplanationsKey)
+
+    /// Select every instruction of the idiom whose note is at `offset`:
+    /// what clicking its note line does.
+    func selectIdiom(noteAt offset: UInt32) {
+        guard let idiom = workbench.explainAt(fileOffset: offset).idioms.first(where: { $0.noteAt == offset }),
+              let first = idiom.offsets.first, let last = idiom.offsets.last
+        else {
+            select(offset: offset)
+            return
+        }
+        let end = last + UInt32(workbench.instructionAt(fileOffset: last)?.len ?? 1)
+        selectRange(first..<end)
     }
 
     var workbench: Workbench { session.workbench }
@@ -325,6 +362,7 @@ final class RomViewModel {
 
     private func clearDetails() {
         instruction = nil
+        explanation = nil
         region = nil
         label = nil
         lineComment = nil
@@ -339,6 +377,7 @@ final class RomViewModel {
     private func refreshSelectionDetails() {
         guard let offset = selectedOffset else { return }
         instruction = workbench.instructionAt(fileOffset: offset)
+        explanation = instruction.map { workbench.explainAt(fileOffset: $0.fileOffset) }
         region = workbench.regionAt(fileOffset: offset)
         let itemStart = instruction?.fileOffset ?? offset
         if let address = rom.snesAddressFor(fileOffset: itemStart) {

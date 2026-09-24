@@ -565,14 +565,24 @@ mod tests {
         // The listing carries a note line; turned off, it does not.
         let with = wb.line_count();
         let note = wb.line_for_offset(0x56).unwrap() - 1;
-        assert!(wb.asm_lines_text(note, 1, AddressStyle::Snes).contains("▸ Wait for vertical blank"));
+        assert!(
+            wb.asm_lines_text(note, 1, AddressStyle::Snes)
+                .contains("▸ Wait for vertical blank")
+        );
         wb.set_show_explanations(false);
         assert!(wb.line_count() < with);
-        assert!(!wb.asm_lines_text(0, wb.line_count(), AddressStyle::Snes).contains('▸'));
-        let c = wb.decompile_blocking(0x008000, DecompileLevel::Full).unwrap();
+        assert!(
+            !wb.asm_lines_text(0, wb.line_count(), AddressStyle::Snes)
+                .contains('▸')
+        );
+        let c = wb
+            .decompile_blocking(0x008000, DecompileLevel::Full)
+            .unwrap();
         assert!(!c.text.contains('▸'));
         wb.set_show_explanations(true);
-        let c = wb.decompile_blocking(0x008000, DecompileLevel::Full).unwrap();
+        let c = wb
+            .decompile_blocking(0x008000, DecompileLevel::Full)
+            .unwrap();
         assert!(c.text.contains("/* ▸ DMA transfer"));
     }
 
@@ -593,7 +603,10 @@ mod tests {
         // The loop block's lines start at its label, then the idiom's note.
         let b = &g.blocks[1];
         let first = b.first_line.unwrap();
-        assert_eq!(b.line_count, 5, "LOOP_008022:, a note and three instructions");
+        assert_eq!(
+            b.line_count, 5,
+            "LOOP_008022:, a note and three instructions"
+        );
         assert_eq!(wb.line_for_offset(0x22), Some(first + 2));
         let calls = wb.call_neighbourhood_blocking(0x008020).unwrap();
         assert_eq!(calls.callers.len(), 1);

@@ -4,6 +4,8 @@ import Foundation
 /// Line kinds (the core's `LineKind`).
 enum AsmLineKind: UInt8 {
     case instruction = 1, data = 2, label = 3, blank = 4, comment = 5, section = 6
+    /// An idiom's note (docs/20), above its first instruction.
+    case note = 7
 
     var isContent: Bool { self == .instruction || self == .data }
 }
@@ -20,7 +22,7 @@ enum AsmRegionKind: UInt8 {
 enum AsmTokenKind: UInt8 {
     case mnemonic = 1, punct = 2, immediate = 3, number = 4, autoLabel = 5, userLabel = 6
     case hardwareRegister = 7, comment = 8, autoComment = 9, autoLabelDef = 10, userLabelDef = 11
-    case directive = 12, dataValue = 13, section = 14, warning = 15
+    case directive = 12, dataValue = 13, section = 14, warning = 15, note = 16
     case other = 255
 
     init(raw: UInt8) { self = AsmTokenKind(rawValue: raw) ?? .other }

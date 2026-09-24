@@ -275,8 +275,7 @@ impl Workbench {
 
     fn analysis_job(
         &self,
-    ) -> impl FnOnce() -> Result<Analysed, romlens_core::analysis::Cancelled> + Send + 'static
-    {
+    ) -> impl FnOnce() -> Result<Analysed, romlens_core::analysis::Cancelled> + Send + 'static {
         let image = self.rom.image.clone();
         let (project, show) = {
             let inner = self.lock();
@@ -525,7 +524,12 @@ impl Workbench {
         };
         ExplanationInfo {
             register,
-            idioms: inner.explain.idioms_at(off).into_iter().map(Into::into).collect(),
+            idioms: inner
+                .explain
+                .idioms_at(off)
+                .into_iter()
+                .map(Into::into)
+                .collect(),
         }
     }
 

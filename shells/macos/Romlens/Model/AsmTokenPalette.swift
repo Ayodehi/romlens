@@ -20,6 +20,7 @@ enum AsmTokenPalette {
         case .dataValue: dim
         case .section: .tertiaryLabelColor
         case .warning: .systemOrange
+        case .note: .systemIndigo
         case .other: .labelColor
         }
     }

@@ -1127,7 +1127,11 @@ static LAYOUTS: &[Layout] = &[
         0x420B,
         "Starts a DMA transfer on each channel whose bit is set, one after another. The CPU stops until they are done. Each channel's $43x0–$43x6 say what to copy where.",
         &[number(7, 0, "Channels", |v| {
-            format!("start DMA on {}", channels(v))
+            if v == 0 {
+                "no transfer started".to_owned()
+            } else {
+                format!("start DMA on {}", channels(v))
+            }
         })],
     ),
     settings(
@@ -1280,6 +1284,7 @@ mod tests {
             "MDMAEN = $03: start DMA on channels 0, 1"
         );
         assert_eq!(short(0x420C, 0x00, 1), "HDMAEN = $00: HDMA off");
+        assert_eq!(short(0x420B, 0x00, 1), "MDMAEN = $00: no transfer started");
         assert_eq!(short(0x212C, 0x13, 1), "TM = $13: BG1, BG2, sprites");
         assert_eq!(short(0x212C, 0x00, 1), "TM = $00: all off");
         assert_eq!(

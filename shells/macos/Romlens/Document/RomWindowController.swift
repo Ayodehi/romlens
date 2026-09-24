@@ -71,6 +71,11 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
     @objc func showC(_ sender: Any?) { model.editorTab = .c }
     @objc func decompileRoutine(_ sender: Any?) { model.showDecompiled() }
     @objc func showGraph(_ sender: Any?) { model.showGraph() }
+    /// View › Show Explanations, remembered for the next window.
+    @objc func toggleExplanations(_ sender: Any?) {
+        model.showExplanations.toggle()
+        UserDefaults.standard.set(!model.showExplanations, forKey: RomViewModel.hideExplanationsKey)
+    }
     @objc func zoomGraphIn(_ sender: Any?) { model.graph.requestZoom(.zoomIn) }
     @objc func zoomGraphOut(_ sender: Any?) { model.graph.requestZoom(.zoomOut) }
     @objc func zoomGraphToFit(_ sender: Any?) { model.graph.requestZoom(.fit) }
@@ -194,6 +199,9 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
         case #selector(showC(_:)):
             item.state = model.graphicsTab == nil && model.editorTab == .c ? .on : .off
             return model.hasDisassembly
+        case #selector(toggleExplanations(_:)):
+            item.state = model.showExplanations ? .on : .off
+            return true
         case #selector(showGraph(_:)):
             item.state = model.graphicsTab == nil && model.editorTab == .graph ? .on : .off
             return model.hasDisassembly

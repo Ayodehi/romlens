@@ -46,7 +46,7 @@ struct AsmLineLayout {
     func textOrigin(for r: AsmLineRecord) -> Int {
         switch r.kind {
         case .label, .section, .blank: 0
-        case .comment, .instruction, .data: textColumn
+        case .comment, .note, .instruction, .data: textColumn
         }
     }
 
@@ -75,7 +75,7 @@ struct AsmLineLayout {
             break
         case .label, .section:
             out.append(contentsOf: Array(r.text.utf8))
-        case .comment:
+        case .comment, .note:
             pad(to: textColumn)
             out.append(contentsOf: Array(r.text.utf8))
         case .instruction, .data:

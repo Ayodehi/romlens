@@ -286,3 +286,45 @@ fn the_c_says_the_same() {
         assert!(with.text.is_char_boundary(t.start as usize) && with.text.is_char_boundary(end));
     }
 }
+
+/// A DMA whose channel is set on two paths: what they set differently
+/// says so, rather than guessing one.
+#[test]
+fn a_dma_set_up_on_two_paths() {
+    let mut code = vec![0u8; 0x40];
+    let mut put = |at: usize, b: &[u8]| code[at..at + b.len()].copy_from_slice(b);
+    put(0x00, &[0x78, 0x18, 0xFB, 0x4B, 0xAB, 0xE2, 0x30]);
+    put(0x07, &[0xA9, 0x01, 0x8D, 0x00, 0x43]); // DMAP0 = $01
+    put(0x0C, &[0xA5, 0x10, 0xF0, 0x07]); // BEQ $8017
+    put(0x10, &[0xA9, 0x18, 0x8D, 0x01, 0x43, 0x80, 0x05]); // BBAD0 = $18; BRA $801C
+    put(0x17, &[0xA9, 0x22, 0x8D, 0x01, 0x43]); // BBAD0 = $22
+    put(0x1C, &[0xA9, 0x01, 0x8D, 0x0B, 0x42, 0x80, 0xFE]); // MDMAEN = $01
+    put(0x30, &[0x40]);
+    let mut vectors = [0x8030; 12];
+    vectors[10] = 0x8000;
+    let rom = RomImage::from_bytes(
+        fixtures::build_custom(
+            romlens_core::MappingMode::LoRom,
+            0x8000,
+            false,
+            &code,
+            "PATHS",
+            vectors,
+        ),
+        "p.sfc",
+    )
+    .unwrap();
+    let x = build(&rom, &Project::new(&rom));
+    let dma: Vec<&str> = x
+        .idioms()
+        .iter()
+        .filter(|i| i.title == "DMA transfer")
+        .map(|i| i.summary.as_str())
+        .collect();
+    assert_eq!(
+        dma,
+        [
+            "Channel 0 copies bytes from an address set by the caller to a register set differently on each path here; the byte count is set by the caller."
+        ]
+    );
+}

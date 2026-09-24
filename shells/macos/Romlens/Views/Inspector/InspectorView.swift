@@ -15,6 +15,9 @@ struct InspectorView: View {
                         if model.instruction != nil {
                             InstructionSection(model: model)
                         }
+                        if let x = model.explanation, x.register != nil || !x.idioms.isEmpty {
+                            ExplanationSection(model: model, explanation: x)
+                        }
                         RegionSection(model: model)
                         if let preview = model.preview {
                             PreviewSection(model: model, preview: preview)
@@ -251,6 +254,114 @@ struct InstructionSection: View {
         case .write: "W"
         case .readWrite: "RW"
         }
+    }
+}
+
+/// What the instruction does to the hardware, field by field, and the
+/// idioms it is part of (docs/20).
+struct ExplanationSection: View {
+    let model: RomViewModel
+    let explanation: ExplanationInfo
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Explanation").font(.headline)
+            if let r = explanation.register {
+                RegisterAccessView(access: r)
+            }
+            ForEach(Array(explanation.idioms.enumerated()), id: \.offset) { _, idiom in
+                IdiomView(model: model, idiom: idiom)
+            }
+        }
+    }
+}
+
+struct RegisterAccessView: View {
+    let access: RegisterAccessInfo
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(Array(access.parts.enumerated()), id: \.offset) { _, part in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(part.short).font(.body.monospaced().weight(.medium)).textSelection(.enabled)
+                    Text(part.about).font(.callout).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if part.twice {
+                        Text("Written twice in a row: low byte, then high.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    if !part.fields.isEmpty {
+                        fields(part)
+                    }
+                }
+            }
+            if let source = access.source {
+                Label("The value is loaded from \(access.sourceName ?? formatSnesAddress(address: source)).",
+                      systemImage: "arrow.down.to.line")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else if access.indexed {
+                Label("Indexed: which register depends on X or Y.", systemImage: "questionmark.circle")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else if !access.store {
+                Label("A read: the fields show what it reports.", systemImage: "eye")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else if access.value == nil {
+                Label("The value is worked out at run time.", systemImage: "questionmark.circle")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func fields(_ part: RegisterPartInfo) -> some View {
+        let known = part.value != nil
+        return Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 3) {
+            GridRow {
+                Text("Bits")
+                Text("Field")
+                if known {
+                    Text("Value")
+                    Text("Meaning")
+                }
+            }
+            .font(.caption).foregroundStyle(.tertiary)
+            ForEach(Array(part.fields.enumerated()), id: \.offset) { _, f in
+                GridRow(alignment: .firstTextBaseline) {
+                    Text(f.bits).monospaced().foregroundStyle(.secondary)
+                    Text(f.name)
+                    if known {
+                        Text(f.raw.map { String($0) } ?? "").monospaced()
+                        Text(f.meaning ?? "").fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+        }
+        .font(.callout)
+    }
+}
+
+struct IdiomView: View {
+    let model: RomViewModel
+    let idiom: IdiomInfo
+    @State private var showWhy = true
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label(idiom.title, systemImage: "lightbulb")
+                .font(.body.weight(.semibold))
+                .foregroundStyle(Color(nsColor: .systemIndigo))
+            Text(idiom.summary).font(.callout).textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+            DisclosureGroup("Why games do this", isExpanded: $showWhy) {
+                Text(idiom.why).font(.callout).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .font(.callout)
+            Button("Select Its Instructions") { model.selectIdiom(noteAt: idiom.noteAt) }
+                .controlSize(.small)
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .systemIndigo).opacity(0.08)))
     }
 }
 

@@ -148,6 +148,7 @@ enum MainMenu {
             item("Show Overview Strip", #selector(RomWindowController.toggleStrip(_:)), "0", modifiers: [.command, .shift]),
             item("Show Results", #selector(RomWindowController.toggleResults(_:)), "0", modifiers: [.command, .control]),
             item("Focus on Code", #selector(RomWindowController.toggleFocus(_:)), "f", modifiers: [.command, .option]),
+            item("Show Explanations", #selector(RomWindowController.toggleExplanations(_:)), "e", modifiers: [.command, .option]),
             .separator(),
             item("Zoom In", #selector(RomWindowController.zoomGraphIn(_:)), "="),
             item("Zoom Out", #selector(RomWindowController.zoomGraphOut(_:)), "-"),

@@ -196,57 +196,115 @@ impl<'a> Routine<'a> {
     }
 
     /// The stores reaching step `at`, latest first: back through its
-    /// block, then on up through blocks with a single predecessor, as far
-    /// as a call.
+    /// block, then up through its predecessors as far as a call. Where
+    /// paths meet, a register keeps the value they agree on.
     fn written_before(&self, at: usize) -> Written {
-        const REACH: usize = 96;
+        let mut visited = BTreeSet::new();
+        let mut budget = 256usize;
+        self.walk_back(self.block[at], at, &mut visited, &mut budget, 0)
+    }
+
+    fn walk_back(
+        &self,
+        b: usize,
+        end: usize,
+        visited: &mut BTreeSet<usize>,
+        budget: &mut usize,
+        depth: usize,
+    ) -> Written {
         let mut w = Written {
             bytes: HashMap::new(),
+            varies: BTreeSet::new(),
             stop: Stop::Earlier,
         };
-        let mut b = self.block[at];
-        let mut end = at;
-        let mut seen = 0;
-        let mut visited = BTreeSet::new();
-        loop {
-            let start = self.cfg.blocks[b].steps.start;
-            for i in (start..end).rev() {
-                seen += 1;
-                if let Some(s) = self.store_at.get(&i)
-                    && !s.indexed
-                {
-                    for k in 0..s.width {
-                        let reg = s.register.wrapping_add(u16::from(k));
-                        w.bytes
-                            .entry(reg)
-                            .or_insert((s.bytes[k as usize], s.offset));
-                    }
-                }
-                // A call may have written anything.
-                if let Transfer::Call { callee, .. } = &self.f.steps[i].transfer {
-                    w.stop = Stop::Call(match callee {
-                        Callee::Direct(a) => Some(*a),
-                        _ => None,
-                    });
-                    return w;
-                }
-                if seen > REACH {
-                    return w;
+        let start = self.cfg.blocks[b].steps.start;
+        for i in (start..end).rev() {
+            if *budget == 0 {
+                return w;
+            }
+            *budget -= 1;
+            if let Some(s) = self.store_at.get(&i)
+                && !s.indexed
+            {
+                for k in 0..s.width {
+                    let reg = s.register.wrapping_add(u16::from(k));
+                    w.bytes
+                        .entry(reg)
+                        .or_insert((s.bytes[k as usize], s.offset));
                 }
             }
-            visited.insert(b);
-            match self.cfg.blocks[b].preds.as_slice() {
-                [p] if !visited.contains(p) => {
-                    b = *p;
-                    end = self.cfg.blocks[b].steps.end;
-                }
-                [] if b == self.cfg.entry => {
-                    w.stop = Stop::Entry;
-                    return w;
-                }
-                _ => return w,
+            // A call may have written anything.
+            if let Transfer::Call { callee, .. } = &self.f.steps[i].transfer {
+                w.stop = Stop::Call(match callee {
+                    Callee::Direct(a) => Some(*a),
+                    _ => None,
+                });
+                return w;
             }
         }
+        visited.insert(b);
+        let preds: Vec<usize> = self.cfg.blocks[b]
+            .preds
+            .iter()
+            .copied()
+            .filter(|p| !visited.contains(p))
+            .collect();
+        if preds.is_empty() {
+            if b == self.cfg.entry {
+                w.stop = Stop::Entry;
+            }
+            return w;
+        }
+        if depth > 8 {
+            return w;
+        }
+        let from: Vec<Written> = preds
+            .iter()
+            .map(|&p| {
+                let mut seen = visited.clone();
+                self.walk_back(
+                    p,
+                    self.cfg.blocks[p].steps.end,
+                    &mut seen,
+                    budget,
+                    depth + 1,
+                )
+            })
+            .collect();
+        // What every way in agrees on.
+        let own: BTreeSet<u16> = w.bytes.keys().copied().collect();
+        let first = &from[0];
+        for (&reg, &(byte, off)) in &first.bytes {
+            if w.bytes.contains_key(&reg) {
+                continue;
+            }
+            let all: Option<Vec<Byte>> = from
+                .iter()
+                .map(|x| x.bytes.get(&reg).map(|(b, _)| *b))
+                .collect();
+            if let Some(all) = all {
+                if all.iter().all(|x| *x == byte) {
+                    w.bytes.insert(reg, (byte, off));
+                } else {
+                    w.bytes.insert(reg, (Byte::Unknown, off));
+                    w.varies.insert(reg);
+                }
+            }
+        }
+        // A register set on this block's own way down was not in doubt.
+        for x in &from {
+            for r in &x.varies {
+                if !own.contains(r) && w.bytes.get(r).is_some_and(|(b, _)| *b == Byte::Unknown) {
+                    w.varies.insert(*r);
+                }
+            }
+        }
+        w.stop = if from.iter().all(|x| x.stop == first.stop) {
+            first.stop
+        } else {
+            Stop::Earlier
+        };
+        w
     }
 
     // ---- waiting ----
@@ -880,6 +938,8 @@ enum Stop {
 /// The register writes reaching an instruction.
 struct Written {
     bytes: HashMap<u16, (Byte, FileOffset)>,
+    /// Registers the ways in set differently.
+    varies: BTreeSet<u16>,
     stop: Stop,
 }
 
@@ -891,6 +951,8 @@ enum Val {
     From(SnesAddress),
     /// Written with something worked out along the way.
     Computed,
+    /// Set differently on the paths that lead here.
+    Varies,
     /// Not written on the way.
     Unset,
 }
@@ -919,6 +981,9 @@ impl Written {
             .collect();
         if bytes.iter().all(Option::is_none) {
             return Val::Unset;
+        }
+        if regs.iter().any(|r| self.varies.contains(r)) {
+            return Val::Varies;
         }
         let known: Option<u32> = bytes.iter().rev().try_fold(0u32, |acc, b| {
             Some(acc << 8 | u32::from(b.and_then(Byte::known)?))
@@ -954,6 +1019,7 @@ impl Written {
             Val::Known(k) => format!("${k:X}"),
             Val::From(a) => format!("in {}", name(a)),
             Val::Computed => "worked out here".to_owned(),
+            Val::Varies => "set differently on each path here".to_owned(),
             Val::Unset => match self.stop {
                 Stop::Call(Some(c)) => format!("set by {}", name(c)),
                 Stop::Call(None) => "set by the call before".to_owned(),
@@ -1119,6 +1185,7 @@ mod tests {
     fn written(stop: Stop) -> Written {
         Written {
             bytes: HashMap::new(),
+            varies: BTreeSet::new(),
             stop,
         }
     }

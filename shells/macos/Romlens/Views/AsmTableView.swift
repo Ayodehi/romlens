@@ -237,6 +237,8 @@ final class AsmCanvasView: NSView {
         }
         if event.modifierFlags.contains(.shift) {
             model.extendSelection(to: record.fileOffset)
+        } else if record.kind == .note {
+            model.selectIdiom(noteAt: record.fileOffset)
         } else {
             model.select(offset: record.fileOffset)
         }

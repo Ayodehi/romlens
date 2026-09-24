@@ -67,8 +67,9 @@ import Testing
         })
         let canvas = try #require(Fixture.find(content, GraphCanvasView.self))
         let scene = canvas.scene
-        // The loop block: its label, then its three instructions.
-        #expect(scene.boxes[1].lines.count == 4)
+        // The loop block: its label, the idiom's note, then its three
+        // instructions.
+        #expect(scene.boxes[1].lines.count == 5)
         #expect(scene.boxes[1].loopHeader)
         #expect(scene.edges.count == 3)
         // Boxes top to bottom, none on another.
