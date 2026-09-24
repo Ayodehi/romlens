@@ -11,9 +11,24 @@ to track progress against it.
 | S1 the registers reaching an instruction, through calls | done: `explain::setup::registers_at`. A walk back that joins paths (a register set differently, or on only some paths, is `Varies`) and takes a call as its routine's writes on every way out (memoised, six calls deep, a cycle counts as nothing). Tests: `tests/screen.rs` |
 | S2 the setup, decoded; `romlens screen` | done: `explain::screen::screen_at`. Each row names the stores that set it, and a register not set says why: "not set yet" in RESET, "the code it interrupted set it" in an interrupt handler, "its callers may set it" elsewhere. A layer section with nothing set collapses to one line. Golden `screen.txt` |
 | S3 where VRAM and the palette were filled from | done: DMA idioms carry `DmaTransfer` records. `UploadIndex` finds the DMAs that write a VRAM word or the palette, preferring one from ROM, and says "VRAM here is written by the DMA at …". It does not say "uploaded these tiles": the DMA is found anywhere in the ROM, not on this path. A row links to its ROM source |
-| S4 FFI | |
-| S5 macOS: the Screen section | |
-| S6 measure and record | |
+| S4 FFI | done: `Workbench::screen_at` (async, with `screen_at_blocking`), records `ScreenSetupInfo`, `ScreenSectionInfo`, `ScreenRowInfo`, `ScreenLinkInfo`. Tested from Rust and RomlensKit |
+| S5 macOS: the Screen section | done: "Screen at this point" in the inspector, closed by default and worked out off the main thread only while open. Each row has a button to the store that set it, a DMA source with Go, and Show Tiles, Show Tilemap or Show Palette. Show Tiles uses the layer's depth and, where the same setup loads the palette from ROM, that palette. App test in `ExplanationTests` (99 pass) |
+| S6 measure and record | done, 24 September 2026; see Measurements |
+
+## Measurements
+
+Checked on 24 September 2026:
+
+- **Super Metroid at `$82:826E`,** after the routine at `$82:81DD` sets up the game screen:
+  - forced blank;
+  - mode 1 with BG3 in front;
+  - BG1 tilemap at VRAM $5000, 64×32; BG2 at $4800, 64×32; BG3 at $5800, 32×64;
+  - BG1 and BG2 tiles at $0000, BG3 tiles at $4000;
+  - all 8×8 tiles, BG1–3 and sprites on the main screen, sprites 8×8 and 16×16 at $6000.
+
+  Every value names its store. The sprite tiles name the DMA at `$80:93B3`, Samus's sprite upload, and the palette names the DMA at `$80:9372` ($0200 bytes from `$7E:C000`). Release build: under 0.1 s.
+- **Super Mario World's RESET at `$00:8069`,** before its main loop, shows only forced blank, the sprite sizes and table, and interrupts off. The mode and layers are "not set yet", which is right: the game sets them later, in its mode routines and the NMI handler.
+- **Super Mario World's NMI handler.** Mode 1 comes from its constant store at `$00:81D7`. Most other registers read "set differently on each path", because the handler copies them from RAM mirrors through the direct page, which is not known on entry to an interrupt.
 
 ## Context
 

@@ -168,8 +168,8 @@ Written from `21-screen-setup.md` on 24 September 2026.
 
 | # | Capability | Shell must expose | CLI scenario | macOS | Win | Linux |
 |---|---|---|---|---|---|---|
-| 4.5 | What the screen is set up to be at an instruction | The inspector's Screen section: display, mode, each layer's depth, tilemap, tiles and size, sprites, colour math, interrupts; each value selects the instruction that set it | `romlens screen <rom> [--project P] <address>` | ⬜ | ⬜ | ⬜ |
-| 4.6 | Where VRAM was filled from | A layer's tiles or tilemap name the DMA that uploaded them; a button opens its ROM source in the Tile Decoder or Tilemap viewer | `romlens screen … ` (the uploads) | ⬜ | ⬜ | ⬜ |
+| 4.5 | What the screen is set up to be at an instruction | The inspector's Screen section: display, mode, each layer's depth, tilemap, tiles and size, sprites, colour math, interrupts; each value selects the instruction that set it | `romlens screen <rom> [--project P] <address>` | 🧪 | ⬜ | ⬜ |
+| 4.6 | Where VRAM was filled from | A layer's tiles or tilemap name the DMA that uploaded them; a button opens its ROM source in the Tile Decoder or Tilemap viewer | `romlens screen … ` (the uploads) | 🧪 | ⬜ | ⬜ |
 
 ## Manual pass, macOS (to repeat before each release)
 

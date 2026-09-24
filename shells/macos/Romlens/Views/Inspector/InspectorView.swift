@@ -18,6 +18,9 @@ struct InspectorView: View {
                         if let x = model.explanation, x.register != nil || !x.idioms.isEmpty {
                             ExplanationSection(model: model, explanation: x)
                         }
+                        if model.instruction != nil {
+                            ScreenSection(model: model)
+                        }
                         RegionSection(model: model)
                         if let preview = model.preview {
                             PreviewSection(model: model, preview: preview)
@@ -362,6 +365,91 @@ struct IdiomView: View {
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .systemIndigo).opacity(0.08)))
+    }
+}
+
+/// What the screen is set up to be at the selected instruction (docs/21).
+struct ScreenSection: View {
+    @Bindable var model: RomViewModel
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $model.showScreen) {
+            VStack(alignment: .leading, spacing: 10) {
+                if let s = model.screen {
+                    ForEach(Array(s.sections.enumerated()), id: \.offset) { _, section in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(section.title).font(.callout.weight(.semibold))
+                            ForEach(Array(section.rows.enumerated()), id: \.offset) { _, row in
+                                ScreenRowView(model: model, row: row)
+                            }
+                        }
+                    }
+                } else if model.screenLoading {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Text("The selection is not inside a routine the analysis found.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .padding(.top, 6)
+        } label: {
+            Text("Screen at this point").font(.headline)
+        }
+        .help("What the PPU registers hold when this instruction runs, from the code before it on every path, calls included.")
+    }
+}
+
+struct ScreenRowView: View {
+    let model: RomViewModel
+    let row: ScreenRowInfo
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(row.label).foregroundStyle(.secondary).frame(width: 72, alignment: .leading)
+                Text(row.text).fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                if let at = row.setAt.last {
+                    Button {
+                        model.jump(to: at)
+                    } label: {
+                        Image(systemName: "arrow.right.circle")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Go to the store that set it")
+                }
+            }
+            .font(.callout)
+            if let source = row.source {
+                HStack(spacing: 6) {
+                    Text(source).font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let at = row.sourceAt {
+                        Button("Go") { model.jump(to: at) }.controlSize(.mini)
+                    }
+                    if let link = row.link {
+                        Button(title(link)) { model.open(screenLink: link) }.controlSize(.mini)
+                    }
+                }
+                .padding(.leading, 80)
+            } else if let link = row.link {
+                HStack(spacing: 6) {
+                    if let at = row.sourceAt {
+                        Button("Go") { model.jump(to: at) }.controlSize(.mini)
+                    }
+                    Button(title(link)) { model.open(screenLink: link) }.controlSize(.mini)
+                }
+                .padding(.leading, 80)
+            }
+        }
+    }
+
+    private func title(_ link: ScreenLinkInfo) -> String {
+        switch link {
+        case .tiles: "Show Tiles"
+        case .tilemap: "Show Tilemap"
+        case .palette: "Show Palette"
+        }
     }
 }
 

@@ -84,4 +84,24 @@ import Testing
         #expect(CPaneController.value(of: "0b1000") == 8)
         #expect(CPaneController.bases(0x81) == "129 = 0x81 = 0b10000001")
     }
+
+    @Test func theScreenSectionShowsTheSetupAndOpensItsViews() async throws {
+        let m = try await model()
+        m.select(offset: 0x56)
+        #expect(m.screen == nil, "nothing is worked out until the section opens")
+        m.showScreen = true
+        try await Fixture.settle(until: { m.screen != nil })
+        let irq = m.screen?.sections.first { $0.title == "Interrupts" }?.rows.first
+        #expect(irq?.text == "NMI on, joypad auto-read on")
+        #expect(irq?.setAt == [0x53])
+        // Another instruction: the section follows.
+        m.select(offset: 0x0C)
+        try await Fixture.settle(until: {
+            m.screen?.sections.first { $0.title == "Interrupts" }?.rows.first?.text == "not set yet"
+        })
+        m.open(screenLink: .tiles(rom: 0x1000, bpp: 2))
+        #expect(m.graphicsTab == .tiles)
+        #expect(m.graphics.format == .bpp2)
+        #expect(m.graphics.romOffset == 0x1000)
+    }
 }

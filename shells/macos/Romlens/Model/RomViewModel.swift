@@ -80,6 +80,17 @@ final class RomViewModel {
     /// What the selected instruction does to the hardware, and the idioms
     /// it is part of (docs/20).
     private(set) var explanation: ExplanationInfo?
+    /// What the screen is set up to be at the selected instruction
+    /// (docs/21), worked out only while the inspector's Screen section is
+    /// open.
+    private(set) var screen: ScreenSetupInfo?
+    private(set) var screenLoading = false
+    /// The Screen section is open.
+    var showScreen = false {
+        didSet { if showScreen != oldValue { refreshScreen() } }
+    }
+    @ObservationIgnored private var screenTask: Task<Void, Never>?
+    @ObservationIgnored private var screenFor: UInt32?
     private(set) var region: RegionInfo?
     private(set) var label: LabelInfo?
     private(set) var lineComment: CommentInfo?
@@ -188,6 +199,55 @@ final class RomViewModel {
     }
     private var explanationsShown = !UserDefaults.standard.bool(forKey: RomViewModel.hideExplanationsKey)
 
+    /// Work out the screen at the selected instruction, if the Screen
+    /// section is open and it is not already shown.
+    func refreshScreen(force: Bool = false) {
+        guard showScreen, let at = instruction?.fileOffset else {
+            if instruction == nil { screen = nil }
+            return
+        }
+        guard force || screenFor != at else { return }
+        screenFor = at
+        screenTask?.cancel()
+        screenLoading = true
+        let workbench = workbench
+        screenTask = Task { [weak self] in
+            let s = await workbench.screenAt(fileOffset: at)
+            guard let self, !Task.isCancelled, self.screenFor == at else { return }
+            self.screen = s
+            self.screenLoading = false
+        }
+    }
+
+    /// A Screen row's view: the ROM bytes a DMA sends to VRAM or the
+    /// palette, in the Tile Decoder, Tilemap or Palette view.
+    func open(screenLink link: ScreenLinkInfo) {
+        graphics.source = .rom
+        switch link {
+        case .tiles(let rom, let bpp):
+            graphics.romOffset = rom
+            graphics.format = switch bpp {
+            case 2: .bpp2
+            case 8: .bpp8
+            case 7: .mode7
+            default: .bpp4
+            }
+            // The palette the same setup loads, where it is in ROM.
+            let palette = screen?.sections.flatMap(\.rows).compactMap(\.link).first {
+                if case .palette = $0 { true } else { false }
+            }
+            if case .palette(let p) = palette { graphics.palette = .rom(p) }
+            graphics.selectedTile = 0
+            graphicsTab = .tiles
+        case .tilemap(let rom):
+            graphics.romOffset = rom
+            graphicsTab = .tilemap
+        case .palette(let rom):
+            graphics.romOffset = rom
+            graphicsTab = .palette
+        }
+    }
+
     /// Select every instruction of the idiom whose note is at `offset`:
     /// what clicking its note line does.
     func selectIdiom(noteAt offset: UInt32) {
@@ -243,6 +303,7 @@ final class RomViewModel {
             lineGeneration += 1
             stripGeneration += 1
             refreshSelectionDetails()
+            refreshScreen(force: true)
             decompiler.invalidate()
             graph.invalidate()
             refreshDecompile()
@@ -363,6 +424,8 @@ final class RomViewModel {
     private func clearDetails() {
         instruction = nil
         explanation = nil
+        screen = nil
+        screenFor = nil
         region = nil
         label = nil
         lineComment = nil
@@ -378,6 +441,7 @@ final class RomViewModel {
         guard let offset = selectedOffset else { return }
         instruction = workbench.instructionAt(fileOffset: offset)
         explanation = instruction.map { workbench.explainAt(fileOffset: $0.fileOffset) }
+        refreshScreen()
         region = workbench.regionAt(fileOffset: offset)
         let itemStart = instruction?.fileOffset ?? offset
         if let address = rom.snesAddressFor(fileOffset: itemStart) {
