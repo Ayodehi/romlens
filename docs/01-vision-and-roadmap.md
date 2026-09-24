@@ -182,6 +182,9 @@ pseudo-C rendering of a chosen routine.
 
 The pseudo-C work is planned in `18-decompiler.md` (23 September 2026):
 valid C per routine, shown beside the disassembly.
+The control-flow graph and call graph views are planned in
+`19-graphs.md` (24 September 2026): a Graph tab with each routine's blocks
+and its callers and callees, laid out by the core.
 
 - Function boundaries from analysis and user marks; basic blocks; CFG view.
 - Call graph with drill-down; "who calls this" and "what does this call".
