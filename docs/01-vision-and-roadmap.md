@@ -206,7 +206,9 @@ Deliverable: exportable, animated explanations of real code.
 Static explanations come first and are planned in `20-explanations.md`
 (24 September 2026): each hardware register write decoded one field at a
 time, and the standard SNES sequences (VBlank waits, DMA, clearing memory,
-the APU handshake and so on) named where they appear.
+the APU handshake and so on) named where they appear. What those writes add
+up to, the screen a routine sets up and where its graphics were loaded
+from, is planned in `21-screen-setup.md` (24 September 2026).
 
 - Recording scrubber: step a recording frame by frame with register and
   memory views, and instruction by instruction where the recording carries
