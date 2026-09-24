@@ -245,10 +245,21 @@ fn load(rom: &RomImage, insn: &Instruction, wide: bool) -> [Byte; 2] {
     let direct = matches!(insn.mode, Absolute | AbsoluteLong | Direct);
     let Some(t) = insn
         .target
-        .filter(|t| direct && t.kind == TargetKind::Data && t.certain)
+        .filter(|t| direct && t.kind == TargetKind::Data)
     else {
         return out;
     };
+    if !t.certain {
+        // An absolute address below $2000 is low RAM in every bank a data
+        // bank register normally holds, so where it came from is known even
+        // when the bank is not; its value never is.
+        if insn.mode == Absolute && u32::from(t.address.offset()) + n as u32 <= 0x2000 {
+            for (i, slot) in out.iter_mut().enumerate().take(n) {
+                *slot = Byte::From(SnesAddress::new(0x7E, t.address.offset() + i as u16));
+            }
+        }
+        return out;
+    }
     for (i, slot) in out.iter_mut().enumerate().take(n) {
         let a = plus(t.address, i as u16);
         *slot = match rom.map().classify(a) {

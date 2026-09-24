@@ -157,10 +157,10 @@ Written from `20-explanations.md` on 24 September 2026.
 
 | # | Capability | Shell must expose | CLI scenario | macOS | Win | Linux |
 |---|---|---|---|---|---|---|
-| 4.1 | A register write explained field by field | The listing's automatic comment reads `NMITIMEN = $81: NMI on, joypad auto-read on`; the inspector's Explanation section lists every field; an unknown value says where it came from | `romlens explain <rom> [--project P] <address>`, `romlens registers <address>` | ⬜ | ⬜ | ⬜ |
-| 4.2 | Common idioms named | A note line above each (`; ▸ Wait for vertical blank`), with a summary in its values and why games do it in the inspector; clicking the note selects its instructions | `romlens explain <rom> --routine <address>` | ⬜ | ⬜ | ⬜ |
-| 4.3 | The C says the same | Explained stores and idioms carry the same text as comments in the C tab; the code is unchanged | `romlens decompile <rom> <address>` | ⬜ | ⬜ | ⬜ |
-| 4.4 | Explanations can be turned off | View › Show Explanations: off, the listing reads as before | (n/a) | ⬜ | ⬜ | ⬜ |
+| 4.1 | A register write explained field by field | The listing's automatic comment reads `NMITIMEN = $81: NMI on, joypad auto-read on`; the inspector's Explanation section lists every field; an unknown value says where it came from | `romlens explain <rom> [--project P] <address>`, `romlens registers <address>` | 🧪 | ⬜ | ⬜ |
+| 4.2 | Common idioms named | A note line above each (`; ▸ Wait for vertical blank`), with a summary in its values and why games do it in the inspector; clicking the note selects its instructions | `romlens explain <rom> --routine <address>` | 🧪 | ⬜ | ⬜ |
+| 4.3 | The C says the same | Explained stores and idioms carry the same text as comments in the C tab; the code is unchanged | `romlens decompile <rom> <address>` | 🧪 | ⬜ | ⬜ |
+| 4.4 | Explanations can be turned off | View › Show Explanations: off, the listing reads as before | (n/a) | 🧪 | ⬜ | ⬜ |
 
 ## Manual pass, macOS (to repeat before each release)
 

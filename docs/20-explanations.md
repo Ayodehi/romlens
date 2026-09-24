@@ -15,7 +15,33 @@ track progress against it.
 | E5 the C: the same comments | done: `decompile::notes::annotate` runs after the code is printed. It adds each explained store's meaning after its statement and each idiom's note above the first line it prints on, moved up over a loop's opening line. `DecompileOptions::explain` (on by default; `romlens decompile --no-explain`). A test checks that removing the comments gives the plain text back. Super Metroid: 799 of 799 routines still pass `cc -std=c11 -fsyntax-only -Wall` |
 | E6 FFI | done: records `RegisterAccessInfo` (a store's value, or a read described without one), `RegisterPartInfo`, `FieldRowInfo`, `IdiomInfo`; `Workbench::explain_at(file_offset)`, `show_explanations` / `set_show_explanations` (rebuilds the lines and changes what the C carries), `make_explain_test_rom`. The workbench builds the explanations with each analysis and rebuilds them after every name or comment edit. `explanations_in_routine` was not needed: the listing and the C already carry a routine's notes. `API_VERSION` 0.7.0. Tested from Rust and RomlensKit |
 | E7 macOS: the inspector's Explanation section, the toggle, note lines | done: the inspector's Explanation section after Instruction shows each register's short form, what it is for and a grid of its fields (bits, field, value, meaning), says where an unknown value came from, and for a read the fields it reports. Each idiom gets a card with its summary, "Why games do this" and Select Its Instructions. Note lines are indigo in the listing and inside Graph boxes; clicking one selects the idiom's instructions. View › Show Explanations (⌥⌘E) is remembered between windows. Where paths meet, the search back for a DMA's settings now keeps what every path agrees on and says "set differently on each path" otherwise. App tests: `ExplanationTests`; 97 app tests pass. Checked by eye on Super Mario World's RESET |
-| E8 measure and record | |
+| E8 measure and record | done, 24 September 2026; see Measurements |
+
+## Measurements
+
+Measured 24 September 2026 with `romlens explain <rom> [--project P] --stats`, release build.
+
+| | Super Metroid (static analysis) | Super Mario World (with its project and live session) |
+|---|---|---|
+| Routines | 799 | 918 |
+| Hardware stores | 865 | 485 |
+| Value known | 590 (68%) | 261 (54%) |
+| Source known | 152 (18%) | 42 (9%) |
+| Indexed, register unknown | 19 (2%) | 32 (7%) |
+| DMA / HDMA | 55 / 3 | 41 / 0 |
+| Clear or fill loops, block moves | 38, 0 | 16, 5 |
+| Multiply / divide | 9 / 15 | 13 / 5 |
+| Waits (blanking, sound CPU) | 6, 2 | 5, 4 |
+| Second ways in | 14 | 100 |
+| Time for the whole ROM | 7.5 ms | under 0.25 s with the analysis |
+
+Checked by hand:
+
+- **Super Mario World's RESET.** It turns interrupts, HDMA and DMA off, zeroes the four APU ports, and sets `INIDISP = $80: forced blank, brightness 0`. Its clearing loop stores two things, so it is rightly not called a clear.
+- **The NMI handler.** It hands `$7E:1DF9–$1DFC` to the sound ports and restores `INIDISP ← $7E:0DAE` and `HDMAEN ← $7E:0D9F`. It sets `NMITIMEN = $81`, and it runs on into `$82C3`.
+- **Super Metroid's `SUB_8091A9`.** It is a DMA helper with its settings inline after the `JSL`, so its callers' transfers read "set by SUB_8091A9". Its divides by 100 and 10 read "the value in `$7E:09C2` ÷ 100".
+
+Most unknown values in Super Mario World's NMI handler come through the direct page, which the analysis does not know on entry to an interrupt. They are left unexplained rather than guessed.
 
 ## Context
 
