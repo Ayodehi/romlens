@@ -8,7 +8,7 @@
 use crate::model::hardware::all_hardware_registers;
 
 /// The helpers `snes.h` declares, which a label must not shadow.
-pub const HELPERS: [&str; 25] = [
+pub const HELPERS: [&str; 27] = [
     "SET24",
     "SEI",
     "CLI",
@@ -24,6 +24,8 @@ pub const HELPERS: [&str; 25] = [
     "PLP",
     "mvn",
     "mvp",
+    "mvn8",
+    "mvp8",
     "bcd_add",
     "bcd_sub",
     "WAI",
@@ -37,7 +39,7 @@ pub const HELPERS: [&str; 25] = [
 ];
 
 /// Every other name `snes.h` defines.
-pub const GLOBALS: [&str; 17] = [
+pub const GLOBALS: [&str; 20] = [
     "A",
     "X",
     "Y",
@@ -55,6 +57,9 @@ pub const GLOBALS: [&str; 17] = [
     "s16",
     "s32",
     "ROMLENS_SNES_H",
+    "bool",
+    "true",
+    "false",
 ];
 
 pub fn snes_h() -> String {
@@ -67,6 +72,7 @@ pub fn snes_h() -> String {
          #ifndef ROMLENS_SNES_H\n\
          #define ROMLENS_SNES_H\n\
          \n\
+         #include <stdbool.h>\n\
          #include <stdint.h>\n\
          \n\
          typedef uint8_t u8;\n\
@@ -77,7 +83,10 @@ pub fn snes_h() -> String {
          typedef int32_t s32;\n\
          \n\
          /* The CPU. A holds all 16 bits of the accumulator; with 8-bit A only\n\
-         * its low byte changes. Flags are 0 or 1. */\n\
+         * its low byte changes. Flags are 0 or 1. At the full level each\n\
+         * routine has these as its own variables (a, x, c, ...), and passes\n\
+         * and returns them; the globals carry them only to code that reads\n\
+         * the registers themselves. */\n\
          extern u16 A, X, Y, S, D;\n\
          extern u8 DBR;\n\
          extern u8 N, V, Z, C;\n\
@@ -111,6 +120,8 @@ pub fn snes_h() -> String {
          void PLP(void);\n\
          void mvn(u8 dst_bank, u8 src_bank); /* copies A + 1 bytes from X to Y */\n\
          void mvp(u8 dst_bank, u8 src_bank);\n\
+         void mvn8(u8 dst_bank, u8 src_bank); /* the same with 8-bit X and Y */\n\
+         void mvp8(u8 dst_bank, u8 src_bank);\n\
          /* Decimal-mode ADC and SBC of `bits` bits; they set C and V. */\n\
          u16 bcd_add(u16 a, u16 b, int bits);\n\
          u16 bcd_sub(u16 a, u16 b, int bits);\n\

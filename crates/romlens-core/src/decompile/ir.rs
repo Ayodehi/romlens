@@ -224,6 +224,11 @@ pub enum Expr {
     Signed(Width, Box<Expr>),
     /// A helper from `snes.h` that returns a value (`pull8()`).
     Call(&'static str, Vec<Expr>),
+    /// A C variable the `full` level gave a register (`Lifted::vars`).
+    Var(u32),
+    /// A CPU register as the global `snes.h` declares, where the `full`
+    /// level hands a value to code that reads the registers themselves.
+    Global(Slot),
 }
 
 impl Expr {
@@ -369,6 +374,163 @@ impl Expr {
     }
 }
 
+/// A register the `full` level makes a C variable: the accumulator, the
+/// index registers and the four flags. S, D and DBR stay the globals.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Slot {
+    A,
+    X,
+    Y,
+    C,
+    N,
+    V,
+    Z,
+}
+
+impl Slot {
+    pub const ALL: [Slot; 7] = [
+        Slot::A,
+        Slot::X,
+        Slot::Y,
+        Slot::C,
+        Slot::N,
+        Slot::V,
+        Slot::Z,
+    ];
+
+    /// The C variable's name.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Slot::A => "a",
+            Slot::X => "x",
+            Slot::Y => "y",
+            Slot::C => "c",
+            Slot::N => "n",
+            Slot::V => "v",
+            Slot::Z => "z",
+        }
+    }
+
+    /// The global in `snes.h`.
+    pub const fn global(self) -> &'static str {
+        match self {
+            Slot::A => "A",
+            Slot::X => "X",
+            Slot::Y => "Y",
+            Slot::C => "C",
+            Slot::N => "N",
+            Slot::V => "V",
+            Slot::Z => "Z",
+        }
+    }
+
+    pub const fn of_reg(r: Reg) -> Option<Slot> {
+        match r {
+            Reg::A => Some(Slot::A),
+            Reg::X => Some(Slot::X),
+            Reg::Y => Some(Slot::Y),
+            _ => None,
+        }
+    }
+
+    pub const fn of_flag(f: Flag) -> Slot {
+        match f {
+            Flag::C => Slot::C,
+            Flag::N => Slot::N,
+            Flag::V => Slot::V,
+            Flag::Z => Slot::Z,
+        }
+    }
+
+    pub const fn is_flag(self) -> bool {
+        matches!(self, Slot::C | Slot::N | Slot::V | Slot::Z)
+    }
+
+    /// The register or flag as the IR reads it, whole.
+    pub fn expr(self) -> Expr {
+        match self {
+            Slot::A => Expr::Reg(Reg::A, Width::W16),
+            Slot::X => Expr::Reg(Reg::X, Width::W16),
+            Slot::Y => Expr::Reg(Reg::Y, Width::W16),
+            Slot::C => Expr::Flag(Flag::C),
+            Slot::N => Expr::Flag(Flag::N),
+            Slot::V => Expr::Flag(Flag::V),
+            Slot::Z => Expr::Flag(Flag::Z),
+        }
+    }
+
+    /// The register or flag as the IR writes it, whole.
+    pub fn place(self) -> Place {
+        match self {
+            Slot::A => Place::Reg(Reg::A, Width::W16),
+            Slot::X => Place::Reg(Reg::X, Width::W16),
+            Slot::Y => Place::Reg(Reg::Y, Width::W16),
+            Slot::C => Place::Flag(Flag::C),
+            Slot::N => Place::Flag(Flag::N),
+            Slot::V => Place::Flag(Flag::V),
+            Slot::Z => Place::Flag(Flag::Z),
+        }
+    }
+}
+
+/// A C variable's type at the `full` level.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum CType {
+    U8,
+    U16,
+    Bool,
+    /// A loop counter declared in its `for`.
+    Int,
+}
+
+impl CType {
+    pub const fn name(self) -> &'static str {
+        match self {
+            CType::U8 => "u8",
+            CType::U16 => "u16",
+            CType::Bool => "bool",
+            CType::Int => "int",
+        }
+    }
+}
+
+/// A variable of the `full` level.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VarDecl {
+    pub name: String,
+    pub ty: CType,
+    pub slot: Slot,
+    /// A parameter of the routine, declared in its signature.
+    pub param: bool,
+    /// Nothing in the printed code mentions it: not declared.
+    pub unused: bool,
+}
+
+/// How a block that leaves the routine leaves it at the `full` level.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ExitValue {
+    /// Before the way out: a tail call made as a call with its results
+    /// (then `call_done`), or the registers handed to code that reads them.
+    pub before: Vec<Stmt>,
+    /// The tail call is in `before`; it is not printed again.
+    pub call_done: bool,
+    /// After a tail call left as it was: its results taken back.
+    pub after: Vec<Stmt>,
+    /// The results after the first: `*y_out = y;`.
+    pub outs: Vec<(Slot, Expr)>,
+    pub ret: Option<Expr>,
+}
+
+impl ExitValue {
+    /// Nothing to print but `return;`.
+    pub fn is_plain(&self) -> bool {
+        self.before.is_empty()
+            && self.after.is_empty()
+            && self.outs.is_empty()
+            && self.ret.is_none()
+    }
+}
+
 /// Where a statement stores.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Place {
@@ -380,6 +542,10 @@ pub enum Place {
         addr: Expr,
         width: Width,
     },
+    Var(u32),
+    Global(Slot),
+    /// A result the routine passes back through a pointer: `*y_out`.
+    Out(Slot),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -414,6 +580,14 @@ pub enum Stmt {
     /// A value computed only for its effect, a read that may touch
     /// hardware: `(void)MEM8(…);`.
     Eval(Expr),
+    /// A call with its arguments and results (`full` level): `a =
+    /// SUB_8123(x, &y);`, `ret` the value returned and `outs` the rest.
+    Invoke {
+        target: SnesAddress,
+        args: Vec<Expr>,
+        ret: Option<Place>,
+        outs: Vec<Place>,
+    },
 }
 
 /// One statement and the instruction it came from (an index into
@@ -448,4 +622,6 @@ pub struct LiftedBlock {
     pub term_step: Option<usize>,
     /// Instructions whose values were carried into the condition.
     pub term_merged: Vec<usize>,
+    /// At the `full` level, how a block that leaves the routine does it.
+    pub exit: Option<ExitValue>,
 }

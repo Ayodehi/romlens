@@ -1,21 +1,22 @@
 /* RESET_008000 at $00:8000: 10 instructions, full level. From Romlens; for reading, not for rebuilding the ROM. */
 #include "snes.h"
 
-void SUB_008020(void); /* Reads nothing; returns X. */
+u8 SUB_008020(void); /* Reads nothing; returns X. */
 void SUB_008030(void); /* Reads nothing; returns nothing. */
 void SUB_008040(void); /* Reads nothing; returns nothing. */
-void SUB_008050(void); /* Reads X; returns nothing; preserves X. */
+void SUB_008050(u8 x); /* Reads X; returns nothing; preserves X. */
 
 /* Reads nothing; returns A, X and the carry (some callers are not known, so returns are assumed). */
-void RESET_008000(void)
+u16 RESET_008000(u16 *x_out, bool *c_out)
 {
+    u8 x;
+
     SEI();
     native_mode();
-    /* 8-bit A, X and Y */
-    SUB_008020();
+    x = SUB_008020();
     SUB_008030();
     SUB_008040();
-    SUB_008050();
+    SUB_008050(x);
     for (;;) {
     }
 }
@@ -25,13 +26,14 @@ void RESET_008000(void)
 extern u8 ADDR_7E0200[];
 
 /* Reads nothing; returns X. */
-void SUB_008020(void)
+u8 SUB_008020(void)
 {
-    X = 0x0F;
-    do {
-        ADDR_7E0200[X] = 0;
-        X = (u8)(X - 1);
-    } while ((s8)X >= 0);
+    u8 x;
+
+    for (x = 0x0F; (s8)x >= 0; x--) {
+        ADDR_7E0200[x] = 0;
+    }
+    return x;
 }
 /* SUB_008030 at $00:8030: 7 instructions, full level. From Romlens; for reading, not for rebuilding the ROM. */
 #include "snes.h"
@@ -43,9 +45,7 @@ extern u16 ADDR_7E0014;
 /* Reads nothing; returns nothing. */
 void SUB_008030(void)
 {
-    /* 16-bit A, 8-bit X and Y */
     ADDR_7E0014 = ADDR_7E0010 + ADDR_7E0012;
-    /* 8-bit A, X and Y */
 }
 /* SUB_008040 at $00:8040: 6 instructions, full level. From Romlens; for reading, not for rebuilding the ROM. */
 #include "snes.h"
@@ -57,11 +57,13 @@ extern u8 ADDR_7E0022;
 /* Reads nothing; returns nothing. */
 void SUB_008040(void)
 {
-    A = ADDR_7E0020;
-    if ((u8)A < ADDR_7E0021) {
-        A = ADDR_7E0021;
+    u8 a;
+
+    a = ADDR_7E0020;
+    if (a < ADDR_7E0021) {
+        a = ADDR_7E0021;
     }
-    ADDR_7E0022 = (u8)A;
+    ADDR_7E0022 = a;
 }
 /* SUB_008050 at $00:8050: 5 instructions, full level. From Romlens; for reading, not for rebuilding the ROM. */
 #include "snes.h"
@@ -70,7 +72,7 @@ extern u8 ADDR_7E0300;
 extern u8 DATA_008070[];
 
 /* Reads X; returns nothing; preserves X. */
-void SUB_008050(void)
+void SUB_008050(u8 x)
 {
-    ADDR_7E0300 = DATA_008070[X];
+    ADDR_7E0300 = DATA_008070[x];
 }

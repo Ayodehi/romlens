@@ -25,6 +25,10 @@ pub struct Lifted {
     /// Temporaries `t1..=temps`.
     pub temps: u32,
     pub warnings: Vec<String>,
+    /// At the `full` level: the registers' C variables, and the routine's
+    /// signature.
+    pub vars: Vec<crate::decompile::ir::VarDecl>,
+    pub abi: Option<crate::decompile::signature::Abi>,
 }
 
 /// The decimal flag, followed through the graph: `ADC` and `SBC` mean
@@ -133,6 +137,8 @@ pub fn lift(f: &Function, cfg: &Cfg, opts: LiftOptions) -> Lifted {
         blocks,
         temps: l.temps,
         warnings: l.warnings,
+        vars: Vec::new(),
+        abi: None,
     }
 }
 
@@ -613,6 +619,15 @@ impl Lifter {
                 if bit(0x08) {
                     o.push(Stmt::Effect(if on { "SED" } else { "CLD" }, vec![]));
                 }
+                // Setting X to 8 bits clears X's and Y's high bytes.
+                if on && bit(0x10) && !fl.eff_x() {
+                    for r in [Reg::X, Reg::Y] {
+                        o.push(set(
+                            Place::Reg(r, Width::W16),
+                            Expr::cast(Width::W8, Expr::Reg(r, Width::W16)),
+                        ));
+                    }
+                }
                 if bit(0x30) {
                     o.push(Stmt::Note(widths(insn.flags_after)));
                 }
@@ -628,6 +643,15 @@ impl Lifter {
                         },
                         vec![],
                     ));
+                    // Emulation mode makes X and Y 8 bits wide.
+                    if insn.flags_after.e && !fl.eff_x() {
+                        for r in [Reg::X, Reg::Y] {
+                            o.push(set(
+                                Place::Reg(r, Width::W16),
+                                Expr::cast(Width::W8, Expr::Reg(r, Width::W16)),
+                            ));
+                        }
+                    }
                 }
                 if insn.assumptions & crate::cpu65816::ASSUMED_XCE_CARRY != 0 {
                     o.push(Stmt::Note(
@@ -670,6 +694,15 @@ impl Lifter {
             }
             PLP => {
                 o.push(Stmt::Effect("PLP", vec![]));
+                // Back to 8-bit index registers: their high bytes clear.
+                if insn.flags_after.eff_x() && !fl.eff_x() {
+                    for r in [Reg::X, Reg::Y] {
+                        o.push(set(
+                            Place::Reg(r, Width::W16),
+                            Expr::cast(Width::W8, Expr::Reg(r, Width::W16)),
+                        ));
+                    }
+                }
                 o.push(Stmt::Note(format!(
                     "flags restored; {}",
                     widths(insn.flags_after)
@@ -693,7 +726,13 @@ impl Lifter {
                     crate::cpu65816::Operand::Move { src, dst } => (src, dst),
                     _ => (0, 0),
                 };
-                let helper = if insn.mnemonic == MVN { "mvn" } else { "mvp" };
+                // With 8-bit index registers X and Y count in 8 bits.
+                let helper = match (insn.mnemonic == MVN, fl.eff_x()) {
+                    (true, false) => "mvn",
+                    (true, true) => "mvn8",
+                    (false, false) => "mvp",
+                    (false, true) => "mvp8",
+                };
                 o.push(Stmt::Effect(helper, vec![c(dst as u32), c(src as u32)]));
                 o.push(set(Place::Reg(Reg::Dbr, Width::W16), c(dst as u32)));
             }

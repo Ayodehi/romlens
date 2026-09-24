@@ -164,6 +164,7 @@ fn the_routines_mean_what_the_code_does() {
         let dir = scratch(&format!("semantic-{}", level.name()));
         std::fs::write(dir.join("snes.h"), decompile::snes_h()).unwrap();
         let mut includes = String::new();
+        let mut shims = String::new();
         for at in [0x8020u16, 0x8030, 0x8040, 0x8050] {
             let opts = DecompileOptions {
                 level,
@@ -175,7 +176,17 @@ fn the_routines_mean_what_the_code_does() {
             let name = format!("r{at:04X}.c");
             std::fs::write(dir.join(&name), &d.text).unwrap();
             includes.push_str(&format!("#include \"{name}\"\n"));
+            // At `full` a routine takes and returns its registers: call it
+            // from the globals the checks read.
+            let entry = SnesAddress::new(0, at);
+            let shim = format!("call_{at:04X}");
+            let program = decompile::program(&rom, &snap, &opts);
+            match program.abis.get(&entry).filter(|_| level == Level::Full) {
+                Some(abi) => shims.push_str(&abi.global_shim(&shim, &d.name)),
+                None => shims.push_str(&format!("static void {shim}(void) {{ {}(); }}\n", d.name)),
+            }
         }
+        includes.push_str(&shims);
         let rom_bytes: Vec<String> = rom.bytes()[..0x100].iter().map(|b| b.to_string()).collect();
         let main = RUNTIME
             .replace("/*INCLUDES*/", &includes)
@@ -274,6 +285,8 @@ void PHP(void) { push8((u8)(N << 7 | V << 6 | Z << 1 | C)); }
 void PLP(void) { u8 p = pull8(); N = p >> 7 & 1; V = p >> 6 & 1; Z = p >> 1 & 1; C = p & 1; }
 void mvn(u8 d, u8 s) { do { mem[d << 16 | Y++] = mem[s << 16 | X++]; } while (A-- != 0); }
 void mvp(u8 d, u8 s) { do { mem[d << 16 | Y--] = mem[s << 16 | X--]; } while (A-- != 0); }
+void mvn8(u8 d, u8 s) { do { mem[d << 16 | Y] = mem[s << 16 | X]; X = (X + 1) & 0xFF; Y = (Y + 1) & 0xFF; } while (A-- != 0); }
+void mvp8(u8 d, u8 s) { do { mem[d << 16 | Y] = mem[s << 16 | X]; X = (X - 1) & 0xFF; Y = (Y - 1) & 0xFF; } while (A-- != 0); }
 u16 bcd_add(u16 a, u16 b, int bits) { (void)bits; return a + b; }
 u16 bcd_sub(u16 a, u16 b, int bits) { (void)bits; return a - b; }
 void WAI(void) {}
@@ -290,27 +303,27 @@ int main(void) {
 
     memset(&mem[0x0200], 0xAA, 0x20);
     X = 0x33;
-    SUB_008020();
+    call_8020();
     for (int i = 0; i < 16; i++) CHECK("cleared", mem[0x0200 + i], 0);
     CHECK("past the end", mem[0x0210], 0xAA);
     CHECK("X after the loop", X, 0xFF);
 
     MEM16(0x10) = 0x1234; MEM16(0x12) = 0x0FF0; A = 0xBEEF;
-    SUB_008030();
+    call_8030();
     CHECK("sum", MEM16(0x14), 0x2224);
     MEM16(0x10) = 0xFFFF; MEM16(0x12) = 2;
-    SUB_008030();
+    call_8030();
     CHECK("wrapped sum", MEM16(0x14), 1);
 
     mem[0x20] = 5; mem[0x21] = 9; A = 0x1200;
-    SUB_008040();
+    call_8040();
     CHECK("larger (second)", mem[0x22], 9);
     mem[0x20] = 200;
-    SUB_008040();
+    call_8040();
     CHECK("larger (first)", mem[0x22], 200);
 
     X = 3; S = 0x01FF;
-    SUB_008050();
+    call_8050();
     CHECK("table entry", mem[0x0300], 8);
     CHECK("X restored", X, 3);
     CHECK("S balanced", S, 0x01FF);

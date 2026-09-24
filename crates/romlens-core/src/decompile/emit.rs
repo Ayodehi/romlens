@@ -14,7 +14,10 @@ use crate::cpu65816::format_instruction;
 use crate::decompile::cfg::{BlockId, Cfg, Term};
 use crate::decompile::function::Function;
 use crate::decompile::header::{GLOBALS, HELPERS};
-use crate::decompile::ir::{BinOp, CallTarget, Expr, LiftedBlock, Place, Stmt, UnOp, Width};
+use crate::decompile::ir::{
+    BinOp, CallTarget, Expr, LiftedBlock, Place, Stmt, UnOp, VarDecl, Width,
+};
+use crate::decompile::signature::Abi;
 use crate::memory::address::SnesAddress;
 use crate::memory::map::MemoryClass;
 use crate::model::hardware::{all_hardware_registers, hardware_register};
@@ -148,7 +151,15 @@ pub struct Namer<'a> {
     /// where it is only ever indexed (an array). Printed as `ADDR_7E0000`
     /// until a variable names it.
     pub placeholders: BTreeMap<SnesAddress, Option<u32>>,
+    /// Each routine's C signature, at the `full` level.
+    pub abis: Option<&'a BTreeMap<SnesAddress, Abi>>,
 }
+
+/// The `full` level's variable names, which a label must not take.
+const LOCALS: [&str; 22] = [
+    "a", "x", "y", "c", "n", "v", "z", "a8", "a16", "x8", "x16", "y8", "y16", "a_out", "x_out",
+    "y_out", "c_out", "n_out", "v_out", "z_out", "i", "j",
+];
 
 const KEYWORDS: [&str; 44] = [
     "auto",
@@ -210,6 +221,7 @@ impl<'a> Namer<'a> {
         reserved.extend(GLOBALS);
         reserved.extend(all_hardware_registers().iter().map(|r| r.name));
         reserved.extend(["uintptr_t", "main"]);
+        reserved.extend(LOCALS);
         Self {
             rom,
             project,
@@ -220,6 +232,7 @@ impl<'a> Namer<'a> {
             reserved,
             summaries: None,
             placeholders: BTreeMap::new(),
+            abis: None,
         }
     }
 
@@ -279,8 +292,13 @@ impl<'a> Namer<'a> {
             .and_then(|s| s.get(&at))
             .map(|s| format!(" /* {} */", crate::decompile::signature::describe(s)))
             .unwrap_or_default();
+        let sig = self
+            .abis
+            .and_then(|m| m.get(&at))
+            .map(|abi| abi.c_signature(&name))
+            .unwrap_or_else(|| format!("void {name}(void)"));
         self.decls
-            .insert((0, name.clone()), format!("void {name}(void);{note}"));
+            .insert((0, name.clone()), format!("{sig};{note}"));
         name
     }
 
@@ -539,6 +557,10 @@ pub struct Emitter<'a, 'n> {
     pub w: Writer,
     pub names: &'n mut Namer<'a>,
     pub stats: Stats,
+    /// The `full` level's variables.
+    pub vars: Vec<VarDecl>,
+    /// Print as C is written (`x++`, `a |= 4`), not statement by statement.
+    pub modern: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -557,6 +579,8 @@ impl<'a, 'n> Emitter<'a, 'n> {
             w: Writer::default(),
             names,
             stats: Stats::default(),
+            vars: Vec::new(),
+            modern: false,
         }
     }
 
@@ -626,7 +650,19 @@ impl<'a, 'n> Emitter<'a, 'n> {
                 self.w.tok(name, CTokenKind::Helper, None);
                 self.args(args);
             }
+            Expr::Var(v) => {
+                let name = self.var_name(*v);
+                self.local(&name);
+            }
+            Expr::Global(k) => self.local(k.global()),
         }
+    }
+
+    fn var_name(&self, v: u32) -> String {
+        self.vars
+            .get(v as usize)
+            .map(|d| d.name.clone())
+            .unwrap_or_else(|| format!("v{v}"))
     }
 
     /// Whether a 24-bit store to `addr` can be a plain assignment: a u32
@@ -888,6 +924,15 @@ impl<'a, 'n> Emitter<'a, 'n> {
             Place::Flag(f) => self.local(f.name()),
             Place::Temp(t) => self.local(&format!("t{t}")),
             Place::Mem { addr, width } => self.mem(addr, *width),
+            Place::Var(v) => {
+                let name = self.var_name(*v);
+                self.local(&name);
+            }
+            Place::Global(k) => self.local(k.global()),
+            Place::Out(k) => {
+                self.w.w("*");
+                self.local(&format!("{}_out", k.name()));
+            }
         }
     }
 
@@ -912,6 +957,25 @@ impl<'a, 'n> Emitter<'a, 'n> {
                 self.w.w(", ");
                 self.expr(value);
                 self.w.w(");");
+                self.w.end(steps);
+            }
+            Stmt::Assign { dst, value } if self.modern && self.compound(dst, value).is_some() => {
+                let (op, rhs) = self.compound(dst, value).unwrap();
+                self.place(dst);
+                // `++` binds tighter than a `*` or `&` a memory place
+                // starts with, so memory takes `+= 1`.
+                let var = matches!(dst, Place::Var(_));
+                match (op, rhs.as_const()) {
+                    (BinOp::Add, Some(1)) if var => self.w.w("++"),
+                    (BinOp::Sub, Some(1)) if var => self.w.w("--"),
+                    _ => {
+                        self.w.w(" ");
+                        self.w.w(op.symbol());
+                        self.w.w("= ");
+                        self.expr(&rhs);
+                    }
+                }
+                self.w.w(";");
                 self.w.end(steps);
             }
             Stmt::Assign { dst, value } => {
@@ -979,7 +1043,70 @@ impl<'a, 'n> Emitter<'a, 'n> {
                 self.w.w(";");
                 self.w.end(steps);
             }
+            Stmt::Invoke {
+                target,
+                args,
+                ret,
+                outs,
+            } => {
+                if let Some(r) = ret {
+                    self.place(r);
+                    self.w.w(" = ");
+                }
+                let name = self.names.function(*target);
+                self.w.tok(&name, CTokenKind::Function, Some(*target));
+                self.w.w("(");
+                let mut first = true;
+                for a in args {
+                    if !first {
+                        self.w.w(", ");
+                    }
+                    first = false;
+                    self.expr(a);
+                }
+                for o in outs {
+                    if !first {
+                        self.w.w(", ");
+                    }
+                    first = false;
+                    self.w.w("&");
+                    self.place(o);
+                }
+                self.w.w(");");
+                self.w.end(steps);
+            }
         }
+    }
+
+    /// `x = x + 1` as `x++`, `ADDR = ADDR | 4` as `ADDR |= 4`: the operator
+    /// and right-hand side, where the left-hand side is the destination.
+    fn compound(&self, dst: &Place, value: &Expr) -> Option<(BinOp, Expr)> {
+        let Expr::Bin(
+            op @ (BinOp::Add
+            | BinOp::Sub
+            | BinOp::And
+            | BinOp::Or
+            | BinOp::Xor
+            | BinOp::Shl
+            | BinOp::Shr),
+            a,
+            b,
+        ) = value
+        else {
+            return None;
+        };
+        let same = match (dst, &**a) {
+            (Place::Var(v), Expr::Var(w)) => v == w,
+            (
+                Place::Mem { addr, width },
+                Expr::Mem {
+                    addr: a2,
+                    width: w2,
+                },
+            ) => addr == &**a2 && width == w2,
+            _ => false,
+        };
+        same.then(|| (*op, (**b).clone()))
     }
 
     /// A value as a byte.
@@ -1188,7 +1315,7 @@ impl GotoLayout<'_> {
 }
 
 /// What a block that leaves the function does: return, tail-call, or say
-/// what could not be followed.
+/// what could not be followed; at the `full` level, with its results.
 fn exit(
     cfg: &Cfg,
     blocks: &[LiftedBlock],
@@ -1198,8 +1325,14 @@ fn exit(
     from: BlockId,
     asm: &dyn Fn(usize) -> String,
 ) {
+    let value = blocks[b].exit.as_ref();
+    if let Some(x) = value {
+        for s in &x.before {
+            e.stmt(s, ts, asm);
+        }
+    }
     match &cfg.blocks[b].term {
-        Term::Tail(a) => {
+        Term::Tail(a) if !value.is_some_and(|x| x.call_done) => {
             let name = e.names.function(*a);
             e.w.tok(&name, CTokenKind::Function, Some(*a));
             e.w.w("();");
@@ -1212,7 +1345,23 @@ fn exit(
         }
         _ => {}
     }
+    if let Some(x) = value {
+        for s in &x.after {
+            e.stmt(s, ts, asm);
+        }
+        for (k, v) in &x.outs {
+            e.place(&Place::Out(*k));
+            e.w.w(" = ");
+            e.expr(v);
+            e.w.w(";");
+            e.w.end(ts);
+        }
+    }
     e.kw("return");
+    if let Some(v) = value.and_then(|x| x.ret.as_ref()) {
+        e.w.w(" ");
+        e.expr(v);
+    }
     e.w.w(";");
     e.w.end(ts);
 }
@@ -1401,6 +1550,39 @@ impl TreeLayout<'_> {
                         self.body(e, body, asm);
                         e.w.w("}");
                         e.w.end(&[]);
+                    }
+                    LoopKind::For(c) => {
+                        let mut ts = ts.clone();
+                        ts.extend(c.steps.iter().copied());
+                        let name = e.var_name(c.var);
+                        e.kw("for");
+                        e.w.w(" (");
+                        if c.declare {
+                            e.ty("int");
+                            e.w.w(" ");
+                        }
+                        e.local(&name);
+                        e.w.w(" = ");
+                        e.num(c.init);
+                        e.w.w("; ");
+                        e.expr(&c.cond);
+                        e.w.w("; ");
+                        e.local(&name);
+                        match (c.op, c.step) {
+                            (BinOp::Add, 1) => e.w.w("++"),
+                            (BinOp::Sub, 1) => e.w.w("--"),
+                            (op, k) => {
+                                e.w.w(" ");
+                                e.w.w(op.symbol());
+                                e.w.w("= ");
+                                e.num(k);
+                            }
+                        }
+                        e.w.w(") {");
+                        e.w.end(&ts);
+                        self.body(e, body, asm);
+                        e.w.w("}");
+                        e.w.end(&ts);
                     }
                 }
             }

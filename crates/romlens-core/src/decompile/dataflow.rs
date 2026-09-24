@@ -240,6 +240,9 @@ impl<'a> Flow<'a> {
                         i.writes_mem = true;
                         i.effect = true;
                     }
+                    // The `full` level's variables are not tracked here: no
+                    // clean-up runs after them. Keep their statements.
+                    Place::Var(_) | Place::Global(_) | Place::Out(_) => i.effect = true,
                 }
             }
             Stmt::Call(t) => {
@@ -281,7 +284,7 @@ impl<'a> Flow<'a> {
                         i.defs.extend([Loc::S, Loc::N, Loc::V, Loc::Z, Loc::C]);
                         i.reads_mem = true;
                     }
-                    "mvn" | "mvp" => {
+                    "mvn" | "mvp" | "mvn8" | "mvp8" => {
                         i.uses.extend([Loc::Al, Loc::Ah, Loc::X, Loc::Y]);
                         i.defs.extend([Loc::Al, Loc::Ah, Loc::X, Loc::Y]);
                         i.writes_mem = true;
@@ -304,6 +307,14 @@ impl<'a> Flow<'a> {
                 i.effect = true;
             }
             Stmt::Note(_) => {}
+            Stmt::Invoke { args, .. } => {
+                for a in args {
+                    self.expr_info(a, &mut i);
+                }
+                i.writes_mem = true;
+                i.reads_mem = true;
+                i.effect = true;
+            }
             Stmt::Eval(e) => {
                 self.expr_info(e, &mut i);
                 i.effect = true;
@@ -721,7 +732,10 @@ fn drop_identities(f: &Function, lifted: &mut Lifted) {
             };
             let x8 = f.steps[l.step].insn.flags_before.eff_x();
             let same = match value {
-                Expr::Reg(vr, vw) => vr == r && (vw == dw || *r != Reg::A),
+                // X = X.lo is the same X only while X is 8 bits wide.
+                Expr::Reg(vr, vw) => {
+                    vr == r && (vw == dw || (*r != Reg::A && (*vw == Width::W16 || x8)))
+                }
                 Expr::Cast(Width::W8, inner) => match &**inner {
                     Expr::Reg(vr, _) if vr == r => {
                         (*r == Reg::A && *dw == Width::W8) || (matches!(r, Reg::X | Reg::Y) && x8)
@@ -772,7 +786,7 @@ fn local_defs(dst: &Place) -> Option<Vec<Loc>> {
         Place::Reg(r, w) => Some(Loc::of_reg(*r, *w)),
         Place::Flag(f) => Some(vec![Loc::of_flag(*f)]),
         Place::Temp(t) => Some(vec![Loc::Temp(*t)]),
-        Place::Mem { .. } => None,
+        _ => None,
     }
 }
 
@@ -807,6 +821,7 @@ fn for_each_expr(s: &Stmt, f: &mut impl FnMut(&Expr)) {
         }
         Stmt::Call(CallTarget::Table { index, .. }) => f(index),
         Stmt::Effect(_, args) => args.iter().for_each(f),
+        Stmt::Invoke { args, .. } => args.iter().for_each(f),
         _ => {}
     }
 }
@@ -821,6 +836,8 @@ fn for_each_expr_mut(s: &mut Stmt, f: &mut impl FnMut(&mut Expr)) {
         }
         Stmt::Call(CallTarget::Table { index, .. }) => f(index),
         Stmt::Effect(_, args) => args.iter_mut().for_each(f),
+        Stmt::Invoke { args, .. } => args.iter_mut().for_each(f),
+        Stmt::Eval(e) => f(e),
         _ => {}
     }
 }
@@ -959,7 +976,7 @@ fn try_propagate(
                 lb.lines[j].stmt,
                 Stmt::Call(_)
                     | Stmt::Asm { .. }
-                    | Stmt::Effect("PHP" | "mvn" | "mvp" | "BRK" | "COP", _)
+                    | Stmt::Effect("PHP" | "mvn" | "mvp" | "mvn8" | "mvp8" | "BRK" | "COP", _)
             );
         if (n == 0 || implicit) && defs.iter().any(|d| info.uses.contains(d)) {
             return false;
@@ -1443,23 +1460,41 @@ pub fn rename_temps(lifted: &mut Lifted, map: &BTreeMap<u32, u32>) {
             _ => {}
         }
     }
+    let stmt = |s: &mut Stmt| {
+        if let Stmt::Assign {
+            dst: Place::Temp(t),
+            ..
+        }
+        | Stmt::Invoke {
+            ret: Some(Place::Temp(t)),
+            ..
+        } = s
+            && let Some(n) = map.get(t)
+        {
+            *t = *n;
+        }
+        for_each_expr_mut(s, &mut |e| expr(e, map));
+    };
     for b in &mut lifted.blocks {
         for l in &mut b.lines {
-            if let Stmt::Assign {
-                dst: Place::Temp(t),
-                ..
-            } = &mut l.stmt
-                && let Some(n) = map.get(t)
-            {
-                *t = *n;
-            }
-            for_each_expr_mut(&mut l.stmt, &mut |e| expr(e, map));
+            stmt(&mut l.stmt);
         }
         if let Some(c) = &mut b.cond {
             expr(c, map);
         }
         if let Some((s, _)) = &mut b.switch {
             expr(s, map);
+        }
+        if let Some(x) = &mut b.exit {
+            for s in x.before.iter_mut().chain(x.after.iter_mut()) {
+                stmt(s);
+            }
+            for (_, e) in &mut x.outs {
+                expr(e, map);
+            }
+            if let Some(e) = &mut x.ret {
+                expr(e, map);
+            }
         }
     }
 }

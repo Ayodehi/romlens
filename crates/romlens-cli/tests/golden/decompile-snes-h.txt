@@ -6,6 +6,7 @@
 #ifndef ROMLENS_SNES_H
 #define ROMLENS_SNES_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 typedef uint8_t u8;
@@ -16,7 +17,10 @@ typedef int16_t s16;
 typedef int32_t s32;
 
 /* The CPU. A holds all 16 bits of the accumulator; with 8-bit A only
-* its low byte changes. Flags are 0 or 1. */
+* its low byte changes. Flags are 0 or 1. At the full level each
+* routine has these as its own variables (a, x, c, ...), and passes
+* and returns them; the globals carry them only to code that reads
+* the registers themselves. */
 extern u16 A, X, Y, S, D;
 extern u8 DBR;
 extern u8 N, V, Z, C;
@@ -50,6 +54,8 @@ void PHP(void);
 void PLP(void);
 void mvn(u8 dst_bank, u8 src_bank); /* copies A + 1 bytes from X to Y */
 void mvp(u8 dst_bank, u8 src_bank);
+void mvn8(u8 dst_bank, u8 src_bank); /* the same with 8-bit X and Y */
+void mvp8(u8 dst_bank, u8 src_bank);
 /* Decimal-mode ADC and SBC of `bits` bits; they set C and V. */
 u16 bcd_add(u16 a, u16 b, int bits);
 u16 bcd_sub(u16 a, u16 b, int bits);

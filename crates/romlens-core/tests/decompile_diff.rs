@@ -20,6 +20,8 @@ use std::process::Command;
 
 use romlens_core::analysis::{AnalysisControl, AnalysisSnapshot, analyze};
 use romlens_core::decompile::dataflow::{Loc, LocSet};
+use romlens_core::decompile::ir::{CType, Slot};
+use romlens_core::decompile::signature::Abi;
 use romlens_core::decompile::{self, DecompileOptions, Level, Program};
 use romlens_core::fixtures;
 use romlens_core::model::Project;
@@ -88,7 +90,13 @@ fn build(
         ..Default::default()
     };
     let mut src = String::from(PRELUDE);
-    let mut funcs: BTreeMap<String, (u32, u32)> = BTreeMap::new();
+    let mut funcs: BTreeMap<String, (u32, u32, Option<Abi>)> = BTreeMap::new();
+    let mut exits_x8: BTreeSet<String> = BTreeSet::new();
+    let abi_of = |at: &SnesAddress| {
+        (level == Level::Full)
+            .then(|| program.abis.get(at).cloned())
+            .flatten()
+    };
     let mut tables: BTreeMap<String, (u32, u32)> = BTreeMap::new();
     let mut table_rows = Vec::new();
     for (i, &e) in entries.iter().enumerate() {
@@ -131,7 +139,14 @@ fn build(
                     .get(at)
                     .map(|s| (mask(&s.reads), mask(&s.writes)))
                     .unwrap_or((DEFAULT_READS, ALL));
-                funcs.insert(name.clone(), m);
+                funcs.insert(name.clone(), (m.0, m.1, abi_of(at)));
+                if program
+                    .units
+                    .get(at)
+                    .is_some_and(|u| decompile::signature::index_widths(u).1)
+                {
+                    exits_x8.insert(name.clone());
+                }
             }
         }
         let s = &program.summaries[&e];
@@ -158,8 +173,17 @@ fn build(
             src.push('\n');
         }
         src.push_str(&format!("#undef {}\n", d.name));
+        // At `full` a routine takes and returns its registers: a wrapper
+        // moves them from and to the globals the runs compare.
+        let fn_name = match abi_of(&e) {
+            Some(abi) => {
+                src.push_str(&abi.global_shim(&format!("wrap_{i}"), &format!("entry_{i}")));
+                format!("wrap_{i}")
+            }
+            None => format!("entry_{i}"),
+        };
         table_rows.push(format!(
-            "{{entry_{i}, {}, {i}, {}, {}}}",
+            "{{{fn_name}, {}, {i}, {}, {}}}",
             x8 as u8,
             mask(&s.reads),
             mask(&s.writes)
@@ -168,11 +192,21 @@ fn build(
     src.push_str(
         "\n/* Stubs for everything called, reading and writing what its summary says. */\n",
     );
-    for (k, (name, (r, w))) in funcs.iter().enumerate() {
-        src.push_str(&format!(
-            "void {name}(void) {{ stub({}, {r}, {w}); }}\n",
-            k + 1
-        ));
+    for (k, (name, (r, w, abi))) in funcs.iter().enumerate() {
+        match abi {
+            Some(abi) => src.push_str(&abi_stub(name, abi, k + 1, *r, *w)),
+            // A callee that returns with 8-bit index registers leaves
+            // their high bytes clear, as the hardware does.
+            None => src.push_str(&format!(
+                "void {name}(void) {{ stub({}, {r}, {w}); {}}}\n",
+                k + 1,
+                if exits_x8.contains(name) {
+                    "X &= 0xFF; Y &= 0xFF; "
+                } else {
+                    ""
+                }
+            )),
+        }
     }
     for (k, (name, (r, w))) in tables.iter().enumerate() {
         src.push_str(&format!(
@@ -211,6 +245,40 @@ fn build(
             .join("\n")
     );
     Some(Program2 { exe })
+}
+
+/// A global register read as a value of type `t`.
+fn global_as(k: Slot, t: CType) -> String {
+    match t {
+        CType::U8 => format!("(u8){}", k.global()),
+        _ => k.global().to_owned(),
+    }
+}
+
+/// Store `v`, of type `t`, into the global register.
+fn store_global(k: Slot, t: CType, v: &str) -> String {
+    match (k, t) {
+        (Slot::A, CType::U8) => format!("A = (A & 0xFF00) | (u8)({v});"),
+        _ => format!("{} = {v};", k.global()),
+    }
+}
+
+/// A stub with the callee's signature: its arguments into the globals,
+/// the mixing stub, its results out of them.
+fn abi_stub(name: &str, abi: &Abi, id: usize, r: u32, w: u32) -> String {
+    let mut s = format!("{} {{\n", abi.c_signature(name));
+    for (k, t) in &abi.params {
+        s.push_str(&format!("    {}\n", store_global(*k, *t, k.name())));
+    }
+    s.push_str(&format!("    stub({id}, {r}, {w});\n"));
+    for (k, t) in &abi.outs {
+        s.push_str(&format!("    *{}_out = {};\n", k.name(), global_as(*k, *t)));
+    }
+    if let Some((k, t)) = abi.ret {
+        s.push_str(&format!("    return {};\n", global_as(k, t)));
+    }
+    s.push_str("}\n");
+    s
 }
 
 /// One run: final registers and flags (A X Y S D DBR C N V Z), the
@@ -407,8 +475,43 @@ fn compare(
             };
             compared += 1;
             let s = summary(key.0);
-            let live: LocSet = s.returns.union(&s.preserves).copied().collect();
+            // At `full` the registers are each routine's own variables:
+            // what it preserves is kept by its callers, not put back, so
+            // only S, D and DBR, still globals, must come back.
+            let kept: LocSet = if level == Level::Full {
+                s.preserves
+                    .iter()
+                    .filter(|l| matches!(l, Loc::S | Loc::D | Loc::Dbr))
+                    .copied()
+                    .collect()
+            } else {
+                s.preserves.clone()
+            };
+            let live: LocSet = s.returns.union(&kept).copied().collect();
             let mut diff = reg_diffs(have, want, mask(&live));
+            // An index result the signature makes 8 bits (every caller goes
+            // on with 8-bit index registers) passes only its low byte.
+            if level == Level::Full
+                && let Some(abi) = program.abis.get(&entries[key.0])
+            {
+                let narrow: Vec<&str> = abi
+                    .ret
+                    .iter()
+                    .chain(&abi.outs)
+                    .filter(|(k, t)| *t == CType::U8 && matches!(k, Slot::X | Slot::Y))
+                    .map(|(k, _)| k.global())
+                    .collect();
+                diff.retain(|d| {
+                    let reg = d.split(' ').next().unwrap_or("");
+                    if !narrow.contains(&reg) {
+                        return true;
+                    }
+                    let v: Vec<&str> = d.split([' ', ')']).collect();
+                    let got = u32::from_str_radix(v[1], 16).unwrap_or(0);
+                    let lift = u32::from_str_radix(v[3], 16).unwrap_or(0);
+                    got & 0xFF != lift & 0xFF
+                });
+            }
             diff.extend(mem_diffs(have, want));
             if !diff.is_empty() {
                 say(
@@ -526,6 +629,8 @@ void PHP(void) { push8((u8)(N << 7 | V << 6 | Z << 1 | C)); }
 void PLP(void) { u8 p = pull8(); N = p >> 7 & 1; V = p >> 6 & 1; Z = p >> 1 & 1; C = p & 1; }
 void mvn(u8 d, u8 s) { int n = 0; do { MEM8(d << 16 | Y) = MEM8(s << 16 | X); X++; Y++; } while (A-- != 0 && ++n < 0x10000); }
 void mvp(u8 d, u8 s) { int n = 0; do { MEM8(d << 16 | Y) = MEM8(s << 16 | X); X--; Y--; } while (A-- != 0 && ++n < 0x10000); }
+void mvn8(u8 d, u8 s) { int n = 0; do { MEM8(d << 16 | Y) = MEM8(s << 16 | X); X = (X + 1) & 0xFF; Y = (Y + 1) & 0xFF; } while (A-- != 0 && ++n < 0x10000); }
+void mvp8(u8 d, u8 s) { int n = 0; do { MEM8(d << 16 | Y) = MEM8(s << 16 | X); X = (X - 1) & 0xFF; Y = (Y - 1) & 0xFF; } while (A-- != 0 && ++n < 0x10000); }
 u16 bcd_add(u16 a, u16 b, int bits) { u32 r = a + b + C; C = r >> bits & 1; V = 0; return r; }
 u16 bcd_sub(u16 a, u16 b, int bits) { u32 r = a - b - !C; C = !(r >> bits & 1); V = 0; return r; }
 void WAI(void) {}

@@ -24,6 +24,8 @@ pub enum LoopKind {
     DoWhile(Expr),
     /// `for (;;) { body }`
     Forever,
+    /// `for (i = 3; i != 0; i--) { body }` (`loops`).
+    For(Box<crate::decompile::loops::Counted>),
 }
 
 #[derive(Debug, Clone)]
@@ -100,6 +102,7 @@ impl<'a> Structurer<'a> {
         // A `return;` that ends the function says nothing.
         if let Some(Node::Exit(b, _)) = out.last()
             && matches!(self.cfg.blocks[*b].term, Term::Return)
+            && self.blocks[*b].exit.as_ref().is_none_or(|x| x.is_plain())
         {
             out.pop();
         }

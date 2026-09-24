@@ -20,7 +20,7 @@ use crate::decompile::dataflow::{
     self, Conventions, FLAGS, Flow, Loc, LocSet, REGISTERS, all_fixed,
 };
 use crate::decompile::function::{self, Callee, Function, Transfer};
-use crate::decompile::ir::{CallTarget, Stmt};
+use crate::decompile::ir::{CType, CallTarget, Slot, Stmt};
 use crate::decompile::lift::{self, LiftOptions, Lifted};
 use crate::memory::address::SnesAddress;
 use crate::model::xref::XRefKind;
@@ -50,6 +50,137 @@ pub struct Program {
     pub entries: BTreeSet<SnesAddress>,
     pub units: BTreeMap<SnesAddress, Unit>,
     pub summaries: BTreeMap<SnesAddress, Summary>,
+    /// Each routine's C signature at the `full` level.
+    pub abis: BTreeMap<SnesAddress, Abi>,
+}
+
+/// A routine's C signature at the `full` level, from its summary: a
+/// parameter for each register and flag it reads, and for each it returns
+/// the first as the value (A, then X, Y, the carry, N, V, Z) and the rest
+/// through pointers. S, D and DBR stay the globals. A takes 16 bits where
+/// its high byte is read or returned; X and Y take 8 where they are 8 bits
+/// wide at the entry (a parameter) or at every return (a result).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Abi {
+    pub params: Vec<(Slot, CType)>,
+    pub ret: Option<(Slot, CType)>,
+    pub outs: Vec<(Slot, CType)>,
+}
+
+impl Abi {
+    fn of(s: &Summary, entry_x8: bool, exit_x8: bool) -> Abi {
+        let ty = |slot: Slot, set: &LocSet, x8: bool| match slot {
+            Slot::A if set.contains(&Loc::Ah) => CType::U16,
+            Slot::A => CType::U8,
+            Slot::X | Slot::Y if x8 => CType::U8,
+            Slot::X | Slot::Y => CType::U16,
+            _ => CType::Bool,
+        };
+        let has = |slot: Slot, set: &LocSet| match slot {
+            Slot::A => set.contains(&Loc::Al) || set.contains(&Loc::Ah),
+            Slot::X => set.contains(&Loc::X),
+            Slot::Y => set.contains(&Loc::Y),
+            Slot::C => set.contains(&Loc::C),
+            Slot::N => set.contains(&Loc::N),
+            Slot::V => set.contains(&Loc::V),
+            Slot::Z => set.contains(&Loc::Z),
+        };
+        let params = Slot::ALL
+            .iter()
+            .filter(|&&k| has(k, &s.reads))
+            .map(|&k| (k, ty(k, &s.reads, entry_x8)))
+            .collect();
+        let mut results: Vec<(Slot, CType)> = Slot::ALL
+            .iter()
+            .filter(|&&k| has(k, &s.returns))
+            .map(|&k| (k, ty(k, &s.returns, exit_x8)))
+            .collect();
+        let ret = (!results.is_empty()).then(|| results.remove(0));
+        Abi {
+            params,
+            ret,
+            outs: results,
+        }
+    }
+
+    /// C for `static void SHIM(void)` that calls `name` with this
+    /// signature from the globals of `snes.h` and puts its results back in
+    /// them: how code that knows only the registers runs a `full`-level
+    /// routine.
+    pub fn global_shim(&self, shim: &str, name: &str) -> String {
+        let global_as = |k: Slot, t: CType| match t {
+            CType::U8 => format!("(u8){}", k.global()),
+            _ => k.global().to_owned(),
+        };
+        let store = |k: Slot, t: CType, v: &str| match (k, t) {
+            (Slot::A, CType::U8) => format!("A = (A & 0xFF00) | (u8)({v});"),
+            _ => format!("{} = {v};", k.global()),
+        };
+        let mut s = format!("static void {shim}(void) {{\n");
+        for (k, t) in &self.outs {
+            s.push_str(&format!("    {} o_{};\n", t.name(), k.name()));
+        }
+        let mut args: Vec<String> = self.params.iter().map(|(k, t)| global_as(*k, *t)).collect();
+        args.extend(self.outs.iter().map(|(k, _)| format!("&o_{}", k.name())));
+        let call = format!("{name}({})", args.join(", "));
+        match self.ret {
+            Some((k, t)) => {
+                s.push_str(&format!("    {} r = {call};\n", t.name()));
+                s.push_str(&format!("    {}\n", store(k, t, "r")));
+            }
+            None => s.push_str(&format!("    {call};\n")),
+        }
+        for (k, t) in &self.outs {
+            s.push_str(&format!(
+                "    {}\n",
+                store(*k, *t, &format!("o_{}", k.name()))
+            ));
+        }
+        s.push_str("}\n");
+        s
+    }
+
+    /// `u8 NAME(u16 x, u16 *y_out)`.
+    pub fn c_signature(&self, name: &str) -> String {
+        let mut args: Vec<String> = self
+            .params
+            .iter()
+            .map(|(k, t)| format!("{} {}", t.name(), k.name()))
+            .collect();
+        args.extend(
+            self.outs
+                .iter()
+                .map(|(k, t)| format!("{} *{}_out", t.name(), k.name())),
+        );
+        let args = if args.is_empty() {
+            "void".to_owned()
+        } else {
+            args.join(", ")
+        };
+        let ret = self.ret.map(|(_, t)| t.name()).unwrap_or("void");
+        format!("{ret} {name}({args})")
+    }
+}
+
+/// Whether X is 8 bits wide at the routine's entry, and at every return.
+pub fn index_widths(u: &Unit) -> (bool, bool) {
+    let f = &u.f;
+    let entry = f
+        .index_of(f.entry_offset)
+        .map(|i| f.steps[i].insn.flags_before.eff_x())
+        .unwrap_or(false);
+    let mut exit: Option<bool> = None;
+    for b in &u.cfg.blocks {
+        match b.term {
+            Term::Return | Term::Halt if !b.is_stub() => {
+                let x8 = f.steps[b.steps.end - 1].insn.flags_after.eff_x();
+                exit = Some(exit.unwrap_or(true) && x8);
+            }
+            Term::Tail(_) => exit = Some(false),
+            _ => {}
+        }
+    }
+    (entry, exit.unwrap_or(false))
 }
 
 /// Growing sets always stop; this only bounds a pathological program.
@@ -193,11 +324,12 @@ impl Program {
             let new_returns: BTreeMap<SnesAddress, LocSet> = units
                 .keys()
                 .map(|a| {
-                    let seen = if open.contains(a) {
-                        base.exit.clone()
-                    } else {
-                        read_after[a].clone()
-                    };
+                    // An open routine's unseen callers are assumed to read
+                    // the default; its known ones read what they read.
+                    let mut seen = read_after[a].clone();
+                    if open.contains(a) {
+                        seen.extend(base.exit.iter().copied());
+                    }
                     let mut r: LocSet = seen.intersection(&writes[a]).copied().collect();
                     r.retain(|l| !matches!(l, Loc::Temp(_)));
                     r.extend(returns[a].iter().copied());
@@ -221,7 +353,7 @@ impl Program {
             }
         }
 
-        let summaries = units
+        let summaries: BTreeMap<SnesAddress, Summary> = units
             .keys()
             .map(|a| {
                 (
@@ -236,11 +368,74 @@ impl Program {
                 )
             })
             .collect();
+        // A routine some call reaches with 16-bit index registers takes
+        // them whole, whatever its own entry was decoded with. Its results
+        // are 8 bits where it returns with 8-bit index registers, or where
+        // every call to it goes on with them (the listing assumes a call
+        // leaves the widths as they were, and so does the C).
+        let mut wide_calls: BTreeSet<SnesAddress> = BTreeSet::new();
+        let mut wide_after: BTreeSet<SnesAddress> = BTreeSet::new();
+        let mut called: BTreeSet<SnesAddress> = BTreeSet::new();
+        for u in units.values() {
+            for (b, block) in u.cfg.blocks.iter().enumerate() {
+                if let Term::Tail(t) = &block.term {
+                    // It returns to this routine's callers: not followed.
+                    wide_after.insert(*t);
+                    if block.is_stub() || !u.f.steps[block.steps.end - 1].insn.flags_after.eff_x() {
+                        wide_calls.insert(*t);
+                    }
+                }
+                for l in &u.lifted.blocks[b].lines {
+                    let targets: Vec<SnesAddress> = match &l.stmt {
+                        Stmt::Call(CallTarget::Direct(t)) => vec![*t],
+                        Stmt::Call(CallTarget::Table { targets, .. }) => targets.clone(),
+                        _ => continue,
+                    };
+                    let insn = &u.f.steps[l.step].insn;
+                    called.extend(targets.iter().copied());
+                    if !insn.flags_before.eff_x() {
+                        wide_calls.extend(targets.iter().copied());
+                    }
+                    if !insn.flags_after.eff_x() {
+                        wide_after.extend(targets);
+                    }
+                }
+            }
+        }
+        let abis = units
+            .iter()
+            .map(|(a, u)| {
+                let (entry_x8, exit_x8) = index_widths(u);
+                let entry_x8 = entry_x8 && !wide_calls.contains(a);
+                let exit_x8 =
+                    exit_x8 || (called.contains(a) && !wide_after.contains(a) && !open.contains(a));
+                (*a, Abi::of(&summaries[a], entry_x8, exit_x8))
+            })
+            .collect();
         Program {
             entries,
             units,
             summaries,
+            abis,
         }
+    }
+
+    /// The conventions for the `full` level, where the registers are each
+    /// routine's own variables: a register it preserves need not be put
+    /// back, since its callers keep theirs; S, D and DBR, still globals,
+    /// must.
+    pub fn canonical_conventions(&self, at: SnesAddress) -> Conventions {
+        let mut c = self.conventions(at);
+        if let Some(s) = self.summaries.get(&at) {
+            c.exit = s.returns.clone();
+            c.exit.extend(
+                s.preserves
+                    .iter()
+                    .filter(|l| matches!(l, Loc::S | Loc::D | Loc::Dbr))
+                    .copied(),
+            );
+        }
+        c
     }
 
     /// The conventions for decompiling the routine at `at`.
@@ -344,7 +539,7 @@ fn preserved(u: &Unit, flow: &Flow, writes: &BTreeMap<SnesAddress, LocSet>) -> L
                     }
                     return;
                 }
-                Place::Mem { .. } => {}
+                _ => {}
             }
         }
         for d in flow.info(l).defs {
