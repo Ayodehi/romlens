@@ -28,6 +28,9 @@ pub trait WorkbenchListener: Send + Sync {
     fn on_event(&self, event: WorkbenchEvent);
 }
 
+/// Every routine's summary, and the analysis generation it was built from.
+type ProgramCache = (u64, Arc<romlens_core::decompile::Program>);
+
 struct Inner {
     project: Project,
     snapshot: Arc<AnalysisSnapshot>,
@@ -51,6 +54,9 @@ pub struct Workbench {
     inner: Mutex<Inner>,
     listener: Mutex<Option<Arc<dyn WorkbenchListener>>>,
     cancel: Arc<AtomicBool>,
+    /// Every routine's summary for the snapshot of this analysis generation:
+    /// built on the first decompile after an analysis, then shared.
+    decompiler: Arc<Mutex<Option<ProgramCache>>>,
 }
 
 impl Workbench {
@@ -85,6 +91,7 @@ impl Workbench {
             }),
             listener: Mutex::new(None),
             cancel: Arc::new(AtomicBool::new(false)),
+            decompiler: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -103,6 +110,56 @@ impl Workbench {
             analysis_generation: generation,
         });
         stats
+    }
+
+    /// A job decompiling the routine entered at `snes_address`.
+    fn decompile_job(
+        &self,
+        snes_address: u32,
+        level: DecompileLevel,
+    ) -> impl FnOnce() -> Result<DecompiledInfo, RomlensError> + Send + 'static {
+        use romlens_core::decompile::{self, DecompileOptions};
+        let image = self.rom.image.clone();
+        let (project, snapshot, generation) = {
+            let inner = self.lock();
+            (
+                inner.project.clone(),
+                Arc::clone(&inner.snapshot),
+                inner.analysis_generation,
+            )
+        };
+        let cache = Arc::clone(&self.decompiler);
+        move || {
+            let opts = DecompileOptions {
+                level: level.into(),
+                ..Default::default()
+            };
+            let cached = cache
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .as_ref()
+                .filter(|(g, _)| *g == generation)
+                .map(|(_, p)| Arc::clone(p));
+            let program = match cached {
+                Some(p) => p,
+                None => {
+                    let p = Arc::new(decompile::program(&image, &snapshot, &opts));
+                    *cache.lock().unwrap_or_else(|e| e.into_inner()) =
+                        Some((generation, Arc::clone(&p)));
+                    p
+                }
+            };
+            let at = Project::canonical(&image, SnesAddress::from_u24(snes_address));
+            let f = match program.units.get(&at) {
+                Some(u) => u.f.clone(),
+                None => decompile::discover(&image, &snapshot, &program.entries, at)
+                    .map_err(|e| RomlensError::BadAddress { msg: e.to_string() })?,
+            };
+            Ok(
+                decompile::render_with(&image, &project, &snapshot, &f, &opts, Some(&program))
+                    .into(),
+            )
+        }
     }
 
     /// Rebuild the line index after a label or comment change.
@@ -579,6 +636,41 @@ impl Workbench {
     /// mirror, bank `$00` for a register, the canonical mirror for ROM.
     pub fn canonical_address(&self, snes_address: u32) -> u32 {
         Project::canonical(&self.rom.image, SnesAddress::from_u24(snes_address)).as_u24()
+    }
+
+    /// Pseudo-C for the routine entered at `snes_address`, off the calling
+    /// thread. The first call after an analysis works out every routine's
+    /// summary; later ones reuse it.
+    pub async fn decompile(
+        &self,
+        snes_address: u32,
+        level: DecompileLevel,
+    ) -> Result<DecompiledInfo, RomlensError> {
+        let job = self.decompile_job(snes_address, level);
+        // Its own flag: dropping this future must not cancel an analysis.
+        crate::future::spawn(Arc::new(AtomicBool::new(false)), job).await
+    }
+
+    /// The same on the calling thread.
+    pub fn decompile_blocking(
+        &self,
+        snes_address: u32,
+        level: DecompileLevel,
+    ) -> Result<DecompiledInfo, RomlensError> {
+        self.decompile_job(snes_address, level)()
+    }
+
+    /// The entry of the routine whose instructions include `file_offset`.
+    pub fn function_containing(&self, file_offset: u32) -> Option<u32> {
+        let inner = self.lock();
+        let entries = romlens_core::decompile::entries(&inner.snapshot);
+        romlens_core::decompile::containing(
+            &self.rom.image,
+            &inner.snapshot,
+            &entries,
+            romlens_core::FileOffset(file_offset),
+        )
+        .map(|f| f.entry.as_u24())
     }
 
     pub fn xrefs_to(&self, snes_address: u32) -> Vec<XRefInfo> {
@@ -1308,4 +1400,10 @@ impl Workbench {
         });
         Ok(())
     }
+}
+
+/// `snes.h`, which every decompiled routine includes.
+#[uniffi::export]
+pub fn snes_header() -> String {
+    romlens_core::decompile::snes_h()
 }

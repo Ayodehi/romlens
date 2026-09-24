@@ -430,6 +430,13 @@ pub fn make_test_rom(mapping: Mapping) -> Vec<u8> {
     fixtures::for_mapping(mapping.into())
 }
 
+/// A test ROM whose boot calls small routines, one per shape the
+/// decompiler recovers (a loop, a 16-bit add, an if, a saved register).
+#[uniffi::export]
+pub fn make_routines_test_rom() -> Vec<u8> {
+    fixtures::routines_lorom()
+}
+
 /// `$80:841C`
 #[uniffi::export]
 pub fn format_snes_address(address: u32) -> String {
@@ -462,7 +469,7 @@ mod tests {
         assert_eq!(format_file_offset(0x41C), "0x00041C");
     }
 
-    use crate::workbench::{hardware_register, validate_label_name};
+    use crate::workbench::{hardware_register, snes_header, validate_label_name};
 
     struct Collect(std::sync::Mutex<Vec<WorkbenchEvent>>);
 
@@ -497,6 +504,33 @@ mod tests {
             }
             *ready = false;
         }
+    }
+
+    #[test]
+    fn decompiles_a_routine() {
+        let rom = Rom::from_bytes(make_routines_test_rom(), "r.sfc".into()).unwrap();
+        let wb = Workbench::new(rom);
+        block_on(wb.analyze()).unwrap();
+        let d = block_on(wb.decompile(0x008040, DecompileLevel::Full)).unwrap();
+        assert_eq!(d.name, "SUB_008040");
+        assert!(d.text.contains("if ((u8)A < MEM8(0x21)) {"), "{}", d.text);
+        assert_eq!(d.lines.len(), d.text.lines().count());
+        // The if line came from the CMP's branch at $00:8044.
+        let at = d.text.lines().position(|l| l.contains("if (")).unwrap();
+        assert!(d.lines[at].contains(&0x44), "{:?}", d.lines[at]);
+        let tok = d
+            .tokens
+            .iter()
+            .find(|t| t.kind == CTokenKind::Function)
+            .unwrap();
+        assert_eq!(tok.address, Some(0x008040));
+        assert_eq!(wb.function_containing(0x46), Some(0x008040));
+        assert_eq!(wb.function_containing(0x7FFF), None);
+        assert!(
+            wb.decompile_blocking(0x008041, DecompileLevel::Lift)
+                .is_err()
+        );
+        assert!(snes_header().contains("#define INIDISP MEM8(0x2100)"));
     }
 
     #[test]

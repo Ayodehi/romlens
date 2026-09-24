@@ -30,7 +30,7 @@ import Testing
         #expect(formatSnesAddress(address: 0x80841C) == "$80:841C")
         #expect(formatFileOffset(offset: 0x41C) == "0x00041C")
         #expect(throws: RomlensError.self) { try rom.resolve(text: "$7E:0000") }
-        #expect(apiVersion() == "0.4.0")
+        #expect(apiVersion() == "0.5.0")
     }
 
     @Test func inspectorAndSpans() throws {
@@ -107,5 +107,26 @@ final class EventLog: WorkbenchListener, @unchecked Sendable {
         }
         _ = try workbench.analyzeBlocking()
         #expect(!workbench.needsAnalysis())
+    }
+}
+
+@Suite struct DecompileTests {
+    @Test func decompilesTheRoutineAtAnAddress() async throws {
+        let rom = try Rom.fromBytes(bytes: makeRoutinesTestRom(), name: "r.sfc")
+        let workbench = Workbench(rom: rom)
+        _ = try await workbench.analyze()
+        let d = try await workbench.decompile(snesAddress: 0x008040, level: .full)
+        #expect(d.name == "SUB_008040")
+        #expect(d.text.contains("if ((u8)A < MEM8(0x21)) {"))
+        #expect(d.lines.count == d.text.split(separator: "\n", omittingEmptySubsequences: false).count - 1)
+        let name = d.tokens.first { $0.kind == .function }
+        #expect(name?.address == 0x008040)
+        let text = d.text as NSString
+        #expect(text.substring(with: NSRange(location: Int(name!.start), length: Int(name!.len))) == "SUB_008040")
+        #expect(workbench.functionContaining(fileOffset: 0x46) == 0x008040)
+        #expect(snesHeader().contains("#define INIDISP MEM8(0x2100)"))
+        await #expect(throws: RomlensError.self) {
+            try await workbench.decompile(snesAddress: 0x008041, level: .lift)
+        }
     }
 }

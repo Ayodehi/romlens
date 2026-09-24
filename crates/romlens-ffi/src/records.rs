@@ -1039,3 +1039,128 @@ pub enum WorkbenchEvent {
         total: u64,
     },
 }
+
+/// How far the decompiler goes (`docs/18-decompiler.md`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum DecompileLevel {
+    Lift,
+    Clean,
+    Full,
+}
+
+impl From<DecompileLevel> for romlens_core::decompile::Level {
+    fn from(l: DecompileLevel) -> Self {
+        use romlens_core::decompile::Level;
+        match l {
+            DecompileLevel::Lift => Level::Lift,
+            DecompileLevel::Clean => Level::Clean,
+            DecompileLevel::Full => Level::Full,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum CTokenKind {
+    Keyword,
+    Type,
+    Number,
+    Comment,
+    Function,
+    Variable,
+    Register,
+    Label,
+    Helper,
+    Local,
+    GotoLabel,
+}
+
+impl From<romlens_core::decompile::CTokenKind> for CTokenKind {
+    fn from(k: romlens_core::decompile::CTokenKind) -> Self {
+        use romlens_core::decompile::CTokenKind as K;
+        match k {
+            K::Keyword => CTokenKind::Keyword,
+            K::Type => CTokenKind::Type,
+            K::Number => CTokenKind::Number,
+            K::Comment => CTokenKind::Comment,
+            K::Function => CTokenKind::Function,
+            K::Variable => CTokenKind::Variable,
+            K::Register => CTokenKind::Register,
+            K::Label => CTokenKind::Label,
+            K::Helper => CTokenKind::Helper,
+            K::Local => CTokenKind::Local,
+            K::GotoLabel => CTokenKind::GotoLabel,
+        }
+    }
+}
+
+/// A token of the C, in UTF-16 units so a shell's string APIs can use it
+/// directly.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct CTokenInfo {
+    pub start: u32,
+    pub len: u32,
+    pub kind: CTokenKind,
+    /// The routine, variable, register or label it names.
+    pub address: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct DecompiledInfo {
+    pub name: String,
+    pub entry: u32,
+    pub text: String,
+    pub tokens: Vec<CTokenInfo>,
+    /// For each line of `text`, the file offsets of the instructions it came
+    /// from.
+    pub lines: Vec<Vec<u32>>,
+    pub warnings: Vec<String>,
+    pub instructions: u32,
+    pub statements: u32,
+    pub gotos: u32,
+    pub asm_comments: u32,
+}
+
+impl From<romlens_core::decompile::Decompiled> for DecompiledInfo {
+    fn from(d: romlens_core::decompile::Decompiled) -> Self {
+        // Byte offsets to UTF-16 offsets.
+        let mut utf16_at = Vec::with_capacity(d.text.len() + 1);
+        let mut n = 0u32;
+        for c in d.text.chars() {
+            for _ in 0..c.len_utf8() {
+                utf16_at.push(n);
+            }
+            n += c.len_utf16() as u32;
+        }
+        utf16_at.push(n);
+        let tokens = d
+            .tokens
+            .iter()
+            .map(|t| {
+                let start = utf16_at[t.start as usize];
+                let end = utf16_at[(t.start + t.len) as usize];
+                CTokenInfo {
+                    start,
+                    len: end - start,
+                    kind: t.kind.into(),
+                    address: t.address.map(|a| a.as_u24()),
+                }
+            })
+            .collect();
+        DecompiledInfo {
+            name: d.name,
+            entry: d.entry.as_u24(),
+            tokens,
+            lines: d
+                .lines
+                .iter()
+                .map(|l| l.iter().map(|o| o.0).collect())
+                .collect(),
+            warnings: d.warnings,
+            instructions: d.stats.instructions,
+            statements: d.stats.statements,
+            gotos: d.stats.gotos,
+            asm_comments: d.stats.asm_comments,
+            text: d.text,
+        }
+    }
+}
