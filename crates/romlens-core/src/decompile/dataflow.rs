@@ -863,7 +863,43 @@ fn stack_slots(f: &Function, cfg: &Cfg, lifted: &mut Lifted) {
 }
 
 fn simplify_stmt(s: &mut Stmt) {
+    // What the destination keeps: casts inside modular arithmetic that it
+    // truncates anyway say nothing.
+    let keep = match s {
+        Stmt::Assign { dst, .. } => match dst {
+            Place::Reg(Reg::A, Width::W8) => Some(Width::W8),
+            Place::Reg(r, _) => Some(storage(*r)),
+            Place::Mem { width, .. } if *width != Width::W24 => Some(*width),
+            _ => None,
+        },
+        _ => None,
+    };
+    if let Stmt::Assign { dst, value } = s {
+        if let Place::Mem { addr, .. } = dst {
+            *addr = simplify(addr.clone());
+        }
+        let v = simplify(value.clone());
+        *value = match keep {
+            Some(w) => narrow(v, w),
+            None => v,
+        };
+        return;
+    }
     for_each_expr_mut(s, &mut |e| *e = simplify(e.clone()));
+}
+
+/// `e` with the casts removed that cannot matter when the result is
+/// truncated to `w`: the low bits of a sum, difference, bitwise operation
+/// or left shift depend only on the low bits of its operands.
+pub fn narrow(e: Expr, w: Width) -> Expr {
+    match e {
+        Expr::Cast(cw, x) if cw >= w => narrow(*x, w),
+        Expr::Bin(op @ (BinOp::Add | BinOp::Sub | BinOp::And | BinOp::Or | BinOp::Xor), a, b) => {
+            Expr::bin(op, narrow(*a, w), narrow(*b, w))
+        }
+        Expr::Bin(BinOp::Shl, a, b) => Expr::bin(BinOp::Shl, narrow(*a, w), *b),
+        e => e,
+    }
 }
 
 /// Tidy an expression: comparisons for negated comparisons, sign tests for
@@ -873,7 +909,7 @@ pub fn simplify(e: Expr) -> Expr {
         Expr::Mem { addr, width } => Expr::mem(simplify(*addr), width),
         Expr::Un(op, x) => Expr::un(op, simplify(*x)),
         Expr::Bin(op, a, b) => Expr::bin(op, simplify(*a), simplify(*b)),
-        Expr::Cast(w, x) => Expr::cast(w, simplify(*x)),
+        Expr::Cast(w, x) => Expr::cast(w, narrow(simplify(*x), w)),
         Expr::Signed(w, x) => Expr::Signed(w, Box::new(simplify(*x))),
         Expr::Call(n, args) => Expr::Call(n, args.into_iter().map(simplify).collect()),
         e => e,

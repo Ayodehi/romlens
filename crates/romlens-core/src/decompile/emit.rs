@@ -961,8 +961,6 @@ impl GotoLayout<'_> {
         }
     }
 
-    /// What a block that leaves the function does: return, tail-call, or
-    /// say what could not be followed.
     fn stub(
         &self,
         e: &mut Emitter,
@@ -971,24 +969,38 @@ impl GotoLayout<'_> {
         from: BlockId,
         asm: &dyn Fn(usize) -> String,
     ) {
-        match &self.cfg.blocks[b].term {
-            Term::Tail(a) => {
-                let name = e.names.function(*a);
-                e.w.tok(&name, CTokenKind::Function, Some(*a));
-                e.w.w("();");
-                e.w.end(ts);
-            }
-            Term::Unknown(why) => {
-                e.stats.asm_comments += 1;
-                let text = self.blocks[from].term_step.map(asm).unwrap_or_default();
-                e.w.comment_line(&format!("asm: {text}: {why}"), ts);
-            }
-            _ => {}
-        }
-        e.kw("return");
-        e.w.w(";");
-        e.w.end(ts);
+        exit(self.cfg, self.blocks, e, b, ts, from, asm)
     }
+}
+
+/// What a block that leaves the function does: return, tail-call, or say
+/// what could not be followed.
+fn exit(
+    cfg: &Cfg,
+    blocks: &[LiftedBlock],
+    e: &mut Emitter,
+    b: BlockId,
+    ts: &[usize],
+    from: BlockId,
+    asm: &dyn Fn(usize) -> String,
+) {
+    match &cfg.blocks[b].term {
+        Term::Tail(a) => {
+            let name = e.names.function(*a);
+            e.w.tok(&name, CTokenKind::Function, Some(*a));
+            e.w.w("();");
+            e.w.end(ts);
+        }
+        Term::Unknown(why) => {
+            e.stats.asm_comments += 1;
+            let text = blocks[from].term_step.map(asm).unwrap_or_default();
+            e.w.comment_line(&format!("asm: {text}: {why}"), ts);
+        }
+        _ => {}
+    }
+    e.kw("return");
+    e.w.w(";");
+    e.w.end(ts);
 }
 
 /// The instruction text for asm comments.
@@ -1005,4 +1017,234 @@ pub fn asm_text(
         .map(|s| format_instruction(&s.insn, &symbols).text)
         .collect();
     move |i| texts.get(i).cloned().unwrap_or_default()
+}
+
+/// Print the structured tree (`structure`).
+pub struct TreeLayout<'f> {
+    pub f: &'f Function,
+    pub cfg: &'f Cfg,
+    pub blocks: &'f [LiftedBlock],
+    pub gotos: &'f BTreeSet<BlockId>,
+}
+
+impl TreeLayout<'_> {
+    fn label(&self, b: BlockId) -> String {
+        let s = &self.f.steps[self.cfg.blocks[b].steps.start].insn;
+        format!("L_{:06X}", s.address.as_u24())
+    }
+
+    fn ts(&self, b: BlockId) -> Vec<usize> {
+        self.blocks[b].term_step.into_iter().collect()
+    }
+
+    fn put_label(&self, e: &mut Emitter, b: BlockId, empty: bool) {
+        if !self.gotos.contains(&b) {
+            return;
+        }
+        let indent = e.w.indent;
+        e.w.indent = 0;
+        e.w.tok(&self.label(b), CTokenKind::GotoLabel, None);
+        e.w.w(if empty { ": ;" } else { ":" });
+        e.w.end(&[self.cfg.blocks[b].steps.start]);
+        e.w.indent = indent;
+    }
+
+    pub fn print(
+        &self,
+        e: &mut Emitter,
+        nodes: &[crate::decompile::structure::Node],
+        asm: &dyn Fn(usize) -> String,
+    ) {
+        for n in nodes {
+            self.node(e, n, asm);
+        }
+    }
+
+    fn body(
+        &self,
+        e: &mut Emitter,
+        nodes: &[crate::decompile::structure::Node],
+        asm: &dyn Fn(usize) -> String,
+    ) {
+        e.w.indent += 1;
+        self.print(e, nodes, asm);
+        e.w.indent -= 1;
+    }
+
+    fn node(
+        &self,
+        e: &mut Emitter,
+        n: &crate::decompile::structure::Node,
+        asm: &dyn Fn(usize) -> String,
+    ) {
+        use crate::decompile::structure::{LoopKind, Node};
+        match n {
+            Node::Block(b) => {
+                e.stats.blocks += 1;
+                let lb = &self.blocks[*b];
+                self.put_label(e, *b, lb.lines.is_empty());
+                for line in &lb.lines {
+                    e.stmt(&line.stmt, &[line.step], asm);
+                }
+            }
+            Node::If {
+                cond,
+                then,
+                els,
+                at,
+            } => {
+                let ts = self.ts(*at);
+                e.kw("if");
+                e.w.w(" (");
+                e.expr(cond);
+                e.w.w(") {");
+                e.w.end(&ts);
+                self.body(e, then, asm);
+                let mut els = els;
+                loop {
+                    match els.as_slice() {
+                        [] => {
+                            e.w.w("}");
+                            e.w.end(&ts);
+                            break;
+                        }
+                        // else if, when the else is only another if.
+                        [
+                            Node::If {
+                                cond,
+                                then,
+                                els: next,
+                                at,
+                            },
+                        ] => {
+                            let ts = self.ts(*at);
+                            e.w.w("} ");
+                            e.kw("else");
+                            e.w.w(" ");
+                            e.kw("if");
+                            e.w.w(" (");
+                            e.expr(cond);
+                            e.w.w(") {");
+                            e.w.end(&ts);
+                            self.body(e, then, asm);
+                            els = next;
+                        }
+                        _ => {
+                            e.w.w("} ");
+                            e.kw("else");
+                            e.w.w(" {");
+                            e.w.end(&ts);
+                            self.body(e, els, asm);
+                            e.w.w("}");
+                            e.w.end(&ts);
+                            break;
+                        }
+                    }
+                }
+            }
+            Node::Loop {
+                kind,
+                body,
+                head,
+                at,
+            } => {
+                let ts = self.ts(*at);
+                match kind {
+                    LoopKind::While(cond) => {
+                        self.put_label(e, *head, false);
+                        e.kw("while");
+                        e.w.w(" (");
+                        e.expr(cond);
+                        e.w.w(") {");
+                        e.w.end(&ts);
+                        self.body(e, body, asm);
+                        e.w.w("}");
+                        e.w.end(&ts);
+                    }
+                    LoopKind::DoWhile(cond) => {
+                        e.kw("do");
+                        e.w.w(" {");
+                        e.w.end(&[]);
+                        self.body(e, body, asm);
+                        e.w.w("} ");
+                        e.kw("while");
+                        e.w.w(" (");
+                        e.expr(cond);
+                        e.w.w(");");
+                        e.w.end(&ts);
+                    }
+                    LoopKind::Forever => {
+                        e.kw("for");
+                        e.w.w(" (;;) {");
+                        e.w.end(&[]);
+                        self.body(e, body, asm);
+                        e.w.w("}");
+                        e.w.end(&[]);
+                    }
+                }
+            }
+            Node::Switch { index, cases, at } => {
+                let ts = self.ts(*at);
+                e.kw("switch");
+                e.w.w(" (");
+                e.expr(index);
+                e.w.w(") {");
+                e.w.end(&ts);
+                for (values, body) in cases {
+                    for v in values {
+                        e.kw("case");
+                        e.w.w(" ");
+                        e.num(*v);
+                        e.w.w(":");
+                        e.w.end(&ts);
+                    }
+                    self.body(e, body, asm);
+                    let ends = matches!(
+                        body.last(),
+                        Some(Node::Exit(..) | Node::Goto(..) | Node::Continue(_) | Node::Break(_))
+                    );
+                    if !ends {
+                        e.w.indent += 1;
+                        e.kw("break");
+                        e.w.w(";");
+                        e.w.end(&ts);
+                        e.w.indent -= 1;
+                    }
+                }
+                e.kw("default");
+                e.w.w(":");
+                e.w.end(&ts);
+                e.w.indent += 1;
+                e.w.comment_line("not an entry in the table", &ts);
+                e.kw("return");
+                e.w.w(";");
+                e.w.end(&ts);
+                e.w.indent -= 1;
+                e.w.w("}");
+                e.w.end(&ts);
+            }
+            Node::Goto(t, from) => {
+                e.kw("goto");
+                e.w.w(" ");
+                e.w.tok(&self.label(*t), CTokenKind::GotoLabel, None);
+                e.w.w(";");
+                e.stats.gotos += 1;
+                e.w.end(&self.ts(*from));
+            }
+            Node::Break(from) => {
+                e.kw("break");
+                e.w.w(";");
+                e.w.end(&self.ts(*from));
+            }
+            Node::Continue(from) => {
+                e.kw("continue");
+                e.w.w(";");
+                e.w.end(&self.ts(*from));
+            }
+            Node::Exit(b, from) => {
+                let ts = self.ts(*from);
+                exit(self.cfg, self.blocks, e, *b, &ts, *from, asm);
+            }
+        }
+    }
 }

@@ -12,6 +12,7 @@ pub mod function;
 pub mod header;
 pub mod ir;
 pub mod lift;
+pub mod structure;
 
 pub use cfg::{Block, BlockId, Cfg, Loop, Term};
 pub use emit::{CToken, CTokenKind, Stats};
@@ -180,12 +181,23 @@ pub fn render(
         body.w.end(&[]);
         body.w.blank();
     }
-    emit::GotoLayout {
-        f,
-        cfg: &cfg,
-        blocks: &lifted.blocks,
+    if opts.level == Level::Full {
+        let (tree, gotos) = structure::Structurer::new(&cfg, &lifted.blocks).run();
+        emit::TreeLayout {
+            f,
+            cfg: &cfg,
+            blocks: &lifted.blocks,
+            gotos: &gotos,
+        }
+        .print(&mut body, &tree, &asm);
+    } else {
+        emit::GotoLayout {
+            f,
+            cfg: &cfg,
+            blocks: &lifted.blocks,
+        }
+        .print(&mut body, &asm);
     }
-    .print(&mut body, &asm);
     let stats = body.stats;
     let body = std::mem::take(&mut body.w);
 

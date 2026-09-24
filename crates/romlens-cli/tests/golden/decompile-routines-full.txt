@@ -1,0 +1,68 @@
+/* RESET_008000 at $00:8000: 10 instructions, full level. From Romlens; for reading, not for rebuilding the ROM. */
+#include "snes.h"
+
+void SUB_008020(void);
+void SUB_008030(void);
+void SUB_008040(void);
+void SUB_008050(void);
+
+void RESET_008000(void)
+{
+    SEI();
+    C = 1;
+    native_mode();
+    /* 8-bit A, X and Y */
+    SUB_008020();
+    SUB_008030();
+    SUB_008040();
+    SUB_008050();
+    for (;;) {
+    }
+}
+/* SUB_008020 at $00:8020: 5 instructions, full level. From Romlens; for reading, not for rebuilding the ROM. */
+#include "snes.h"
+
+void SUB_008020(void)
+{
+    X = 0x0F;
+    do {
+        MEM8(0x0200 + X) = 0;
+        X = (u8)(X - 1);
+    } while ((s8)X >= 0);
+}
+/* SUB_008030 at $00:8030: 7 instructions, full level. From Romlens; for reading, not for rebuilding the ROM. */
+#include "snes.h"
+
+void SUB_008030(void)
+{
+    u32 t1;
+
+    /* 16-bit A, 8-bit X and Y */
+    t1 = MEM16(0x10) + MEM16(0x12);
+    C = t1 > 0xFFFF;
+    A = t1;
+    MEM16(0x14) = A;
+    /* 8-bit A, X and Y */
+}
+/* SUB_008040 at $00:8040: 6 instructions, full level. From Romlens; for reading, not for rebuilding the ROM. */
+#include "snes.h"
+
+void SUB_008040(void)
+{
+    A = (A & 0xFF00) | MEM8(0x20);
+    C = (u8)A >= MEM8(0x21);
+    if (!C) {
+        A = (A & 0xFF00) | MEM8(0x21);
+    }
+    MEM8(0x22) = (u8)A;
+}
+/* SUB_008050 at $00:8050: 5 instructions, full level. From Romlens; for reading, not for rebuilding the ROM. */
+#include "snes.h"
+
+extern u8 DATA_008070[];
+
+void SUB_008050(void)
+{
+    A = (A & 0xFF00) | DATA_008070[X];
+    MEM8(0x0300) = (u8)A;
+}
