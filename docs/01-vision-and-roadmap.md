@@ -203,6 +203,11 @@ and its callers and callees, laid out by the core.
 
 Deliverable: exportable, animated explanations of real code.
 
+Static explanations come first and are planned in `20-explanations.md`
+(24 September 2026): each hardware register write decoded one field at a
+time, and the standard SNES sequences (VBlank waits, DMA, clearing memory,
+the APU handshake and so on) named where they appear.
+
 - Recording scrubber: step a recording frame by frame with register and
   memory views, and instruction by instruction where the recording carries
   an execution trace. No game code runs inside Romlens in this phase.

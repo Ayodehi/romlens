@@ -151,6 +151,17 @@ Written from `19-graphs.md` on 24 September 2026.
 | 3.10 | What the recording saw | With an execution log, each block's run count and each edge's count; blocks that never ran dimmed | `romlens graph … --json` with a project that has a log | 🧪 | ⬜ | ⬜ |
 | 3.11 | Who calls this, and what it calls | Calls mode: callers on the left, callees on the right, with sites and how they call; double-click re-centres; Back and Forward | `romlens graph … --calls [--dot\|--json]` | 🧪 | ⬜ | ⬜ |
 
+### 4A — explanations
+
+Written from `20-explanations.md` on 24 September 2026.
+
+| # | Capability | Shell must expose | CLI scenario | macOS | Win | Linux |
+|---|---|---|---|---|---|---|
+| 4.1 | A register write explained field by field | The listing's automatic comment reads `NMITIMEN = $81: NMI on, joypad auto-read on`; the inspector's Explanation section lists every field; an unknown value says where it came from | `romlens explain <rom> [--project P] <address>`, `romlens registers <address>` | ⬜ | ⬜ | ⬜ |
+| 4.2 | Common idioms named | A note line above each (`; ▸ Wait for vertical blank`), with a summary in its values and why games do it in the inspector; clicking the note selects its instructions | `romlens explain <rom> --routine <address>` | ⬜ | ⬜ | ⬜ |
+| 4.3 | The C says the same | Explained stores and idioms carry the same text as comments in the C tab; the code is unchanged | `romlens decompile <rom> <address>` | ⬜ | ⬜ | ⬜ |
+| 4.4 | Explanations can be turned off | View › Show Explanations: off, the listing reads as before | (n/a) | ⬜ | ⬜ | ⬜ |
+
 ## Manual pass, macOS (to repeat before each release)
 
 1. Open `roms/SuperMetroid.F8DF.sfc` and `romlens testrom` output.
@@ -317,3 +328,9 @@ the development ROM.
 41. Pick Calls on `SUB_008079`: its callers sit to its left and its
     callees to its right, each with its call sites. Double-click a caller: it moves to the
     middle. Back returns to `SUB_008079`.
+42. In Super Mario World's RESET, the `STA $4200` reads `NMITIMEN = …` with
+    its fields, and the inspector's Explanation section shows the field
+    grid. Any loop that polls HVBJOY or RDNMI has a `▸ Wait for …` note.
+43. Find a DMA to VRAM (the NMI handler has several): its note summarises
+    the byte count, the source and the VRAM address. The C tab shows the
+    same comments. View › Show Explanations off: the listing reads as before.
