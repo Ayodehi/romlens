@@ -201,6 +201,20 @@ pub fn render_with(
     let mut body = emit::Emitter::new(&mut names);
     body.w.indent = 1;
     body.stats.instructions = f.steps.len() as u32;
+    // A temporary nothing reads is a value kept only for its read.
+    let read = read_temps(&lifted);
+    for b in &mut lifted.blocks {
+        for l in &mut b.lines {
+            if let ir::Stmt::Assign {
+                dst: ir::Place::Temp(t),
+                value,
+            } = &l.stmt
+                && !read.contains(t)
+            {
+                l.stmt = ir::Stmt::Eval(value.clone());
+            }
+        }
+    }
     let used = used_temps(&lifted);
     let renames: std::collections::BTreeMap<u32, u32> = used
         .iter()
@@ -309,6 +323,56 @@ pub fn render_with(
     }
 }
 
+/// The temporaries the code reads.
+fn read_temps(lifted: &lift::Lifted) -> std::collections::BTreeSet<u32> {
+    let mut all = used_temps(lifted);
+    let mut written_only = std::collections::BTreeSet::new();
+    for b in &lifted.blocks {
+        for l in &b.lines {
+            if let ir::Stmt::Assign {
+                dst: ir::Place::Temp(t),
+                ..
+            } = &l.stmt
+            {
+                written_only.insert(*t);
+            }
+        }
+    }
+    // Reads are every mention but the writes' destinations.
+    let mut reads = std::collections::BTreeSet::new();
+    let see = |e: &ir::Expr, out: &mut std::collections::BTreeSet<u32>| {
+        e.walk(&mut |x| {
+            if let ir::Expr::Temp(t) = x {
+                out.insert(*t);
+            }
+        })
+    };
+    for b in &lifted.blocks {
+        for l in &b.lines {
+            match &l.stmt {
+                ir::Stmt::Assign { dst, value } => {
+                    if let ir::Place::Mem { addr, .. } = dst {
+                        see(addr, &mut reads);
+                    }
+                    see(value, &mut reads);
+                }
+                ir::Stmt::Effect(_, args) => args.iter().for_each(|a| see(a, &mut reads)),
+                ir::Stmt::Call(ir::CallTarget::Table { index, .. }) => see(index, &mut reads),
+                ir::Stmt::Eval(e) => see(e, &mut reads),
+                _ => {}
+            }
+        }
+        if let Some(c) = &b.cond {
+            see(c, &mut reads);
+        }
+        if let Some((s, _)) = &b.switch {
+            see(s, &mut reads);
+        }
+    }
+    all.retain(|t| reads.contains(t) || !written_only.contains(t));
+    all
+}
+
 /// The temporaries the printed code still reads or writes.
 fn used_temps(lifted: &lift::Lifted) -> std::collections::BTreeSet<u32> {
     use ir::{Expr, Place, Stmt};
@@ -335,6 +399,7 @@ fn used_temps(lifted: &lift::Lifted) -> std::collections::BTreeSet<u32> {
                 }
                 Stmt::Effect(_, args) => args.iter().for_each(|a| see(a, &mut out)),
                 Stmt::Call(ir::CallTarget::Table { index, .. }) => see(index, &mut out),
+                Stmt::Eval(e) => see(e, &mut out),
                 _ => {}
             }
         }

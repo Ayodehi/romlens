@@ -67,6 +67,9 @@ fn mask(set: &LocSet) -> u32 {
 }
 
 const ALL: u32 = 1023;
+/// What `Conventions::default()` says an unknown call reads: every register
+/// and the carry, not N, V or Z.
+const DEFAULT_READS: u32 = 1 | 2 | 4 | 8 | 16 | 256 | 512;
 
 #[allow(clippy::too_many_arguments)]
 fn build(
@@ -115,11 +118,11 @@ fn build(
                             m.0 |= mask(&s.reads);
                             m.1 |= mask(&s.writes);
                         }
-                        None => m = (ALL, ALL),
+                        None => m = (DEFAULT_READS, ALL),
                     }
                 }
                 if targets.is_empty() {
-                    m = (ALL, ALL);
+                    m = (DEFAULT_READS, ALL);
                 }
                 tables.insert(name.clone(), m);
             } else {
@@ -127,13 +130,33 @@ fn build(
                     .summaries
                     .get(at)
                     .map(|s| (mask(&s.reads), mask(&s.writes)))
-                    .unwrap_or((ALL, ALL));
+                    .unwrap_or((DEFAULT_READS, ALL));
                 funcs.insert(name.clone(), m);
             }
         }
         let s = &program.summaries[&e];
         src.push_str(&format!("#define {} entry_{i}\n", d.name));
-        src.push_str(&d.text);
+        // After a call made with 8-bit index registers their high bytes are
+        // zero, as the hardware keeps them; a stub does not know, so each
+        // such call line says so, at every level alike.
+        let x8_calls: BTreeSet<u32> = f
+            .steps
+            .iter()
+            .filter(|st| st.insn.mnemonic.is_call() && st.insn.flags_after.eff_x())
+            .map(|st| st.insn.file_offset.0)
+            .collect();
+        for (n, line) in d.text.lines().enumerate() {
+            src.push_str(line);
+            let t = line.trim();
+            if t.ends_with("();")
+                && d.lines
+                    .get(n)
+                    .is_some_and(|o| o.iter().any(|o| x8_calls.contains(&o.0)))
+            {
+                src.push_str(" X &= 0xFF; Y &= 0xFF;");
+            }
+            src.push('\n');
+        }
         src.push_str(&format!("#undef {}\n", d.name));
         table_rows.push(format!(
             "{{entry_{i}, {}, {i}, {}, {}}}",
@@ -398,7 +421,12 @@ fn compare(
             }
         }
     }
-    let _ = std::fs::remove_dir_all(&dir);
+    // ROMLENS_DIFF_KEEP leaves the programs for a look.
+    if std::env::var_os("ROMLENS_DIFF_KEEP").is_none() {
+        let _ = std::fs::remove_dir_all(&dir);
+    } else {
+        eprintln!("kept {}", dir.display());
+    }
     Some((compared, bad))
 }
 
@@ -487,9 +515,12 @@ void SED(void) {}
 void CLD(void) {}
 void native_mode(void) {}
 void emulation_mode(void) {}
-void push8(u8 v) { MEM8(S) = v; S--; }
+/* The stack is its own memory: at lift the pushes write it and at clean
+ * the saved temporaries do not, so it must not be memory a routine reads. */
+static uint8_t stack[0x10000];
+void push8(u8 v) { stack[S] = v; S--; }
 void push16(u16 v) { push8(v >> 8); push8(v & 0xFF); }
-u8 pull8(void) { S++; return MEM8(S); }
+u8 pull8(void) { S++; return stack[S]; }
 u16 pull16(void) { u16 lo = pull8(); return lo | (u16)(pull8() << 8); }
 void PHP(void) { push8((u8)(N << 7 | V << 6 | Z << 1 | C)); }
 void PLP(void) { u8 p = pull8(); N = p >> 7 & 1; V = p >> 6 & 1; Z = p >> 1 & 1; C = p & 1; }
@@ -550,7 +581,7 @@ int main(int argc, char **argv) {
                 uint32_t r = hash(0xC0FFEE);
                 A = r; X = r >> 8; Y = r >> 12; D = hash(1) & 0xFF00; DBR = 0x7E;
                 if (entries[i].x8) { X &= 0xFF; Y &= 0xFF; }
-                S = 0x1F80; C = r & 1; N = r >> 1 & 1; V = r >> 2 & 1; Z = r >> 3 & 1;
+                S = 0x01FF; C = r & 1; N = r >> 1 & 1; V = r >> 2 & 1; Z = r >> 3 & 1;
                 if (variant) {
                     /* Change what the summary says is not read. */
                     unsigned k = ~entries[i].reads;
@@ -567,14 +598,12 @@ int main(int argc, char **argv) {
                 }
                 u16 a0 = A, x0 = X, y0 = Y, d0 = D; u8 dbr0 = DBR, c0 = C, n0 = N, v0 = V, z0 = Z;
                 entries[i].fn();
-                printf("R %d %d | %04X %04X %04X %04X %04X %02X %X %X %X %X | %04X %04X %04X 1F80 %04X %02X %X %X %X %X |",
+                printf("R %d %d | %04X %04X %04X %04X %04X %02X %X %X %X %X | %04X %04X %04X 01FF %04X %02X %X %X %X %X |",
                        entries[i].index, s, A, X, Y, S, D, DBR, C, N, V, Z, a0, x0, y0, d0, dbr0, c0, n0, v0, z0);
                 for (uint32_t a = 0; a < (1u << 24); a += 8) {
                     if (!touched[a >> 3]) continue;
                     for (uint32_t b = a; b < a + 8; b++) {
                         if (!(touched[b >> 3] & (1 << (b & 7)))) continue;
-                        /* The stack page the routine may use: slots make it differ. */
-                        if (b >= 0x1C00 && b <= 0x1F84) continue;
                         if (mem[b] != initial(b)) printf(" %06X:%02X", b, mem[b]);
                     }
                 }
@@ -589,3 +618,36 @@ int main(int argc, char **argv) {
     return 0;
 }
 "#;
+
+/// The same on any ROM, when `ROMLENS_DIFF_ROM` names one.
+#[test]
+fn every_level_does_what_lift_does_on_a_rom_you_name() {
+    let Some(path) = std::env::var_os("ROMLENS_DIFF_ROM") else {
+        return;
+    };
+    let rom = RomImage::load(std::path::Path::new(&path)).unwrap();
+    // With ROMLENS_DIFF_PROJECT, the project's traces and marks too.
+    let (rom, project, snap) = match std::env::var_os("ROMLENS_DIFF_PROJECT") {
+        Some(dir) => {
+            let files = romlens_core::io::read_package(std::path::Path::new(&dir)).unwrap();
+            let project = romlens_core::io::from_files(&rom, &files).unwrap();
+            let snap = analyze(&rom, &project, &AnalysisControl::silent()).unwrap();
+            (rom, project, snap)
+        }
+        None => setup(rom),
+    };
+    let mut entries: Vec<SnesAddress> = decompile::entries(&snap).into_iter().collect();
+    // ROMLENS_DIFF_ONLY=009BC9 narrows it to one routine.
+    if let Some(only) = std::env::var("ROMLENS_DIFF_ONLY")
+        .ok()
+        .and_then(|s| u32::from_str_radix(&s, 16).ok())
+    {
+        entries.retain(|a| a.as_u24() == only);
+    }
+    let Some((compared, bad)) = compare("named", &rom, &project, &snap, &entries) else {
+        eprintln!("skipped: no C compiler or not POSIX");
+        return;
+    };
+    eprintln!("{compared} runs compared, {} differ", bad.len());
+    assert!(bad.is_empty(), "{}", bad.join("\n"));
+}

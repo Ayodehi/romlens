@@ -3,6 +3,8 @@
 //! Both checks need a C compiler (`$CC` or `cc`) and print "skipped" and
 //! pass without one, as the development-ROM tests do without the ROM.
 
+mod common;
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -202,6 +204,43 @@ fn the_routines_mean_what_the_code_does() {
             String::from_utf8_lossy(&run.stdout),
             String::from_utf8_lossy(&run.stderr)
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+/// Every routine on the development ROM, at every level, compiles without
+/// a warning.
+#[test]
+fn every_routine_on_the_development_rom_is_valid_c() {
+    let Some(rom) = common::dev_rom() else {
+        return;
+    };
+    let Some(cc) = compiler() else {
+        eprintln!("skipped: no C compiler");
+        return;
+    };
+    let (rom, project, snap) = setup(rom.bytes().to_vec());
+    for level in LEVELS {
+        let opts = DecompileOptions {
+            level,
+            ..Default::default()
+        };
+        let program = decompile::program(&rom, &snap, &opts);
+        let dir = scratch(&format!("devrom-{}", level.name()));
+        std::fs::write(dir.join("snes.h"), decompile::snes_h()).unwrap();
+        let files: Vec<PathBuf> = program
+            .units
+            .iter()
+            .map(|(a, u)| {
+                let d = decompile::render_with(&rom, &project, &snap, &u.f, &opts, Some(&program));
+                let p = dir.join(format!("f_{:06X}.c", a.as_u24()));
+                std::fs::write(&p, d.text).unwrap();
+                p
+            })
+            .collect();
+        assert!(files.len() > 700, "{}", files.len());
+        let errors = syntax_errors(&cc, &dir, &files);
+        assert!(errors.is_empty(), "{} level:\n{errors}", level.name());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

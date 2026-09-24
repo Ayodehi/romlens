@@ -15,7 +15,7 @@ that tracks against it.
 | T5 signatures | done, as summaries rather than typed parameters: `decompile::signature` works out, over the whole program, what each routine reads, writes, returns (what its callers read after it) and preserves (saves on entry and restores on every return), counting a table call's callers and a table slot's dispatcher as known. They replace the every-register assumption for calls, returns and tail calls, and each routine and declaration carries them as a comment (`/* Reads A and X; returns A; preserves Y. */`). On the development ROM 4 of 799 routines stay open (the vectors), gotos 439, all valid C, about a second for the whole ROM. The differential test's stubs now read and write only what each summary says, and two new checks keep the summaries honest: perturbing what a routine is said not to read changes nothing it returns, and what it is said not to write is unchanged. 9,408 runs, no differences; on the way they found five bugs (a preserved register that was also an input, a slot reused for a different value, a register read after its restore, a tail call's pass-through registers, and table stubs). Not done: `u16 f(u16 a)`-style parameters; registers stay the globals of `snes.h` |
 | T6 FFI | done: `Workbench::decompile` (async, on its own thread, with its own cancel flag so dropping it never cancels an analysis) and `decompile_blocking`, `function_containing`, `snes_header()` and `make_routines_test_rom()`. Every routine's summary is built on the first decompile after an analysis and reused until the next. Tokens come back in UTF-16 units for the shell's string APIs. `API_VERSION` 0.5.0 (the bump planned after 2C had not been made, so it moves once). Tested from Rust and from RomlensKit |
 | T7 macOS C tab | done: the C tab (View › C, ⌥⌘8) splits the disassembly and the routine at the selection as C; the header names the routine, carries the level picker and Export C… (the `.c` and `snes.h` beside it). Selecting an instruction highlights the C lines it made, including values carried into a later line, and clicking a C line selects its instructions; double-clicking a routine's or a label's name goes there. Decompile Routine in the context menu. Renames and variables show at once. Also View › Focus on Code (⌥⌘F, and a toolbar button), which hides the navigator, inspector and overview strip together and puts them back as they were. App tests: `DecompileTabTests` |
-| T8 measure and record | to do |
+| T8 measure and record | done, 23 September 2026: see Measurements below. Running Super Mario World with its project through the differential test found four more problems, one in the output and three in the harness, all fixed (below) |
 
 ## Context
 
@@ -290,3 +290,44 @@ work has something to beat.
   `$80:841C`.
 - **Gates:** `make test`, `make swift`, `make app-test`.
 - **By hand** (manual-pass steps 34–36 in `15-conformance-checklist.md`).
+
+## Measurements (23 September 2026)
+
+Every routine the analysis found, `romlens decompile <rom> --all --check`,
+compiled with `cc -std=c11 -fsyntax-only -Wall`. Super Metroid is the
+development ROM with static analysis only; Super Mario World is a user's
+project, with an execution log from play.
+
+| | Routines | Instructions | Level | Statements | Gotos | Asm comments | Valid C | Time |
+|---|---|---|---|---|---|---|---|---|
+| Super Metroid | 799 | 28,500 | lift | 55,716 | 2,796 | 55 | 799 / 799 | 1.1 s |
+| | | | clean | 16,940 | 2,796 | 55 | 799 / 799 | 1.2 s |
+| | | | full | 16,940 | 439 | 55 | 799 / 799 | 1.2 s |
+| Super Mario World | 795 | 35,337 | lift | 77,564 | 4,303 | 22 | 795 / 795 | 0.8 s |
+| | | | clean | 18,198 | 4,303 | 22 | 795 / 795 | 0.9 s |
+| | | | full | 18,198 | 759 | 22 | 795 / 795 | 0.9 s |
+
+Data flow removes 70% (Super Metroid) and 77% (Super Mario World) of the
+statements the lift writes; structuring removes 84% and 82% of the gotos.
+The time covers every routine's summary as well as its C; the app pays it
+once per analysis and then decompiles a routine in milliseconds.
+
+**Meaning.** The differential test (`tests/decompile_diff.rs`) runs every
+routine at every level from four pseudo-random states and compares what it
+leaves with the `lift` level, and checks every summary against the `lift`
+code. Super Metroid, in CI with `ROMLENS_ROM_DIR`: 9,408 runs, no
+differences. Super Mario World with its project (`ROMLENS_DIFF_ROM`,
+`ROMLENS_DIFF_PROJECT`): 9,357 runs, no differences. Getting there found:
+
+- in the output, a value carried out of a `u32` temporary into a
+  comparison, where C's int arithmetic let it go negative; it now stays
+  `(u32)`;
+- in the harness, stubs for calls into unanalysed code that read N, V and
+  Z (the analysis assumes they do not), stubs leaving a 16-bit value in X
+  where the hardware keeps an 8-bit index register's high byte zero, and a
+  stack in memory the routines read.
+
+**Syntax.** Super Mario World also showed routines keeping a read through a
+pointer (which may be a hardware register) for its effect alone. Those now
+print as `(void)MEM8(…);` rather than as a temporary nothing reads, and a
+goto label followed only by a comment gets an empty statement.

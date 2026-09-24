@@ -581,7 +581,8 @@ impl<'a, 'n> Emitter<'a, 'n> {
         let helper = match width {
             Width::W8 => "MEM8",
             Width::W16 => "MEM16",
-            Width::W24 => "MEM24",
+            // Memory is never read as 32 bits.
+            Width::W24 | Width::W32 => "MEM24",
         };
         self.w.tok(helper, CTokenKind::Helper, None);
         self.w.w("(");
@@ -697,7 +698,7 @@ impl<'a, 'n> Emitter<'a, 'n> {
                     base(self);
                 }
             }
-            Width::W24 => {
+            Width::W24 | Width::W32 => {
                 self.w.tok("LONG", CTokenKind::Helper, None);
                 self.w.w("(");
                 base(self);
@@ -795,6 +796,14 @@ impl<'a, 'n> Emitter<'a, 'n> {
                 self.w.comment_line(&format!("asm: {text}: {note}"), steps);
             }
             Stmt::Note(n) => self.w.comment_line(n, steps),
+            Stmt::Eval(e) => {
+                self.w.w("(");
+                self.ty("void");
+                self.w.w(")");
+                self.expr(e);
+                self.w.w(";");
+                self.w.end(steps);
+            }
         }
     }
 
@@ -1112,7 +1121,9 @@ impl TreeLayout<'_> {
             Node::Block(b) => {
                 e.stats.blocks += 1;
                 let lb = &self.blocks[*b];
-                self.put_label(e, *b, lb.lines.is_empty());
+                // A label needs a statement after it: comments are not one.
+                let empty = lb.lines.iter().all(|l| matches!(l.stmt, Stmt::Note(_)));
+                self.put_label(e, *b, empty);
                 for line in &lb.lines {
                     e.stmt(&line.stmt, &line.steps(), asm);
                 }

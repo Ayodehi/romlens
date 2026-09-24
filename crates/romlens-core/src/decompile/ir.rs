@@ -67,6 +67,8 @@ pub enum Width {
     W8,
     W16,
     W24,
+    /// A temporary's width: only for keeping C's arithmetic unsigned.
+    W32,
 }
 
 impl Width {
@@ -75,6 +77,7 @@ impl Width {
             Width::W8 => 1,
             Width::W16 => 2,
             Width::W24 => 3,
+            Width::W32 => 4,
         }
     }
 
@@ -83,6 +86,7 @@ impl Width {
             Width::W8 => 0xFF,
             Width::W16 => 0xFFFF,
             Width::W24 => 0xFF_FFFF,
+            Width::W32 => 0xFFFF_FFFF,
         }
     }
 
@@ -91,6 +95,7 @@ impl Width {
             Width::W8 => 0x80,
             Width::W16 => 0x8000,
             Width::W24 => 0x80_0000,
+            Width::W32 => 0x8000_0000,
         }
     }
 
@@ -108,7 +113,7 @@ impl Width {
         match self {
             Width::W8 => "u8",
             Width::W16 => "u16",
-            Width::W24 => "u32",
+            Width::W24 | Width::W32 => "u32",
         }
     }
 
@@ -116,7 +121,7 @@ impl Width {
         match self {
             Width::W8 => "s8",
             Width::W16 => "s16",
-            Width::W24 => "s32",
+            Width::W24 | Width::W32 => "s32",
         }
     }
 }
@@ -406,6 +411,9 @@ pub enum Stmt {
     },
     /// A remark for the reader (`16-bit A`).
     Note(String),
+    /// A value computed only for its effect, a read that may touch
+    /// hardware: `(void)MEM8(…);`.
+    Eval(Expr),
 }
 
 /// One statement and the instruction it came from (an index into

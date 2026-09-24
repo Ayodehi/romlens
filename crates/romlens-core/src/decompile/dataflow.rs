@@ -289,6 +289,10 @@ impl<'a> Flow<'a> {
                 i.effect = true;
             }
             Stmt::Note(_) => {}
+            Stmt::Eval(e) => {
+                self.expr_info(e, &mut i);
+                i.effect = true;
+            }
         }
         i
     }
@@ -594,7 +598,15 @@ fn substitute(e: &Expr, dst: &Place, v: &Expr) -> Option<Expr> {
             _ => Expr::cast(storage(*r), v.clone()),
         },
         (Expr::Flag(f), Place::Flag(df)) if f == df => v.clone(),
-        (Expr::Temp(t), Place::Temp(dt)) if t == dt => v.clone(),
+        // A temporary is a u32: where the value could go negative as a C
+        // int, it stays unsigned.
+        (Expr::Temp(t), Place::Temp(dt)) if t == dt => {
+            if may_go_negative(v) {
+                Expr::Cast(Width::W32, Box::new(v.clone()))
+            } else {
+                v.clone()
+            }
+        }
         (Expr::Mem { addr, width }, _) => Expr::mem(rec(addr)?, *width),
         (Expr::Un(op, x), _) => Expr::un(*op, rec(x)?),
         (Expr::Bin(op, a, b), _) => Expr::bin(*op, rec(a)?, rec(b)?),
@@ -613,6 +625,17 @@ fn substitute_stmt(s: &Stmt, dst: &Place, v: &Expr) -> Option<Stmt> {
         None => ok = false,
     });
     ok.then_some(out)
+}
+
+/// Whether C, promoting to int, could give `e` a negative value.
+fn may_go_negative(e: &Expr) -> bool {
+    match e {
+        Expr::Bin(BinOp::Sub, ..) | Expr::Un(UnOp::Not, _) | Expr::Signed(..) => true,
+        Expr::Bin(BinOp::Add | BinOp::And | BinOp::Or | BinOp::Xor | BinOp::Shl, a, b) => {
+            may_go_negative(a) || may_go_negative(b)
+        }
+        _ => false,
+    }
 }
 
 /// How wide a register is in `snes.h`.
