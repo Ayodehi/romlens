@@ -68,4 +68,20 @@ import Testing
         m.showExplanations = true
         try await Fixture.settle(until: { m.asmLineCount == lines })
     }
+
+    @Test func theCPrintsNumbersInTheBaseAsked() async throws {
+        let m = try await model()
+        m.select(offset: 0x09)
+        m.editorTab = .c
+        try await Fixture.settle(until: { m.decompiler.state == .ready })
+        #expect(m.decompiler.result?.text.contains("INIDISP = 0x8F;") == true)
+        m.decompiler.numbers = .binary
+        m.refreshDecompile()
+        try await Fixture.settle(until: { m.decompiler.result?.text.contains("INIDISP = 0b10001111;") == true })
+        m.decompiler.numbers = .decimal
+        m.refreshDecompile()
+        try await Fixture.settle(until: { m.decompiler.result?.text.contains("INIDISP = 143;") == true })
+        #expect(CPaneController.value(of: "0b1000") == 8)
+        #expect(CPaneController.bases(0x81) == "129 = 0x81 = 0b10000001")
+    }
 }

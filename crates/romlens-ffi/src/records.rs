@@ -1040,6 +1040,33 @@ pub enum WorkbenchEvent {
     },
 }
 
+/// How the C prints numbers; addresses stay hex.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum NumberStyle {
+    /// Small numbers decimal, the rest hex.
+    Auto,
+    Hex,
+    Decimal,
+    Binary,
+}
+
+impl From<NumberStyle> for romlens_core::decompile::NumberStyle {
+    fn from(n: NumberStyle) -> Self {
+        match n {
+            NumberStyle::Auto => Self::Auto,
+            NumberStyle::Hex => Self::Hex,
+            NumberStyle::Decimal => Self::Decimal,
+            NumberStyle::Binary => Self::Binary,
+        }
+    }
+}
+
+/// `value` as C writes it in each style, for a tooltip.
+#[uniffi::export]
+pub fn format_c_number(value: u32, style: NumberStyle) -> String {
+    romlens_core::decompile::number_in(value, style.into())
+}
+
 /// How far the decompiler goes (`docs/18-decompiler.md`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
 pub enum DecompileLevel {

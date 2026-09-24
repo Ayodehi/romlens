@@ -20,6 +20,10 @@ final class DecompileModel {
     var level: DecompileLevel = .full {
         didSet { if level != oldValue { invalidate() } }
     }
+    /// How the C prints numbers (addresses stay hex).
+    var numbers: NumberStyle = .auto {
+        didSet { if numbers != oldValue { invalidate() } }
+    }
     private(set) var state: State = .idle
     private(set) var result: DecompiledInfo?
     /// Bumped whenever `result` changes, so views rebuild their text once.
@@ -36,6 +40,7 @@ final class DecompileModel {
     private struct Key: Equatable {
         let entry: UInt32
         let level: DecompileLevel
+        let numbers: NumberStyle
         let generation: Int
     }
 
@@ -50,7 +55,8 @@ final class DecompileModel {
     func follow(workbench: Workbench, instructionStart: UInt32?, generation: Int) {
         guard let start = instructionStart else { return }
         // Still inside the routine shown: nothing to do.
-        if let key, key.level == level, key.generation == generation, linesByOffset[start] != nil {
+        if let key, key.level == level, key.numbers == numbers, key.generation == generation,
+           linesByOffset[start] != nil {
             return
         }
         guard let entry = workbench.functionContaining(fileOffset: start) else {
@@ -65,13 +71,14 @@ final class DecompileModel {
             }
             return
         }
-        let next = Key(entry: entry, level: level, generation: generation)
+        let next = Key(entry: entry, level: level, numbers: numbers, generation: generation)
         guard next != key else { return }
         key = next
         self.entry = entry
         // The same routine at the same level again, as after an analysis:
         // the text shown stays up until the new one is ready.
-        if shown?.entry != entry || shown?.level != next.level || result == nil {
+        if shown?.entry != entry || shown?.level != next.level || shown?.numbers != next.numbers
+            || result == nil {
             state = .loading
         }
         if task == nil {
@@ -83,6 +90,7 @@ final class DecompileModel {
         task = Task { [weak self] in
             let outcome: Result<DecompiledInfo, Error>
             do {
+                workbench.setCNumbers(style: run.numbers)
                 outcome = .success(try await workbench.decompile(snesAddress: run.entry, level: run.level))
             } catch {
                 outcome = .failure(error)
@@ -92,7 +100,7 @@ final class DecompileModel {
             guard let key = self.key else { return }
             // A result for the routine and level wanted is shown even if the
             // analysis moved on meanwhile; the next run brings it up to date.
-            if key.entry == run.entry, key.level == run.level {
+            if key.entry == run.entry, key.level == run.level, key.numbers == run.numbers {
                 switch outcome {
                 case .success(let d):
                     self.install(d, for: run)

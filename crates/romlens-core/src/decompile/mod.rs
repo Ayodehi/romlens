@@ -19,7 +19,7 @@ pub mod signature;
 pub mod structure;
 
 pub use cfg::{Block, BlockId, Cfg, Loop, Term};
-pub use emit::{CToken, CTokenKind, Stats};
+pub use emit::{CToken, CTokenKind, Stats, number_in};
 pub use function::{
     Callee, Dest, Function, FunctionError, Step, Transfer, containing, discover, entries,
 };
@@ -63,6 +63,30 @@ impl Level {
     }
 }
 
+/// How the C prints its numbers. Addresses stay hex whatever this says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum NumberStyle {
+    /// Small numbers in decimal, the rest in hex: `3`, `0x81`.
+    #[default]
+    Auto,
+    Hex,
+    Decimal,
+    /// `0b10000001`, padded to 8, 16 or 24 bits.
+    Binary,
+}
+
+impl NumberStyle {
+    pub fn parse(s: &str) -> Option<NumberStyle> {
+        match s {
+            "auto" => Some(NumberStyle::Auto),
+            "hex" => Some(NumberStyle::Hex),
+            "decimal" | "dec" => Some(NumberStyle::Decimal),
+            "binary" | "bin" => Some(NumberStyle::Binary),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct DecompileOptions {
     pub level: Level,
@@ -74,6 +98,7 @@ pub struct DecompileOptions {
     /// Comments explaining hardware writes and the common idioms
     /// (docs/20).
     pub explain: bool,
+    pub numbers: NumberStyle,
 }
 
 impl Default for DecompileOptions {
@@ -83,6 +108,7 @@ impl Default for DecompileOptions {
             names: true,
             assume_dp: None,
             explain: true,
+            numbers: NumberStyle::Auto,
         }
     }
 }
@@ -233,6 +259,7 @@ pub fn render_with(
             }
         }
     }
+    body.numbers = opts.numbers;
     body.w.indent = 1;
     body.stats.instructions = f.steps.len() as u32;
     // A temporary nothing reads is a value kept only for its read.

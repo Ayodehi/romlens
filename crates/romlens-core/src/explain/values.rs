@@ -243,10 +243,7 @@ fn load(rom: &RomImage, insn: &Instruction, wide: bool) -> [Byte; 2] {
         return out;
     }
     let direct = matches!(insn.mode, Absolute | AbsoluteLong | Direct);
-    let Some(t) = insn
-        .target
-        .filter(|t| direct && t.kind == TargetKind::Data)
-    else {
+    let Some(t) = insn.target.filter(|t| direct && t.kind == TargetKind::Data) else {
         return out;
     };
     if !t.certain {

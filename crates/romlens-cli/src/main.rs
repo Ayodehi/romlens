@@ -280,6 +280,10 @@ enum Command {
         /// Leave out the comments explaining hardware writes and idioms.
         #[arg(long)]
         no_explain: bool,
+        /// How numbers print: auto (small ones decimal, the rest hex), hex,
+        /// decimal or binary. Addresses stay hex.
+        #[arg(long, default_value = "auto")]
+        numbers: String,
     },
     /// Export an assembly listing or a symbol file.
     Export {
@@ -1105,6 +1109,7 @@ fn run() -> Result<()> {
             no_names,
             assume_dp,
             no_explain,
+            numbers,
         } => commands::decompile::run(commands::decompile::DecompileArgs {
             rom: rom.as_deref(),
             expr: expr.as_deref(),
@@ -1117,6 +1122,7 @@ fn run() -> Result<()> {
             no_names,
             assume_dp: assume_dp.as_deref(),
             no_explain,
+            numbers: &numbers,
         }),
         Command::Export { what } => match what {
             ExportCommand::Asm {

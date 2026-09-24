@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result, bail};
-use romlens_core::decompile::{self, DecompileOptions, Decompiled, Level};
+use romlens_core::decompile::{self, DecompileOptions, Decompiled, Level, NumberStyle};
 use romlens_core::{AddressExpr, SnesAddress};
 
 use crate::commands::rom::json_str;
@@ -23,6 +23,7 @@ pub struct DecompileArgs<'a> {
     pub no_names: bool,
     pub assume_dp: Option<&'a str>,
     pub no_explain: bool,
+    pub numbers: &'a str,
 }
 
 pub fn run(args: DecompileArgs) -> Result<()> {
@@ -51,6 +52,12 @@ pub fn run(args: DecompileArgs) -> Result<()> {
         names: !args.no_names,
         assume_dp,
         explain: !args.no_explain,
+        numbers: NumberStyle::parse(args.numbers).with_context(|| {
+            format!(
+                "--numbers {}: expected auto, hex, decimal or binary",
+                args.numbers
+            )
+        })?,
     };
     let s = session::open(rom, args.project, false)?;
 

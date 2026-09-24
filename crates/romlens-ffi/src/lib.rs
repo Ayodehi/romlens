@@ -584,6 +584,13 @@ mod tests {
             .decompile_blocking(0x008000, DecompileLevel::Full)
             .unwrap();
         assert!(c.text.contains("/* ▸ DMA transfer"));
+        // Numbers in another base.
+        wb.set_c_numbers(NumberStyle::Binary);
+        let c = wb
+            .decompile_blocking(0x008000, DecompileLevel::Full)
+            .unwrap();
+        assert!(c.text.contains("INIDISP = 0b10001111;"), "{}", c.text);
+        assert_eq!(format_c_number(0x81, NumberStyle::Decimal), "129");
     }
 
     #[test]

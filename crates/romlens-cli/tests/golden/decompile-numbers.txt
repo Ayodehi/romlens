@@ -1,0 +1,162 @@
+/* RESET_008000 at $00:8000: 56 instructions, full level. From Romlens; for reading, not for rebuilding the ROM. */
+#include "snes.h"
+
+void SUB_0080A0(void); /* Reads nothing; returns nothing. */
+void SUB_0080A4(void); /* Reads nothing; returns nothing. */
+extern u8 ADDR_7E0010;
+extern u8 ADDR_7E0200[];
+extern u8 ADDR_7E0DAE;
+extern u8 ADDR_7E0DBE;
+
+/* Reads nothing; returns A, X, DBR and the carry (some callers are not known, so returns are assumed). */
+u16 RESET_008000(u16 *x_out, bool *c_out)
+{
+    bool c;
+
+    SEI();
+    native_mode();
+    INIDISP = 0x8F; /* forced blank, brightness 15 */
+    NMITIMEN = 0x00; /* NMI off */
+    /* ▸ DMA transfer: Channel 0 copies $0800 bytes from $00:9000 to VRAM word $6000. */
+    *(u16 *)&DMAP0 = 0x1801; /* 2 registers, alternating; to $2118 VMDATAL: VRAM */
+    *(u16 *)&A1T0L = 0x9000; /* source $9000 in bank A1B */
+    *(u16 *)&DAS0L = 0x0800; /* 2048 bytes (or an HDMA address) */
+    *(u16 *)&VMADDL = 0x6000; /* VRAM word $6000 (byte $0C000) */
+    VMAIN = 0x80; /* step after the high byte, step 1 word */
+    A1B0 = 0x00; /* bank $00 */
+    MDMAEN = 0x01; /* start DMA on channel 0 */
+    /* ▸ Hardware multiply: 6 × 7 = 42, unsigned 8 × 8 bits; the 16-bit product is read from RDMPY. */
+    WRMPYA = 0x06; /* 6 × WRMPYB */
+    WRMPYB = 0x07; /* WRMPYA × 7, into RDMPY */
+    ADDR_7E0010 = RDMPYL;
+    INIDISP = ADDR_7E0DAE;
+    NMITIMEN = 0x81; /* NMI on, joypad auto-read on */
+    /* ▸ Wait for vertical blank: Reads HVBJOY until bit 7 is set. */
+    do {
+    } while ((s8)HVBJOY >= 0x00);
+    /* ▸ Clear memory: Clears $7E:0200 to $7E:020F: 16 bytes, a byte at a time, indexed by X. */
+    for (int i = 0x0F; i >= 0x00; i--) {
+        ADDR_7E0200[i] = 0x00;
+    }
+    /* ▸ Decimal arithmetic: With the D flag set, ADC and SBC work on decimal digits: this adds two digits a byte, so $09 + $01 is $10. */
+    SED();
+    c = 0x00;
+    C = c;
+    ADDR_7E0DBE = bcd_add(ADDR_7E0DBE, 0x01, 0x08);
+    CLD();
+    /* ▸ Wait for the sound CPU: Waits until the sound CPU puts $AA in APUIO0. */
+    do {
+    } while (APUIO0 != 0xAA);
+    SUB_0080A0();
+    SUB_0080A4();
+    for (;;) {
+    }
+}
+/* RESET_008000 at $00:8000: 56 instructions, full level. From Romlens; for reading, not for rebuilding the ROM. */
+#include "snes.h"
+
+void SUB_0080A0(void); /* Reads nothing; returns nothing. */
+void SUB_0080A4(void); /* Reads nothing; returns nothing. */
+extern u8 ADDR_7E0010;
+extern u8 ADDR_7E0200[];
+extern u8 ADDR_7E0DAE;
+extern u8 ADDR_7E0DBE;
+
+/* Reads nothing; returns A, X, DBR and the carry (some callers are not known, so returns are assumed). */
+u16 RESET_008000(u16 *x_out, bool *c_out)
+{
+    bool c;
+
+    SEI();
+    native_mode();
+    INIDISP = 143; /* forced blank, brightness 15 */
+    NMITIMEN = 0; /* NMI off */
+    /* ▸ DMA transfer: Channel 0 copies $0800 bytes from $00:9000 to VRAM word $6000. */
+    *(u16 *)&DMAP0 = 6145; /* 2 registers, alternating; to $2118 VMDATAL: VRAM */
+    *(u16 *)&A1T0L = 36864; /* source $9000 in bank A1B */
+    *(u16 *)&DAS0L = 2048; /* 2048 bytes (or an HDMA address) */
+    *(u16 *)&VMADDL = 24576; /* VRAM word $6000 (byte $0C000) */
+    VMAIN = 128; /* step after the high byte, step 1 word */
+    A1B0 = 0; /* bank $00 */
+    MDMAEN = 1; /* start DMA on channel 0 */
+    /* ▸ Hardware multiply: 6 × 7 = 42, unsigned 8 × 8 bits; the 16-bit product is read from RDMPY. */
+    WRMPYA = 6; /* 6 × WRMPYB */
+    WRMPYB = 7; /* WRMPYA × 7, into RDMPY */
+    ADDR_7E0010 = RDMPYL;
+    INIDISP = ADDR_7E0DAE;
+    NMITIMEN = 129; /* NMI on, joypad auto-read on */
+    /* ▸ Wait for vertical blank: Reads HVBJOY until bit 7 is set. */
+    do {
+    } while ((s8)HVBJOY >= 0);
+    /* ▸ Clear memory: Clears $7E:0200 to $7E:020F: 16 bytes, a byte at a time, indexed by X. */
+    for (int i = 15; i >= 0; i--) {
+        ADDR_7E0200[i] = 0;
+    }
+    /* ▸ Decimal arithmetic: With the D flag set, ADC and SBC work on decimal digits: this adds two digits a byte, so $09 + $01 is $10. */
+    SED();
+    c = 0;
+    C = c;
+    ADDR_7E0DBE = bcd_add(ADDR_7E0DBE, 1, 8);
+    CLD();
+    /* ▸ Wait for the sound CPU: Waits until the sound CPU puts $AA in APUIO0. */
+    do {
+    } while (APUIO0 != 170);
+    SUB_0080A0();
+    SUB_0080A4();
+    for (;;) {
+    }
+}
+/* RESET_008000 at $00:8000: 56 instructions, full level. From Romlens; for reading, not for rebuilding the ROM. */
+#include "snes.h"
+
+void SUB_0080A0(void); /* Reads nothing; returns nothing. */
+void SUB_0080A4(void); /* Reads nothing; returns nothing. */
+extern u8 ADDR_7E0010;
+extern u8 ADDR_7E0200[];
+extern u8 ADDR_7E0DAE;
+extern u8 ADDR_7E0DBE;
+
+/* Reads nothing; returns A, X, DBR and the carry (some callers are not known, so returns are assumed). */
+u16 RESET_008000(u16 *x_out, bool *c_out)
+{
+    bool c;
+
+    SEI();
+    native_mode();
+    INIDISP = 0b10001111; /* forced blank, brightness 15 */
+    NMITIMEN = 0b00000000; /* NMI off */
+    /* ▸ DMA transfer: Channel 0 copies $0800 bytes from $00:9000 to VRAM word $6000. */
+    *(u16 *)&DMAP0 = 0b0001100000000001; /* 2 registers, alternating; to $2118 VMDATAL: VRAM */
+    *(u16 *)&A1T0L = 0b1001000000000000; /* source $9000 in bank A1B */
+    *(u16 *)&DAS0L = 0b0000100000000000; /* 2048 bytes (or an HDMA address) */
+    *(u16 *)&VMADDL = 0b0110000000000000; /* VRAM word $6000 (byte $0C000) */
+    VMAIN = 0b10000000; /* step after the high byte, step 1 word */
+    A1B0 = 0b00000000; /* bank $00 */
+    MDMAEN = 0b00000001; /* start DMA on channel 0 */
+    /* ▸ Hardware multiply: 6 × 7 = 42, unsigned 8 × 8 bits; the 16-bit product is read from RDMPY. */
+    WRMPYA = 0b00000110; /* 6 × WRMPYB */
+    WRMPYB = 0b00000111; /* WRMPYA × 7, into RDMPY */
+    ADDR_7E0010 = RDMPYL;
+    INIDISP = ADDR_7E0DAE;
+    NMITIMEN = 0b10000001; /* NMI on, joypad auto-read on */
+    /* ▸ Wait for vertical blank: Reads HVBJOY until bit 7 is set. */
+    do {
+    } while ((s8)HVBJOY >= 0b00000000);
+    /* ▸ Clear memory: Clears $7E:0200 to $7E:020F: 16 bytes, a byte at a time, indexed by X. */
+    for (int i = 0b00001111; i >= 0b00000000; i--) {
+        ADDR_7E0200[i] = 0b00000000;
+    }
+    /* ▸ Decimal arithmetic: With the D flag set, ADC and SBC work on decimal digits: this adds two digits a byte, so $09 + $01 is $10. */
+    SED();
+    c = 0b00000000;
+    C = c;
+    ADDR_7E0DBE = bcd_add(ADDR_7E0DBE, 0b00000001, 0b00001000);
+    CLD();
+    /* ▸ Wait for the sound CPU: Waits until the sound CPU puts $AA in APUIO0. */
+    do {
+    } while (APUIO0 != 0b10101010);
+    SUB_0080A0();
+    SUB_0080A4();
+    for (;;) {
+    }
+}

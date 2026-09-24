@@ -557,6 +557,34 @@ fn needs_parens(parent: BinOp, child: &Expr, right: bool) -> bool {
     c == p && right && !(*op == parent && parent.commutative())
 }
 
+/// `v` in the style asked for.
+pub fn number_in(v: u32, style: super::NumberStyle) -> String {
+    use super::NumberStyle::*;
+    match style {
+        Auto => number(v),
+        Decimal => v.to_string(),
+        Hex => {
+            if v <= 0xFF {
+                format!("0x{v:02X}")
+            } else if v <= 0xFFFF {
+                format!("0x{v:04X}")
+            } else {
+                format!("0x{v:06X}")
+            }
+        }
+        Binary => {
+            let bits = if v <= 0xFF {
+                8
+            } else if v <= 0xFFFF {
+                16
+            } else {
+                24
+            };
+            format!("0b{v:0bits$b}")
+        }
+    }
+}
+
 pub fn number(v: u32) -> String {
     if v < 10 {
         v.to_string()
@@ -580,6 +608,8 @@ pub struct Emitter<'a, 'n> {
     pub modern: bool,
     /// The RAM each call's caller passes, by the call's step.
     pub mem_args: BTreeMap<usize, BTreeSet<u32>>,
+    /// How numbers print.
+    pub numbers: super::NumberStyle,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -601,11 +631,13 @@ impl<'a, 'n> Emitter<'a, 'n> {
             vars: Vec::new(),
             modern: false,
             mem_args: BTreeMap::new(),
+            numbers: super::NumberStyle::Auto,
         }
     }
 
     fn num(&mut self, v: u32) {
-        self.w.tok(&number(v), CTokenKind::Number, None);
+        self.w
+            .tok(&number_in(v, self.numbers), CTokenKind::Number, None);
     }
 
     fn kw(&mut self, s: &str) {
@@ -740,7 +772,7 @@ impl<'a, 'n> Emitter<'a, 'n> {
             && let Expr::Const(b) = **base
             && b > 0xFF
         {
-            self.num(b);
+            self.w.tok(&number(b), CTokenKind::Number, None);
             self.w.w(" + ");
             self.paren_if(i, needs_parens(BinOp::Add, i, true));
         } else {

@@ -88,6 +88,9 @@ final class CPaneController: NSObject, NSTextViewDelegate {
     private let levels = NSSegmentedControl(
         labels: ["Lift", "Clean", "Full"], trackingMode: .selectOne, target: nil, action: nil
     )
+    private let numbers = NSSegmentedControl(
+        labels: ["Auto", "Hex", "Dec", "Bin"], trackingMode: .selectOne, target: nil, action: nil
+    )
     private let scrollView: NSScrollView
     let textView: CTextView
     private var shownGeneration = -1
@@ -141,11 +144,20 @@ final class CPaneController: NSObject, NSTextViewDelegate {
         levels.controlSize = .small
         levels.toolTip = "Lift: every instruction in full. Clean: after data flow. Full: with if, loops and signatures."
         levels.setAccessibilityIdentifier("decompile-level")
+        numbers.target = self
+        numbers.action = #selector(numbersChanged(_:))
+        numbers.controlSize = .small
+        numbers.toolTip = "How numbers print: small ones in decimal and the rest in hex, or all in hex, decimal or binary. Addresses stay hex. Hover over a number to see it in every base."
+        numbers.setAccessibilityIdentifier("decompile-numbers")
+        if let saved = UserDefaults.standard.string(forKey: Self.numbersKey),
+           let style = Self.style(named: saved) {
+            model.decompiler.numbers = style
+        }
         let export = NSButton(title: "Export C…", target: nil, action: #selector(RomWindowController.exportC(_:)))
         export.controlSize = .small
         export.bezelStyle = .rounded
 
-        let header = NSStackView(views: [title, status, NSView(), levels, export])
+        let header = NSStackView(views: [title, status, NSView(), numbers, levels, export])
         header.orientation = .horizontal
         header.spacing = 8
         header.edgeInsets = NSEdgeInsets(top: 4, left: 8, bottom: 4, right: 8)
@@ -180,6 +192,7 @@ final class CPaneController: NSObject, NSTextViewDelegate {
         case .clean: 1
         case .full: 2
         }
+        numbers.selectedSegment = Self.styles.firstIndex(of: d.numbers) ?? 0
         switch d.state {
         case .idle:
             title.stringValue = "No routine"
@@ -215,6 +228,21 @@ final class CPaneController: NSObject, NSTextViewDelegate {
         selectingFromText = false
     }
 
+    /// A C literal's value: `12`, `0x81`, `0b1000`.
+    static func value(of literal: String) -> UInt32? {
+        let l = literal.lowercased()
+        if l.hasPrefix("0x") { return UInt32(l.dropFirst(2), radix: 16) }
+        if l.hasPrefix("0b") { return UInt32(l.dropFirst(2), radix: 2) }
+        return UInt32(l)
+    }
+
+    /// `129 = 0x81 = 0b10000001`.
+    static func bases(_ v: UInt32) -> String {
+        [NumberStyle.decimal, .hex, .binary]
+            .map { formatCNumber(value: v, style: $0) }
+            .joined(separator: " = ")
+    }
+
     private func setText(_ result: DecompiledInfo?) {
         let text = result?.text ?? ""
         // A live session re-analyses every few seconds and the routine's C
@@ -231,6 +259,9 @@ final class CPaneController: NSObject, NSTextViewDelegate {
             let range = NSRange(location: Int(t.start), length: Int(t.len))
             guard NSMaxRange(range) <= s.length else { continue }
             s.addAttribute(.foregroundColor, value: CTokenPalette.color(for: t.kind), range: range)
+            if t.kind == .number, let v = Self.value(of: (text as NSString).substring(with: range)) {
+                s.addAttribute(.toolTip, value: Self.bases(v), range: range)
+            }
         }
         // A new text keeps the old caret's character index, which falls on
         // some line of the new routine; that must not read as a click there.
@@ -296,6 +327,22 @@ final class CPaneController: NSObject, NSTextViewDelegate {
             if lineStarts[mid] <= index { lo = mid } else { hi = mid - 1 }
         }
         return lo
+    }
+
+    /// Where the C tab remembers its number style.
+    static let numbersKey = "CNumberStyle"
+    static let styles: [NumberStyle] = [.auto, .hex, .decimal, .binary]
+    private static let names = ["auto", "hex", "decimal", "binary"]
+
+    static func style(named name: String) -> NumberStyle? {
+        names.firstIndex(of: name).map { styles[$0] }
+    }
+
+    @objc private func numbersChanged(_ sender: NSSegmentedControl) {
+        let i = max(0, min(sender.selectedSegment, Self.styles.count - 1))
+        model.decompiler.numbers = Self.styles[i]
+        UserDefaults.standard.set(Self.names[i], forKey: Self.numbersKey)
+        model.refreshDecompile()
     }
 
     @objc private func levelChanged(_ sender: NSSegmentedControl) {

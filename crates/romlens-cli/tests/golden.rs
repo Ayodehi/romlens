@@ -962,6 +962,15 @@ fn explain_commands() {
         &run(&["explain", rom, "$00:8009", "--json"]),
     );
     check(
+        "decompile-numbers",
+        &format!(
+            "{}{}{}",
+            run(&["decompile", rom, "$00:8000", "--numbers", "hex"]),
+            run(&["decompile", rom, "$00:8000", "--numbers", "decimal"]),
+            run(&["decompile", rom, "$00:8000", "--numbers", "binary"]),
+        ),
+    );
+    check(
         "explain-disasm",
         &run(&[
             "disasm",

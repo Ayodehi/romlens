@@ -59,6 +59,8 @@ struct Inner {
     explain: Arc<Explanations>,
     /// Explanations in the listing and the C.
     show_explanations: bool,
+    /// How the C prints numbers.
+    c_numbers: NumberStyle,
     lines: Arc<LineIndex>,
     undo: UndoStack,
     analysis_generation: u64,
@@ -109,6 +111,7 @@ impl Workbench {
                 snapshot: Arc::new(AnalysisSnapshot::default()),
                 explain: Arc::new(Explanations::default()),
                 show_explanations: true,
+                c_numbers: NumberStyle::Auto,
                 lines: Arc::new(LineIndex::default()),
                 undo: UndoStack::default(),
                 analysis_generation: 0,
@@ -148,13 +151,14 @@ impl Workbench {
     ) -> impl FnOnce() -> Result<DecompiledInfo, RomlensError> + Send + 'static {
         use romlens_core::decompile::{self, DecompileOptions};
         let image = self.rom.image.clone();
-        let (project, snapshot, generation, explain) = {
+        let (project, snapshot, generation, explain, numbers) = {
             let inner = self.lock();
             (
                 inner.project.clone(),
                 Arc::clone(&inner.snapshot),
                 inner.analysis_generation,
                 inner.show_explanations,
+                inner.c_numbers,
             )
         };
         let cache = Arc::clone(&self.decompiler);
@@ -162,6 +166,7 @@ impl Workbench {
             let opts = DecompileOptions {
                 level: level.into(),
                 explain,
+                numbers: numbers.into(),
                 ..Default::default()
             };
             let cached = cache
@@ -531,6 +536,15 @@ impl Workbench {
                 .map(Into::into)
                 .collect(),
         }
+    }
+
+    /// How the C prints numbers from the next decompile on.
+    pub fn c_numbers(&self) -> NumberStyle {
+        self.lock().c_numbers
+    }
+
+    pub fn set_c_numbers(&self, style: NumberStyle) {
+        self.lock().c_numbers = style;
     }
 
     /// Whether the listing and the C carry the explanations.
