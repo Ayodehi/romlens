@@ -288,8 +288,15 @@ enum Command {
         #[command(subcommand)]
         action: ProjectCommand,
     },
-    /// The built-in hardware register names.
-    Registers { address: Option<String> },
+    /// The built-in hardware register names; with an address, what its bits
+    /// mean, and with `--value` what that value would do.
+    Registers {
+        address: Option<String>,
+        /// A value to decode (`$81`, `0x1801`); above `$FF` it is a 16-bit
+        /// store covering the next register too.
+        #[arg(long)]
+        value: Option<String>,
+    },
     /// Decode bytes as 8×8 tiles: the index grid, the planes, or a picture.
     Tiles {
         rom: PathBuf,
@@ -1180,7 +1187,9 @@ fn run() -> Result<()> {
                 )
             }
         },
-        Command::Registers { address } => commands::registers::run(address.as_deref()),
+        Command::Registers { address, value } => {
+            commands::registers::run(address.as_deref(), value.as_deref())
+        }
         Command::Tiles {
             rom,
             from,

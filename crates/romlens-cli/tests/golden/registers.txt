@@ -1,3 +1,49 @@
 $420D  MEMSEL    W   FastROM enable
+
+  FastROM: whether banks $80–$FF are read at 3.58 MHz instead of 2.68 MHz.
+  Only works with a cartridge whose ROM is fast enough.
+
+  Bits  Field  
+  0     FastROM
 [exit code 1]
 Error: no register at $2145
+$4200  NMITIMEN  W   Interrupt enable: NMI, IRQ timers, auto joypad read
+
+  Turns interrupts on and off: the NMI at the start of vertical blank, the
+  timer IRQ, and the automatic reading of the controllers each frame.
+
+  Bits  Field      Value  Meaning
+  7     NMI        1      NMI on
+  4–5   Timer IRQ  0      no timer IRQ
+  0     Joypad     1      joypad auto-read on
+
+  NMITIMEN = $81: NMI on, joypad auto-read on
+$4300  DMAP0     RW  DMA channel 0 parameters
+
+  $4300 DMAP0
+  How this DMA channel copies: which way, how the source address moves,
+  and which pattern of B-bus registers it writes.
+
+  Bits  Field          Value  Meaning
+  7     Direction      0      from memory to the B bus
+  6     HDMA indirect  0      HDMA direct table
+  3–4   Source step    0      source address counts up
+  0–2   Pattern        1      2 registers, alternating
+
+  $4301 BBAD0
+  Which B-bus register ($21xx) this channel writes: $18 is VRAM, $22 the
+  palette, $04 sprite memory, $80 work RAM.
+
+  Bits  Field     Value  Meaning
+  0–7   Register  $18    to $2118 VMDATAL: VRAM
+
+  DMAP0 = $01: 2 registers, alternating
+  BBAD0 = $18: to $2118 VMDATAL: VRAM
+$2107  BG1SC     W   BG1 tilemap address and size
+
+  Where BG1's tilemap is in VRAM and how many tiles it spans. The tilemap
+  says which tile goes in each cell of the layer.
+
+  Bits  Field
+  2–7   Base
+  0–1   Size

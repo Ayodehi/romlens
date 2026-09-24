@@ -273,7 +273,7 @@ fn region_arg(name: &str) -> Result<StateRegion> {
     })
 }
 
-fn number(text: &str) -> Result<u32> {
+pub(crate) fn number(text: &str) -> Result<u32> {
     let t = text.trim();
     let parsed = match t.strip_prefix("0x").or_else(|| t.strip_prefix('$')) {
         Some(hex) => u32::from_str_radix(hex, 16),

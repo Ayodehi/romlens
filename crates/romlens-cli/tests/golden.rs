@@ -289,9 +289,12 @@ fn lorom_analysis_commands() {
     check(
         "registers",
         &format!(
-            "{}{}",
+            "{}{}{}{}{}",
             run(&["registers", "$420D"]),
-            run(&["registers", "$2145"])
+            run(&["registers", "$2145"]),
+            run(&["registers", "$4200", "--value", "$81"]),
+            run(&["registers", "$4300", "--value", "0x1801"]),
+            run(&["registers", "$2107"])
         ),
     );
     let _ = std::fs::remove_dir_all(dir);
