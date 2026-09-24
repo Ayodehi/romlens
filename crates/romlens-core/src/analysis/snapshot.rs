@@ -168,6 +168,9 @@ pub struct AnalysisSnapshot {
     pub heuristic_hits: Vec<HeuristicHit>,
     /// Resolved dispatch tables, by base then dispatcher.
     pub jump_tables: Vec<JumpTable>,
+    /// Callees that skip inline arguments after their call, by the callee's
+    /// file offset: the number of bytes after each `JSR`/`JSL` to them.
+    pub inline_args: BTreeMap<u32, u16>,
     pub xrefs_by_target: Vec<XRef>,
     /// Sorted by source then target.
     pub xrefs_by_source: Vec<XRef>,

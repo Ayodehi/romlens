@@ -8,7 +8,7 @@ that tracks against it.
 | Task | State |
 |---|---|
 | T0 this document, the roadmap pointer, the checklist rows | done |
-| T1 functions and control-flow graphs | to do |
+| T1 functions and control-flow graphs | done: `decompile::function` and `decompile::cfg`. On the development ROM (static analysis only) all 799 entries decompose, 28,500 instructions, 386 loops, 2 routines irreducible, in 5 ms. The snapshot now keeps `inline_args` |
 | T2 lifting, `snes.h`, the `lift` level and `romlens decompile` | to do |
 | T3 data flow (the `clean` level) | to do |
 | T4 structuring (the `full` level) | to do |

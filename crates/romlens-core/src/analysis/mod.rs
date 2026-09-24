@@ -597,6 +597,7 @@ pub fn analyze_cached(
         instructions,
         heuristic_hits,
         jump_tables: tables,
+        inline_args,
         regions,
         auto_labels,
         xrefs_by_target,

@@ -9,6 +9,7 @@
 
 pub mod analysis;
 pub mod cpu65816;
+pub mod decompile;
 pub mod error;
 pub mod fixtures;
 pub mod graphics;
