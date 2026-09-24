@@ -30,6 +30,7 @@ u8 SUB_008020(void)
 {
     u8 x;
 
+    /* ▸ Clear memory: Clears $7E:0200 to $7E:020F: 16 bytes, a byte at a time, indexed by X. */
     for (x = 0x0F; (s8)x >= 0; x--) {
         ADDR_7E0200[x] = 0;
     }

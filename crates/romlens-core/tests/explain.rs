@@ -221,3 +221,68 @@ fn near_misses_are_not_idioms() {
     let found: Vec<String> = x.idioms().iter().map(|i| i.title.clone()).collect();
     assert!(found.is_empty(), "{found:?}");
 }
+
+/// The C carries the same explanations as comments, and without them the
+/// code is the same.
+#[test]
+fn the_c_says_the_same() {
+    use romlens_core::decompile::{self, DecompileOptions};
+    let rom = rom();
+    let project = Project::new(&rom);
+    let snap = analyze(&rom, &project, &AnalysisControl::silent()).unwrap();
+    let c = |explain| {
+        decompile::decompile(
+            &rom,
+            &project,
+            &snap,
+            SnesAddress::new(0, 0x8000),
+            &DecompileOptions {
+                explain,
+                ..Default::default()
+            },
+        )
+        .unwrap()
+    };
+    let with = c(true);
+    let without = c(false);
+    assert!(
+        with.text
+            .contains("INIDISP = 0x8F; /* forced blank, brightness 15 */"),
+        "{}",
+        with.text
+    );
+    assert!(
+        with.text.contains(
+            "    /* ▸ Wait for vertical blank: Reads HVBJOY until bit 7 is set. */\n    do {"
+        ),
+        "{}",
+        with.text
+    );
+    assert!(
+        with.text
+            .contains("/* ▸ DMA transfer: Channel 0 copies $0800 bytes")
+    );
+    // Taking the comments out gives the plain text back.
+    let stripped: Vec<String> = with
+        .text
+        .lines()
+        .filter(|l| !l.trim_start().starts_with("/* ▸"))
+        .map(|l| match l.find(" /* ") {
+            Some(i) if l.starts_with("    ") && !l.trim_start().starts_with("/*") => {
+                l[..i].to_owned()
+            }
+            _ => l.to_owned(),
+        })
+        .collect();
+    let plain: Vec<&str> = without.text.lines().collect();
+    assert_eq!(stripped, plain);
+    // The line map still lines up with the text, note lines mapping to
+    // nothing.
+    assert_eq!(with.lines.len(), with.text.lines().count());
+    // Tokens stay inside the text and on character boundaries.
+    for t in &with.tokens {
+        let end = (t.start + t.len) as usize;
+        assert!(end <= with.text.len());
+        assert!(with.text.is_char_boundary(t.start as usize) && with.text.is_char_boundary(end));
+    }
+}

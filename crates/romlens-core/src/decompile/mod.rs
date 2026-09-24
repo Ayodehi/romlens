@@ -14,6 +14,7 @@ pub mod header;
 pub mod ir;
 pub mod lift;
 pub mod loops;
+pub mod notes;
 pub mod signature;
 pub mod structure;
 
@@ -70,6 +71,9 @@ pub struct DecompileOptions {
     pub names: bool,
     /// The direct page where the analysis does not know it.
     pub assume_dp: Option<u16>,
+    /// Comments explaining hardware writes and the common idioms
+    /// (docs/20).
+    pub explain: bool,
 }
 
 impl Default for DecompileOptions {
@@ -78,6 +82,7 @@ impl Default for DecompileOptions {
             level: Level::Full,
             names: true,
             assume_dp: None,
+            explain: true,
         }
     }
 }
@@ -312,6 +317,20 @@ pub fn render_with(
     let stats = body.stats;
     let callees = body.names.callees();
     let body = std::mem::take(&mut body.w);
+    let body = if opts.explain {
+        let own;
+        let entries = match program {
+            Some(p) => &p.entries,
+            None => {
+                own = function::entries(snap);
+                &own
+            }
+        };
+        let (writes, idioms) = crate::explain::routine(rom, project, snap, f, &cfg, entries);
+        notes::annotate(body, f, &writes, &idioms)
+    } else {
+        body
+    };
 
     let mut w = emit::Writer::default();
     w.comment_line(

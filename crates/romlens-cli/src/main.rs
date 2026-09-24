@@ -277,6 +277,9 @@ enum Command {
         /// The direct page where the analysis does not know it (hex).
         #[arg(long)]
         assume_dp: Option<String>,
+        /// Leave out the comments explaining hardware writes and idioms.
+        #[arg(long)]
+        no_explain: bool,
     },
     /// Export an assembly listing or a symbol file.
     Export {
@@ -1101,6 +1104,7 @@ fn run() -> Result<()> {
             check,
             no_names,
             assume_dp,
+            no_explain,
         } => commands::decompile::run(commands::decompile::DecompileArgs {
             rom: rom.as_deref(),
             expr: expr.as_deref(),
@@ -1112,6 +1116,7 @@ fn run() -> Result<()> {
             check,
             no_names,
             assume_dp: assume_dp.as_deref(),
+            no_explain,
         }),
         Command::Export { what } => match what {
             ExportCommand::Asm {

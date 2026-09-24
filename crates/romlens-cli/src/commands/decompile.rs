@@ -22,6 +22,7 @@ pub struct DecompileArgs<'a> {
     pub check: bool,
     pub no_names: bool,
     pub assume_dp: Option<&'a str>,
+    pub no_explain: bool,
 }
 
 pub fn run(args: DecompileArgs) -> Result<()> {
@@ -49,6 +50,7 @@ pub fn run(args: DecompileArgs) -> Result<()> {
         level,
         names: !args.no_names,
         assume_dp,
+        explain: !args.no_explain,
     };
     let s = session::open(rom, args.project, false)?;
 

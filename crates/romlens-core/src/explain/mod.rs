@@ -86,15 +86,7 @@ impl Explanations {
     pub fn build(rom: &RomImage, project: &Project, snap: &AnalysisSnapshot) -> Explanations {
         let entries = function::entries(snap);
         let symbols = Symbols::new(rom, project, &snap.auto_labels);
-        let name = |a: SnesAddress| {
-            let a = Project::canonical(rom, a);
-            match symbols.name_for(a) {
-                // An automatic name already says where it is.
-                Some(n) if !n.user => n.name,
-                Some(n) => format!("{} ({a})", n.name),
-                None => format!("{a}"),
-            }
-        };
+        let name = |a: SnesAddress| address_name(rom, &symbols, a);
         let mut stores: HashMap<u32, Store> = HashMap::new();
         let mut idioms: BTreeMap<(u32, IdiomKind), Idiom> = BTreeMap::new();
         let mut routines = 0;
@@ -190,6 +182,39 @@ impl Explanations {
             }
         }
         s
+    }
+}
+
+/// One routine's explanations, for the C (docs/20): its stores and the
+/// idioms in it, found from this routine alone.
+pub fn routine(
+    rom: &RomImage,
+    project: &Project,
+    snap: &AnalysisSnapshot,
+    f: &crate::decompile::function::Function,
+    cfg: &Cfg,
+    entries: &std::collections::BTreeSet<SnesAddress>,
+) -> (Vec<Explained>, Vec<Idiom>) {
+    let symbols = Symbols::new(rom, project, &snap.auto_labels);
+    let name = |a: SnesAddress| address_name(rom, &symbols, a);
+    let v = values::values(rom, f, cfg);
+    let idioms = idioms::find(rom, f, cfg, &v, entries, &name);
+    let writes = v
+        .stores
+        .iter()
+        .filter_map(|s| explain(rom, &symbols, s))
+        .collect();
+    (writes, idioms)
+}
+
+/// An address as a summary says it: `Brightness ($7E:0DAE)`, an automatic
+/// name alone (it already says where it is), or `$7E:0DAE`.
+fn address_name(rom: &RomImage, symbols: &Symbols, a: SnesAddress) -> String {
+    let a = Project::canonical(rom, a);
+    match symbols.name_for(a) {
+        Some(n) if !n.user => n.name,
+        Some(n) => format!("{} ({a})", n.name),
+        None => format!("{a}"),
     }
 }
 

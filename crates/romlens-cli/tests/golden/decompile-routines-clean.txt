@@ -30,6 +30,7 @@ void SUB_008020(void)
 {
     X = 0x0F;
 
+/* ▸ Clear memory: Clears $7E:0200 to $7E:020F: 16 bytes, a byte at a time, indexed by X. */
 LOOP_008022:
     ADDR_7E0200[X] = 0;
     X = (u8)(X - 1);
