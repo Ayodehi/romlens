@@ -19,7 +19,8 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use romlens_core::analysis::{AnalysisControl, AnalysisSnapshot, analyze};
-use romlens_core::decompile::{self, DecompileOptions, Level};
+use romlens_core::decompile::dataflow::{Loc, LocSet};
+use romlens_core::decompile::{self, DecompileOptions, Level, Program};
 use romlens_core::fixtures;
 use romlens_core::model::Project;
 use romlens_core::{RomImage, SnesAddress};
@@ -39,67 +40,120 @@ fn compiler() -> Option<String> {
         .map(|_| cc)
 }
 
-/// One run's result: the registers, then changed memory.
-type Outcome = (String, BTreeMap<u32, u8>);
-
-struct Program {
+struct Program2 {
     exe: PathBuf,
 }
 
+/// Bits for registers and flags, as the C side masks them.
+fn mask(set: &LocSet) -> u32 {
+    let mut m = 0;
+    for (l, bit) in [
+        (Loc::Al, 1),
+        (Loc::Ah, 2),
+        (Loc::X, 4),
+        (Loc::Y, 8),
+        (Loc::C, 16),
+        (Loc::N, 32),
+        (Loc::V, 64),
+        (Loc::Z, 128),
+        (Loc::D, 256),
+        (Loc::Dbr, 512),
+    ] {
+        if set.contains(&l) {
+            m |= bit;
+        }
+    }
+    m
+}
+
+const ALL: u32 = 1023;
+
+#[allow(clippy::too_many_arguments)]
 fn build(
     cc: &str,
     dir: &std::path::Path,
     rom: &RomImage,
     project: &Project,
     snap: &AnalysisSnapshot,
+    program: &Program,
     entries: &[SnesAddress],
     level: Level,
-) -> Option<Program> {
+) -> Option<Program2> {
     let opts = DecompileOptions {
         level,
         names: false,
         ..Default::default()
     };
-    let all = decompile::entries(snap);
     let mut src = String::from(PRELUDE);
-    let mut funcs: BTreeSet<String> = BTreeSet::new();
-    let mut tables: BTreeSet<String> = BTreeSet::new();
+    let mut funcs: BTreeMap<String, (u32, u32)> = BTreeMap::new();
+    let mut tables: BTreeMap<String, (u32, u32)> = BTreeMap::new();
     let mut table_rows = Vec::new();
     for (i, &e) in entries.iter().enumerate() {
-        let Ok(f) = decompile::discover(rom, snap, &all, e) else {
+        let Some(u) = program.units.get(&e) else {
             continue;
         };
+        let f = &u.f;
         let x8 = f.steps[f.index_of(f.entry_offset).unwrap()]
             .insn
             .flags_before
             .eff_x();
-        let d = decompile::render(rom, project, snap, &f, &opts);
-        for line in d.text.lines() {
-            if let Some(name) = line
-                .strip_prefix("void ")
-                .and_then(|l| l.strip_suffix("(void);"))
-            {
-                funcs.insert(name.to_owned());
-            }
-            if let Some(name) = line
-                .strip_prefix("extern void (*const ")
-                .and_then(|l| l.strip_suffix("[])(void);"))
-            {
-                tables.insert(name.to_owned());
+        let d = decompile::render_with(rom, project, snap, f, &opts, Some(program));
+        for (name, at, table) in &d.callees {
+            if *table {
+                // What the analysis assumes of a table call: the union of
+                // its targets' summaries.
+                let targets: Vec<SnesAddress> = snap
+                    .jump_tables
+                    .iter()
+                    .filter(|t| t.base_address == *at)
+                    .flat_map(|t| t.targets.iter().map(|(a, _)| *a))
+                    .collect();
+                let mut m = (0, 0);
+                for t in &targets {
+                    match program.summaries.get(t) {
+                        Some(s) => {
+                            m.0 |= mask(&s.reads);
+                            m.1 |= mask(&s.writes);
+                        }
+                        None => m = (ALL, ALL),
+                    }
+                }
+                if targets.is_empty() {
+                    m = (ALL, ALL);
+                }
+                tables.insert(name.clone(), m);
+            } else {
+                let m = program
+                    .summaries
+                    .get(at)
+                    .map(|s| (mask(&s.reads), mask(&s.writes)))
+                    .unwrap_or((ALL, ALL));
+                funcs.insert(name.clone(), m);
             }
         }
+        let s = &program.summaries[&e];
         src.push_str(&format!("#define {} entry_{i}\n", d.name));
         src.push_str(&d.text);
         src.push_str(&format!("#undef {}\n", d.name));
-        table_rows.push(format!("{{entry_{i}, {}, {}}}", x8 as u8, i));
+        table_rows.push(format!(
+            "{{entry_{i}, {}, {i}, {}, {}}}",
+            x8 as u8,
+            mask(&s.reads),
+            mask(&s.writes)
+        ));
     }
-    src.push_str("\n/* Stubs for everything called. */\n");
-    for (k, name) in funcs.iter().enumerate() {
-        src.push_str(&format!("void {name}(void) {{ stub({}); }}\n", k + 1));
-    }
-    for (k, name) in tables.iter().enumerate() {
+    src.push_str(
+        "\n/* Stubs for everything called, reading and writing what its summary says. */\n",
+    );
+    for (k, (name, (r, w))) in funcs.iter().enumerate() {
         src.push_str(&format!(
-            "static void {name}_stub(void) {{ stub({}); }}\n\
+            "void {name}(void) {{ stub({}, {r}, {w}); }}\n",
+            k + 1
+        ));
+    }
+    for (k, (name, (r, w))) in tables.iter().enumerate() {
+        src.push_str(&format!(
+            "static void {name}_stub(void) {{ stub({}, {r}, {w}); }}\n\
              void (*const {name}[32768])(void) = {{[0 ... 32767] = {name}_stub}};\n",
             0x10000 + k
         ));
@@ -133,39 +187,109 @@ fn build(
             .collect::<Vec<_>>()
             .join("\n")
     );
-    Some(Program { exe })
+    Some(Program2 { exe })
 }
 
-/// Run every routine under every seed: (routine index, seed) to outcome;
-/// timeouts and crashes are absent.
-fn run(p: &Program, rom_path: &std::path::Path) -> BTreeMap<(usize, u32), Outcome> {
+/// One run: final registers and flags (A X Y S D DBR C N V Z), the
+/// initial ones, and the memory it changed.
+#[derive(Debug, Clone, PartialEq)]
+struct Outcome {
+    regs: [u32; 10],
+    initial: [u32; 10],
+    mem: BTreeMap<u32, u8>,
+}
+
+/// Run every routine under every seed, perturbing what `variant` 1 says:
+/// (routine index, seed) to outcome; timeouts and crashes are absent.
+fn run(p: &Program2, rom_path: &std::path::Path, variant: u32) -> BTreeMap<(usize, u32), Outcome> {
     let out = Command::new(&p.exe)
         .arg(rom_path)
         .arg(SEEDS.to_string())
+        .arg(variant.to_string())
         .output()
         .unwrap();
     let mut results = BTreeMap::new();
+    let hex = |v: &str| u32::from_str_radix(v, 16).unwrap();
     for line in String::from_utf8_lossy(&out.stdout).lines() {
-        let mut parts = line.split(" | ");
-        let head = parts.next().unwrap_or("");
-        let mut h = head.split_whitespace();
+        let parts: Vec<&str> = line.split('|').map(|p| p.trim()).collect();
+        if parts.len() < 3 {
+            continue;
+        }
+        let mut h = parts[0].split_whitespace();
         if h.next() != Some("R") {
             continue;
         }
         let i: usize = h.next().unwrap().parse().unwrap();
         let s: u32 = h.next().unwrap().parse().unwrap();
-        let regs: Vec<&str> = h.collect();
+        let regs: Vec<u32> = parts[1].split_whitespace().map(hex).collect();
+        let initial: Vec<u32> = parts[2].split_whitespace().map(hex).collect();
         let mut mem = BTreeMap::new();
-        for pair in parts.next().unwrap_or("").split_whitespace() {
+        for pair in parts.get(3).unwrap_or(&"").split_whitespace() {
             let (a, v) = pair.split_once(':').unwrap();
-            mem.insert(
-                u32::from_str_radix(a, 16).unwrap(),
-                u8::from_str_radix(v, 16).unwrap(),
-            );
+            mem.insert(hex(a), hex(v) as u8);
         }
-        results.insert((i, s), (regs.join(" "), mem));
+        results.insert(
+            (i, s),
+            Outcome {
+                regs: regs.try_into().unwrap(),
+                initial: initial.try_into().unwrap(),
+                mem,
+            },
+        );
     }
     results
+}
+
+/// Registers by mask bit: which part of which outcome field.
+fn reg_diffs(a: &Outcome, b: &Outcome, bits: u32) -> Vec<String> {
+    const NAMES: [&str; 10] = ["A", "X", "Y", "S", "D", "DBR", "C", "N", "V", "Z"];
+    let mut out = Vec::new();
+    let mut check = |field: usize, m: u32, name: &str| {
+        if a.regs[field] & m != b.regs[field] & m {
+            out.push(format!(
+                "{name} {:X} (lift: {:X})",
+                a.regs[field] & m,
+                b.regs[field] & m
+            ));
+        }
+    };
+    if bits & 1 != 0 {
+        check(0, 0xFF, "A.lo");
+    }
+    if bits & 2 != 0 {
+        check(0, 0xFF00, "A.hi");
+    }
+    for (bit, field) in [
+        (4, 1),
+        (8, 2),
+        (256, 4),
+        (512, 5),
+        (16, 6),
+        (32, 7),
+        (64, 8),
+        (128, 9),
+    ] {
+        if bits & bit != 0 {
+            check(field, 0xFFFF, NAMES[field]);
+        }
+    }
+    check(3, 0xFFFF, "S");
+    out
+}
+
+fn mem_diffs(a: &Outcome, b: &Outcome) -> Vec<String> {
+    let addrs: BTreeSet<&u32> = a.mem.keys().chain(b.mem.keys()).collect();
+    addrs
+        .into_iter()
+        .filter(|x| a.mem.get(x) != b.mem.get(x))
+        .map(|x| {
+            format!(
+                "${x:06X} {:02X?} (lift: {:02X?})",
+                a.mem.get(x),
+                b.mem.get(x)
+            )
+        })
+        .collect()
 }
 
 fn compare(
@@ -181,41 +305,96 @@ fn compare(
     std::fs::create_dir_all(&dir).unwrap();
     let rom_path = dir.join("rom.sfc");
     std::fs::write(&rom_path, rom.bytes()).unwrap();
-    let base = run(
-        &build(&cc, &dir, rom, project, snap, entries, Level::Lift)?,
-        &rom_path,
-    );
+    let program = decompile::program(rom, snap, &DecompileOptions::default());
+    let lift = build(
+        &cc,
+        &dir,
+        rom,
+        project,
+        snap,
+        &program,
+        entries,
+        Level::Lift,
+    )?;
+    let base = run(&lift, &rom_path, 0);
     let mut compared = 0;
     let mut bad = Vec::new();
+    let summary = |i: usize| &program.summaries[&entries[i]];
+    let say = |bad: &mut Vec<String>, i: usize, what: &str, seed: u32, diff: Vec<String>| {
+        bad.push(format!(
+            "{} {what}, seed {seed}: {}",
+            entries[i],
+            diff.into_iter().take(6).collect::<Vec<_>>().join("; ")
+        ));
+    };
+
+    // The summary is true of the lift level: perturbing what it says is not
+    // read changes nothing, and what it says is not written is unchanged.
+    let perturbed = run(&lift, &rom_path, 1);
+    for (key, want) in &base {
+        let s = summary(key.0);
+        let seen = mask(&s.writes);
+        for (bit, field, m) in [
+            (1u32, 0usize, 0xFFu32),
+            (2, 0, 0xFF00),
+            (4, 1, 0xFFFF),
+            (8, 2, 0xFFFF),
+            (256, 4, 0xFFFF),
+            (512, 5, 0xFF),
+            (16, 6, 1),
+        ] {
+            if seen & bit == 0 && want.regs[field] & m != want.initial[field] & m {
+                say(
+                    &mut bad,
+                    key.0,
+                    "changes what its summary says it does not write",
+                    key.1,
+                    vec![format!("field {field}")],
+                );
+            }
+        }
+        let Some(have) = perturbed.get(key) else {
+            continue;
+        };
+        compared += 1;
+        // Only what callers read: a register written on some paths and not
+        // others passes its input through on the rest, which no one reads.
+        let mut diff = reg_diffs(have, want, mask(&s.returns));
+        diff.extend(mem_diffs(have, want));
+        if !diff.is_empty() {
+            say(
+                &mut bad,
+                key.0,
+                "depends on what its summary says it does not read",
+                key.1,
+                diff,
+            );
+        }
+    }
+
     for level in [Level::Clean, Level::Full] {
         let got = run(
-            &build(&cc, &dir, rom, project, snap, entries, level)?,
+            &build(&cc, &dir, rom, project, snap, &program, entries, level)?,
             &rom_path,
+            0,
         );
         for (key, want) in &base {
             let Some(have) = got.get(key) else {
                 continue;
             };
             compared += 1;
-            if have != want {
-                let mut diff: Vec<String> = Vec::new();
-                if have.0 != want.0 {
-                    diff.push(format!("registers {} (lift: {})", have.0, want.0));
-                }
-                let addrs: BTreeSet<&u32> = have.1.keys().chain(want.1.keys()).collect();
-                for a in addrs {
-                    let (h, w) = (have.1.get(a), want.1.get(a));
-                    if h != w {
-                        diff.push(format!("${a:06X} {h:02X?} (lift: {w:02X?})"));
-                    }
-                }
-                bad.push(format!(
-                    "{} at {} level, seed {}: {}",
-                    entries[key.0],
-                    level.name(),
+            let s = summary(key.0);
+            let live: LocSet = s.returns.union(&s.preserves).copied().collect();
+            let mut diff = reg_diffs(have, want, mask(&live));
+            diff.extend(mem_diffs(have, want));
+            if !diff.is_empty() {
+                say(
+                    &mut bad,
+                    key.0,
+                    &format!("at {} level", level.name()),
                     key.1,
-                    diff.into_iter().take(6).collect::<Vec<_>>().join("; ")
-                ));
+                    diff,
+                );
             }
         }
     }
@@ -254,11 +433,7 @@ fn every_level_does_what_lift_does_on_the_development_rom() {
         return;
     };
     eprintln!("{compared} runs compared, {} differ", bad.len());
-    assert!(
-        bad.is_empty(),
-        "{}",
-        bad.iter().take(40).cloned().collect::<Vec<_>>().join("\n")
-    );
+    assert!(bad.is_empty(), "{}", bad.join("\n"));
 }
 
 /// Memory is 16 MB, filled on first touch: ROM bytes (LoROM) where the
@@ -326,13 +501,33 @@ void WAI(void) {}
 void STP(void) { _exit(3); }
 void BRK(u8 n) { A ^= n; }
 void COP(u8 n) { A ^= n; }
-/* A call: mixes what it reads into what it writes. */
-static void stub(uint32_t id) {
-    uint32_t h = hash(id ^ A * 31 ^ X * 17 ^ Y * 7 ^ C);
-    A = h; X = h >> 8; Y = h >> 16; C = h & 1; N = h >> 1 & 1; V = h >> 2 & 1; Z = h >> 3 & 1;
+/* A call: mixes what it reads (mask r) into what it writes (mask w). */
+static void stub(uint32_t id, unsigned r, unsigned w) {
+    uint32_t in = id;
+    if (r & 1) in ^= (A & 0xFF) * 31;
+    if (r & 2) in ^= (A >> 8) * 37;
+    if (r & 4) in ^= X * 17;
+    if (r & 8) in ^= Y * 7;
+    if (r & 16) in ^= C * 3;
+    if (r & 32) in ^= N * 5;
+    if (r & 64) in ^= V * 11;
+    if (r & 128) in ^= Z * 13;
+    if (r & 256) in ^= D * 19;
+    if (r & 512) in ^= DBR * 23;
+    uint32_t h = hash(in);
+    if (w & 1) A = (A & 0xFF00) | (h & 0xFF);
+    if (w & 2) A = (A & 0x00FF) | (h & 0xFF00);
+    if (w & 4) X = h >> 8;
+    if (w & 8) Y = h >> 16;
+    if (w & 16) C = h & 1;
+    if (w & 32) N = h >> 1 & 1;
+    if (w & 64) V = h >> 2 & 1;
+    if (w & 128) Z = h >> 3 & 1;
+    if (w & 256) D = h >> 4;
+    if (w & 512) DBR = h >> 12;
     if (h & 0x10) MEM8(0x7E0000 | (h >> 8 & 0xFFFF)) = h >> 24;
 }
-struct entry { void (*fn)(void); int x8; int index; };
+struct entry { void (*fn)(void); int x8; int index; unsigned reads, writes; };
 "#;
 
 const MAIN: &str = r#"
@@ -343,6 +538,7 @@ int main(int argc, char **argv) {
     mem = calloc((1 << 24) + 4, 1);
     touched = calloc((1 << 21) + 1, 1);
     int seeds = atoi(argv[2]);
+    int variant = atoi(argv[3]);
     for (int i = 0; i < n_entries; i++) {
         for (int s = 0; s < seeds; s++) {
             fflush(stdout);
@@ -355,8 +551,24 @@ int main(int argc, char **argv) {
                 A = r; X = r >> 8; Y = r >> 12; D = hash(1) & 0xFF00; DBR = 0x7E;
                 if (entries[i].x8) { X &= 0xFF; Y &= 0xFF; }
                 S = 0x1F80; C = r & 1; N = r >> 1 & 1; V = r >> 2 & 1; Z = r >> 3 & 1;
+                if (variant) {
+                    /* Change what the summary says is not read. */
+                    unsigned k = ~entries[i].reads;
+                    if (k & 1) A ^= 0x5A;
+                    if (k & 2) A ^= 0xA500;
+                    if (k & 4) X ^= entries[i].x8 ? 0x33 : 0x3C3;
+                    if (k & 8) Y ^= entries[i].x8 ? 0x55 : 0x5A5;
+                    if (k & 16) C ^= 1;
+                    if (k & 32) N ^= 1;
+                    if (k & 64) V ^= 1;
+                    if (k & 128) Z ^= 1;
+                    if (k & 256) D ^= 0x1100;
+                    if (k & 512) DBR ^= 0x01;
+                }
+                u16 a0 = A, x0 = X, y0 = Y, d0 = D; u8 dbr0 = DBR, c0 = C, n0 = N, v0 = V, z0 = Z;
                 entries[i].fn();
-                printf("R %d %d %04X %04X %04X %04X %04X %02X %d |", entries[i].index, s, A, X, Y, S, D, DBR, C);
+                printf("R %d %d | %04X %04X %04X %04X %04X %02X %X %X %X %X | %04X %04X %04X 1F80 %04X %02X %X %X %X %X |",
+                       entries[i].index, s, A, X, Y, S, D, DBR, C, N, V, Z, a0, x0, y0, d0, dbr0, c0, n0, v0, z0);
                 for (uint32_t a = 0; a < (1u << 24); a += 8) {
                     if (!touched[a >> 3]) continue;
                     for (uint32_t b = a; b < a + 8; b++) {

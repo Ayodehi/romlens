@@ -142,6 +142,8 @@ pub struct Namer<'a> {
     /// Name to declaration, functions first.
     decls: BTreeMap<(u8, String), String>,
     reserved: BTreeSet<&'static str>,
+    /// What each routine reads and returns, for its declaration.
+    pub summaries: Option<&'a BTreeMap<SnesAddress, crate::decompile::signature::Summary>>,
 }
 
 const KEYWORDS: [&str; 44] = [
@@ -212,6 +214,7 @@ impl<'a> Namer<'a> {
             taken: BTreeMap::new(),
             decls: BTreeMap::new(),
             reserved,
+            summaries: None,
         }
     }
 
@@ -266,9 +269,28 @@ impl<'a> Namer<'a> {
             .map(str::to_owned)
             .unwrap_or_else(|| format!("sub_{:06X}", at.as_u24()));
         let name = self.claim(&raw, at, Kind::Function);
+        let note = self
+            .summaries
+            .and_then(|s| s.get(&at))
+            .map(|s| format!(" /* {} */", crate::decompile::signature::describe(s)))
+            .unwrap_or_default();
         self.decls
-            .insert((0, name.clone()), format!("void {name}(void);"));
+            .insert((0, name.clone()), format!("void {name}(void);{note}"));
         name
+    }
+
+    /// Every routine and table the unit calls, by name.
+    pub fn callees(&self) -> Vec<(String, SnesAddress, bool)> {
+        self.taken
+            .iter()
+            .filter(|(n, (_, k))| {
+                matches!(k, Kind::Function | Kind::Table)
+                    && self
+                        .decls
+                        .contains_key(&(if *k == Kind::Function { 0 } else { 1 }, (*n).clone()))
+            })
+            .map(|(n, (a, k))| (n.clone(), *a, *k == Kind::Table))
+            .collect()
     }
 
     /// The name of the routine being printed: declared by its definition.

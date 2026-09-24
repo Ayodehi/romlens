@@ -1,15 +1,15 @@
 /* RESET_008000 at $00:8000: 10 instructions, clean level. From Romlens; for reading, not for rebuilding the ROM. */
 #include "snes.h"
 
-void SUB_008020(void);
-void SUB_008030(void);
-void SUB_008040(void);
-void SUB_008050(void);
+void SUB_008020(void); /* Reads nothing; returns X. */
+void SUB_008030(void); /* Reads nothing; returns nothing. */
+void SUB_008040(void); /* Reads nothing; returns nothing. */
+void SUB_008050(void); /* Reads X; returns nothing. */
 
+/* Reads nothing; returns A, X and the carry (some callers are not known, so returns are assumed). */
 void RESET_008000(void)
 {
     SEI();
-    C = 1;
     native_mode();
     /* 8-bit A, X and Y */
     SUB_008020();
@@ -23,6 +23,7 @@ L_008016:
 /* SUB_008020 at $00:8020: 5 instructions, clean level. From Romlens; for reading, not for rebuilding the ROM. */
 #include "snes.h"
 
+/* Reads nothing; returns X. */
 void SUB_008020(void)
 {
     X = 0x0F;
@@ -36,27 +37,23 @@ L_008022:
 /* SUB_008030 at $00:8030: 7 instructions, clean level. From Romlens; for reading, not for rebuilding the ROM. */
 #include "snes.h"
 
+/* Reads nothing; returns nothing. */
 void SUB_008030(void)
 {
-    u32 t1;
-
     /* 16-bit A, 8-bit X and Y */
-    t1 = MEM16(0x10) + MEM16(0x12);
-    C = t1 > 0xFFFF;
-    A = t1;
-    MEM16(0x14) = A;
+    MEM16(0x14) = MEM16(0x10) + MEM16(0x12);
     /* 8-bit A, X and Y */
     return;
 }
 /* SUB_008040 at $00:8040: 6 instructions, clean level. From Romlens; for reading, not for rebuilding the ROM. */
 #include "snes.h"
 
+/* Reads nothing; returns nothing. */
 void SUB_008040(void)
 {
-    A = (A & 0xFF00) | MEM8(0x20);
-    C = (u8)A >= MEM8(0x21);
-    if (C) goto L_008048;
-    A = (A & 0xFF00) | MEM8(0x21);
+    A = MEM8(0x20);
+    if ((u8)A >= MEM8(0x21)) goto L_008048;
+    A = MEM8(0x21);
 
 L_008048:
     MEM8(0x22) = (u8)A;
@@ -67,9 +64,9 @@ L_008048:
 
 extern u8 DATA_008070[];
 
+/* Reads X; returns nothing. */
 void SUB_008050(void)
 {
-    A = (A & 0xFF00) | DATA_008070[X];
-    MEM8(0x0300) = (u8)A;
+    MEM8(0x0300) = DATA_008070[X];
     return;
 }

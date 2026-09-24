@@ -207,7 +207,9 @@ fn the_routines_mean_what_the_code_does() {
 }
 
 /// A runtime over a flat 16 MB array, with the fixture's first 256 bytes of
-/// ROM at `$00:8000`, then each routine checked on inputs.
+/// ROM at `$00:8000`, then each routine checked on inputs. Only what a caller
+/// reads is checked: the boot never reads `SUB_008030`'s carry or
+/// `SUB_008040`'s high byte of A, so from the clean level on neither is kept.
 const RUNTIME: &str = r#"
 #include <stdint.h>
 #include <stdio.h>
@@ -257,16 +259,13 @@ int main(void) {
     MEM16(0x10) = 0x1234; MEM16(0x12) = 0x0FF0; A = 0xBEEF;
     SUB_008030();
     CHECK("sum", MEM16(0x14), 0x2224);
-    CHECK("no carry", C, 0);
     MEM16(0x10) = 0xFFFF; MEM16(0x12) = 2;
     SUB_008030();
     CHECK("wrapped sum", MEM16(0x14), 1);
-    CHECK("carry", C, 1);
 
     mem[0x20] = 5; mem[0x21] = 9; A = 0x1200;
     SUB_008040();
     CHECK("larger (second)", mem[0x22], 9);
-    CHECK("high byte kept", A >> 8, 0x12);
     mem[0x20] = 200;
     SUB_008040();
     CHECK("larger (first)", mem[0x22], 200);

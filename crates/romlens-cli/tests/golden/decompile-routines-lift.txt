@@ -1,11 +1,12 @@
 /* RESET_008000 at $00:8000: 10 instructions, lift level. From Romlens; for reading, not for rebuilding the ROM. */
 #include "snes.h"
 
-void SUB_008020(void);
-void SUB_008030(void);
-void SUB_008040(void);
-void SUB_008050(void);
+void SUB_008020(void); /* Reads nothing; returns X. */
+void SUB_008030(void); /* Reads nothing; returns nothing. */
+void SUB_008040(void); /* Reads nothing; returns nothing. */
+void SUB_008050(void); /* Reads X; returns nothing. */
 
+/* Reads nothing; returns A, X and the carry (some callers are not known, so returns are assumed). */
 void RESET_008000(void)
 {
     SEI();
@@ -24,6 +25,7 @@ L_008016:
 /* SUB_008020 at $00:8020: 5 instructions, lift level. From Romlens; for reading, not for rebuilding the ROM. */
 #include "snes.h"
 
+/* Reads nothing; returns X. */
 void SUB_008020(void)
 {
     X = 0x0F;
@@ -41,6 +43,7 @@ L_008022:
 /* SUB_008030 at $00:8030: 7 instructions, lift level. From Romlens; for reading, not for rebuilding the ROM. */
 #include "snes.h"
 
+/* Reads nothing; returns nothing. */
 void SUB_008030(void)
 {
     u32 t1, t2;
@@ -64,6 +67,7 @@ void SUB_008030(void)
 /* SUB_008040 at $00:8040: 6 instructions, lift level. From Romlens; for reading, not for rebuilding the ROM. */
 #include "snes.h"
 
+/* Reads nothing; returns nothing. */
 void SUB_008040(void)
 {
     u32 t1;
@@ -89,6 +93,7 @@ L_008048:
 
 extern u8 DATA_008070[];
 
+/* Reads X; returns nothing. */
 void SUB_008050(void)
 {
     push8(X);

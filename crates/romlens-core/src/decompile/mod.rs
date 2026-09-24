@@ -12,6 +12,7 @@ pub mod function;
 pub mod header;
 pub mod ir;
 pub mod lift;
+pub mod signature;
 pub mod structure;
 
 pub use cfg::{Block, BlockId, Cfg, Loop, Term};
@@ -20,6 +21,7 @@ pub use function::{
     Callee, Dest, Function, FunctionError, Step, Transfer, containing, discover, entries,
 };
 pub use header::snes_h;
+pub use signature::{Program, Summary};
 
 use crate::analysis::snapshot::AnalysisSnapshot;
 use crate::memory::address::{FileOffset, SnesAddress};
@@ -90,6 +92,8 @@ pub struct Decompiled {
     pub lines: Vec<Vec<FileOffset>>,
     pub warnings: Vec<String>,
     pub stats: Stats,
+    /// Every routine (`false`) and call table (`true`) the text names.
+    pub callees: Vec<(String, SnesAddress, bool)>,
 }
 
 impl Decompiled {
@@ -109,18 +113,49 @@ pub fn decompile(
     at: SnesAddress,
     opts: &DecompileOptions,
 ) -> Result<Decompiled, FunctionError> {
-    let entries = entries(snap);
-    let f = discover(rom, snap, &entries, at)?;
-    Ok(render(rom, project, snap, &f, opts))
+    let program = Program::build(
+        rom,
+        snap,
+        lift::LiftOptions {
+            assume_dp: opts.assume_dp,
+        },
+    );
+    let f = discover(rom, snap, &program.entries, at)?;
+    Ok(render_with(rom, project, snap, &f, opts, Some(&program)))
 }
 
-/// Print a function already found.
+/// Every routine's summary, for `render_with`.
+pub fn program(rom: &RomImage, snap: &AnalysisSnapshot, opts: &DecompileOptions) -> Program {
+    Program::build(
+        rom,
+        snap,
+        lift::LiftOptions {
+            assume_dp: opts.assume_dp,
+        },
+    )
+}
+
+/// Print a function already found, assuming every call reads and writes
+/// everything.
 pub fn render(
     rom: &RomImage,
     project: &Project,
     snap: &AnalysisSnapshot,
     f: &Function,
     opts: &DecompileOptions,
+) -> Decompiled {
+    render_with(rom, project, snap, f, opts, None)
+}
+
+/// Print a function already found, with what every routine reads and
+/// returns when `program` is given.
+pub fn render_with(
+    rom: &RomImage,
+    project: &Project,
+    snap: &AnalysisSnapshot,
+    f: &Function,
+    opts: &DecompileOptions,
+    program: Option<&Program>,
 ) -> Decompiled {
     let cfg = Cfg::build(f);
     let lifted = lift::lift(
@@ -132,7 +167,8 @@ pub fn render(
     );
     let mut lifted = lifted;
     if opts.level != Level::Lift {
-        dataflow::clean(rom, f, &cfg, &mut lifted, &dataflow::Conventions::default());
+        let conv = program.map(|p| p.conventions(f.entry)).unwrap_or_default();
+        dataflow::clean(rom, f, &cfg, &mut lifted, &conv);
     }
     let mut warnings = lifted.warnings.clone();
     if f.truncated {
@@ -159,6 +195,7 @@ pub fn render(
     let asm = emit::asm_text(rom, project, snap, f);
 
     let mut names = emit::Namer::new(rom, project, snap, opts.names);
+    names.summaries = program.map(|p| &p.summaries);
     let name = names.own(f.entry);
     // The body first, so every name it uses is known for the declarations.
     let mut body = emit::Emitter::new(&mut names);
@@ -199,6 +236,7 @@ pub fn render(
         .print(&mut body, &asm);
     }
     let stats = body.stats;
+    let callees = body.names.callees();
     let body = std::mem::take(&mut body.w);
 
     let mut w = emit::Writer::default();
@@ -226,6 +264,9 @@ pub fn render(
         }
     }
     w.blank();
+    if let Some(s) = program.and_then(|p| p.summaries.get(&f.entry)) {
+        w.comment_line(&signature::describe(s), &[]);
+    }
     w.tok("void", CTokenKind::Type, None);
     w.w(" ");
     w.tok(&name, CTokenKind::Function, Some(f.entry));
@@ -264,6 +305,7 @@ pub fn render(
         lines,
         warnings,
         stats,
+        callees,
     }
 }
 

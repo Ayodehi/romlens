@@ -103,15 +103,15 @@ fn print_json(d: &Decompiled) {
 
 /// Decompile every routine; with `check`, run each through the C compiler.
 fn all(s: &session::Session, opts: &DecompileOptions, check: bool) -> Result<()> {
-    let entries = decompile::entries(&s.snap);
-    let mut done: Vec<(SnesAddress, Decompiled)> = Vec::new();
-    let mut refused = 0;
     let started = std::time::Instant::now();
-    for &e in &entries {
-        match decompile::discover(&s.rom, &s.snap, &entries, e) {
-            Ok(f) => done.push((e, decompile::render(&s.rom, &s.project, &s.snap, &f, opts))),
-            Err(_) => refused += 1,
-        }
+    let program = decompile::program(&s.rom, &s.snap, opts);
+    let mut done: Vec<(SnesAddress, Decompiled)> = Vec::new();
+    let refused = program.entries.len() - program.units.len();
+    for (e, u) in &program.units {
+        done.push((
+            *e,
+            decompile::render_with(&s.rom, &s.project, &s.snap, &u.f, opts, Some(&program)),
+        ));
     }
     let elapsed = started.elapsed();
     let sum = |f: fn(&Decompiled) -> u32| done.iter().map(|(_, d)| f(d) as u64).sum::<u64>();
