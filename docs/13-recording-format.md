@@ -109,7 +109,7 @@ bytes from the start of the structure.
 | 52 | 4 | region count |
 | 56 | 8 | frame count; `$FFFFFFFFFFFFFFFF` while the file is being written |
 | 64 | 8 | created, Unix seconds (0 when the producer does not say) |
-| 72 | 4 | layers present: bit 0 framebuffer, 1 write log, 2 trace, 3 read log |
+| 72 | 4 | layers present: bit 0 framebuffer, 1 write log, 2 trace, 3 read log, 4 register writes by line (1.1) |
 | 76 | 4 | compression: 0 none, 1 zstd (one frame per payload) |
 | 80 | 4 + 4 | producer name: offset into the string area, length |
 | 88 | 4 + 4 | producer version, likewise |
@@ -217,8 +217,37 @@ count (u32), then 104 bytes a record:
 | 4 | 4 | reserved |
 | 8 | 96 | the eight channels' `$43x0`–`$43xB` at the moment of the write |
 
-Later kinds (per-byte writes with the writing PC) take new kind numbers;
-a reader skips kinds it does not know by their fixed length.
+Kind 3 (format 1.1, recorder stream 2) follows the kind 1 it belongs to
+and says where the transfer's bytes went and who started it:
+
+| Offset | Size | Field |
+|---|---|---|
+| 0 | 1 | kind: 3, the context of the DMA start before it |
+| 2 | 2 | the scanline |
+| 4 | 2 | master cycles into the scanline |
+| 8 | 2 | `VMADD`, the VRAM word address |
+| 10 | 1 | `CGADD` |
+| 11 | 2 | the OAM byte address |
+| 13 | 4 | `WMADD`, the WRAM port address |
+| 17 | 1 | the program bank (`K`) when `MDMAEN` was written |
+| 18 | 2 | the program counter then |
+| the rest | | zero |
+
+Later kinds take new kind numbers; a reader skips kinds it does not know
+by their fixed length.
+
+**`LINE`, register writes by scanline** (format 1.1). One chunk after each
+frame from the second on: every write to `$2100`–`$2133` made while that
+frame was drawn, DMA's bytes through the data ports included, in order.
+The body is the frame (u64), the write count (u32), a compression byte (as
+the frame payloads: 0 none, 1 zstd), then the writes as one block, 6 bytes
+each: the scanline in the frame's own numbering (i16; 0 is the frame's
+first line, the vertical blank before it negative), the dot (u16), the
+register less `$2100` (u8) and the value (u8). Replayed over the previous
+frame's end (`recording::lines::Replay`), they give the registers and the
+VRAM, CGRAM and OAM each visible line was drawn with, and arrive exactly at
+the frame's own snapshot: every frame of ten games' recordings does
+(`22-phase3-finish.md`, P1).
 
 **Index**, `IDX\0`, a length, then 24 bytes per frame: frame (u64), file
 offset of its chunk (u64), chunk length (u32), kind (u8), 3 reserved.
@@ -301,7 +330,7 @@ What `mesen_recorder.lua` writes and only `rec pack` reads
 promise beyond its version number, since Romlens ships both ends.
 Little-endian; `s1`/`s2` are strings with a u8/u16 length.
 
-- **Header:** `RLSTREAM`, version (u16, now 1), producer (`s2`), Mesen's
+- **Header:** `RLSTREAM`, version (u16, now 2; `rec pack` reads 1 and 2), producer (`s2`), Mesen's
   ROM SHA-1 (`s2`, informational), start time (i64 Unix seconds), PRG ROM
   size (u32), 64 samples of 16 bytes taken at `size / 64 × i`, and the
   field names (u16 count, `s1` each): every numeric or boolean
@@ -315,7 +344,16 @@ Little-endian; `s1`/`s2` are strings with a u8/u16 length.
   the 256-byte blocks that changed (u16 count, then u16 block number and
   the block each; OAM's last block is 32 bytes).
 - **`D`, a DMA start:** frame (u32), the byte written to `$420B`, the
-  scanline (u16), and `$4300`–`$437F` at that moment.
+  scanline (u16), and `$4300`–`$437F` at that moment. From version 2, then
+  master cycles into the line (u16), `VMADD` (u16), `CGADD` (u8), the OAM
+  address (u16), the WRAM port address (u32), `K` (u8) and `PC` (u16), read
+  from `getState()` in the same callback.
+- **`R`, the register writes of a frame** (version 2): frame (u32), count
+  (u32), then 6 bytes a write as in the `LINE` chunk. Written just before the
+  frame's `F`, from the second frame on. The script notes `emu.getMasterClock()`
+  at each write, and at each frame end reads `masterClock`, `ppu.scanline` and
+  `memoryManager.hClock`; 1,364 master cycles a line place each write on its
+  scanline and dot, on stock Mesen as on the fork.
 - **`L`:** frame (u32); a savestate was loaded before it.
 - **`E`:** frames written (u32), the clean end. A stream without it was
   cut short; `rec pack` keeps every whole frame and says so.

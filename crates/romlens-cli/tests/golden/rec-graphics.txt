@@ -19,7 +19,7 @@ wrote <tmp>/window.romrec: frames 25 to 35 of <tmp>/t.romrec, 11 frames
 vram 0x00a0+1: next changes at frame 5
 [exit code 1]
 Error: frames 80 to 95 are not in a recording of 90 frames (0 to 89)
-Format:       1.0
+Format:       1.1
 Producer:     romlens testrec 0.7.0
 ROM SHA-256:  cfd385e8107dc5977e88d9b3f4b4b9ce866c707732e4fb7fef36ba5687b20f77
               matches romlens-graphics.sfc
@@ -28,7 +28,7 @@ Storage:      54474 bytes, zstd
               keyframes 5535 bytes each on average, deltas 464
 Regions:      cpu 16, ppu 256, io 128, wram 131072, vram 65536, cgram 512, oam 544, timing 16
 Layers:       none
-Format:       1.0
+Format:       1.1
 Producer:     romlens testrec 0.7.0
 ROM SHA-256:  cfd385e8107dc5977e88d9b3f4b4b9ce866c707732e4fb7fef36ba5687b20f77
               the recording was made from a different ROM (expected SHA-256 cfd385e8107dc5977e88d9b3f4b4b9ce866c707732e4fb7fef36ba5687b20f77, found a2462f1d74f993d0b3e10ae9425cd9b48253ac82c99913f07ef704d9c85dc6ee)
@@ -110,12 +110,20 @@ frame 0: sprite 0 at (64, 48), tile $008, palette 0
                 
 frame 8: sprite 3 at (144, 48), tile $008, palette 3
 16x16 sha256=03b5c213877d357eccf7b3371ade70e2eac4df5e8366fbda1547f413de0eb1b5
+frame 8: mode 1, 256x224, drawn from the PPU state at the frame's end
+sha256=4a3cb0c0967501f958c9917ca3ed9ec37547ae1ca727820acfc9492497f7dbd1
+frame 8: mode 1, 256x224, drawn from the PPU state at the frame's end
+(150, 55): sprite 3 (priority 3), tile $019 at VRAM word $0190, pixel (1, 0) index 2, CGRAM colour 178
+sha256=4a3cb0c0967501f958c9917ca3ed9ec37547ae1ca727820acfc9492497f7dbd1
+frame 8: mode 1, 256x224, drawn from the PPU state at the frame's end
+(68, 52): BG1, tilemap entry at VRAM word $10C9 ($0002: tile $002, palette 0), tile data at word $0020, pixel (4, 5) index 2, CGRAM colour 2
+sha256=4a3cb0c0967501f958c9917ca3ed9ec37547ae1ca727820acfc9492497f7dbd1
 wrote 65536 bytes of vram at frame 0 to <tmp>/vram.bin
 wrote 512 bytes of cgram at frame 0 to <tmp>/cgram.bin
 wrote 544 bytes of oam at frame 0 to <tmp>/oam.bin
 wrote 256 bytes of ppu at frame 0 to <tmp>/ppu.bin
 wrote <tmp>/raw.romrec: one frame with ppu, vram, cgram, oam
-Format:       1.0
+Format:       1.1
 Producer:     romlens import-raw 0.7.0
 ROM SHA-256:  cfd385e8107dc5977e88d9b3f4b4b9ce866c707732e4fb7fef36ba5687b20f77
 Frames:       1 (1 keyframe, every 60 frames)

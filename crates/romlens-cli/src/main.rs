@@ -662,6 +662,24 @@ enum RenderCommand {
         #[arg(long)]
         digest: bool,
     },
+    /// The screen, drawn from the PPU state (docs/22): what drew a pixel
+    /// with --at, or how it matches a screen dumped from Mesen with
+    /// --against.
+    Frame {
+        #[arg(long)]
+        rec: PathBuf,
+        #[arg(long, default_value_t = 0)]
+        frame: u64,
+        /// `x,y`: what drew that pixel.
+        #[arg(long)]
+        at: Option<String>,
+        /// A screen dump (u16 width, u16 height, ARGB u32 pixels) to compare
+        /// with, as the oracle script writes.
+        #[arg(long)]
+        against: Option<PathBuf>,
+        #[arg(long)]
+        ascii: bool,
+    },
     /// One sprite at its own size.
     Sprite {
         #[arg(long)]
@@ -1404,8 +1422,19 @@ fn run() -> Result<()> {
                 keyframe_interval,
             } => commands::rec::convert(&rec, from, to, &out, keyframe_interval),
         },
+        Command::Render {
+            what:
+                RenderCommand::Frame {
+                    rec,
+                    frame,
+                    at,
+                    against,
+                    ascii,
+                },
+        } => commands::rec::render_frame(&rec, frame, at.as_deref(), against.as_deref(), ascii),
         Command::Render { what } => {
             let (rec, frame, bg, sprite, ascii) = match what {
+                RenderCommand::Frame { .. } => unreachable!(),
                 RenderCommand::Bg {
                     rec,
                     frame,

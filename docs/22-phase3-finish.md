@@ -8,12 +8,12 @@ that tracks against it.
 | Task | State |
 |---|---|
 | F0 this document, the roadmap pointer, the checklist rows | done |
-| P1 the compositor | to do |
+| P1 the compositor | done, 25 September 2026: `graphics::compose` draws every BG mode but hi-res (6 and 5), with scroll, 16×16 cells, offset-per-tile, mosaic, Mode 7's transform, sprites with the hardware's 32-sprite and 34-tile limits and rotated OAM priority, the main and sub screens, both windows and the colour window with their logic, colour math and brightness, and keeps what drew every pixel (`Winner`: the tilemap entry and tile, or the OAM entry). Lines come from a `LineSource`: the recorder (stream version 2) now logs every PPU register write with its scanline and dot, DMA's port writes included, and the DMA context (`VMADD`, `CGADD`, the OAM and WRAM port addresses, `K:PC`), all on stock Mesen; `recording::lines::Replay` plays a frame's writes over the previous frame's end, registers and memories both. New layer chunk `LINE`, `WLOG` kind 3, format 1.1. `romlens render frame --rec R --frame N [--at x,y] [--against dump]`. Checked with `scripts/oracle/run.sh` against Mesen's own screen: 101 frames of ten games (Super Metroid, Super Mario World, F-Zero, Chrono Trigger, Secret of Mana, Super Mario Kart, Donkey Kong Country 2, Street Fighter II, ActRaiser, Kirby's Avalanche) match pixel for pixel, and every one of 38,400 recorded frames replays exactly to its own snapshot. What the checks found, in order: brightness 0 is black; the scroll latch keeps two bytes; memory changes part way down the screen (Street Fighter II uploads in a forced blank at line 215); and Mesen's test runner skips drawing frames unless `--snes.disableFrameSkipping=true` |
 | P2 the Frame and Layers views | to do |
 | P3 VRAM, CGRAM and OAM words to the DMA that wrote them | to do |
 | P4 WRAM buffers to the code that filled them, and to ROM | to do |
 | P5 the provenance chain in the app | to do |
-| P6 the recorder records where each DMA went (MesenCE) | to do |
+| P6 the recorder records where each DMA went (MesenCE) | done in P1 on stock Mesen: the DMA context and the line log need no fork change. The fork is updated only if P3 or P4 find something Mesen's Lua cannot give |
 | A1 the Atlas in the core | to do |
 | A2 the Atlas in the app | to do |
 | D1 comparing two ROMs in the core, `romlens diff` | to do |

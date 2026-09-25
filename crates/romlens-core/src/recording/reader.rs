@@ -11,6 +11,9 @@ use crate::recording::{
     Layers, MachineState, MachineStateSource, RecordingError, RecordingIdentity, StateRegion,
 };
 
+/// A layer chunk's magic and body.
+pub type LayerChunk = ([u8; 4], Vec<u8>);
+
 pub trait ReadSeek: Read + Seek + Send {}
 impl<T: Read + Seek + Send> ReadSeek for T {}
 
@@ -230,6 +233,27 @@ impl RomrecSource {
         Ok(head)
     }
 
+    /// The layer chunks that follow a frame's chunk, magic and body each.
+    pub fn layer_chunks(&self, frame: u64) -> Result<Vec<LayerChunk>, RecordingError> {
+        let e = self.entry(frame)?;
+        let mut at = e.offset + u64::from(e.len);
+        let mut out = Vec::new();
+        while at + 8 <= self.file_len {
+            let head = self.read_at(at, 8)?;
+            let magic: [u8; 4] = head[0..4].try_into().unwrap();
+            if !LAYER_MAGICS.iter().any(|m| **m == magic) {
+                break;
+            }
+            let len = u32_at(&head, 4) as u64;
+            if at + 8 + len > self.file_len {
+                break;
+            }
+            out.push((magic, self.read_at(at + 8, len as usize)?));
+            at += 8 + len;
+        }
+        Ok(out)
+    }
+
     /// Apply one frame's payloads on top of `state`.
     fn apply_frame(&self, frame: u64, state: &mut MachineState) -> Result<(), RecordingError> {
         let e = self.entry(frame)?;
@@ -328,6 +352,38 @@ impl MachineStateSource for RomrecSource {
 
     fn layers(&self) -> Layers {
         self.header.layers
+    }
+
+    fn line_writes(
+        &self,
+        frame: u64,
+    ) -> Result<Option<Vec<crate::recording::lines::RegWrite>>, RecordingError> {
+        if !self.header.layers.line_writes {
+            return Ok(None);
+        }
+        for (magic, body) in self.layer_chunks(frame)? {
+            if &magic == LAYER_MAGICS[4] {
+                let (_, writes) =
+                    crate::recording::lines::decode(&body).map_err(RecordingError::Corrupt)?;
+                return Ok(Some(writes));
+            }
+        }
+        Ok(None)
+    }
+
+    fn dma_records(
+        &self,
+        frame: u64,
+    ) -> Result<Vec<crate::recording::wlog::DmaRecord>, RecordingError> {
+        let mut out = Vec::new();
+        for (magic, body) in self.layer_chunks(frame)? {
+            if &magic == LAYER_MAGICS[1] {
+                let (_, r) =
+                    crate::recording::wlog::decode(&body).map_err(RecordingError::Corrupt)?;
+                out.extend(r);
+            }
+        }
+        Ok(out)
     }
 }
 

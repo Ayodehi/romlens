@@ -706,6 +706,16 @@ fn recording_commands() {
         &["render", "sprite", "--rec", rec],
         &["--index", "3", "--frame", "8"],
     );
+    // The whole screen, and what drew two of its pixels: a sprite and BG1.
+    out += &run_with(&["render", "frame", "--rec", rec], &["--frame", "8"]);
+    out += &run_with(
+        &["render", "frame", "--rec", rec],
+        &["--frame", "8", "--at", "150,55"],
+    );
+    out += &run_with(
+        &["render", "frame", "--rec", rec],
+        &["--frame", "8", "--at", "68,52"],
+    );
     // Dump frame 0, import the dumps as a one-frame recording, and draw the
     // same picture from it.
     for region in ["vram", "cgram", "oam", "ppu"] {

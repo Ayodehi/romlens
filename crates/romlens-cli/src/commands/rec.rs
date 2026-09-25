@@ -176,6 +176,7 @@ pub fn info(path: &Path, rom: Option<&Path>, recover: bool) -> Result<()> {
         (l.write_log, "write log"),
         (l.trace, "trace"),
         (l.read_log, "read log"),
+        (l.line_writes, "register writes by line"),
     ]
     .iter()
     .filter(|(on, _)| *on)
@@ -593,6 +594,152 @@ pub fn render(a: RenderArgs<'_>) -> Result<()> {
     match a.output {
         Output::Ascii => print!("{}", bm.to_ascii()),
         _ => println!("{}x{} sha256={}", bm.width, bm.height, bm.digest()),
+    }
+    Ok(())
+}
+
+/// `render frame`: the screen composed from the PPU state.
+pub fn render_frame(
+    path: &Path,
+    frame: u64,
+    at: Option<&str>,
+    against: Option<&Path>,
+    ascii: bool,
+) -> Result<()> {
+    use romlens_core::graphics::compose::{Lines, Winner, compose};
+    let rec = open(path, false)?;
+    let state = rec.state_at(frame)?;
+    let (Some(vram), Some(cgram), Some(oam), Some(ppu)) =
+        (state.vram(), state.cgram(), state.oam(), state.ppu())
+    else {
+        return Err(anyhow!(
+            "the recording needs VRAM, CGRAM, OAM and the PPU registers to draw a frame"
+        ));
+    };
+    let replay = romlens_core::recording::lines::frame_replay(&rec, frame)?;
+    let per_line = replay.is_some();
+    let f = match replay {
+        Some(mut r) => romlens_core::graphics::compose::compose_lines(&mut r),
+        None => compose(vram, cgram, oam, Lines::Frame(&ppu)),
+    };
+    println!(
+        "frame {frame}: mode {}, {}x{}, drawn from the PPU state{}",
+        ppu.bg_mode(),
+        f.bitmap.width,
+        f.bitmap.height,
+        if per_line {
+            " line by line"
+        } else {
+            " at the frame's end"
+        }
+    );
+    if !f.unsupported.is_empty() {
+        println!("not drawn: {}", f.unsupported.join(", "));
+    }
+    if let Some(at) = at {
+        let (x, y) = at
+            .split_once(',')
+            .and_then(|(x, y)| Some((x.trim().parse().ok()?, y.trim().parse().ok()?)))
+            .ok_or_else(|| anyhow!("--at takes x,y"))?;
+        let w = f
+            .winner(x, y)
+            .ok_or_else(|| anyhow!("({x}, {y}) is off the screen"))?;
+        match w {
+            Winner::Blank => println!("({x}, {y}): forced blank"),
+            Winner::Backdrop => println!("({x}, {y}): the backdrop, CGRAM colour 0"),
+            Winner::Bg(p) => println!(
+                "({x}, {y}): BG{}, tilemap entry at VRAM word ${:04X} (${:04X}: tile ${:03X}, palette {}{}{}{}), tile data at word ${:04X}, pixel ({}, {}) index {}, CGRAM colour {}",
+                p.layer,
+                p.map_word,
+                p.entry.raw,
+                p.entry.tile,
+                p.entry.palette,
+                if p.entry.priority { ", priority" } else { "" },
+                if p.entry.hflip { ", h-flip" } else { "" },
+                if p.entry.vflip { ", v-flip" } else { "" },
+                p.tile_word,
+                p.x,
+                p.y,
+                p.index,
+                p.colour
+            ),
+            Winner::Sprite(p) => println!(
+                "({x}, {y}): sprite {} (priority {}), tile ${:03X} at VRAM word ${:04X}, pixel ({}, {}) index {}, CGRAM colour {}",
+                p.sprite, p.priority, p.tile, p.tile_word, p.x, p.y, p.index, p.colour
+            ),
+        }
+    }
+    if let Some(shot) = against {
+        compare_screen(&f.bitmap, shot)?;
+    } else if ascii {
+        print!("{}", f.bitmap.to_ascii());
+    } else {
+        println!("sha256={}", f.bitmap.digest());
+    }
+    Ok(())
+}
+
+/// How a composed frame matches a screen Mesen drew: the share of pixels
+/// alike, and an 8×8-block map of where they are not.
+fn compare_screen(bm: &romlens_core::graphics::Bitmap, shot: &Path) -> Result<()> {
+    let bytes = std::fs::read(shot).with_context(|| format!("reading {}", shot.display()))?;
+    if bytes.len() < 4 {
+        return Err(anyhow!("{} is not a screen dump", shot.display()));
+    }
+    let sw = u16::from_le_bytes([bytes[0], bytes[1]]) as u32;
+    let sh = u16::from_le_bytes([bytes[2], bytes[3]]) as u32;
+    if sw != bm.width || bytes.len() < 4 + (sw * sh * 4) as usize {
+        return Err(anyhow!(
+            "the dump is {sw}x{sh}; this compares 256-wide screens only"
+        ));
+    }
+    let pixel = |x: u32, y: u32| {
+        let i = 4 + ((y * sw + x) * 4) as usize;
+        let v = u32::from_le_bytes([bytes[i], bytes[i + 1], bytes[i + 2], bytes[i + 3]]);
+        [(v >> 16) as u8, (v >> 8) as u8, v as u8]
+    };
+    let close = |a: [u8; 4], b: [u8; 3]| (0..3).all(|k| a[k].abs_diff(b[k]) <= 8);
+    let rows = bm.height.min(sh);
+    let score = |off: u32| {
+        let mut ok = 0u32;
+        for y in 0..rows.saturating_sub(off) {
+            for x in 0..sw {
+                if close(bm.get(x, y), pixel(x, y + off)) {
+                    ok += 1;
+                }
+            }
+        }
+        ok
+    };
+    // Mesen's buffer is 239 lines; without overscan it blanks the top 7, so
+    // the 224 visible lines start at row 7.
+    let off = if bm.height == 224 && sh >= 231 { 7 } else { 0 };
+    let total = (rows - off) * sw;
+    let ok = score(off);
+    let mut exact = 0u32;
+    for y in 0..rows - off {
+        for x in 0..sw {
+            let (a, b) = (bm.get(x, y), pixel(x, y + off));
+            exact += u32::from(a[..3] == b[..]);
+        }
+    }
+    println!(
+        "against {sw}x{sh} dump (offset {off} lines): {ok} of {total} pixels alike ({:.2}%), {exact} exactly",
+        ok as f64 * 100.0 / total as f64
+    );
+    // One character per 8x8 block: '.' all alike, '#' some differ.
+    for by in 0..(rows - off).div_ceil(8) {
+        let mut line = String::new();
+        for bx in 0..sw / 8 {
+            let mut bad = false;
+            for y in by * 8..((by + 1) * 8).min(rows - off) {
+                for x in bx * 8..bx * 8 + 8 {
+                    bad |= !close(bm.get(x, y), pixel(x, y + off));
+                }
+            }
+            line.push(if bad { '#' } else { '.' });
+        }
+        println!("  {line}");
     }
     Ok(())
 }

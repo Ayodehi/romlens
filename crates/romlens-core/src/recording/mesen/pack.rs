@@ -61,6 +61,8 @@ impl Default for PackOptions {
 pub struct PackReport {
     pub frames: u64,
     pub dma_events: u64,
+    /// PPU register writes placed on their scanlines (stream version 2).
+    pub line_writes: u64,
     pub state_loads: u64,
     /// The stream ended without its end record: the emulator closed
     /// mid-recording. Every whole frame was kept.
@@ -91,12 +93,6 @@ pub enum PackError {
     #[error("the stream has no frames")]
     Empty,
 }
-
-/// A `WLOG` record kind: a write to `MDMAEN` starting general DMA.
-pub const WLOG_KIND_DMA: u8 = 1;
-/// Bytes per `WLOG` record: kind, `MDMAEN`, scanline (u16), 4 reserved, then
-/// the eight channels' `$43x0`–`$43xB`.
-pub const WLOG_RECORD_LEN: usize = 8 + 8 * io_state::DMA_CHANNEL_LEN;
 
 /// Every `getState()` field the mapping reads.
 const FIELDS: &[&str] = &[
@@ -519,18 +515,17 @@ fn io_state(f: &Fields, record: &FrameRecord) -> IoState {
 }
 
 fn wlog_body(frame: u64, events: &[DmaEvent]) -> Vec<u8> {
-    let mut b = Vec::with_capacity(12 + events.len() * WLOG_RECORD_LEN);
-    b.extend_from_slice(&frame.to_le_bytes());
-    b.extend_from_slice(&(events.len() as u32).to_le_bytes());
-    for e in events {
-        b.extend_from_slice(&[WLOG_KIND_DMA, e.value]);
-        b.extend_from_slice(&e.scanline.to_le_bytes());
-        b.extend_from_slice(&[0; 4]);
-        let mut io = IoState::default();
-        io.set_dma(&e.registers);
-        b.extend_from_slice(&io.bytes[io_state::DMA..]);
-    }
-    b
+    use crate::recording::wlog::{DmaRecord, channels_from, encode};
+    let records: Vec<DmaRecord> = events
+        .iter()
+        .map(|e| DmaRecord {
+            value: e.value,
+            scanline: e.scanline,
+            channels: channels_from(&e.registers),
+            context: e.context,
+        })
+        .collect();
+    encode(frame, &records)
 }
 
 fn mapping_byte(m: MappingMode) -> u8 {
@@ -654,6 +649,7 @@ pub fn pack<R: Read, W: Write + Seek>(
         mapping: mapping_byte(rom.mapping()),
         layers: Layers {
             write_log: true,
+            line_writes: header.version >= 2,
             ..Layers::default()
         },
     };
@@ -666,6 +662,7 @@ pub fn pack<R: Read, W: Write + Seek>(
     )?;
 
     let mut pending: Vec<DmaEvent> = Vec::new();
+    let mut lines: Option<Vec<crate::recording::lines::RegWrite>> = None;
     while let Some(record) = reader.next_record()? {
         match record {
             Record::Frame(f) => {
@@ -686,9 +683,17 @@ pub fn pack<R: Read, W: Write + Seek>(
                     report.dma_events += pending.len() as u64;
                     pending.clear();
                 }
+                // A version-2 stream has line writes for every frame after
+                // the first, even when there were none.
+                if let Some(w) = lines.take() {
+                    report.line_writes += w.len() as u64;
+                    let body = crate::recording::lines::encode(report.frames, &w, options.compress);
+                    writer.write_layer(LAYER_MAGICS[4], &body)?;
+                }
                 report.frames += 1;
             }
             Record::Dma(d) => pending.push(*d),
+            Record::Lines(l) => lines = Some(l.writes),
             Record::StateLoaded { .. } => decoder.report.state_loads += 1,
             // A live connection's; a file keeps its log beside it instead.
             Record::ExecLog(_) => {}

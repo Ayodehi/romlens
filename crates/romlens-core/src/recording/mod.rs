@@ -18,11 +18,13 @@ pub mod fixtures;
 pub mod format;
 pub mod import;
 pub mod io_state;
+pub mod lines;
 pub mod live;
 pub mod memory;
 pub mod mesen;
 pub mod reader;
 pub mod validate;
+pub mod wlog;
 pub mod writer;
 
 use std::collections::BTreeMap;
@@ -191,6 +193,8 @@ pub struct Layers {
     pub write_log: bool,
     pub trace: bool,
     pub read_log: bool,
+    /// PPU register writes by scanline (`LINE`).
+    pub line_writes: bool,
 }
 
 impl Layers {
@@ -199,6 +203,7 @@ impl Layers {
             | (self.write_log as u32) << 1
             | (self.trace as u32) << 2
             | (self.read_log as u32) << 3
+            | (self.line_writes as u32) << 4
     }
 
     pub const fn from_bits(bits: u32) -> Self {
@@ -207,6 +212,7 @@ impl Layers {
             write_log: bits & 2 != 0,
             trace: bits & 4 != 0,
             read_log: bits & 8 != 0,
+            line_writes: bits & 16 != 0,
         }
     }
 }
@@ -301,4 +307,13 @@ pub trait MachineStateSource {
     /// offset order, never overlapping. Bytes outside them are equal.
     fn changes(&self, from: u64, to: u64, region: StateRegion) -> Result<Vec<Run>, RecordingError>;
     fn layers(&self) -> Layers;
+    /// The PPU register writes made while `frame` was drawn, on their
+    /// scanlines (`lines`); `None` where the source has none for it.
+    fn line_writes(&self, _frame: u64) -> Result<Option<Vec<lines::RegWrite>>, RecordingError> {
+        Ok(None)
+    }
+    /// The general DMA transfers started in `frame` (`wlog`).
+    fn dma_records(&self, _frame: u64) -> Result<Vec<wlog::DmaRecord>, RecordingError> {
+        Ok(Vec::new())
+    }
 }

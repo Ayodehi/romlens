@@ -5,7 +5,7 @@
 //! header        128 bytes fixed, then the region table (16 bytes a region)
 //!               and a string area; header_len covers all three
 //! FRM\0 chunks  one per frame, in frame order
-//! other chunks  FBUF WLOG TRCE RLOG: reserved layers, skipped by readers
+//! other chunks  FBUF WLOG TRCE RLOG LINE: layers, skipped by readers that do not use them
 //! IDX\0 chunk   24 bytes per frame
 //! footer        32 bytes, ending "ROMR"
 //! ```
@@ -20,13 +20,15 @@ use crate::recording::{Layers, RecordingError, StateRegion};
 
 pub const MAGIC: &[u8; 8] = b"ROMREC\0\0";
 pub const VERSION_MAJOR: u16 = 1;
-pub const VERSION_MINOR: u16 = 0;
+pub const VERSION_MINOR: u16 = 1;
 pub const HEADER_FIXED_LEN: usize = 128;
 pub const REGION_ENTRY_LEN: usize = 16;
 pub const FRAME_MAGIC: &[u8; 4] = b"FRM\0";
 pub const INDEX_MAGIC: &[u8; 4] = b"IDX\0";
 /// Reserved layer chunks. Nothing in Phase 2 writes them.
-pub const LAYER_MAGICS: [&[u8; 4]; 4] = [b"FBUF", b"WLOG", b"TRCE", b"RLOG"];
+/// The layer chunks, by header layer bit: framebuffer, write log, trace,
+/// read log, and (1.1) PPU register writes by scanline.
+pub const LAYER_MAGICS: [&[u8; 4]; 5] = [b"FBUF", b"WLOG", b"TRCE", b"RLOG", b"LINE"];
 pub const FRAME_HEADER_LEN: usize = 28;
 pub const DIR_ENTRY_LEN: usize = 20;
 pub const INDEX_ENTRY_LEN: usize = 24;
@@ -451,7 +453,7 @@ mod tests {
         newer[8] = 9;
         assert_eq!(
             Header::decode(&newer),
-            Err(RecordingError::NewerVersion(9, 0))
+            Err(RecordingError::NewerVersion(9, VERSION_MINOR))
         );
         assert!(matches!(
             Header::decode(b"NOTAREC!"),

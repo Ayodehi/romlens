@@ -25,7 +25,7 @@
 -- once a second what the CPU did since ('X' records), so Romlens can fill in
 -- the disassembly as the game plays.
 --
--- Stream format 1, little-endian (docs/13, "The Mesen stream"):
+-- Stream format 2, little-endian (docs/13, "The Mesen stream"):
 --   header  "RLSTREAM", u16 version, s2 producer, s2 ROM SHA-1,
 --           i8 created (Unix seconds), u32 ROM size, 64 x 16 bytes of ROM
 --           at offsets size / 64 * i, u16 field count, s1 each field name
@@ -35,12 +35,19 @@
 --           (vram, cgram, oam, wram) u16 changed blocks then
 --           (u16 block, the block's bytes) each
 --   'D'     u32 frame, u8 value written to $420B, u16 scanline,
---           128 bytes $4300-$437F at the moment of the write
+--           128 bytes $4300-$437F at the moment of the write, then
+--           u16 master cycles into the line, u16 VMADD, u8 CGADD,
+--           u16 OAM address, u32 WRAM port address, u8 K, u16 PC
+--   'R'     u32 frame, u32 count, then (i16 scanline, u16 dot, u8 register
+--           - $2100, u8 value) for each PPU register write made while the
+--           frame was drawn; the scanline counts from the frame's first
+--           line, the vertical blank before it negative. Written before
+--           the frame's 'F', from the second frame on
 --   'L'     u32 frame: a savestate was loaded before this frame
 --   'E'     u32 frames written, the stream's clean end
 
 local M = emu.memType
-local VERSION = 1
+local VERSION = 2
 local BLOCK = 256
 local REGISTER_FORMAT = "<" .. string.rep("B", 104)
 
@@ -209,12 +216,42 @@ local function reset_registers()
   for i = 0, 0x33 do last[i], seen[i] = 0, 0 end
 end
 reset_registers()
+local frame = 0
+
+-- Each write's master clock, placed on its scanline at the frame's end:
+-- the clock and scanline of the previous frame end give the line and dot.
+local ends = nil
+local w_clock, w_reg, w_value, w_count = {}, {}, {}, 0
+local get_clock = emu.getMasterClock
 local function on_ppu_write(address, value)
   local r = address & 0xFF
   last[r], seen[r] = value, 1
+  if ends then
+    w_count = w_count + 1
+    w_clock[w_count], w_reg[w_count], w_value[w_count] = get_clock(), r, value
+  end
 end
 
-local frame = 0
+local function line_writes(state)
+  local now = value_of(state["masterClock"])
+  local line = value_of(state["ppu.scanline"])
+  local h = value_of(state["memoryManager.hClock"])
+  local r = nil
+  if ends then
+    -- The lines between the two ends: a frame's length.
+    local total = (now - ends.clock + 682) // 1364
+    local parts = { "R", string.pack("<I4I4", frame, w_count) }
+    for i = 1, w_count do
+      local pos = ends.line * 1364 + ends.h + (w_clock[i] - ends.clock)
+      parts[#parts + 1] = string.pack("<i2I2BB", pos // 1364 - total, (pos % 1364) // 4, w_reg[i], w_value[i])
+    end
+    r = table.concat(parts)
+  end
+  ends = { clock = now, line = line, h = h }
+  w_count = 0
+  return r
+end
+
 local finished = false
 local finish
 
@@ -233,6 +270,11 @@ end
 local function on_dma(_, value)
   local s = emu.getState()
   local d = "D" .. string.pack("<I4I1I2", frame, value, value_of(s["ppu.scanline"])) .. dma_registers()
+    .. string.pack("<I2I2BI2I4BI2", value_of(s["memoryManager.hClock"]) & 0xFFFF,
+      value_of(s["ppu.vramAddress"]) & 0xFFFF, value_of(s["ppu.cgramAddress"]) & 0xFF,
+      value_of(s["ppu.oamRamAddress"]) & 0xFFFF,
+      value_of(s["memoryManager.registerHandlerB.wramPosition"]) & 0x1FFFF,
+      value_of(s["cpu.k"]) & 0xFF, value_of(s["cpu.pc"]) & 0xFFFF)
   out:write(d)
   live_send(d)
 end
@@ -245,6 +287,11 @@ local previous = {}
 
 local function write_frame()
   local state = emu.getState()
+  local r = line_writes(state)
+  if r then
+    out:write(r)
+    live_send(r)
+  end
   local changed = {}
   for i, k in ipairs(fields) do
     local v = value_of(state[k])
@@ -355,8 +402,10 @@ emu.addEventCallback(guarded(function()
 end), emu.eventType.endFrame)
 
 emu.addEventCallback(guarded(function()
-  -- The loaded state's registers were written before we could see them.
+  -- The loaded state's registers were written before we could see them,
+  -- and its clock is not this session's.
   reset_registers()
+  ends, w_count = nil, 0
   out:write("L", string.pack("<I4", frame))
   live_send("L" .. string.pack("<I4", frame))
 end), emu.eventType.stateLoaded)

@@ -339,7 +339,7 @@ pub fn validate(mut file: Box<dyn ReadSeek>, options: ValidateOptions) -> Valida
     // T, K, D, R, P, L, W: walk every chunk from the header to the index.
     let mut seen: Vec<Seen> = Vec::new();
     let mut wlog_chunks = 0u32;
-    let mut other_layers = [false; 4];
+    let mut other_layers = [false; 5];
     let mut at = header_len as u64;
     let interval = header.keyframe_interval.max(1) as u64;
     let whole: Vec<StateRegion> = header.regions.clone();
@@ -397,6 +397,9 @@ pub fn validate(mut file: Box<dyn ReadSeek>, options: ValidateOptions) -> Valida
                 wlog_chunks += 1;
                 check_wlog(&mut out, &chunk, seen.last().map(|s| s.frame));
             } else {
+                if i == 4 {
+                    check_lines(&mut out, &chunk, seen.last().map(|s| s.frame));
+                }
                 other_layers[i] = true;
             }
         } else {
@@ -420,12 +423,14 @@ pub fn validate(mut file: Box<dyn ReadSeek>, options: ValidateOptions) -> Valida
         write_log: wlog_chunks > 0,
         trace: other_layers[2],
         read_log: other_layers[3],
+        line_writes: other_layers[4],
     };
     for (name, d, p) in [
         ("framebuffer", declared.framebuffer, present.framebuffer),
         ("write log", declared.write_log, present.write_log),
         ("trace", declared.trace, present.trace),
         ("read log", declared.read_log, present.read_log),
+        ("line write", declared.line_writes, present.line_writes),
     ] {
         if p && !d {
             out.error(
@@ -730,7 +735,7 @@ fn check_wlog(out: &mut Out, chunk: &[u8], after: Option<u64>) {
         return;
     }
     for r in body[12..].chunks(RECORD) {
-        if r[0] != DMA {
+        if r[0] != DMA && r[0] != crate::recording::wlog::KIND_DMA_CONTEXT {
             out.warn(
                 "L3",
                 Some(frame),
@@ -740,6 +745,22 @@ fn check_wlog(out: &mut Out, chunk: &[u8], after: Option<u64>) {
                 ),
             );
         }
+    }
+}
+
+/// A `LINE` chunk: it names the frame it follows and decodes.
+fn check_lines(out: &mut Out, chunk: &[u8], after: Option<u64>) {
+    match crate::recording::lines::decode(&chunk[8..]) {
+        Ok((frame, _)) if Some(frame) != after => out.error(
+            "L2",
+            after,
+            format!(
+                "a line-write chunk names frame {frame} but follows frame {}",
+                after.map_or("none".into(), |f| f.to_string())
+            ),
+        ),
+        Ok(_) => {}
+        Err(e) => out.error("L2", after, e),
     }
 }
 

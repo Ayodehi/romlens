@@ -7,10 +7,10 @@
 //! BGR15 expansion are written once — a classifier that disagreed with the
 //! decoder would be worse than no classifier.
 //!
-//! What stops here, deliberately: the reference renderer draws one BG layer or
-//! one sprite. Priority, windows, colour math and compositing wait for a
-//! recorded framebuffer to test them against (`16-phase2-plan.md` 2B.6).
+//! The reference renderer draws one BG layer or one sprite; `compose` draws
+//! the screen from them, checked against Mesen's own frames (docs/22, P1).
 
+pub mod compose;
 pub mod compress;
 pub mod mode7;
 pub mod oam;

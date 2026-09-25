@@ -10,11 +10,17 @@
 use std::io::Read;
 
 pub const STREAM_MAGIC: &[u8; 8] = b"RLSTREAM";
-pub const STREAM_VERSION: u16 = 1;
+pub const STREAM_VERSION: u16 = 2;
+/// The oldest stream this reads: version 1 has no line writes and no DMA
+/// context.
+pub const OLDEST_STREAM_VERSION: u16 = 1;
 /// Blocks are this long, except the last of a region that is not a multiple.
 pub const BLOCK: usize = 256;
 /// The largest execution log record read: far above a real session's.
 pub const MAX_EXEC_LOG: usize = 256 << 20;
+/// More register writes than any frame could make: 1,364 master cycles a
+/// line, 262 lines, one write at most every 6 cycles.
+pub const MAX_LINE_WRITES: usize = 1 << 16;
 /// Samples of the ROM the header carries, each [`SAMPLE_LEN`] bytes.
 pub const SAMPLES: usize = 64;
 pub const SAMPLE_LEN: usize = 16;
@@ -125,12 +131,28 @@ pub struct DmaEvent {
     pub value: u8,
     pub scanline: u16,
     pub registers: [u8; DMA_LEN],
+    /// Where the transfer's bytes go and who started it (stream version 2).
+    pub context: Option<DmaContext>,
+}
+
+pub use crate::recording::wlog::DmaContext;
+
+/// Bytes of a [`DmaContext`] in a `D` record.
+pub const DMA_CONTEXT_LEN: usize = 14;
+
+/// The PPU register writes made while one frame was drawn (stream version
+/// 2): the `R` record before its frame's `F`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LineRecord {
+    pub frame: u32,
+    pub writes: Vec<crate::recording::lines::RegWrite>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Record {
     Frame(Box<FrameRecord>),
     Dma(Box<DmaEvent>),
+    Lines(Box<LineRecord>),
     /// A savestate was loaded before this frame.
     StateLoaded {
         frame: u32,
@@ -237,9 +259,9 @@ impl<R: Read> StreamReader<R> {
             ));
         }
         let version = need!(t.u16());
-        if version != STREAM_VERSION {
+        if !(OLDEST_STREAM_VERSION..=STREAM_VERSION).contains(&version) {
             return Err(StreamError::BadFormat(format!(
-                "stream version {version}; this Romlens reads version {STREAM_VERSION}"
+                "stream version {version}; this Romlens reads versions {OLDEST_STREAM_VERSION} to {STREAM_VERSION}"
             )));
         }
         let producer = need!(t.string(true));
@@ -283,6 +305,7 @@ impl<R: Read> StreamReader<R> {
 
     fn read_record(&mut self) -> Result<Option<Record>, StreamError> {
         let field_count = self.header.fields.len();
+        let version = self.header.version;
         let mut t = Take(&mut self.input);
         let tag = need!(t.u8());
         match tag {
@@ -332,12 +355,47 @@ impl<R: Read> StreamReader<R> {
                 let value = need!(t.u8());
                 let scanline = need!(t.u16());
                 let registers: [u8; DMA_LEN] = need!(t.array());
+                let context = if version >= 2 {
+                    let c: [u8; DMA_CONTEXT_LEN] = need!(t.array());
+                    Some(DmaContext {
+                        h_clock: u16::from_le_bytes([c[0], c[1]]),
+                        vram_address: u16::from_le_bytes([c[2], c[3]]),
+                        cgram_address: c[4],
+                        oam_address: u16::from_le_bytes([c[5], c[6]]),
+                        wram_address: u32::from_le_bytes([c[7], c[8], c[9], c[10]]),
+                        k: c[11],
+                        pc: u16::from_le_bytes([c[12], c[13]]),
+                    })
+                } else {
+                    None
+                };
                 Ok(Some(Record::Dma(Box::new(DmaEvent {
                     frame,
                     value,
                     scanline,
                     registers,
+                    context,
                 }))))
+            }
+            b'R' => {
+                let frame = need!(t.u32());
+                let count = need!(t.u32()) as usize;
+                if count > MAX_LINE_WRITES {
+                    return Err(StreamError::Corrupt(format!(
+                        "frame {frame} claims {count} register writes"
+                    )));
+                }
+                let raw = need!(t.bytes(count * crate::recording::lines::WRITE_LEN));
+                let writes = raw
+                    .chunks(crate::recording::lines::WRITE_LEN)
+                    .map(|w| crate::recording::lines::RegWrite {
+                        line: i16::from_le_bytes([w[0], w[1]]),
+                        dot: u16::from_le_bytes([w[2], w[3]]),
+                        reg: w[4],
+                        value: w[5],
+                    })
+                    .collect();
+                Ok(Some(Record::Lines(Box::new(LineRecord { frame, writes }))))
             }
             b'L' => Ok(Some(Record::StateLoaded {
                 frame: need!(t.u32()),
@@ -412,12 +470,39 @@ pub mod encode {
         };
         let mut b = header(&head);
         for n in 0..frames {
+            // From the second frame on, the writes made while it was drawn:
+            // BG1's horizontal scroll set in the vertical blank.
+            if n >= 1 {
+                b.extend(record(&Record::Lines(Box::new(LineRecord {
+                    frame: n,
+                    writes: vec![
+                        crate::recording::lines::RegWrite {
+                            line: -10,
+                            dot: 100,
+                            reg: 0x0D,
+                            value: n as u8,
+                        },
+                        crate::recording::lines::RegWrite {
+                            line: -10,
+                            dot: 110,
+                            reg: 0x0D,
+                            value: 0,
+                        },
+                    ],
+                }))));
+            }
             if n == 1 {
                 b.extend(record(&Record::Dma(Box::new(DmaEvent {
                     frame: 1,
                     value: 1,
                     scanline: 240,
                     registers: [0x55; DMA_LEN],
+                    context: Some(DmaContext {
+                        vram_address: 0x6000,
+                        k: 0x80,
+                        pc: 0x8123,
+                        ..DmaContext::default()
+                    }),
                 }))));
             }
             let mut blocks: [Vec<(u16, Vec<u8>)>; 4] = Default::default();
@@ -470,6 +555,25 @@ pub mod encode {
                 b.push(d.value);
                 b.extend_from_slice(&d.scanline.to_le_bytes());
                 b.extend_from_slice(&d.registers);
+                if let Some(c) = d.context {
+                    b.extend_from_slice(&c.h_clock.to_le_bytes());
+                    b.extend_from_slice(&c.vram_address.to_le_bytes());
+                    b.push(c.cgram_address);
+                    b.extend_from_slice(&c.oam_address.to_le_bytes());
+                    b.extend_from_slice(&c.wram_address.to_le_bytes());
+                    b.push(c.k);
+                    b.extend_from_slice(&c.pc.to_le_bytes());
+                }
+            }
+            Record::Lines(l) => {
+                b.push(b'R');
+                b.extend_from_slice(&l.frame.to_le_bytes());
+                b.extend_from_slice(&(l.writes.len() as u32).to_le_bytes());
+                for w in &l.writes {
+                    b.extend_from_slice(&w.line.to_le_bytes());
+                    b.extend_from_slice(&w.dot.to_le_bytes());
+                    b.extend_from_slice(&[w.reg, w.value]);
+                }
             }
             Record::StateLoaded { frame } => {
                 b.push(b'L');
@@ -527,6 +631,24 @@ mod tests {
                 value: 0x02,
                 scanline: 225,
                 registers: [9; DMA_LEN],
+                context: Some(DmaContext {
+                    h_clock: 40,
+                    vram_address: 0x1234,
+                    cgram_address: 7,
+                    oam_address: 0x100,
+                    wram_address: 0x1_0000,
+                    k: 0x80,
+                    pc: 0x8123,
+                }),
+            })),
+            Record::Lines(Box::new(LineRecord {
+                frame: 1,
+                writes: vec![crate::recording::lines::RegWrite {
+                    line: -3,
+                    dot: 10,
+                    reg: 0x05,
+                    value: 1,
+                }],
             })),
             Record::StateLoaded { frame: 1 },
             frame(1),
