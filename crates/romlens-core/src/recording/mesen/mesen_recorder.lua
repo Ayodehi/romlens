@@ -51,6 +51,17 @@ local VERSION = 2
 local BLOCK = 256
 local REGISTER_FORMAT = "<" .. string.rep("B", 104)
 
+-- Mesen gives a script `io` and `os` only with the script window's
+-- "Allow access to I/O and OS functions" setting on; without them there is
+-- nowhere to write the stream, so say so and do nothing else.
+if not io or not os then
+  local why = "the Romlens recorder needs file access: in the script window, open Settings, "
+    .. "turn on \"Allow access to I/O and OS functions\", and run the script again"
+  emu.log(why)
+  pcall(emu.displayMessage, "Romlens", why)
+  return
+end
+
 local out_path = os.getenv("ROMLENS_REC_OUT")
 if not out_path or out_path == "" then
   out_path = emu.getScriptDataFolder() .. "/romlens-" .. os.date("%Y%m%d-%H%M%S") .. ".rlstream"
@@ -237,15 +248,21 @@ local function line_writes(state)
   local line = value_of(state["ppu.scanline"])
   local h = value_of(state["memoryManager.hClock"])
   local r = nil
-  if ends then
-    -- The lines between the two ends: a frame's length.
-    local total = (now - ends.clock + 682) // 1364
-    local parts = { "R", string.pack("<I4I4", frame, w_count) }
+  -- The lines between the two ends: a frame's length. Anything else (a
+  -- power cycle restarting the clock, a rewind, a paused and stepped
+  -- frame) leaves the frame without line writes rather than guessing.
+  local total = ends and math.tointeger((now - ends.clock + 682) // 1364)
+  if total and total >= 200 and total <= 400 then
+    local parts, count = {}, 0
     for i = 1, w_count do
-      local pos = ends.line * 1364 + ends.h + (w_clock[i] - ends.clock)
-      parts[#parts + 1] = string.pack("<i2I2BB", pos // 1364 - total, (pos % 1364) // 4, w_reg[i], w_value[i])
+      local pos = math.tointeger(ends.line * 1364 + ends.h + (w_clock[i] - ends.clock))
+      local l = pos and pos // 1364 - total
+      if l and l >= -400 and l <= 400 then
+        count = count + 1
+        parts[count] = string.pack("<i2I2BB", l, (pos % 1364) // 4, w_reg[i], w_value[i])
+      end
     end
-    r = table.concat(parts)
+    r = "R" .. string.pack("<I4I4", frame, count) .. table.concat(parts)
   end
   ends = { clock = now, line = line, h = h }
   w_count = 0
@@ -256,13 +273,20 @@ local finished = false
 local finish
 
 -- A script error must not leave the emulator hung or the stream half-written.
+-- A failure stops the recording, never the game: it is shown and logged
+-- with where it happened, and the stream is closed cleanly. Only a
+-- headless run with a frame limit stops the emulator, so it cannot hang.
+local failed = false
 local function guarded(fn)
   return function(...)
-    local ok, err = pcall(fn, ...)
+    if failed then return end
+    local ok, err = xpcall(fn, debug.traceback, ...)
     if not ok then
+      failed = true
       emu.log("Romlens recorder failed: " .. tostring(err))
+      pcall(emu.displayMessage, "Romlens", "The recorder stopped: " .. tostring(err):match("[^\n]*"))
       pcall(finish)
-      emu.stop(3)
+      if frame_limit then emu.stop(3) end
     end
   end
 end
