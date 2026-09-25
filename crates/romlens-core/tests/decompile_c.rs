@@ -171,7 +171,7 @@ fn the_routines_mean_what_the_code_does() {
 ///
 /// ```text
 /// $8000  SEI; CLC; XCE; REP #$10; SEP #$20
-/// $8007  JSR $8020; STY $30; JSR each of the rest; BRA self
+/// $8007  JSR $8020; STY $30; JSR each of the rest; ROL $42; BRA self
 ///
 /// $8020  INY / BEQ $8027          ; Y += 2, into the next bank past $FFFF
 /// $8023  INY / BEQ $8027
@@ -189,6 +189,10 @@ fn the_routines_mean_what_the_code_does() {
 /// $806D  LDA #$01 / STA $21 / RTS
 ///
 /// $8080  PEA $1234 / PLB / PLB / RTS      ; DBR = $12
+///
+/// $80A0  LDA $40 / AND $41 / BNE $80A8    ; carry = ($40 & $41) != 0
+/// $80A6  CLC / RTS
+/// $80A8  SEC / RTS
 /// ```
 fn conditions_rom() -> RomImage {
     let mut code = vec![0u8; 0x100];
@@ -200,7 +204,7 @@ fn conditions_rom() -> RomImage {
         0x8000,
         &[
             0x78, 0x18, 0xFB, 0xC2, 0x10, 0xE2, 0x20, 0x20, 0x20, 0x80, 0x84, 0x30, 0x20, 0x40,
-            0x80, 0x20, 0x60, 0x80, 0x20, 0x80, 0x80, 0x80, 0xFE,
+            0x80, 0x20, 0x60, 0x80, 0x20, 0x80, 0x80, 0x20, 0xA0, 0x80, 0x26, 0x42, 0x80, 0xFE,
         ],
     );
     put(
@@ -224,6 +228,10 @@ fn conditions_rom() -> RomImage {
         ],
     );
     put(0x8080, &[0xF4, 0x34, 0x12, 0xAB, 0xAB, 0x60]);
+    put(
+        0x80A0,
+        &[0xA5, 0x40, 0x25, 0x41, 0xD0, 0x02, 0x18, 0x60, 0x38, 0x60],
+    );
     put(0x80F0, &[0x40]);
     let mut vectors = [0x80F0; 12];
     vectors[10] = 0x8000;
@@ -272,6 +280,10 @@ fn combined_tests_mean_what_the_branches_do() {
     let either = full(0x8060);
     assert!(either.contains("||"), "{either}");
     assert!(!either.contains("goto"), "{either}");
+    // Two ways out alike but for the carry: one test, one return.
+    let carry = full(0x80A0);
+    assert!(carry.contains(" != 0;"), "{carry}");
+    assert!(!carry.contains("if ("), "{carry}");
     let bank = full(0x8080);
     assert!(bank.contains("DBR = 0x12;"), "{bank}");
     run_checks(
@@ -279,7 +291,7 @@ fn combined_tests_mean_what_the_branches_do() {
         &rom,
         &project,
         &snap,
-        &[0x8020, 0x8040, 0x8060, 0x8080],
+        &[0x8020, 0x8040, 0x8060, 0x8080, 0x80A0],
         CONDITION_CHECKS,
     );
 }
@@ -510,4 +522,10 @@ const CONDITION_CHECKS: &str = r#"
     call_8080();
     CHECK("PEA bank", DBR, 0x12);
     CHECK("S balanced after PEA", S, 0x01FF);
+
+    for (int i = 0; i < 4; i++) {
+        mem[0x40] = i & 1 ? 0x0C : 0x03; mem[0x41] = i & 2 ? 0x04 : 0x10; C = 1 - (i & 1);
+        call_80A0();
+        CHECK("carry is the test", C, (mem[0x40] & mem[0x41]) != 0);
+    }
 "#;

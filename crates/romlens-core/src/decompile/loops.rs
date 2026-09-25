@@ -84,7 +84,8 @@ fn walk(
 fn body_blocks(nodes: &[Node], out: &mut Vec<BlockId>, cont: &mut bool) {
     for n in nodes {
         match n {
-            Node::Block(b) | Node::Lines(b, _) => out.push(*b),
+            Node::Block(b) | Node::Lines(b, ..) => out.push(*b),
+            Node::Stmt { blocks, .. } => out.extend(blocks.iter().copied()),
             Node::If {
                 then, els, merged, ..
             } => {
@@ -313,6 +314,10 @@ fn rename_nodes(nodes: &mut [Node], from: u32, to: u32) {
                 }
                 rename_nodes(body, from, to);
             }
+            Node::Stmt {
+                stmt: Stmt::Assign { value, .. },
+                ..
+            } => *value = rename_expr(value.clone(), from, to),
             Node::Switch { index, cases, .. } => {
                 *index = rename_expr(index.clone(), from, to);
                 for (_, b) in cases {

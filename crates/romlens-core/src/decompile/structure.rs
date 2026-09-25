@@ -34,8 +34,18 @@ pub enum LoopKind {
 pub enum Node {
     /// A block's own statements (and its label, if a goto names it).
     Block(BlockId),
-    /// A block's first statements: its last is in the test after it.
-    Lines(BlockId, usize),
+    /// Some of a block's statements, `from..to`: the rest are in the test
+    /// after it or after the `if` both ways share. With its label, if a
+    /// goto names it, when the last is `true`.
+    Lines(BlockId, usize, usize, bool),
+    /// A statement the structure made from an `if`: `c = a != 0;` for one
+    /// whose arms set `c` to 1 and 0. The instructions it stands for and
+    /// the blocks it came from.
+    Stmt {
+        stmt: Stmt,
+        steps: Vec<usize>,
+        blocks: Vec<BlockId>,
+    },
     If {
         cond: Expr,
         then: Vec<Node>,
@@ -106,7 +116,7 @@ impl<'a> Structurer<'a> {
         let mut out = Vec::new();
         self.seq(self.cfg.entry, None, ctx, &mut out, self.cfg.entry);
         tidy(&mut out, false);
-        normalize(&mut out, self.blocks);
+        normalize(&mut out, self.cfg, self.blocks, &self.gotos);
         // A `return;` that ends the function says nothing.
         if let Some(Node::Exit(b, _)) = out.last()
             && matches!(self.cfg.blocks[*b].term, Term::Return)
@@ -396,7 +406,7 @@ impl<'a> Structurer<'a> {
         {
             cond = replace_first(cond, &first, c);
             let n = self.blocks[b].lines.len() - 1;
-            *out.last_mut().unwrap() = Node::Lines(b, n);
+            *out.last_mut().unwrap() = Node::Lines(b, 0, n, true);
             steps.push(at);
         }
         (cond, taken, fall, merged, steps)
@@ -612,17 +622,19 @@ fn strip_trailing_continue(nodes: &mut Vec<Node>) {
 }
 
 /// After tidying: an `if` whose `then` came out empty tests the other way;
-/// one with nothing in either arm, and a pure condition, is dropped.
-fn normalize(nodes: &mut Vec<Node>, blocks: &[LiftedBlock]) {
-    let _ = blocks;
+/// one with nothing in either arm, and a pure condition, is dropped; arms
+/// that end the routine the same way share that ending after the `if`; and
+/// arms that only set one variable to 1 and 0 are that variable set to the
+/// test.
+fn normalize(nodes: &mut Vec<Node>, cfg: &Cfg, blocks: &[LiftedBlock], gotos: &BTreeSet<BlockId>) {
     let mut i = 0;
     while i < nodes.len() {
         match &mut nodes[i] {
             Node::If {
                 cond, then, els, ..
             } => {
-                normalize(then, blocks);
-                normalize(els, blocks);
+                normalize(then, cfg, blocks, gotos);
+                normalize(els, cfg, blocks, gotos);
                 if then.is_empty() && !els.is_empty() {
                     *cond = simplify(Expr::un(UnOp::LNot, cond.clone()));
                     std::mem::swap(then, els);
@@ -631,6 +643,17 @@ fn normalize(nodes: &mut Vec<Node>, blocks: &[LiftedBlock]) {
                     nodes.remove(i);
                     continue;
                 }
+                if let Some(tail) = share_tail(then, els, cfg, blocks) {
+                    nodes.splice(i + 1..i + 1, tail);
+                }
+                if let Some(set) = as_assignment(&nodes[i], blocks, gotos) {
+                    nodes[i] = set;
+                    i += 1;
+                    continue;
+                }
+                let Node::If { then, els, .. } = &mut nodes[i] else {
+                    unreachable!()
+                };
                 // `if (c) { …; return; } else { rest }` is `if (c) { …;
                 // return; } rest`: nothing after the `then` reaches it.
                 if leaves(then) && !els.is_empty() {
@@ -638,12 +661,148 @@ fn normalize(nodes: &mut Vec<Node>, blocks: &[LiftedBlock]) {
                     nodes.splice(i + 1..i + 1, rest);
                 }
             }
-            Node::Loop { body, .. } => normalize(body, blocks),
-            Node::Switch { cases, .. } => cases.iter_mut().for_each(|(_, b)| normalize(b, blocks)),
+            Node::Loop { body, .. } => normalize(body, cfg, blocks, gotos),
+            Node::Switch { cases, .. } => cases
+                .iter_mut()
+                .for_each(|(_, b)| normalize(b, cfg, blocks, gotos)),
             _ => {}
         }
         i += 1;
     }
+}
+
+/// Where in an arm a block's statements are: the node's index, and which
+/// of them it prints.
+type Span = Option<(usize, usize, usize)>;
+
+/// An arm that ends the routine: the block that leaves, and its
+/// statements.
+fn ending(arm: &[Node], blocks: &[LiftedBlock]) -> Option<(BlockId, Span)> {
+    let Some(Node::Exit(x, _)) = arm.last() else {
+        return None;
+    };
+    let at = arm.len().checked_sub(2);
+    let lines = match at.map(|k| (k, &arm[k])) {
+        Some((k, Node::Block(b))) if b == x => Some((k, 0, blocks[*b].lines.len())),
+        Some((k, Node::Lines(b, from, to, true))) if b == x => Some((k, *from, *to)),
+        _ => None,
+    };
+    Some((*x, lines))
+}
+
+/// Both arms leave the routine the same way (the same kind of return, with
+/// the same results): their last statements in common and the way out, to
+/// go after the `if`, with the arms cut to what differs.
+fn share_tail(
+    then: &mut Vec<Node>,
+    els: &mut Vec<Node>,
+    cfg: &Cfg,
+    blocks: &[LiftedBlock],
+) -> Option<Vec<Node>> {
+    let (a, la) = ending(then, blocks)?;
+    let (b, lb) = ending(els, blocks)?;
+    if a == b || cfg.blocks[a].term != cfg.blocks[b].term || blocks[a].exit != blocks[b].exit {
+        return None;
+    }
+    let range = |l: Span, x: BlockId| match l {
+        Some((_, f, t)) => &blocks[x].lines[f..t],
+        None => &[],
+    };
+    let (ra, rb) = (range(la, a), range(lb, b));
+    let common = ra
+        .iter()
+        .rev()
+        .zip(rb.iter().rev())
+        .take_while(|(p, q)| p.stmt == q.stmt)
+        .count();
+    let Some(Node::Exit(_, from)) = then.pop() else {
+        unreachable!()
+    };
+    els.pop();
+    let cut = |arm: &mut Vec<Node>, l: Span, x: BlockId| {
+        if let Some((k, f, t)) = l {
+            arm[k] = Node::Lines(x, f, t - common, true);
+        }
+    };
+    cut(then, la, a);
+    cut(els, lb, b);
+    let mut tail = Vec::new();
+    if let Some((_, _, t)) = la
+        && common > 0
+    {
+        tail.push(Node::Lines(a, t - common, t, false));
+    }
+    tail.push(Node::Exit(a, from));
+    Some(tail)
+}
+
+/// `if (c) v = 1; else v = 0;` as `v = c;` (or `v = !c;` the other way).
+fn as_assignment(node: &Node, blocks: &[LiftedBlock], gotos: &BTreeSet<BlockId>) -> Option<Node> {
+    let Node::If {
+        cond,
+        then,
+        els,
+        at,
+        merged,
+        steps,
+    } = node
+    else {
+        return None;
+    };
+    let only = |arm: &[Node]| -> Option<(BlockId, &crate::decompile::ir::Line)> {
+        let (b, lines) = match arm {
+            [Node::Block(b)] => (*b, &blocks[*b].lines[..]),
+            [Node::Lines(b, f, t, _)] => (*b, &blocks[*b].lines[*f..*t]),
+            _ => return None,
+        };
+        match lines {
+            [l] => Some((b, l)),
+            _ => None,
+        }
+    };
+    let (ba, la) = only(then)?;
+    let (bb, lb) = only(els)?;
+    // A goto into either arm needs its label.
+    if gotos.contains(&ba) || gotos.contains(&bb) {
+        return None;
+    }
+    let (
+        Stmt::Assign {
+            dst,
+            value: Expr::Const(x),
+        },
+        Stmt::Assign {
+            dst: dst2,
+            value: Expr::Const(y),
+        },
+    ) = (&la.stmt, &lb.stmt)
+    else {
+        return None;
+    };
+    if dst != dst2 || matches!(dst, Place::Mem { .. }) || !cond.is_boolean() {
+        return None;
+    }
+    let value = match (x, y) {
+        (1, 0) => cond.clone(),
+        (0, 1) => simplify(Expr::un(UnOp::LNot, cond.clone())),
+        _ => return None,
+    };
+    let lb_at = &blocks[*at];
+    let mut all: Vec<usize> = lb_at.term_step.into_iter().collect();
+    all.extend(lb_at.term_merged.iter().copied());
+    all.extend(steps.iter().copied());
+    all.extend(la.steps());
+    all.extend(lb.steps());
+    let mut from = vec![ba, bb];
+    from.extend(merged.iter().copied());
+    Some(Node::Stmt {
+        stmt: Stmt::Assign {
+            dst: dst.clone(),
+            value,
+        },
+        steps: all,
+        blocks: from,
+    })
 }
 
 /// `v = v ± 1` then a test that reads `v` once, directly: the test with

@@ -1496,12 +1496,22 @@ impl TreeLayout<'_> {
     }
 
     /// A block's label and its first `n` statements.
-    fn lines(&self, e: &mut Emitter, b: BlockId, n: usize, asm: &dyn Fn(usize) -> String) {
+    fn lines(
+        &self,
+        e: &mut Emitter,
+        b: BlockId,
+        from: usize,
+        to: usize,
+        label: bool,
+        asm: &dyn Fn(usize) -> String,
+    ) {
         e.stats.blocks += 1;
-        let lines = &self.blocks[b].lines[..n];
+        let lines = &self.blocks[b].lines[from..to];
         // A label needs a statement after it: comments are not one.
         let empty = lines.iter().all(|l| matches!(l.stmt, Stmt::Note(_)));
-        self.put_label(e, b, empty);
+        if label {
+            self.put_label(e, b, empty);
+        }
         for line in lines {
             e.stmt(&line.stmt, &line.steps(), asm);
         }
@@ -1550,8 +1560,12 @@ impl TreeLayout<'_> {
     ) {
         use crate::decompile::structure::{LoopKind, Node};
         match n {
-            Node::Block(b) => self.lines(e, *b, self.blocks[*b].lines.len(), asm),
-            Node::Lines(b, n) => self.lines(e, *b, *n, asm),
+            Node::Block(b) => self.lines(e, *b, 0, self.blocks[*b].lines.len(), true, asm),
+            Node::Lines(b, from, to, label) => self.lines(e, *b, *from, *to, *label, asm),
+            Node::Stmt { stmt, steps, .. } => {
+                e.stats.blocks += 1;
+                e.stmt(stmt, steps, asm);
+            }
             Node::If {
                 cond,
                 then,
