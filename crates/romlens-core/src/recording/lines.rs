@@ -361,8 +361,9 @@ pub fn line_states(start: &PpuState, writes: &[RegWrite], height: u32) -> Vec<Pp
 }
 
 /// A recording's `frame`, ready to replay: the previous frame's end with
-/// this frame's writes. `None` for the first frame, and where the
-/// recording has no line writes or lacks a memory.
+/// this frame's writes. `None` for the first frame, where the previous
+/// frame is gone (a live session's window), and where the recording has no
+/// line writes or lacks a memory.
 pub fn frame_replay(
     src: &dyn crate::recording::MachineStateSource,
     frame: u64,
@@ -373,7 +374,11 @@ pub fn frame_replay(
     let Some(writes) = src.line_writes(frame)? else {
         return Ok(None);
     };
-    let before = src.state_at(frame - 1)?;
+    // A live session may no longer hold, or never have had, the frame
+    // before: then there is nothing to replay over.
+    let Ok(before) = src.state_at(frame - 1) else {
+        return Ok(None);
+    };
     let (Some(ppu), Some(vram), Some(cgram), Some(oam)) =
         (before.ppu(), before.vram(), before.cgram(), before.oam())
     else {

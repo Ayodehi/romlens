@@ -531,6 +531,120 @@ pub struct RecordingSession {
     /// Where it came from, to validate the file itself and keep its index.
     origin: Origin,
     index: std::sync::Mutex<Option<romlens_core::recording::change_index::ChangeIndex>>,
+    /// The last frame composed, so the pointer's pixel is a lookup.
+    composed: std::sync::Mutex<Option<(u64, Arc<romlens_core::graphics::compose::Composed>)>>,
+}
+
+/// A frame drawn from the PPU state (docs/22, P2).
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct FrameImageInfo {
+    pub image: BitmapInfo,
+    pub bg_mode: u8,
+    /// Drawn line by line from the recording's register writes, rather than
+    /// from the registers as the frame ended.
+    pub per_line: bool,
+    /// Features the registers turn on that the drawing leaves out.
+    pub unsupported: Vec<String>,
+}
+
+/// What drew one pixel of a composed frame.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
+pub enum PixelWinnerInfo {
+    /// The screen was off (forced blank).
+    Blank,
+    /// No layer drew here: CGRAM colour 0.
+    Backdrop,
+    Background {
+        /// 1–4.
+        layer: u8,
+        /// The VRAM word holding the tilemap entry.
+        map_word: u16,
+        /// The entry: `vhopppcc cccccccc`.
+        entry: u16,
+        /// The 8×8 tile drawn, and the VRAM word its data starts at.
+        tile: u16,
+        tile_word: u16,
+        /// The pixel inside the tile, after flipping.
+        x: u8,
+        y: u8,
+        index: u8,
+        colour: u8,
+    },
+    Sprite {
+        /// The OAM entry, 0–127.
+        sprite: u8,
+        tile: u16,
+        tile_word: u16,
+        x: u8,
+        y: u8,
+        index: u8,
+        colour: u8,
+        priority: u8,
+    },
+}
+
+impl From<romlens_core::graphics::compose::Winner> for PixelWinnerInfo {
+    fn from(w: romlens_core::graphics::compose::Winner) -> Self {
+        use romlens_core::graphics::compose::Winner;
+        match w {
+            Winner::Blank => PixelWinnerInfo::Blank,
+            Winner::Backdrop => PixelWinnerInfo::Backdrop,
+            Winner::Bg(p) => PixelWinnerInfo::Background {
+                layer: p.layer,
+                map_word: p.map_word,
+                entry: p.entry.raw,
+                tile: p.tile,
+                tile_word: p.tile_word,
+                x: p.x,
+                y: p.y,
+                index: p.index,
+                colour: p.colour,
+            },
+            Winner::Sprite(p) => PixelWinnerInfo::Sprite {
+                sprite: p.sprite,
+                tile: p.tile,
+                tile_word: p.tile_word,
+                x: p.x,
+                y: p.y,
+                index: p.index,
+                colour: p.colour,
+                priority: p.priority,
+            },
+        }
+    }
+}
+
+impl RecordingSession {
+    /// `frame` composed with `options`: line by line where the recording
+    /// has the writes, from the frame's end state otherwise.
+    fn compose(
+        &self,
+        frame: u64,
+        options: romlens_core::graphics::compose::ComposeOptions,
+    ) -> Result<(romlens_core::graphics::compose::Composed, u8, bool), RomlensError> {
+        use romlens_core::graphics::compose::{Lines, compose_lines_with, compose_with};
+        let src = self.source.dynamic();
+        let state = src.state_at(frame)?;
+        let missing = |r: &'static str| RomlensError::Recording {
+            msg: format!("the recording has no {r}"),
+        };
+        let ppu = state.ppu().ok_or_else(|| missing("PPU registers"))?;
+        if let Some(mut replay) = romlens_core::recording::lines::frame_replay(src, frame)? {
+            return Ok((
+                compose_lines_with(&mut replay, options),
+                ppu.bg_mode(),
+                true,
+            ));
+        }
+        let f = compose_with(
+            state.vram().ok_or_else(|| missing("VRAM"))?,
+            state.cgram().ok_or_else(|| missing("CGRAM"))?,
+            state.oam().ok_or_else(|| missing("OAM"))?,
+            Lines::Frame(&ppu),
+            options,
+        );
+        Ok((f, ppu.bg_mode(), false))
+    }
 }
 
 enum Origin {
@@ -568,6 +682,7 @@ impl RecordingSession {
             source: Source::Live(source),
             origin: Origin::Live,
             index: Default::default(),
+            composed: Default::default(),
         })
     }
 }
@@ -616,6 +731,7 @@ impl RecordingSession {
             source: Source::File(Box::new(source)),
             origin: Origin::Path(path),
             index: Default::default(),
+            composed: Default::default(),
         }))
     }
 
@@ -625,6 +741,7 @@ impl RecordingSession {
             source: Source::File(Box::new(RomrecSource::from_bytes(bytes.clone(), false)?)),
             origin: Origin::Bytes(bytes),
             index: Default::default(),
+            composed: Default::default(),
         }))
     }
 
@@ -854,6 +971,69 @@ impl RecordingSession {
     }
 }
 
+#[uniffi::export]
+impl RecordingSession {
+    /// The screen at `frame`, drawn from the PPU state (docs/22, P2). The
+    /// result is kept, so asking what drew a pixel of it is a lookup.
+    pub fn render_frame(&self, frame: u64) -> Result<FrameImageInfo, RomlensError> {
+        let (f, bg_mode, per_line) = self.compose(frame, Default::default())?;
+        let f = Arc::new(f);
+        *self.composed.lock().unwrap() = Some((frame, f.clone()));
+        Ok(FrameImageInfo {
+            image: f.bitmap.clone().into(),
+            bg_mode,
+            per_line,
+            unsupported: f.unsupported.iter().map(|s| s.to_string()).collect(),
+        })
+    }
+
+    /// What drew pixel (`x`, `y`) of `frame`; `None` off the screen.
+    pub fn frame_pixel(
+        &self,
+        frame: u64,
+        x: u32,
+        y: u32,
+    ) -> Result<Option<PixelWinnerInfo>, RomlensError> {
+        let cached = self
+            .composed
+            .lock()
+            .unwrap()
+            .as_ref()
+            .filter(|(f, _)| *f == frame)
+            .map(|(_, c)| c.clone());
+        let c = match cached {
+            Some(c) => c,
+            None => {
+                let (f, ..) = self.compose(frame, Default::default())?;
+                let f = Arc::new(f);
+                *self.composed.lock().unwrap() = Some((frame, f.clone()));
+                f
+            }
+        };
+        Ok(c.winner(x, y).map(Into::into))
+    }
+
+    /// The frame's layers front to back, in words, as its mode orders them
+    /// (as the frame ends).
+    pub fn priority_order(&self, frame: u64) -> Result<Vec<String>, RomlensError> {
+        let state = self.source.dynamic().state_at(frame)?;
+        let ppu = state.ppu().ok_or(RecordingError::MissingRegion("ppu"))?;
+        Ok(romlens_core::graphics::compose::priority_names(
+            ppu.bg_mode(),
+            ppu.register(0x2105) & 0x08 != 0,
+        ))
+    }
+
+    /// One layer of `frame` on its own, where it shows on the main screen:
+    /// 1–4 a background, 5 the sprites. No colour math; transparent where
+    /// the layer draws nothing.
+    pub fn render_frame_layer(&self, frame: u64, layer: u8) -> Result<BitmapInfo, RomlensError> {
+        use romlens_core::graphics::compose::ComposeOptions;
+        let (f, ..) = self.compose(frame, ComposeOptions::alone(layer))?;
+        Ok(f.bitmap.into())
+    }
+}
+
 /// The synthetic recording `romlens testrec` writes, for shell tests.
 #[uniffi::export]
 pub fn make_test_recording(frames: u32) -> Vec<u8> {
@@ -1008,6 +1188,33 @@ mod tests {
         );
         assert!(RecordingSession::open(path, false).is_ok());
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_frame_draws_and_names_what_drew_each_pixel() {
+        let rec = RecordingSession::from_bytes(make_test_recording(40)).unwrap();
+        let f = rec.render_frame(8).unwrap();
+        assert_eq!((f.image.width, f.image.height), (256, 224));
+        assert_eq!(f.bg_mode, 1);
+        assert!(!f.per_line, "a synthetic recording has no line writes");
+        assert!(matches!(
+            rec.frame_pixel(8, 150, 55).unwrap(),
+            Some(PixelWinnerInfo::Sprite { sprite: 3, .. })
+        ));
+        assert!(matches!(
+            rec.frame_pixel(8, 68, 52).unwrap(),
+            Some(PixelWinnerInfo::Background { layer: 1, .. })
+        ));
+        assert_eq!(
+            rec.frame_pixel(8, 4, 4).unwrap(),
+            Some(PixelWinnerInfo::Backdrop)
+        );
+        assert_eq!(rec.frame_pixel(8, 300, 4).unwrap(), None);
+        // The sprites alone: the sprite, and transparency where BG1 was.
+        let objs = rec.render_frame_layer(8, 5).unwrap();
+        let alpha = |b: &BitmapInfo, x: u32, y: u32| b.rgba[((y * b.width + x) * 4 + 3) as usize];
+        assert_eq!(alpha(&objs, 150, 55), 255);
+        assert_eq!(alpha(&objs, 68, 52), 0);
     }
 
     #[test]

@@ -23,6 +23,49 @@ import Testing
         return url
     }
 
+    // MARK: Frame and layers (docs/22, P2)
+
+    @Test func theFrameViewNeedsARecordingAndNamesWhatDrewAPixel() async throws {
+        let m = try await model()
+        m.openGraphics(.frame)
+        #expect(m.graphicsTab == .frame)
+        #expect(m.graphics.frameImage() == nil, "no recording, no frame")
+        let url = try recordingURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        #expect(RecordingController.attach(url: url, model: m, window: nil))
+        m.openGraphics(.frame)
+        #expect(m.graphics.source == .recording)
+        m.graphics.frame = 8
+        let f = try #require(m.graphics.frameImage())
+        #expect(f.image.width == 256 && f.image.height == 224)
+        let w = try #require(m.graphics.pixel(x: 150, y: 55))
+        #expect(w.summary.hasPrefix("sprite 3"))
+        // Its OAM entry, its tile and its colour, each in its view.
+        #expect(m.graphics.reveal(.sprite, of: w) == .oam)
+        #expect(m.graphics.selectedSprite == 3)
+        #expect(m.graphics.reveal(.tile, of: w) == .tiles)
+        #expect(m.graphics.format == .bpp4)
+        #expect(m.graphics.reveal(.colour, of: w) == .palette)
+        #expect(m.graphics.selectedColour == Int(w.colour!))
+        // A background pixel's tilemap cell.
+        let bg = try #require(m.graphics.pixel(x: 68, y: 52))
+        #expect(m.graphics.reveal(.cell, of: bg) == .tilemap)
+        #expect(m.graphics.backgroundLayer == 1)
+        #expect(m.graphics.selectedCell != nil)
+    }
+
+    @Test func theLayersViewDrawsEachLayerAlone() async throws {
+        let m = try await model()
+        let url = try recordingURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        #expect(RecordingController.attach(url: url, model: m, window: nil))
+        m.openGraphics(.layers)
+        m.graphics.frame = 8
+        let sprites = try #require(m.graphics.frameLayer(5))
+        #expect(sprites.width == 256)
+        #expect(m.graphics.priorityOrder().count == 10, "mode 1: sprites at four priorities, BG1–3 high and low")
+    }
+
     // MARK: Tabs and selection
 
     @Test func theGraphicsPickerSharesTheEditorWithTheTextTabs() async throws {

@@ -99,6 +99,8 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
             }
         }
     }
+    @objc func showFrame(_ sender: Any?) { model.openGraphics(.frame) }
+    @objc func showLayers(_ sender: Any?) { model.openGraphics(.layers) }
     @objc func showTileDecoder(_ sender: Any?) { model.openGraphics(.tiles) }
     @objc func showPalette(_ sender: Any?) { model.openGraphics(.palette) }
     @objc func showOam(_ sender: Any?) { model.openGraphics(.oam) }
@@ -211,6 +213,10 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
             return model.hasDisassembly && model.instruction != nil
         case #selector(exportC(_:)):
             return model.decompiler.result != nil
+        case #selector(showFrame(_:)):
+            item.state = model.graphicsTab == .frame ? .on : .off
+        case #selector(showLayers(_:)):
+            item.state = model.graphicsTab == .layers ? .on : .off
         case #selector(showTileDecoder(_:)):
             item.state = model.graphicsTab == .tiles ? .on : .off
         case #selector(showPalette(_:)):

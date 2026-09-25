@@ -179,6 +179,20 @@ fn priority_order(mode: u8, bg3_high: bool) -> &'static [Source] {
     }
 }
 
+/// A mode's layers front to back in words, for the Layers view's legend:
+/// "sprites of priority 3", "BG1 high", and so on.
+pub fn priority_names(mode: u8, bg3_high: bool) -> Vec<String> {
+    priority_order(mode, bg3_high)
+        .iter()
+        .map(|s| match *s {
+            Obj(p) => format!("sprites of priority {p}"),
+            Bg(l, _) if mode == 7 => format!("BG{l}"),
+            Bg(l, true) => format!("BG{l}, high priority"),
+            Bg(l, false) => format!("BG{l}, low priority"),
+        })
+        .collect()
+}
+
 /// The registers one line was drawn with: one state for the whole frame,
 /// or one per line.
 pub enum Lines<'a> {
@@ -239,16 +253,69 @@ fn word(vram: &[u8], word: usize) -> u16 {
 
 /// Compose the frame.
 pub fn compose(vram: &[u8], cgram: &[u8], oam: &[u8], lines: Lines<'_>) -> Composed {
-    compose_lines(&mut Fixed {
-        vram,
-        cgram,
-        oam,
-        lines,
-    })
+    compose_with(vram, cgram, oam, lines, ComposeOptions::default())
+}
+
+/// [`compose`] with options.
+pub fn compose_with(
+    vram: &[u8],
+    cgram: &[u8],
+    oam: &[u8],
+    lines: Lines<'_>,
+    options: ComposeOptions,
+) -> Composed {
+    compose_lines_with(
+        &mut Fixed {
+            vram,
+            cgram,
+            oam,
+            lines,
+        },
+        options,
+    )
+}
+
+/// What to draw of a frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ComposeOptions {
+    /// Which layers may draw: bits 0–3 BG1–4, bit 4 sprites. The game's own
+    /// `TM` and `TS` still apply.
+    pub layers: u8,
+    /// Colour math and the sub screen.
+    pub colour_math: bool,
+    /// Leave the backdrop transparent, to show a layer alone.
+    pub transparent_backdrop: bool,
+}
+
+impl Default for ComposeOptions {
+    fn default() -> Self {
+        ComposeOptions {
+            layers: 0x1F,
+            colour_math: true,
+            transparent_backdrop: false,
+        }
+    }
+}
+
+impl ComposeOptions {
+    /// One layer on its own (1–4 a background, 5 the sprites), as the
+    /// Layers view shows it: no colour math, nothing behind it.
+    pub fn alone(layer: u8) -> Self {
+        ComposeOptions {
+            layers: 1 << (layer.clamp(1, 5) - 1),
+            colour_math: false,
+            transparent_backdrop: true,
+        }
+    }
 }
 
 /// Compose the frame from a line-by-line source.
 pub fn compose_lines(src: &mut dyn LineSource) -> Composed {
+    compose_lines_with(src, ComposeOptions::default())
+}
+
+/// Compose what `options` asks for.
+pub fn compose_lines_with(src: &mut dyn LineSource, options: ComposeOptions) -> Composed {
     let height = if src.line(0).ppu.register(0x2133) & 0x04 != 0 {
         239
     } else {
@@ -286,25 +353,37 @@ pub fn compose_lines(src: &mut dyn LineSource) -> Composed {
             ppu,
             y,
             line,
-            ppu.register(0x212C),
+            ppu.register(0x212C) & options.layers,
             ppu.register(0x212E),
             &windows,
         );
-        let sub = screen_line(
-            vram,
-            &sprites,
-            ppu,
-            y,
-            line,
-            ppu.register(0x212D),
-            ppu.register(0x212F),
-            &windows,
-        );
+        let sub = if options.colour_math {
+            screen_line(
+                vram,
+                &sprites,
+                ppu,
+                y,
+                line,
+                ppu.register(0x212D) & options.layers,
+                ppu.register(0x212F),
+                &windows,
+            )
+        } else {
+            vec![Winner::Backdrop; WIDTH as usize]
+        };
         let brightness = u32::from(inidisp & 0x0F);
         for x in 0..WIDTH as usize {
             let w = main[x];
             winners[row + x] = w;
-            let c = blend(ppu, &colours, &windows, x as u32, w, sub[x]);
+            if options.transparent_backdrop && w == Winner::Backdrop {
+                bitmap.set(x as u32, y, [0, 0, 0, 0]);
+                continue;
+            }
+            let c = if options.colour_math {
+                blend(ppu, &colours, &windows, x as u32, w, sub[x])
+            } else {
+                colours[w.colour().unwrap_or(0) as usize]
+            };
             bitmap.set(x as u32, y, rgb(c, brightness));
         }
     }
@@ -1012,6 +1091,33 @@ mod tests {
         ppu.set_fixed_colour(0x7C00);
         let f = compose(&vram, &cg, &oam, Lines::Frame(&ppu));
         assert_eq!(f.bitmap.get(100, 100), [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn a_layer_alone_leaves_the_rest_transparent() {
+        let (mut vram, cg, oam, ppu) = machine();
+        let at = (32 + 4) * 2;
+        vram[at..at + 2].copy_from_slice(&1u16.to_le_bytes());
+        let f = compose_with(
+            &vram,
+            &cg,
+            &oam,
+            Lines::Frame(&ppu),
+            ComposeOptions::alone(5),
+        );
+        // The sprite shows; BG1's cell and the backdrop do not.
+        assert!(matches!(f.winner(18, 10), Some(Winner::Sprite(_))));
+        assert_eq!(f.bitmap.get(33, 9)[3], 0);
+        assert_eq!(f.bitmap.get(100, 100)[3], 0);
+        let f = compose_with(
+            &vram,
+            &cg,
+            &oam,
+            Lines::Frame(&ppu),
+            ComposeOptions::alone(1),
+        );
+        assert!(matches!(f.winner(33, 9), Some(Winner::Bg(_))));
+        assert_eq!(f.winner(18, 10), Some(Winner::Backdrop));
     }
 
     #[test]

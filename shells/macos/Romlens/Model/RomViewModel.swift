@@ -369,7 +369,9 @@ final class RomViewModel {
 
     /// Open a graphics view on the ROM bytes at the selection.
     func openGraphics(_ tab: GraphicsModel.Tab) {
-        if graphics.source == .rom, let range = highlightedRange {
+        if tab.needsRecording {
+            if graphics.hasRecording { graphics.source = .recording }
+        } else if graphics.source == .rom, let range = highlightedRange {
             graphics.romOffset = range.lowerBound
         }
         graphicsTab = tab

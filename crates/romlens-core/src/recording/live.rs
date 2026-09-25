@@ -57,6 +57,8 @@ pub struct LiveSource {
 struct Window {
     /// Consecutive frames, oldest first.
     frames: VecDeque<MachineState>,
+    /// Each frame's PPU register writes, where the stream sent them.
+    lines: VecDeque<Option<Vec<crate::recording::lines::RegWrite>>>,
     /// The number of `frames[0]`.
     first: u64,
 }
@@ -72,13 +74,25 @@ impl LiveSource {
 
     /// Add the next frame, numbered after the last, dropping the oldest when
     /// the window is full. Returns its number.
-    pub fn push(&self, mut state: MachineState) -> u64 {
+    pub fn push(&self, state: MachineState) -> u64 {
+        self.push_with_lines(state, None)
+    }
+
+    /// [`push`](Self::push) with the register writes made while the frame
+    /// was drawn.
+    pub fn push_with_lines(
+        &self,
+        mut state: MachineState,
+        lines: Option<Vec<crate::recording::lines::RegWrite>>,
+    ) -> u64 {
         let mut w = self.inner.write().unwrap();
         let number = w.first + w.frames.len() as u64;
         state.frame = number;
         w.frames.push_back(state);
+        w.lines.push_back(lines);
         if w.frames.len() > self.capacity {
             w.frames.pop_front();
+            w.lines.pop_front();
             w.first += 1;
         }
         number
@@ -163,6 +177,18 @@ impl MachineStateSource for LiveSource {
 
     fn layers(&self) -> Layers {
         Layers::default()
+    }
+
+    fn line_writes(
+        &self,
+        frame: u64,
+    ) -> Result<Option<Vec<crate::recording::lines::RegWrite>>, RecordingError> {
+        let w = self.inner.read().unwrap();
+        Ok(frame
+            .checked_sub(w.first)
+            .and_then(|i| w.lines.get(i as usize))
+            .cloned()
+            .flatten())
     }
 }
 
@@ -370,13 +396,16 @@ fn read_stream(
         producer: reader.header.producer.clone(),
     });
     let mut decoder = StreamDecoder::new(&reader.header);
+    let mut lines = None;
     loop {
         match reader.next_record() {
             Ok(Some(Record::Frame(f))) => {
                 let next = source.latest().map_or(source.first_frame(), |l| l + 1);
-                let n = source.push(decoder.frame(&f, next, &LIVE_REGIONS));
+                let n =
+                    source.push_with_lines(decoder.frame(&f, next, &LIVE_REGIONS), lines.take());
                 events.frame(n);
             }
+            Ok(Some(Record::Lines(l))) => lines = Some(l.writes),
             Ok(Some(Record::ExecLog(log))) => events.exec_log(log),
             Ok(Some(Record::End { .. })) => {
                 return LiveStatus::Disconnected {

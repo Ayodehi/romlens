@@ -133,6 +133,9 @@ enum MainMenu {
             item("C", #selector(RomWindowController.showC(_:)), "8", modifiers: [.command, .option]),
             item("Graph", #selector(RomWindowController.showGraph(_:)), "9", modifiers: [.command, .option]),
             submenu("Graphics", [
+                item("Frame", #selector(RomWindowController.showFrame(_:)), ""),
+                item("Layers", #selector(RomWindowController.showLayers(_:)), ""),
+                .separator(),
                 item("Tile Decoder", #selector(RomWindowController.showTileDecoder(_:)), "4", modifiers: [.command, .option]),
                 item("Palette", #selector(RomWindowController.showPalette(_:)), "5", modifiers: [.command, .option]),
                 item("OAM", #selector(RomWindowController.showOam(_:)), "6", modifiers: [.command, .option]),

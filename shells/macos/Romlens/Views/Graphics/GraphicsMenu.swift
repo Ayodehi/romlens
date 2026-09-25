@@ -26,6 +26,6 @@ struct GraphicsMenu: View {
         .menuStyle(.button)
         .controlSize(.large)
         .fixedSize()
-        .help("Tile Decoder (⌥⌘4), Palette (⌥⌘5), OAM (⌥⌘6) or Tilemap (⌥⌘7)")
+        .help("Frame and Layers (from a recording), Tile Decoder (⌥⌘4), Palette (⌥⌘5), OAM (⌥⌘6) or Tilemap (⌥⌘7)")
     }
 }

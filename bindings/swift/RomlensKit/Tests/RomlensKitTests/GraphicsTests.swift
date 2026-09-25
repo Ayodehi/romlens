@@ -40,4 +40,20 @@ import Testing
         let other = try Rom.fromBytes(bytes: makeTestRom(mapping: .loRom), name: "t.sfc")
         #expect(throws: RomlensError.self) { try rec.checkRom(rom: other) }
     }
+
+    @Test func aFrameNamesWhatDrewEachPixel() throws {
+        let rec = try RecordingSession.fromBytes(bytes: makeTestRecording(frames: 12))
+        let f = try rec.renderFrame(frame: 8)
+        #expect(f.image.width == 256 && f.image.height == 224)
+        #expect(f.bgMode == 1)
+        guard case .sprite(let sprite, _, _, _, _, _, _, _) = try rec.framePixel(frame: 8, x: 150, y: 55) else {
+            Issue.record("no sprite at (150, 55)")
+            return
+        }
+        #expect(sprite == 3)
+        #expect(try rec.framePixel(frame: 8, x: 4, y: 4) == .backdrop)
+        #expect(try rec.priorityOrder(frame: 8).contains("sprites of priority 3"))
+        let objs = try rec.renderFrameLayer(frame: 8, layer: 5)
+        #expect(objs.width == 256)
+    }
 }

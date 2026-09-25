@@ -157,8 +157,8 @@ Written from `22-phase3-finish.md` on 25 September 2026.
 
 | # | Capability | Shell must expose | CLI scenario | macOS | Win | Linux |
 |---|---|---|---|---|---|---|
-| 3.12 | A recorded frame, drawn from the PPU state | A Frame view over the frame stepper; hovering names the layer, tile or sprite that drew the pixel; clicking selects its OAM entry or tilemap cell, tile and palette row | `romlens render frame <rec> <frame> [--at x,y]` | ⬜ | ⬜ | ⬜ |
-| 3.13 | The frame's layers apart | A Layers view: each enabled layer alone, in priority order, with the mode's rules | `romlens render bg …` | ⬜ | ⬜ | ⬜ |
+| 3.12 | A recorded frame, drawn from the PPU state | A Frame view over the frame stepper; hovering names the layer, tile or sprite that drew the pixel; clicking selects its OAM entry or tilemap cell, tile and palette row | `romlens render frame <rec> <frame> [--at x,y]` | 🧪 | ⬜ | ⬜ |
+| 3.13 | The frame's layers apart | A Layers view: each enabled layer alone, in priority order, with the mode's rules | `romlens render bg …` | 🧪 | ⬜ | ⬜ |
 | 3.14 | From a pixel back to ROM | The inspector's Provenance chain: pixel, OAM or tilemap entry, VRAM word, the DMA, the WRAM buffer and its writer, the ROM bytes; each step a link with its evidence and confidence | `romlens provenance <rec> <frame> x,y [--project P]` | ⬜ | ⬜ | ⬜ |
 | 3.15 | The whole ROM as a map | An Atlas editor tab: banks, then blocks, then items, zoomed continuously; overlays for kind, confidence, entropy, coverage and call arcs; double-click opens the listing | `romlens map <rom> --from <a> --len <n>` | ⬜ | ⬜ | ⬜ |
 | 3.16 | Two versions of a ROM compared | File › Compare With…: a Compare tab listing changed, moved, added and removed routines and data, the two listings side by side; carry names over | `romlens diff <a> <b> [--routines] [--json]` | ⬜ | ⬜ | ⬜ |

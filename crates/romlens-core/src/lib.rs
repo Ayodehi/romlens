@@ -45,4 +45,4 @@ pub use viewmodel::spans::{Span, SpanIndex, SpanKind, header_spans};
 /// Semantic version of the core's public surface. The FFI crate and the CLI
 /// both print it so a shell can pin the version it was built against
 /// (docs/08 rule 6).
-pub const API_VERSION: &str = "0.7.0";
+pub const API_VERSION: &str = "0.8.0";

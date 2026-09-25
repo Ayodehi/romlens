@@ -11,12 +11,30 @@ struct GraphicsEditorView: View {
             GraphicsSourceBar(model: model, graphics: model.graphics)
             Divider()
             switch model.graphicsTab {
+            case .some(let tab) where tab.needsRecording && !model.graphics.hasRecording:
+                NeedsRecording(tab: tab)
+            case .frame: FrameView(model: model, graphics: model.graphics)
+            case .layers: LayersView(graphics: model.graphics)
             case .tiles: TileDecoderView(graphics: model.graphics)
             case .palette: PaletteView(graphics: model.graphics)
             case .oam: OamTableView(graphics: model.graphics)
             case .tilemap: TilemapView(model: model, graphics: model.graphics)
             case nil: EmptyView()
             }
+        }
+    }
+}
+
+/// What the Frame and Layers views say before there is a recording: the
+/// screen exists only in one.
+struct NeedsRecording: View {
+    let tab: GraphicsModel.Tab
+
+    var body: some View {
+        ContentUnavailableView {
+            Label("No Recording", systemImage: tab.systemImage)
+        } description: {
+            Text("The \(tab.title) view draws the screen from a recording's PPU memories and registers. Open one with File › Open Recording…, or start a live session with File › Start Live Session and run the recorder script in Mesen.")
         }
     }
 }
@@ -93,15 +111,27 @@ struct GraphicsSourceBar: View {
     }
 }
 
-/// A frame field with previous and next: Phase 2 has no scrubber.
+/// The frame: a scrubber, previous and next, and the number.
 struct FrameStepper: View {
     @Bindable var graphics: GraphicsModel
+
+    private var frameValue: Binding<Double> {
+        Binding(
+            get: { Double(graphics.frame) },
+            set: { graphics.frame = UInt64($0.rounded()) }
+        )
+    }
 
     var body: some View {
         HStack(spacing: 4) {
             Button { graphics.step(by: -1) } label: { Image(systemName: "chevron.left") }
                 .disabled(graphics.frame <= graphics.firstFrame)
                 .help("Previous frame")
+            if graphics.frameCount > 1 {
+                Slider(value: frameValue, in: Double(graphics.firstFrame)...Double(graphics.frameCount - 1))
+                    .frame(width: 160)
+                    .help("Scrub through the recording")
+            }
             TextField("Frame", value: $graphics.frame, format: .number.grouping(.never))
                 .frame(width: 64)
                 .multilineTextAlignment(.trailing)

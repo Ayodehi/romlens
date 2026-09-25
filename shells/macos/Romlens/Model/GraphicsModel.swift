@@ -15,10 +15,12 @@ import RomlensKit
 @Observable
 final class GraphicsModel {
     enum Tab: String, CaseIterable, Identifiable {
-        case tiles, palette, oam, tilemap
+        case frame, layers, tiles, palette, oam, tilemap
         var id: String { rawValue }
         var title: String {
             switch self {
+            case .frame: "Frame"
+            case .layers: "Layers"
             case .tiles: "Tile Decoder"
             case .palette: "Palette"
             case .oam: "OAM"
@@ -27,12 +29,16 @@ final class GraphicsModel {
         }
         var systemImage: String {
             switch self {
+            case .frame: "photo"
+            case .layers: "square.3.layers.3d"
             case .tiles: "square.grid.3x3"
             case .palette: "paintpalette"
             case .oam: "list.bullet.rectangle"
             case .tilemap: "map"
             }
         }
+        /// Views that need a recording: the screen exists only in one.
+        var needsRecording: Bool { self == .frame || self == .layers }
     }
 
     /// What the views read.
@@ -103,6 +109,13 @@ final class GraphicsModel {
     var screenSize: ScreenSize = .s32x32
     var backgroundLayer: UInt8 = 1
     var selectedCell: Int?
+
+    // Frame
+    /// The pixel clicked in the Frame view, and the one under the pointer.
+    var selectedPixel: (x: Int, y: Int)?
+    var hoverPixel: (x: Int, y: Int)?
+    /// How many screen pixels a frame pixel takes.
+    var frameScale: Int = 2
 
     // Recording
     private(set) var recording: RecordingSession?
@@ -542,5 +555,114 @@ final class GraphicsModel {
     func spriteImage(_ index: UInt8) -> BitmapInfo? {
         guard source == .recording, let recording else { return nil }
         return try? recording.renderSprite(frame: frame, index: index)
+    }
+
+    // MARK: Frame and layers
+
+    /// The screen at the current frame, drawn from the PPU state. Kept per
+    /// frame: the view redraws on every pointer move.
+    func frameImage() -> FrameImageInfo? {
+        guard let recording else { return nil }
+        let id = ObjectIdentifier(recording)
+        if let c = frameCache, c.session == id, c.frame == frame { return c.value }
+        let value = try? recording.renderFrame(frame: frame)
+        frameCache = (id, frame, value)
+        return value
+    }
+    @ObservationIgnored private var frameCache: (session: ObjectIdentifier, frame: UInt64, value: FrameImageInfo?)?
+
+    /// What drew a pixel of the current frame.
+    func pixel(x: Int, y: Int) -> PixelWinnerInfo? {
+        guard let recording, x >= 0, y >= 0 else { return nil }
+        return (try? recording.framePixel(frame: frame, x: UInt32(x), y: UInt32(y))) ?? nil
+    }
+
+    /// One layer alone: 1–4 a background, 5 the sprites.
+    func frameLayer(_ layer: UInt8) -> BitmapInfo? {
+        guard let recording else { return nil }
+        return try? recording.renderFrameLayer(frame: frame, layer: layer)
+    }
+
+    func priorityOrder() -> [String] {
+        guard let recording else { return [] }
+        return (try? recording.priorityOrder(frame: frame)) ?? []
+    }
+
+    /// Where the views should go for a pixel's winner.
+    enum Reveal { case sprite, tile, cell, colour }
+
+    /// Point the other views at what drew a pixel: its OAM entry, its tile in
+    /// the Tile Decoder, its tilemap cell, or its colour. Returns the view to
+    /// show.
+    func reveal(_ what: Reveal, of winner: PixelWinnerInfo) -> Tab? {
+        source = .recording
+        switch (what, winner) {
+        case (.sprite, .sprite(let sprite, _, _, _, _, _, _, _)):
+            visibleSpritesOnly = false
+            selectedSprite = sprite
+            return .oam
+        case (.tile, .sprite(_, _, let tileWord, _, _, _, let colour, _)):
+            showTile(word: tileWord, format: .bpp4, colour: colour)
+            return .tiles
+        case (.tile, .background(let layer, _, _, _, let tileWord, _, _, _, let colour)):
+            // Mode 7's tiles sit in VRAM's high bytes, interleaved with the
+            // map: the Tilemap view shows them, the Tile Decoder cannot.
+            guard let format = ppu?.layers.first(where: { $0.bg == layer })?.format, format != .mode7 else {
+                return nil
+            }
+            showTile(word: tileWord, format: format, colour: colour)
+            return .tiles
+        case (.cell, .background(let layer, let mapWord, _, _, _, _, _, _, _)):
+            backgroundLayer = layer
+            let all = cells()
+            let offset: UInt32 = isMode7
+                ? UInt32(mapWord) * 2
+                : UInt32(mapWord &- (currentLayer?.mapWord ?? 0)) * 2
+            selectedCell = all.firstIndex { $0.byteOffset == offset }
+            return .tilemap
+        case (.colour, _):
+            guard let colour = winner.colour else { return nil }
+            selectedColour = Int(colour)
+            return .palette
+        default:
+            return nil
+        }
+    }
+
+    private func showTile(word: UInt16, format: TileFormat, colour: UInt8) {
+        self.format = format
+        vramOffset = UInt32(word) * 2
+        selectedTile = 0
+        hoveredPixel = nil
+        let colours = max(format.colours, 1)
+        palette = .cgram(row: UInt8(Int(colour) / colours))
+    }
+}
+
+extension PixelWinnerInfo {
+    /// The CGRAM colour it shows, where it has one.
+    var colour: UInt8? {
+        switch self {
+        case .blank: nil
+        case .backdrop: 0
+        case .background(_, _, _, _, _, _, _, _, let colour): colour
+        case .sprite(_, _, _, _, _, _, let colour, _): colour
+        }
+    }
+
+    /// One line for the status bar.
+    var summary: String {
+        switch self {
+        case .blank:
+            return "the screen is off here (forced blank)"
+        case .backdrop:
+            return "the backdrop: no layer drew here, so it shows CGRAM colour 0"
+        case .background(let layer, let mapWord, let entry, let tile, _, let x, let y, let index, let colour):
+            let pal = (entry >> 10) & 7
+            let flips = (entry & 0x4000 != 0 ? ", h-flip" : "") + (entry & 0x8000 != 0 ? ", v-flip" : "")
+            return "BG\(layer): tilemap entry at VRAM $\(GraphicsStyle.hex(mapWord, 4)) = $\(GraphicsStyle.hex(entry, 4)) (tile $\(GraphicsStyle.hex(tile, 3)), palette \(pal)\(entry & 0x2000 != 0 ? ", high priority" : "")\(flips)); pixel (\(x), \(y)) of the tile, index \(index), colour \(colour)"
+        case .sprite(let sprite, let tile, let tileWord, let x, let y, let index, let colour, let priority):
+            return "sprite \(sprite) (priority \(priority)): tile $\(GraphicsStyle.hex(tile, 3)) at VRAM $\(GraphicsStyle.hex(tileWord, 4)); pixel (\(x), \(y)) of the tile, index \(index), colour \(colour)"
+        }
     }
 }
