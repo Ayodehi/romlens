@@ -65,6 +65,7 @@ pub enum IdiomKindInfo {
     Decimal,
     SharedEntry,
     ShadowRegister,
+    DataBank,
 }
 
 impl From<IdiomKind> for IdiomKindInfo {
@@ -81,6 +82,7 @@ impl From<IdiomKind> for IdiomKindInfo {
             IdiomKind::Decimal => Self::Decimal,
             IdiomKind::SharedEntry => Self::SharedEntry,
             IdiomKind::ShadowRegister => Self::ShadowRegister,
+            IdiomKind::DataBank => Self::DataBank,
         }
     }
 }

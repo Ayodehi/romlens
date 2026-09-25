@@ -49,6 +49,10 @@ A ninth idiom, added after E8. A store to a write-only register paired with a st
 
 On the development ROM: 21 such groups, among them the routine at `$82:81DD`, which keeps a copy of every PPU setting it writes in `$7E:0053–$0077`.
 
+## Setting the data bank (24 September 2026)
+
+A tenth idiom. `PHK; PLB`, `PEA $xxyy; PLB; PLB` and `PEI ($dp); PLB; PLB` are named "Set the data bank", with the bank that stays: "DBR = $12: PEA pushes $1234, and the two PLBs pull its bytes one at a time, $34 then $12." The C says the same thing in one line (docs/18, T11).
+
 ## The audit of the register tables (24 September 2026)
 
 After E8, every field in `explain::fields` was checked, bit by bit, against two sources:

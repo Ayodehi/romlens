@@ -180,6 +180,53 @@ fn the_fixture_s_idioms() {
     assert_eq!(x.idioms_at(off).len(), 1);
 }
 
+/// The three ways to set the data bank through the stack.
+#[test]
+fn the_data_bank_through_the_stack() {
+    let mut code = vec![0u8; 0x60];
+    let mut put = |at: usize, b: &[u8]| code[at..at + b.len()].copy_from_slice(b);
+    put(0x00, &[0x78, 0x18, 0xFB, 0x4B, 0xAB, 0xE2, 0x30]);
+    put(0x07, &[0xF4, 0x34, 0x12, 0xAB, 0xAB]); // PEA $1234; PLB; PLB
+    put(0x0C, &[0xD4, 0x01, 0xAB, 0xAB]); // PEI ($01); PLB; PLB
+    put(0x10, &[0x80, 0xFE]);
+    put(0x40, &[0x40]);
+    let mut vectors = [0x8040; 12];
+    vectors[10] = 0x8000;
+    let rom = RomImage::from_bytes(
+        fixtures::build_custom(
+            romlens_core::MappingMode::LoRom,
+            0x8000,
+            false,
+            &code,
+            "BANKS",
+            vectors,
+        ),
+        "b.sfc",
+    )
+    .unwrap();
+    let x = build(&rom, &Project::new(&rom));
+    assert!(
+        titles(&rom, &x, 0x8003)[0]
+            .starts_with("Set the data bank: DBR = $00, the bank this code runs in"),
+        "{:?}",
+        titles(&rom, &x, 0x8003)
+    );
+    assert!(
+        titles(&rom, &x, 0x8007)[0].starts_with(
+            "Set the data bank: DBR = $12: PEA pushes $1234, and the two PLBs pull its bytes one at a time, $34 then $12."
+        ),
+        "{:?}",
+        titles(&rom, &x, 0x8007)
+    );
+    assert!(
+        titles(&rom, &x, 0x800C)[0].starts_with(
+            "Set the data bank: DBR = the byte at direct page $02: PEI pushes the word at $01–$02"
+        ),
+        "{:?}",
+        titles(&rom, &x, 0x800C)
+    );
+}
+
 /// Look-alikes that are not the idiom.
 #[test]
 fn near_misses_are_not_idioms() {
@@ -203,7 +250,9 @@ fn near_misses_are_not_idioms() {
     put(0x20, &[0xF8, 0xEA, 0xD8]);
     // A multiply whose product is never read.
     put(0x23, &[0xA9, 0x02, 0x8D, 0x02, 0x42, 0x8D, 0x03, 0x42]);
-    put(0x2B, &[0x80, 0xFE]);
+    // PEA with one PLB: the bank that stays is the low byte, not a pair.
+    put(0x2B, &[0xF4, 0x34, 0x12, 0xAB, 0xEA]);
+    put(0x30, &[0x80, 0xFE]);
     let mut vectors = [0x8040; 12];
     vectors[10] = 0x8000;
     put(0x40, &[0x40]);
@@ -220,7 +269,14 @@ fn near_misses_are_not_idioms() {
     )
     .unwrap();
     let x = build(&rom, &Project::new(&rom));
-    let found: Vec<String> = x.idioms().iter().map(|i| i.title.clone()).collect();
+    // The boot's PHK; PLB is the one real idiom here.
+    let boot = rom.file_offset_for(SnesAddress::new(0, 0x8003)).unwrap();
+    let found: Vec<String> = x
+        .idioms()
+        .iter()
+        .filter(|i| i.offsets[0] != boot)
+        .map(|i| i.title.clone())
+        .collect();
     assert!(found.is_empty(), "{found:?}");
 }
 

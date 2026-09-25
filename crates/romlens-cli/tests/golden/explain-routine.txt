@@ -12,6 +12,17 @@ $00:803F  STA $4203        WRMPYB = $07: WRMPYA × 7, into RDMPY
 $00:804E  STA $2100        INIDISP ← $7E:0DAE
 $00:8053  STA $4200        NMITIMEN = $81: NMI on, joypad auto-read on
 
+▸ Set the data bank  ($00:8003–$00:8004, 2 instructions)
+  DBR = $00, the bank this code runs in: PHK pushes the program bank and
+  PLB pulls it into DBR, so absolute addresses read this bank.
+
+  The data bank register (DBR) is the bank that absolute addresses like
+  LDA $1234 read from. No instruction loads it directly: the only way in
+  is PLB, which pulls a byte off the stack. So code pushes the bank it
+  wants and pulls it. PHK; PLB uses the bank the code runs in. PEA, or PEI
+  from memory, pushes two bytes, and two PLBs pull both, leaving the
+  second in DBR; that keeps the stack balanced and leaves A alone.
+
 ▸ DMA transfer  ($00:8014–$00:8035, 6 instructions)
   Channel 0 copies $0800 bytes from $00:9000 to VRAM word $6000.
 

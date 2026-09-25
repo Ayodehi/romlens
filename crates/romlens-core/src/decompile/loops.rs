@@ -84,8 +84,11 @@ fn walk(
 fn body_blocks(nodes: &[Node], out: &mut Vec<BlockId>, cont: &mut bool) {
     for n in nodes {
         match n {
-            Node::Block(b) => out.push(*b),
-            Node::If { then, els, .. } => {
+            Node::Block(b) | Node::Lines(b, _) => out.push(*b),
+            Node::If {
+                then, els, merged, ..
+            } => {
+                out.extend(merged.iter().copied());
                 body_blocks(then, out, cont);
                 body_blocks(els, out, cont);
             }
@@ -415,6 +418,7 @@ fn value(e: &Expr, v: u32, x: i64) -> Option<i64> {
 fn rename_expr(e: Expr, from: u32, to: u32) -> Expr {
     match e {
         Expr::Var(v) if v == from => Expr::Var(to),
+        Expr::Step(op, v) if v == from => Expr::Step(op, to),
         Expr::Mem { addr, width } => Expr::mem(rename_expr(*addr, from, to), width),
         Expr::Un(op, x) => Expr::Un(op, Box::new(rename_expr(*x, from, to))),
         Expr::Bin(op, a, b) => Expr::Bin(

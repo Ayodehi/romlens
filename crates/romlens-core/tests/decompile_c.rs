@@ -156,23 +156,161 @@ fn every_opcode_lifts_to_valid_c() {
 #[test]
 fn the_routines_mean_what_the_code_does() {
     let (rom, project, snap) = setup(fixtures::routines_lorom());
+    run_checks(
+        "semantic",
+        &rom,
+        &project,
+        &snap,
+        &[0x8020, 0x8030, 0x8040, 0x8050],
+        ROUTINE_CHECKS,
+    );
+}
+
+/// Tests that choose between the same two ways, read as `&&` and `||`, and
+/// a pushed word pulled a byte at a time, still do what the code does:
+///
+/// ```text
+/// $8000  SEI; CLC; XCE; REP #$10; SEP #$20
+/// $8007  JSR $8020; STY $30; JSR each of the rest; BRA self
+///
+/// $8020  INY / BEQ $8027          ; Y += 2, into the next bank past $FFFF
+/// $8023  INY / BEQ $8027
+/// $8026  RTS
+/// $8027  INC $02 / PEI ($01) / PLB / PLB / LDY #$8000 / RTS
+///
+/// $8040  LDA $10 / BEQ $804C      ; $12 = 1 when $10 and $11 are both set
+/// $8044  LDA $11 / BEQ $804C
+/// $8048  LDA #$01 / STA $12
+/// $804C  RTS
+///
+/// $8060  LDA $20 / CMP #$03 / BEQ $806D   ; $21 = ($20 is 3 or 5)
+/// $8066  CMP #$05 / BEQ $806D
+/// $806A  STZ $21 / RTS
+/// $806D  LDA #$01 / STA $21 / RTS
+///
+/// $8080  PEA $1234 / PLB / PLB / RTS      ; DBR = $12
+/// ```
+fn conditions_rom() -> RomImage {
+    let mut code = vec![0u8; 0x100];
+    let mut put = |at: u16, b: &[u8]| {
+        let i = (at - 0x8000) as usize;
+        code[i..i + b.len()].copy_from_slice(b);
+    };
+    put(
+        0x8000,
+        &[
+            0x78, 0x18, 0xFB, 0xC2, 0x10, 0xE2, 0x20, 0x20, 0x20, 0x80, 0x84, 0x30, 0x20, 0x40,
+            0x80, 0x20, 0x60, 0x80, 0x20, 0x80, 0x80, 0x80, 0xFE,
+        ],
+    );
+    put(
+        0x8020,
+        &[
+            0xC8, 0xF0, 0x04, 0xC8, 0xF0, 0x01, 0x60, 0xE6, 0x02, 0xD4, 0x01, 0xAB, 0xAB, 0xA0,
+            0x00, 0x80, 0x60,
+        ],
+    );
+    put(
+        0x8040,
+        &[
+            0xA5, 0x10, 0xF0, 0x08, 0xA5, 0x11, 0xF0, 0x04, 0xA9, 0x01, 0x85, 0x12, 0x60,
+        ],
+    );
+    put(
+        0x8060,
+        &[
+            0xA5, 0x20, 0xC9, 0x03, 0xF0, 0x07, 0xC9, 0x05, 0xF0, 0x03, 0x64, 0x21, 0x60, 0xA9,
+            0x01, 0x85, 0x21, 0x60,
+        ],
+    );
+    put(0x8080, &[0xF4, 0x34, 0x12, 0xAB, 0xAB, 0x60]);
+    put(0x80F0, &[0x40]);
+    let mut vectors = [0x80F0; 12];
+    vectors[10] = 0x8000;
+    RomImage::from_bytes(
+        fixtures::build_custom(
+            romlens_core::MappingMode::LoRom,
+            0x8000,
+            false,
+            &code,
+            "CONDITIONS",
+            vectors,
+        ),
+        "c.sfc",
+    )
+    .unwrap()
+}
+
+#[test]
+fn combined_tests_mean_what_the_branches_do() {
+    let rom = conditions_rom();
+    let (rom, project, snap) = setup(rom.bytes().to_vec());
+    let full = |at: u16| {
+        decompile::decompile(
+            &rom,
+            &project,
+            &snap,
+            SnesAddress::new(0, at),
+            &DecompileOptions::default(),
+        )
+        .unwrap()
+        .text
+    };
+    // As C is written: one test, no goto, the bank from memory in one line.
+    let advance = full(0x8020);
+    assert!(advance.contains("if (++y == 0 || ++y == 0) {"), "{advance}");
+    assert!(advance.contains("DBR = ADDR_7E0002;"), "{advance}");
+    assert!(
+        !advance.contains("goto") && !advance.contains("pull8"),
+        "{advance}"
+    );
+    let both = full(0x8040);
+    assert!(
+        both.contains("if (ADDR_7E0010 != 0 && ADDR_7E0011 != 0) {"),
+        "{both}"
+    );
+    let either = full(0x8060);
+    assert!(either.contains("||"), "{either}");
+    assert!(!either.contains("goto"), "{either}");
+    let bank = full(0x8080);
+    assert!(bank.contains("DBR = 0x12;"), "{bank}");
+    run_checks(
+        "conditions",
+        &rom,
+        &project,
+        &snap,
+        &[0x8020, 0x8040, 0x8060, 0x8080],
+        CONDITION_CHECKS,
+    );
+}
+
+/// Each routine at `entries` compiled at every level into one program with
+/// `checks` as its `main`, which must build and pass.
+fn run_checks(
+    name: &str,
+    rom: &RomImage,
+    project: &Project,
+    snap: &AnalysisSnapshot,
+    entries: &[u16],
+    checks: &str,
+) {
     let Some(cc) = compiler() else {
         eprintln!("skipped: no C compiler");
         return;
     };
     for level in LEVELS {
-        let dir = scratch(&format!("semantic-{}", level.name()));
+        let dir = scratch(&format!("{name}-{}", level.name()));
         std::fs::write(dir.join("snes.h"), decompile::snes_h()).unwrap();
         let mut includes = String::new();
         let mut shims = String::new();
-        for at in [0x8020u16, 0x8030, 0x8040, 0x8050] {
+        for &at in entries {
             let opts = DecompileOptions {
                 level,
                 names: false,
                 ..Default::default()
             };
-            let d = decompile::decompile(&rom, &project, &snap, SnesAddress::new(0, at), &opts)
-                .unwrap();
+            let d =
+                decompile::decompile(rom, project, snap, SnesAddress::new(0, at), &opts).unwrap();
             let name = format!("r{at:04X}.c");
             std::fs::write(dir.join(&name), &d.text).unwrap();
             includes.push_str(&format!("#include \"{name}\"\n"));
@@ -180,7 +318,7 @@ fn the_routines_mean_what_the_code_does() {
             // from the globals the checks read.
             let entry = SnesAddress::new(0, at);
             let shim = format!("call_{at:04X}");
-            let program = decompile::program(&rom, &project, &snap, &opts);
+            let program = decompile::program(rom, project, snap, &opts);
             match program.abis.get(&entry).filter(|_| level == Level::Full) {
                 Some(abi) => shims.push_str(&abi.global_shim(&shim, &d.name)),
                 None => shims.push_str(&format!("static void {shim}(void) {{ {}(); }}\n", d.name)),
@@ -190,7 +328,8 @@ fn the_routines_mean_what_the_code_does() {
         let rom_bytes: Vec<String> = rom.bytes()[..0x100].iter().map(|b| b.to_string()).collect();
         let main = RUNTIME
             .replace("/*INCLUDES*/", &includes)
-            .replace("/*ROM*/", &rom_bytes.join(","));
+            .replace("/*ROM*/", &rom_bytes.join(","))
+            .replace("/*CHECKS*/", checks);
         std::fs::write(dir.join("main.c"), main).unwrap();
         let exe = dir.join("main");
         let out = Command::new(&cc)
@@ -257,9 +396,7 @@ fn every_routine_on_the_development_rom_is_valid_c() {
 }
 
 /// A runtime over a flat 16 MB array, with the fixture's first 256 bytes of
-/// ROM at `$00:8000`, then each routine checked on inputs. Only what a caller
-/// reads is checked: the boot never reads `SUB_008030`'s carry or
-/// `SUB_008040`'s high byte of A, so from the clean level on neither is kept.
+/// ROM at `$00:8000`, then the checks.
 const RUNTIME: &str = r#"
 #include <stdint.h>
 #include <stdio.h>
@@ -300,6 +437,15 @@ static int failures;
     if (g != w) { printf("%s: got 0x%X, want 0x%X\n", what, g, w); failures++; } } while (0)
 int main(void) {
     memcpy(&mem[0x8000], rom, sizeof rom);
+/*CHECKS*/
+    return failures != 0;
+}
+"#;
+
+/// `routines_lorom`'s routines on inputs. Only what a caller reads is
+/// checked: the boot never reads `SUB_008030`'s carry or `SUB_008040`'s high
+/// byte of A, so from the clean level on neither is kept.
+const ROUTINE_CHECKS: &str = r#"
 
     memset(&mem[0x0200], 0xAA, 0x20);
     X = 0x33;
@@ -327,6 +473,41 @@ int main(void) {
     CHECK("table entry", mem[0x0300], 8);
     CHECK("X restored", X, 3);
     CHECK("S balanced", S, 0x01FF);
-    return failures != 0;
-}
+"#;
+
+/// `conditions_rom`'s routines on inputs.
+const CONDITION_CHECKS: &str = r#"
+    Y = 0x1234; DBR = 0x80; mem[2] = 5;
+    call_8020();
+    CHECK("stepped twice", Y, 0x1236);
+    CHECK("bank kept", DBR, 0x80);
+    CHECK("bank byte kept", mem[2], 5);
+    Y = 0xFFFE;
+    call_8020();
+    CHECK("second step wraps", Y, 0x8000);
+    CHECK("next bank", mem[2], 6);
+    CHECK("data bank", DBR, 6);
+    Y = 0xFFFF;
+    call_8020();
+    CHECK("first step wraps", Y, 0x8000);
+    CHECK("next bank again", DBR, 7);
+    CHECK("S balanced", S, 0x01FF);
+
+    int both[4][2] = {{0, 0}, {1, 0}, {0, 1}, {1, 1}};
+    for (int i = 0; i < 4; i++) {
+        mem[0x10] = both[i][0]; mem[0x11] = both[i][1]; mem[0x12] = 0;
+        call_8040();
+        CHECK("both set", mem[0x12], both[i][0] && both[i][1]);
+    }
+
+    for (int v = 0; v < 8; v++) {
+        mem[0x20] = v; mem[0x21] = 0xAA;
+        call_8060();
+        CHECK("3 or 5", mem[0x21], v == 3 || v == 5);
+    }
+
+    DBR = 0;
+    call_8080();
+    CHECK("PEA bank", DBR, 0x12);
+    CHECK("S balanced after PEA", S, 0x01FF);
 "#;

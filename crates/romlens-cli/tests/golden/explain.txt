@@ -75,3 +75,4 @@ idiom clear-memory:    1
 idiom apu-handshake:   1
 idiom decimal:         1
 idiom shared-entry:    1
+idiom data-bank:       1

@@ -528,7 +528,7 @@ fn var_decl(name: &str, ty: VarType) -> (Shape, String) {
 fn prec(e: &Expr) -> u8 {
     match e {
         Expr::Bin(op, ..) => op.precedence(),
-        Expr::Un(..) | Expr::Cast(..) | Expr::Signed(..) => 14,
+        Expr::Un(..) | Expr::Cast(..) | Expr::Signed(..) | Expr::Step(..) => 14,
         _ => 16,
     }
 }
@@ -537,6 +537,13 @@ fn bitwise(op: BinOp) -> bool {
     matches!(
         op,
         BinOp::And | BinOp::Or | BinOp::Xor | BinOp::Shl | BinOp::Shr | BinOp::LAnd | BinOp::LOr
+    )
+}
+
+fn comparison(op: BinOp) -> bool {
+    matches!(
+        op,
+        BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge
     )
 }
 
@@ -550,6 +557,10 @@ fn needs_parens(parent: BinOp, child: &Expr, right: bool) -> bool {
     let (p, c) = (parent.precedence(), op.precedence());
     if c < p {
         return true;
+    }
+    // `a == 0 || b == 0`: a test inside `&&` or `||` reads plainly.
+    if matches!(parent, BinOp::LAnd | BinOp::LOr) && comparison(*op) {
+        return false;
     }
     if *op != parent && (bitwise(parent) || bitwise(*op)) {
         return true;
@@ -707,6 +718,11 @@ impl<'a, 'n> Emitter<'a, 'n> {
                 self.local(&name);
             }
             Expr::Global(k) => self.local(k.global()),
+            Expr::Step(op, v) => {
+                self.w.w(if *op == BinOp::Sub { "--" } else { "++" });
+                let name = self.var_name(*v);
+                self.local(&name);
+            }
         }
     }
 
@@ -1479,6 +1495,18 @@ impl TreeLayout<'_> {
             .collect()
     }
 
+    /// A block's label and its first `n` statements.
+    fn lines(&self, e: &mut Emitter, b: BlockId, n: usize, asm: &dyn Fn(usize) -> String) {
+        e.stats.blocks += 1;
+        let lines = &self.blocks[b].lines[..n];
+        // A label needs a statement after it: comments are not one.
+        let empty = lines.iter().all(|l| matches!(l.stmt, Stmt::Note(_)));
+        self.put_label(e, b, empty);
+        for line in lines {
+            e.stmt(&line.stmt, &line.steps(), asm);
+        }
+    }
+
     fn put_label(&self, e: &mut Emitter, b: BlockId, empty: bool) {
         if !self.gotos.contains(&b) {
             return;
@@ -1522,23 +1550,18 @@ impl TreeLayout<'_> {
     ) {
         use crate::decompile::structure::{LoopKind, Node};
         match n {
-            Node::Block(b) => {
-                e.stats.blocks += 1;
-                let lb = &self.blocks[*b];
-                // A label needs a statement after it: comments are not one.
-                let empty = lb.lines.iter().all(|l| matches!(l.stmt, Stmt::Note(_)));
-                self.put_label(e, *b, empty);
-                for line in &lb.lines {
-                    e.stmt(&line.stmt, &line.steps(), asm);
-                }
-            }
+            Node::Block(b) => self.lines(e, *b, self.blocks[*b].lines.len(), asm),
+            Node::Lines(b, n) => self.lines(e, *b, *n, asm),
             Node::If {
                 cond,
                 then,
                 els,
                 at,
+                steps,
+                ..
             } => {
-                let ts = self.ts(*at);
+                let mut ts = self.ts(*at);
+                ts.extend(steps.iter().copied());
                 e.kw("if");
                 e.w.w(" (");
                 e.expr(cond);
@@ -1560,9 +1583,12 @@ impl TreeLayout<'_> {
                                 then,
                                 els: next,
                                 at,
+                                steps,
+                                ..
                             },
                         ] => {
-                            let ts = self.ts(*at);
+                            let mut ts = self.ts(*at);
+                            ts.extend(steps.iter().copied());
                             e.w.w("} ");
                             e.kw("else");
                             e.w.w(" ");

@@ -6,7 +6,9 @@
 //! 65816 shape, `DEX; BPL`), `while` when its header only tests, and
 //! `for (;;)` otherwise, with `break` and `continue` for the edges out and
 //! back. A conditional branch becomes `if`/`else` joined at its immediate
-//! post-dominator. A block reached a second time, which the structure could
+//! post-dominator, and a branch whose other way is only another test (the
+//! `BEQ`, `BEQ` of two checks for one outcome) becomes one `if` with `&&`
+//! or `||`. A block reached a second time, which the structure could
 //! not place, is a `goto` to its label. Iterative where it matters: the
 //! recursion is bounded by nesting depth, not by the routine's length.
 
@@ -14,7 +16,7 @@ use std::collections::BTreeSet;
 
 use crate::decompile::cfg::{BlockId, Cfg, Loop, Term};
 use crate::decompile::dataflow::simplify;
-use crate::decompile::ir::{Expr, LiftedBlock, UnOp};
+use crate::decompile::ir::{BinOp, Expr, LiftedBlock, Place, Stmt, UnOp};
 
 #[derive(Debug, Clone)]
 pub enum LoopKind {
@@ -32,12 +34,18 @@ pub enum LoopKind {
 pub enum Node {
     /// A block's own statements (and its label, if a goto names it).
     Block(BlockId),
+    /// A block's first statements: its last is in the test after it.
+    Lines(BlockId, usize),
     If {
         cond: Expr,
         then: Vec<Node>,
         els: Vec<Node>,
         /// The block whose branch this is.
         at: BlockId,
+        /// Blocks whose tests the condition takes in, and the instructions
+        /// they and a stepped variable came from.
+        merged: Vec<BlockId>,
+        steps: Vec<usize>,
     },
     Loop {
         kind: LoopKind,
@@ -283,6 +291,8 @@ impl<'a> Structurer<'a> {
             ..ctx
         };
         let not = |c: &Expr| simplify(Expr::un(UnOp::LNot, c.clone()));
+        let (cond, taken, fall, merged, steps) =
+            self.combine(b, cond, taken, fall, join, stop, ctx, out);
         let arm = |s: &mut Self, t: BlockId| {
             let mut v = Vec::new();
             if Some(t) != join {
@@ -310,11 +320,129 @@ impl<'a> Structurer<'a> {
             then,
             els,
             at: b,
+            merged,
+            steps,
         });
         match join {
             Some(j) if Some(j) != stop => Some(j),
             _ => None,
         }
+    }
+
+    /// The branch at `b` with the tests after it that only choose between
+    /// the same two ways taken in: `if (c1) goto T; if (c2) goto T;` is
+    /// `if (c1 || c2) goto T`, and `if (!c1) goto F; if (c2) goto T; goto
+    /// F;` is `if (c1 && c2) goto T`. Each step keeps the meaning exactly,
+    /// and `&&` and `||` test the second only when the first did not
+    /// decide, as the branches did. Returns the test, where it goes each
+    /// way, the blocks taken in and their instructions.
+    #[allow(clippy::too_many_arguments, clippy::type_complexity)]
+    fn combine(
+        &mut self,
+        b: BlockId,
+        mut cond: Expr,
+        mut taken: BlockId,
+        mut fall: BlockId,
+        join: Option<BlockId>,
+        stop: Option<BlockId>,
+        ctx: Ctx,
+        out: &mut [Node],
+    ) -> (Expr, BlockId, BlockId, Vec<BlockId>, Vec<usize>) {
+        let mut merged: Vec<BlockId> = Vec::new();
+        let mut steps = Vec::new();
+        // The block's own last statement, `y++`, can be the first test's
+        // `++y` once there is a combined test to read it in.
+        let head = self.blocks[b]
+            .lines
+            .last()
+            .and_then(|l| step_into(&l.stmt, &cond).map(|c| (c, l.step)));
+        let first = cond.clone();
+        loop {
+            let mut grew = false;
+            for side in [false, true] {
+                let y = if side { taken } else { fall };
+                if Some(y) == join || Some(y) == stop {
+                    continue;
+                }
+                let Some((cy, yt, yf, ysteps)) = self.test_only(y, b, &merged, ctx) else {
+                    continue;
+                };
+                let (op, cy, t, f) = if !side && yt == taken {
+                    (BinOp::LOr, cy, taken, yf)
+                } else if !side && yf == taken {
+                    (BinOp::LOr, simplify(Expr::un(UnOp::LNot, cy)), taken, yt)
+                } else if side && yf == fall {
+                    (BinOp::LAnd, cy, yt, fall)
+                } else if side && yt == fall {
+                    (BinOp::LAnd, simplify(Expr::un(UnOp::LNot, cy)), yf, fall)
+                } else {
+                    continue;
+                };
+                cond = Expr::bin(op, cond, cy);
+                (taken, fall) = (t, f);
+                merged.push(y);
+                steps.extend(ysteps);
+                self.visited.insert(y);
+                grew = true;
+            }
+            if !grew {
+                break;
+            }
+        }
+        if !merged.is_empty()
+            && let Some((c, at)) = head
+            && let Some(Node::Block(last)) = out.last()
+            && *last == b
+        {
+            cond = replace_first(cond, &first, c);
+            let n = self.blocks[b].lines.len() - 1;
+            *out.last_mut().unwrap() = Node::Lines(b, n);
+            steps.push(at);
+        }
+        (cond, taken, fall, merged, steps)
+    }
+
+    /// A block that only tests, reached only from `b` or a block already
+    /// taken into its test, in the same loop: its test and ways, and its
+    /// instructions. It may also step a variable its test reads, which
+    /// becomes `++v` in the test.
+    fn test_only(
+        &self,
+        y: BlockId,
+        b: BlockId,
+        merged: &[BlockId],
+        ctx: Ctx,
+    ) -> Option<(Expr, BlockId, BlockId, Vec<usize>)> {
+        let Term::Branch { taken, fall } = self.cfg.blocks[y].term else {
+            return None;
+        };
+        let cb = &self.cfg.blocks[y];
+        if self.visited.contains(&y) || self.loop_of(y).is_some() || cb.is_stub() {
+            return None;
+        }
+        if let Some((l, follow)) = ctx.lp
+            && (y == l.header || Some(y) == follow)
+        {
+            return None;
+        }
+        match cb.preds.as_slice() {
+            [p] if *p == b || merged.contains(p) => {}
+            _ => return None,
+        }
+        if self.innermost(y).map(|l| l.header) != self.innermost(b).map(|l| l.header) {
+            return None;
+        }
+        let lb = &self.blocks[y];
+        let cond = lb.cond.clone()?;
+        let cond = match lb.lines.as_slice() {
+            [] => cond,
+            [line] => step_into(&line.stmt, &cond)?,
+            _ => return None,
+        };
+        let mut steps: Vec<usize> = lb.lines.iter().flat_map(|l| l.steps()).collect();
+        steps.extend(lb.term_step);
+        steps.extend(lb.term_merged.iter().copied());
+        Some((cond, taken, fall, steps))
     }
 
     fn switch(
@@ -503,11 +631,73 @@ fn normalize(nodes: &mut Vec<Node>, blocks: &[LiftedBlock]) {
                     nodes.remove(i);
                     continue;
                 }
+                // `if (c) { …; return; } else { rest }` is `if (c) { …;
+                // return; } rest`: nothing after the `then` reaches it.
+                if leaves(then) && !els.is_empty() {
+                    let rest = std::mem::take(els);
+                    nodes.splice(i + 1..i + 1, rest);
+                }
             }
             Node::Loop { body, .. } => normalize(body, blocks),
             Node::Switch { cases, .. } => cases.iter_mut().for_each(|(_, b)| normalize(b, blocks)),
             _ => {}
         }
         i += 1;
+    }
+}
+
+/// `v = v ± 1` then a test that reads `v` once, directly: the test with
+/// `++v` (or `--v`) in its place.
+fn step_into(stmt: &Stmt, cond: &Expr) -> Option<Expr> {
+    let Stmt::Assign {
+        dst: Place::Var(v),
+        value: Expr::Bin(op @ (BinOp::Add | BinOp::Sub), a, one),
+    } = stmt
+    else {
+        return None;
+    };
+    if **a != Expr::Var(*v) || **one != Expr::Const(1) {
+        return None;
+    }
+    let mut reads = 0;
+    cond.walk(&mut |e| {
+        if matches!(e, Expr::Var(w) | Expr::Step(_, w) if w == v) {
+            reads += 1;
+        }
+    });
+    if reads != 1 {
+        return None;
+    }
+    let var = Expr::Var(*v);
+    let step = Expr::Step(*op, *v);
+    match cond {
+        Expr::Bin(cmp, l, r) if **l == var => Some(Expr::Bin(*cmp, Box::new(step), r.clone())),
+        Expr::Bin(cmp, l, r) if **r == var => Some(Expr::Bin(*cmp, l.clone(), Box::new(step))),
+        Expr::Un(UnOp::LNot, x) if **x == var => Some(Expr::Un(UnOp::LNot, Box::new(step))),
+        e if *e == var => Some(step),
+        _ => None,
+    }
+}
+
+/// `e` with the leftmost operand of its `&&`/`||` chain that is `old`
+/// replaced by `new`.
+fn replace_first(e: Expr, old: &Expr, new: Expr) -> Expr {
+    if e == *old {
+        return new;
+    }
+    match e {
+        Expr::Bin(op @ (BinOp::LAnd | BinOp::LOr), a, b) => {
+            Expr::Bin(op, Box::new(replace_first(*a, old, new)), b)
+        }
+        e => e,
+    }
+}
+
+/// Whether control never runs past the end of `nodes`.
+fn leaves(nodes: &[Node]) -> bool {
+    match nodes.last() {
+        Some(Node::Exit(..) | Node::Goto(..) | Node::Break(_) | Node::Continue(_)) => true,
+        Some(Node::If { then, els, .. }) => leaves(then) && leaves(els),
+        _ => false,
     }
 }

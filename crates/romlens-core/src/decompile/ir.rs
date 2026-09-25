@@ -229,6 +229,9 @@ pub enum Expr {
     /// A CPU register as the global `snes.h` declares, where the `full`
     /// level hands a value to code that reads the registers themselves.
     Global(Slot),
+    /// `++v` or `--v` (`op` `Add` or `Sub`): a variable stepped by one where
+    /// a combined test reads it (`structure`).
+    Step(BinOp, u32),
 }
 
 impl Expr {
@@ -351,7 +354,7 @@ impl Expr {
     /// same as evaluating it once (a hardware register, `pull8()`).
     pub fn has_effects(&self) -> bool {
         match self {
-            Expr::Mem { .. } | Expr::Call(..) => true,
+            Expr::Mem { .. } | Expr::Call(..) | Expr::Step(..) => true,
             Expr::Un(_, e) | Expr::Cast(_, e) | Expr::Signed(_, e) => e.has_effects(),
             Expr::Bin(_, a, b) => a.has_effects() || b.has_effects(),
             _ => false,

@@ -1,5 +1,9 @@
 //! Data flow over the lifted IR: what the `clean` level adds.
 //!
+//! - **Bytes through the stack.** `PEI ($01); PLB; PLB` pushes two bytes
+//!   and pulls them one at a time, the usual way to load the data bank from
+//!   memory without touching A: each pull becomes the byte it takes, so it
+//!   reads `DBR = ADDR_02`.
 //! - **Stack slots.** Pushes and pulls that pair up at the same depth
 //!   become saved temporaries, when the routine never looks at `S` itself.
 //! - **Dead code.** Liveness over the registers (with the accumulator's two
@@ -493,6 +497,7 @@ pub fn live_at_entry(flow: &Flow, cfg: &Cfg, lifted: &Lifted, live_out: &[LocSet
 
 /// Run every clean-up to a fixed point.
 pub fn clean(rom: &RomImage, f: &Function, cfg: &Cfg, lifted: &mut Lifted, conv: &Conventions) {
+    split_pushes(rom, lifted);
     stack_slots(f, cfg, lifted);
     let flow = Flow::new(rom, conv);
     for _ in 0..32 {
@@ -1314,6 +1319,85 @@ fn whole_accumulator(flow: &Flow, cfg: &Cfg, lifted: &mut Lifted, live_out: &[Lo
     }
 }
 
+/// A 16-bit push of a constant or of memory whose two bytes are pulled
+/// one at a time straight after, in the same block with only flag updates
+/// between: each pull is the byte it takes, low first. `PEA $7E7E; PLB;
+/// PLB` is `DBR = 0x7E; DBR = 0x7E`, and dead code keeps the last. Memory
+/// is read a byte at a time, so only memory whose reads do nothing else:
+/// not hardware registers.
+fn split_pushes(rom: &RomImage, lifted: &mut Lifted) {
+    let byte = |v: &Expr, k: u32| -> Option<Expr> {
+        match v {
+            Expr::Const(c) => Some(Expr::Const((c >> (8 * k)) & 0xFF)),
+            Expr::Mem {
+                addr,
+                width: Width::W16,
+            } => {
+                let a = addr.as_const()?;
+                let hw = |a: u32| {
+                    rom.map().classify(SnesAddress::from_u24(a & 0xFF_FFFF))
+                        == MemoryClass::Hardware
+                };
+                if hw(a) || hw(a + 1) {
+                    return None;
+                }
+                Some(Expr::mem(Expr::Const(a + k), Width::W8))
+            }
+            _ => None,
+        }
+    };
+    let pull8 = |s: &Stmt| {
+        matches!(
+            s,
+            Stmt::Assign {
+                value: Expr::Call("pull8", _),
+                ..
+            }
+        )
+    };
+    for block in &mut lifted.blocks {
+        let mut i = 0;
+        while i < block.lines.len() {
+            let Stmt::Effect("push16", args) = &block.lines[i].stmt else {
+                i += 1;
+                continue;
+            };
+            let v = args[0].clone();
+            // The two pulls, past flag updates.
+            let mut pulls = Vec::new();
+            let mut j = i + 1;
+            while j < block.lines.len() && pulls.len() < 2 {
+                match &block.lines[j].stmt {
+                    s if pull8(s) => pulls.push(j),
+                    Stmt::Assign {
+                        dst: Place::Flag(_),
+                        ..
+                    } => {}
+                    _ => break,
+                }
+                j += 1;
+            }
+            let (Some(lo), Some(hi)) = (byte(&v, 0), byte(&v, 1)) else {
+                i += 1;
+                continue;
+            };
+            if pulls.len() != 2 {
+                i += 1;
+                continue;
+            }
+            let push = block.lines[i].step;
+            for (&at, b) in pulls.iter().zip([lo, hi]) {
+                let line = &mut block.lines[at];
+                if let Stmt::Assign { value, .. } = &mut line.stmt {
+                    *value = b;
+                }
+                line.merged.push(push);
+            }
+            block.lines.remove(i);
+        }
+    }
+}
+
 /// Pushes and pulls that pair at one depth become temporaries.
 ///
 /// Only where the routine never addresses the stack directly, reads or
@@ -1608,6 +1692,19 @@ pub fn narrow(e: Expr, w: Width) -> Expr {
     }
 }
 
+/// Whether `!e` simplifies to a test without a `!` in front of anything
+/// longer than a name.
+fn negates_plainly(e: &Expr) -> bool {
+    match e {
+        Expr::Bin(BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge, ..) => {
+            true
+        }
+        Expr::Bin(BinOp::LAnd | BinOp::LOr, a, b) => negates_plainly(a) && negates_plainly(b),
+        Expr::Un(UnOp::LNot, _) | Expr::Flag(_) => true,
+        _ => false,
+    }
+}
+
 /// Tidy an expression: comparisons for negated comparisons, sign tests for
 /// sign-bit masks.
 pub fn simplify(e: Expr) -> Expr {
@@ -1634,6 +1731,23 @@ pub fn simplify(e: Expr) -> Expr {
                 };
                 match flipped {
                     Some(f) => simplify(Expr::Bin(f, a, b)),
+                    // De Morgan, where each side turns without a `!`:
+                    // `!(a == 0 || b == 0)` is `a != 0 && b != 0`.
+                    None if matches!(op, BinOp::LAnd | BinOp::LOr)
+                        && negates_plainly(&a)
+                        && negates_plainly(&b) =>
+                    {
+                        let other = if op == BinOp::LAnd {
+                            BinOp::LOr
+                        } else {
+                            BinOp::LAnd
+                        };
+                        Expr::Bin(
+                            other,
+                            Box::new(simplify(Expr::un(UnOp::LNot, *a))),
+                            Box::new(simplify(Expr::un(UnOp::LNot, *b))),
+                        )
+                    }
                     None => Expr::un(UnOp::LNot, Expr::Bin(op, a, b)),
                 }
             }

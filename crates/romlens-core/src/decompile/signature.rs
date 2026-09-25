@@ -452,6 +452,10 @@ pub fn index_widths(u: &Unit) -> (bool, bool) {
 /// Growing sets always stop; this only bounds a pathological program.
 const MAX_ROUNDS: usize = 400;
 
+/// The registers that stay globals at every level: whatever a routine
+/// leaves in them, its caller runs with.
+const GLOBALS: [Loc; 3] = [Loc::S, Loc::D, Loc::Dbr];
+
 impl Program {
     /// `ran`: whether the instruction at a file offset is known to run (a
     /// trace saw it), or may (there is none).
@@ -714,18 +718,13 @@ impl Program {
 
     /// The conventions for the `full` level, where the registers are each
     /// routine's own variables: a register it preserves need not be put
-    /// back, since its callers keep theirs; S, D and DBR, still globals,
-    /// must.
+    /// back, since its callers keep theirs. S, D and DBR stay globals, so
+    /// what the routine leaves in them is always seen after it.
     pub fn canonical_conventions(&self, at: SnesAddress) -> Conventions {
         let mut c = self.conventions(at);
         if let Some(s) = self.summaries.get(&at) {
             c.exit = s.returns.clone();
-            c.exit.extend(
-                s.preserves
-                    .iter()
-                    .filter(|l| matches!(l, Loc::S | Loc::D | Loc::Dbr))
-                    .copied(),
-            );
+            c.exit.extend(GLOBALS);
         }
         c
     }
@@ -742,10 +741,19 @@ impl Program {
         Conventions {
             // What it preserves stays live at its returns, so the restore is
             // printed: callers rely on it.
+            // S, D and DBR are seen after it too: a bank set with `PLB` is
+            // read by the caller's next load even when the lifter resolved
+            // that load's bank itself.
             exit: self
                 .summaries
                 .get(&at)
-                .map(|s| s.returns.union(&s.preserves).copied().collect())
+                .map(|s| {
+                    s.returns
+                        .union(&s.preserves)
+                        .copied()
+                        .chain(GLOBALS)
+                        .collect()
+                })
                 .unwrap_or(base.exit),
             calls,
             default_call: base.default_call,

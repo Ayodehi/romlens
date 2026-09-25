@@ -37,6 +37,7 @@ const KINDS: &[&str] = &[
     "decimal",
     "shared-entry",
     "shadow-register",
+    "data-bank",
 ];
 
 pub fn run(args: ExplainArgs) -> Result<()> {

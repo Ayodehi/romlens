@@ -1,7 +1,7 @@
 //! The sequences every SNES game contains, named where they appear
 //! (docs/20): waiting for blanking, DMA and HDMA, the hardware multiplier,
-//! clearing memory, the sound CPU's handshake, decimal arithmetic, and a
-//! routine with a second way in.
+//! clearing memory, the sound CPU's handshake, decimal arithmetic, setting
+//! the data bank through the stack, and a routine with a second way in.
 //!
 //! Each recogniser works on one routine's blocks and the values
 //! [`super::values`] found, and names only what it can see: a DMA whose
@@ -36,6 +36,9 @@ pub enum IdiomKind {
     SharedEntry,
     /// A write-only register stored twice: to the hardware and to RAM.
     ShadowRegister,
+    /// `PHK; PLB`, or a word pushed and pulled a byte at a time by two
+    /// `PLB`s: the data bank set through the stack.
+    DataBank,
 }
 
 impl IdiomKind {
@@ -52,6 +55,7 @@ impl IdiomKind {
             IdiomKind::Decimal => "decimal",
             IdiomKind::SharedEntry => "shared-entry",
             IdiomKind::ShadowRegister => "shadow-register",
+            IdiomKind::DataBank => "data-bank",
         }
     }
 }
@@ -151,6 +155,7 @@ pub fn find(
     out.extend(r.arithmetic(name));
     out.extend(r.block_moves(name));
     out.extend(r.decimal());
+    out.extend(r.data_bank());
     out.extend(shared_entry(rom, f, entries, name));
     out.extend(r.shadows());
     for i in &mut out {
@@ -1159,6 +1164,66 @@ impl<'a> Routine<'a> {
     }
 }
 
+impl Routine<'_> {
+    /// `PHK; PLB`, `PEA $xxyy; PLB; PLB` and `PEI ($dp); PLB; PLB`, each
+    /// instruction straight after the one before.
+    fn data_bank(&self) -> Vec<Idiom> {
+        use Mnemonic::*;
+        let mut out = Vec::new();
+        let n = self.f.steps.len();
+        let next = |k: usize| {
+            let (a, b) = (self.insn(k), self.insn(k + 1));
+            b.file_offset.0 == a.file_offset.0 + u32::from(a.len)
+        };
+        for i in 0..n {
+            let insn = self.insn(i);
+            let pulls = match insn.mnemonic {
+                PHK => 1,
+                PEA | PEI => 2,
+                _ => continue,
+            };
+            if i + pulls >= n
+                || !(i..i + pulls).all(|k| next(k) && self.insn(k + 1).mnemonic == PLB)
+            {
+                continue;
+            }
+            let summary = match insn.mnemonic {
+                PHK => format!(
+                    "DBR = ${:02X}, the bank this code runs in: PHK pushes the program bank and PLB pulls it into DBR, so absolute addresses read this bank.",
+                    insn.address.bank()
+                ),
+                PEA => {
+                    let w = insn.operand.value();
+                    format!(
+                        "DBR = ${hi:02X}: PEA pushes ${w:04X}, and the two PLBs pull its bytes one at a time, ${lo:02X} then ${hi:02X}. The second is the one that stays.",
+                        hi = w >> 8,
+                        lo = w & 0xFF
+                    )
+                }
+                _ => {
+                    let dp = insn.operand.value();
+                    format!(
+                        "DBR = the byte at direct page ${:02X}: PEI pushes the word at ${dp:02X}–${:02X}, and the two PLBs pull its bytes one at a time. The second is the one that stays, and A is left alone.",
+                        (dp + 1) & 0xFF,
+                        (dp + 1) & 0xFF
+                    )
+                }
+            };
+            out.push(Idiom {
+                kind: IdiomKind::DataBank,
+                title: "Set the data bank".to_owned(),
+                summary,
+                why: WHY_DATA_BANK,
+                offsets: (i..=i + pulls).map(|k| self.insn(k).file_offset).collect(),
+                note_at: None,
+                transfers: Vec::new(),
+                table: None,
+            });
+        }
+        out
+    }
+}
+
 fn shared_entry(
     rom: &RomImage,
     f: &Function,
@@ -1454,6 +1519,7 @@ const WHY_APU: &str = "The sound CPU (an SPC700 with its own 64 KB of RAM) runs 
 const WHY_APU_BOOT: &str = "At power-on the sound CPU's boot ROM puts $AA and $BB in ports 0 and 1 to say it is ready. A game waits for them before uploading its sound driver a byte at a time through the same ports.";
 const WHY_DECIMAL: &str = "In decimal mode each byte holds two decimal digits, one per nibble. Games keep scores, timers and lives this way so each digit can be drawn straight from its nibble, without dividing by ten.";
 const WHY_SHADOW: &str = "Most PPU registers are write-only: reading them back gives nothing useful. So games keep a copy of each setting in RAM, a \"shadow\" of the register, and write both. Later code reads the copy to see the current setting, or changes one bit of it and writes the whole value back.";
+const WHY_DATA_BANK: &str = "The data bank register (DBR) is the bank that absolute addresses like LDA $1234 read from. No instruction loads it directly: the only way in is PLB, which pulls a byte off the stack. So code pushes the bank it wants and pulls it. PHK; PLB uses the bank the code runs in. PEA, or PEI from memory, pushes two bytes, and two PLBs pull both, leaving the second in DBR; that keeps the stack balanced and leaves A alone.";
 const WHY_SHARED: &str = "In assembly a routine can have more than one entry point: code that needs one extra step first starts a few instructions earlier and runs on into the shared part. It saves the bytes of a call or a copy.";
 
 #[cfg(test)]
