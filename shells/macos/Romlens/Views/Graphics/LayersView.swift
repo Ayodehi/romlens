@@ -2,30 +2,84 @@ import RomlensKit
 import SwiftUI
 
 /// The frame's layers apart (checklist 3.13): each background the mode has
-/// and the sprites, alone where they show on the main screen, with the
-/// mode's order front to back.
+/// and the sprites, alone where they show on the main screen, in a grid two
+/// wide (three when a mode has four backgrounds), with the mode's order
+/// front to back.
 struct LayersView: View {
     @Bindable var graphics: GraphicsModel
 
+    private static let spacing: CGFloat = 16
+    private static let header: CGFloat = 22
+
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
-            ScrollView {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 256 * 1.5 + 24), alignment: .top)], spacing: 16) {
-                    ForEach(layers, id: \.id) { layer in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(layer.title).font(.headline)
-                            Text(layer.detail).font(.caption).foregroundStyle(.secondary)
-                            if let image = graphics.frameLayer(layer.id) {
-                                PixelImage(bitmap: image, scale: 1.5)
-                            }
-                        }
-                    }
-                }
-                .padding()
+            VStack(spacing: 0) {
+                controls
+                Divider()
+                panels
             }
             Divider()
             legend.frame(width: 220)
         }
+    }
+
+    private var controls: some View {
+        HStack {
+            Picker("Size", selection: $graphics.layersFit) {
+                Text("Fit").tag(true)
+                Text("1:1").tag(false)
+            }
+            .pickerStyle(.segmented)
+            .fixedSize()
+            Spacer()
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+    }
+
+    @ViewBuilder private var panels: some View {
+        let shown = layers.map { ($0, graphics.frameLayer($0.id)) }
+        let columns = shown.count > 4 ? 3 : 2
+        let rows = (shown.count + columns - 1) / columns
+        let size = shown.lazy.compactMap(\.1).first.map { CGSize(width: Int($0.width), height: Int($0.height)) }
+            ?? CGSize(width: 256, height: 224)
+        if graphics.layersFit {
+            GeometryReader { geo in
+                let s = Self.spacing
+                let across = (geo.size.width - s * CGFloat(columns + 1)) / CGFloat(columns) / size.width
+                let down = (geo.size.height - s * CGFloat(rows + 1) - Self.header * CGFloat(rows))
+                    / CGFloat(rows) / size.height
+                grid(shown, columns: columns, scale: max(0.25, min(across, down)))
+                    .frame(width: geo.size.width, height: geo.size.height)
+            }
+        } else {
+            ScrollView([.horizontal, .vertical]) {
+                grid(shown, columns: columns, scale: 1)
+            }
+        }
+    }
+
+    private func grid(_ shown: [(Layer, BitmapInfo?)], columns: Int, scale: CGFloat) -> some View {
+        Grid(alignment: .topLeading, horizontalSpacing: Self.spacing, verticalSpacing: Self.spacing) {
+            ForEach(Array(stride(from: 0, to: shown.count, by: columns)), id: \.self) { start in
+                GridRow {
+                    ForEach(shown[start..<min(start + columns, shown.count)], id: \.0.id) { layer, image in
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                Text(layer.title).font(.headline)
+                                Text(layer.detail).font(.caption).foregroundStyle(.secondary)
+                            }
+                            .lineLimit(1)
+                            .frame(height: Self.header - 4, alignment: .leading)
+                            if let image {
+                                PixelImage(bitmap: image, scale: scale)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .padding(Self.spacing)
     }
 
     private struct Layer {

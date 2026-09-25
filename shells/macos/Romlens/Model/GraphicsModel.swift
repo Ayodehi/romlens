@@ -116,6 +116,8 @@ final class GraphicsModel {
     var hoverPixel: (x: Int, y: Int)?
     /// How many screen pixels a frame pixel takes.
     var frameScale: Int = 2
+    /// The Layers view scales its grid to the window; off, 1:1.
+    var layersFit = true
 
     // Recording
     private(set) var recording: RecordingSession?
