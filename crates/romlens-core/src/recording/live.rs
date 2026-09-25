@@ -361,7 +361,9 @@ fn read_stream(
     };
     if let Some(why) = reader.header.rom_mismatch(rom) {
         return LiveStatus::Refused {
-            reason: format!("the stream was not recorded from this ROM: {why}"),
+            reason: format!(
+                "the recorder is running for a different game ({why}). In Mesen, stop the recorder script, load this ROM, and run the script again"
+            ),
         };
     }
     events.status(LiveStatus::Connected {

@@ -325,9 +325,27 @@ function finish()
   end
 end
 
+-- The stream describes the game loaded when the script started. Loading
+-- another game leaves the script running, so notice and stop, rather than
+-- send the new game's frames under the old one's header.
+local started_sha1 = rom.fileSha1Hash or ""
+local function game_changed()
+  local now = emu.getRomInfo()
+  local sha1 = (now and now.fileSha1Hash) or ""
+  if sha1 == started_sha1 then return false end
+  emu.log("Romlens recorder: the game changed to " .. ((now and now.name) or "another ROM")
+    .. "; stopped. Run the script again to record this game.")
+  live_close("the game changed")
+  finish()
+  return true
+end
+
 emu.addEventCallback(guarded(function()
   if finished then return end
-  if frame % 120 == 0 then live_try_connect() end
+  if frame % 120 == 0 then
+    if game_changed() then return end
+    live_try_connect()
+  end
   write_frame()
   if xlog and frame % 3600 == 0 then write_xlog() end
   if frame_limit and frame >= frame_limit then
