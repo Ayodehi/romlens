@@ -15,6 +15,12 @@ import SwiftUI
 /// thing.
 struct DocumentView: View {
     @Bindable var model: RomViewModel
+    /// The window is too narrow for the editor tabs as a segmented control.
+    /// A toolbar item that does not fit goes to the overflow menu, and a
+    /// segmented control shows there as blank checkmarks, so below this
+    /// width the tabs are a menu instead, which always fits.
+    @State private var compactToolbar = false
+    static let compactWidth: CGFloat = 1180
 
     /// No segment is selected while a graphics view has the editor, so the
     /// control never claims a tab that is not showing.
@@ -57,6 +63,15 @@ struct DocumentView: View {
                     .frame(minWidth: 280, idealWidth: 320, maxWidth: 420)
             }
         }
+        .background {
+            GeometryReader { g in
+                Color.clear
+                    .onAppear { compactToolbar = g.size.width < Self.compactWidth }
+                    .onChange(of: g.size.width) { _, w in
+                        compactToolbar = w < Self.compactWidth
+                    }
+            }
+        }
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 Button {
@@ -80,14 +95,33 @@ struct DocumentView: View {
                 .help("Hide or show the navigator, inspector and overview strip together (⌥⌘F)")
             }
             ToolbarItem(placement: .principal) {
-                Picker("Editor", selection: editorTab) {
-                    ForEach(RomViewModel.EditorTab.allCases) { tab in
-                        Text(tab.title).tag(Optional(tab))
+                if compactToolbar {
+                    Menu {
+                        Picker("Editor", selection: editorTab) {
+                            ForEach(RomViewModel.EditorTab.allCases) { tab in
+                                Text(tab.title).tag(Optional(tab))
+                            }
+                        }
+                        .pickerStyle(.inline)
+                        .labelsHidden()
+                    } label: {
+                        Text(model.graphicsTab == nil ? model.editorTab.title : "Editor")
+                            .padding(.horizontal, 8)
                     }
+                    .menuStyle(.button)
+                    .controlSize(.large)
+                    .fixedSize()
+                    .help("Hex (⌥⌘1), Disassembly (⌥⌘2), Both (⌥⌘3), C (⌥⌘8) or Graph (⌥⌘9)")
+                } else {
+                    Picker("Editor", selection: editorTab) {
+                        ForEach(RomViewModel.EditorTab.allCases) { tab in
+                            Text(tab.title).tag(Optional(tab))
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .controlSize(.large)
+                    .help("Hex (⌥⌘1), Disassembly (⌥⌘2), Both (⌥⌘3), C (⌥⌘8) or Graph (⌥⌘9)")
                 }
-                .pickerStyle(.segmented)
-                .controlSize(.large)
-                .help("Hex (⌥⌘1), Disassembly (⌥⌘2), Both (⌥⌘3), C (⌥⌘8) or Graph (⌥⌘9)")
             }
             ToolbarItem(placement: .principal) {
                 GraphicsMenu(model: model)
