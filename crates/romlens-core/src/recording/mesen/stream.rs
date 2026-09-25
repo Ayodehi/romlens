@@ -71,7 +71,12 @@ impl StreamHeader {
     /// Whether `rom` is the ROM the stream was recorded from, by size and
     /// samples. `None` when they agree, else why not.
     pub fn rom_mismatch(&self, rom: &[u8]) -> Option<String> {
-        if rom.len() != self.rom_size as usize {
+        let size = self.rom_size as usize;
+        // Mesen pads a ROM whose size is not a power of two up to the next
+        // one (Super Metroid's 3 MB reads as 4 MB), so that size is the same
+        // ROM; its samples in the padding say nothing about the file.
+        let padded = size > rom.len() && size == rom.len().next_power_of_two();
+        if rom.len() != size && !padded {
             return Some(format!(
                 "the stream was recorded from a {}-byte ROM; this one is {} bytes",
                 self.rom_size,
@@ -80,6 +85,9 @@ impl StreamHeader {
         }
         for i in 0..SAMPLES {
             let at = self.sample_offset(i);
+            if padded && at >= rom.len() {
+                continue;
+            }
             let want = &self.samples[i * SAMPLE_LEN..(i + 1) * SAMPLE_LEN];
             // A sample past the end reads as zeroes in Mesen.
             let mut have = [0u8; SAMPLE_LEN];
@@ -575,5 +583,26 @@ mod tests {
         other[h.sample_offset(5) + 3] ^= 1;
         assert!(h.rom_mismatch(&other).unwrap().contains("0x140"));
         assert!(h.rom_mismatch(&rom[..0x800]).unwrap().contains("bytes"));
+    }
+
+    /// Mesen reads a ROM whose size is not a power of two as the next one,
+    /// padded with $FF: Super Metroid's 3 MB as 4 MB.
+    #[test]
+    fn a_rom_padded_to_a_power_of_two_is_the_same_rom() {
+        let rom: Vec<u8> = (0..0x3000u32).map(|i| (i * 7) as u8).collect();
+        let mut padded = rom.clone();
+        padded.resize(0x4000, 0xFF);
+        let mut h = header();
+        h.rom_size = 0x4000;
+        h.samples = (0..SAMPLES)
+            .flat_map(|i| padded[h.sample_offset(i)..h.sample_offset(i) + SAMPLE_LEN].to_vec())
+            .collect();
+        assert_eq!(h.rom_mismatch(&rom), None);
+        // Still the same bytes where the ROM has them.
+        let mut other = rom.clone();
+        other[h.sample_offset(10)] ^= 1;
+        assert!(h.rom_mismatch(&other).is_some());
+        // A size that is not the next power of two is another ROM.
+        assert!(h.rom_mismatch(&rom[..0x1800]).unwrap().contains("bytes"));
     }
 }
