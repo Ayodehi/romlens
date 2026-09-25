@@ -102,12 +102,15 @@ struct FrameView: View {
     }
 }
 
-/// The clicked pixel: what drew it, and buttons to the views that show it.
+/// The clicked pixel: what drew it, buttons to the views that show it, and
+/// where its bytes came from (checklist 3.14).
 struct PixelDetail: View {
     let model: RomViewModel
     let graphics: GraphicsModel
     let at: (x: Int, y: Int)
     let winner: PixelWinnerInfo
+    @State private var chain: ProvenanceInfo?
+    @State private var loading = false
 
     var body: some View {
         ScrollView {
@@ -133,9 +136,28 @@ struct PixelDetail: View {
                     }
                 }
                 .buttonStyle(.link)
+                Divider()
+                Text("Where it came from").font(.headline)
+                if loading {
+                    ProgressView().controlSize(.small)
+                } else if let chain {
+                    ForEach(Array(chain.parts.enumerated()), id: \.offset) { _, part in
+                        ProvenancePartView(model: model, graphics: graphics, part: part)
+                    }
+                } else {
+                    Text("The recording cannot say.").foregroundStyle(.secondary)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(12)
+        }
+        .task(id: "\(graphics.frame) \(at.x) \(at.y)") {
+            guard let recording = graphics.recording else { return }
+            loading = true
+            chain = await model.workbench.pixelProvenance(
+                recording: recording, frame: graphics.frame, x: UInt32(at.x), y: UInt32(at.y)
+            )
+            loading = false
         }
     }
 
@@ -145,5 +167,93 @@ struct PixelDetail: View {
         } label: {
             Label(title, systemImage: image)
         }
+    }
+}
+
+/// One part of a pixel's chain: the writes that put its bytes there, then
+/// the hop before them, each with buttons to what it names.
+struct ProvenancePartView: View {
+    let model: RomViewModel
+    let graphics: GraphicsModel
+    let part: ProvenancePartInfo
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(part.what.prefix(1).uppercased() + part.what.dropFirst())
+                .font(.subheadline.weight(.semibold))
+            ForEach(Array(part.links.enumerated()), id: \.offset) { _, link in
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(link.summary).font(.callout).fixedSize(horizontal: false, vertical: true)
+                    DisclosureGroup("\(link.bytes.count) byte\(link.bytes.count == 1 ? "" : "s")") {
+                        ForEach(link.bytes, id: \.self) { Text($0).font(.caption.monospaced()) }
+                    }
+                    .font(.caption)
+                    HStack {
+                        if let pc = link.startedAt {
+                            Button("Show the Code") { showCode(pc) }
+                                .help("The instruction that started the DMA")
+                        }
+                        if let start = link.romStart {
+                            Button("Show the Bytes") { showBytes(start, max(link.romLen, 1)) }
+                                .help("The DMA's source in the ROM")
+                        }
+                    }
+                    .buttonStyle(.link)
+                    .font(.caption)
+                }
+            }
+            if let hop = part.hop {
+                Text(hop.codeSummary).font(.callout).fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    ForEach(hop.code, id: \.pc) { c in
+                        Button(formatSnesAddress(address: c.pc)) { showCode(c.pc) }
+                            .help(c.clears ? "Clears memory: writes this among many others" : "Writes it \(c.count) times")
+                    }
+                }
+                .buttonStyle(.link)
+                .font(.caption.monospaced())
+                if let placed = hop.placedSummary {
+                    Text(placed).font(.callout).fixedSize(horizontal: false, vertical: true)
+                }
+                if let p = hop.placed {
+                    HStack {
+                        Button(p.compressed ? "Show the Stream" : "Show the Bytes") {
+                            showBytes(p.compressed ? p.start : p.focus, p.compressed ? p.len : 32)
+                        }
+                        if p.compressed {
+                            Button("Open Decompressed") { openDecompressed(p) }
+                                .help("Decompress the stream into the Tile Decoder")
+                            Button("Mark as Compressed Graphics") { markCompressed(p) }
+                                .help("A proposal: mark the stream in the ROM map, with this recording as the evidence. Undo takes it back.")
+                        }
+                    }
+                    .buttonStyle(.link)
+                    .font(.caption)
+                }
+            }
+        }
+    }
+
+    private func showCode(_ pc: UInt32) {
+        model.editorTab = .disassembly
+        model.jump(toSnesAddress: pc)
+    }
+
+    private func showBytes(_ start: UInt32, _ len: UInt32) {
+        model.editorTab = .hex
+        model.jump(to: start)
+        model.selectRange(start..<start + len)
+    }
+
+    private func openDecompressed(_ p: PlacedInfo) {
+        guard let d = try? decompressSm(bytes: model.rom.bytes(fileOffset: p.start, len: max(p.len, 1))) else { return }
+        graphics.source = .bytes(label: "Decompressed", data: d.output)
+        graphics.selectedTile = 0
+        model.graphicsTab = .tiles
+    }
+
+    private func markCompressed(_ p: PlacedInfo) {
+        model.selectRange(p.start..<p.start + max(p.len, 1))
+        model.mark(.data, dataKind: .compressed)
     }
 }

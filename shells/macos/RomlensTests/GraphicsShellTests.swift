@@ -54,6 +54,17 @@ import Testing
         #expect(m.graphics.selectedCell != nil)
     }
 
+    @Test func aPixelsChainLoadsThroughTheWorkbench() async throws {
+        let m = try await model()
+        let url = try recordingURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        #expect(RecordingController.attach(url: url, model: m, window: nil))
+        let rec = try #require(m.graphics.recording)
+        let chain = try #require(await m.workbench.pixelProvenance(recording: rec, frame: 8, x: 150, y: 55))
+        #expect(chain.summary.hasPrefix("(150, 55) at frame 8: sprite 3"))
+        #expect(chain.parts.map(\.what) == ["its tile's bytes for this row", "its OAM entry", "its colour"])
+    }
+
     @Test func theLayersViewDrawsEachLayerAlone() async throws {
         let m = try await model()
         let url = try recordingURL()

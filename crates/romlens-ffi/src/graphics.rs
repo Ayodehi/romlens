@@ -1034,6 +1034,190 @@ impl RecordingSession {
     }
 }
 
+/// Where a pixel's bytes came from (docs/22, P5), as the inspector shows it:
+/// each line already in words, with the addresses its buttons go to.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct ProvenanceInfo {
+    /// What drew the pixel.
+    pub summary: String,
+    pub parts: Vec<ProvenancePartInfo>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct ProvenancePartInfo {
+    /// "its tile's bytes for this row", "its OAM entry", "its colour".
+    pub what: String,
+    pub links: Vec<ProvenanceLinkInfo>,
+    pub hop: Option<ProvenanceHopInfo>,
+}
+
+/// Bytes that got there the same way.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct ProvenanceLinkInfo {
+    pub summary: String,
+    /// Each byte, with where a DMA read it from.
+    pub bytes: Vec<String>,
+    /// The instruction that started the DMA (SNES address).
+    pub started_at: Option<u32>,
+    /// A DMA straight from the ROM: its source's file offset and length.
+    pub rom_start: Option<u32>,
+    pub rom_len: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct ProvenanceHopInfo {
+    /// Who writes the buffer or the port.
+    pub code_summary: String,
+    pub code: Vec<CodeWriterInfo>,
+    /// Where the bytes are in the ROM, or what was not found.
+    pub placed_summary: Option<String>,
+    pub placed: Option<PlacedInfo>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct CodeWriterInfo {
+    /// SNES address of the instruction.
+    pub pc: u32,
+    pub count: u32,
+    /// It writes 4 KB or more in a run: clearing memory.
+    pub clears: bool,
+}
+
+/// Where a run of the part's bytes is in the ROM.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct PlacedInfo {
+    /// File offset and length: the bytes as they are, or the whole stream.
+    pub start: u32,
+    pub len: u32,
+    pub compressed: bool,
+    /// The ROM byte behind the part's first byte.
+    pub focus: u32,
+}
+
+impl ProvenanceInfo {
+    pub(crate) fn from_chain(
+        c: &romlens_core::provenance::chain::Chain,
+        rom: &romlens_core::RomImage,
+        have_log: bool,
+    ) -> Self {
+        use romlens_core::provenance::chain::{Link, target_name};
+        use romlens_core::provenance::source::RomSource;
+        ProvenanceInfo {
+            summary: c.describe(),
+            parts: c
+                .parts
+                .iter()
+                .map(|p| ProvenancePartInfo {
+                    what: p.what.to_owned(),
+                    links: p
+                        .groups
+                        .iter()
+                        .map(|g| {
+                            let (started_at, rom_start, rom_len) = match &g.link {
+                                Link::Dma {
+                                    started_at,
+                                    source,
+                                    bytes,
+                                    ..
+                                } => (
+                                    started_at.map(|a| a.as_u24()),
+                                    p.from_rom
+                                        .and_then(|_| rom.file_offset_for(*source))
+                                        .map(|o| o.0),
+                                    *bytes,
+                                ),
+                                _ => (None, None, 0),
+                            };
+                            ProvenanceLinkInfo {
+                                summary: g.link.describe(),
+                                bytes: g
+                                    .bytes
+                                    .iter()
+                                    .map(|b| match b.source {
+                                        Some(s) => format!("{} from {s}", target_name(b.target)),
+                                        None => target_name(b.target),
+                                    })
+                                    .collect(),
+                                started_at,
+                                rom_start,
+                                rom_len,
+                            }
+                        })
+                        .collect(),
+                    hop: p.hop.as_ref().map(|h| ProvenanceHopInfo {
+                        code_summary: h.describe_code(),
+                        code: h
+                            .code
+                            .iter()
+                            .flatten()
+                            .take(4)
+                            .map(|c| CodeWriterInfo {
+                                pc: c.pc,
+                                count: c.count,
+                                clears: c.clears(),
+                            })
+                            .collect(),
+                        placed_summary: h.describe_placed(rom, have_log),
+                        placed: h.placed.as_ref().map(|pl| {
+                            let (start, len, compressed) = match pl.source {
+                                RomSource::Verbatim { at, .. } => (at.0, 0, false),
+                                RomSource::Compressed {
+                                    stream, consumed, ..
+                                } => (stream.0, consumed as u32, true),
+                            };
+                            PlacedInfo {
+                                start,
+                                len,
+                                compressed,
+                                focus: pl.focus_offset().0,
+                            }
+                        }),
+                    }),
+                })
+                .collect(),
+        }
+    }
+}
+
+impl RecordingSession {
+    /// How far back to look for a byte's last write: the frame it last
+    /// changed, from the change index (built on first use, as `history`
+    /// does), and at most a minute of frames.
+    pub(crate) fn earliest(&self, frame: u64, target: romlens_core::provenance::Target) -> u64 {
+        use romlens_core::recording::change_index::{ChangeIndex, load_or_build};
+        let floor = frame.saturating_sub(3600);
+        let Some(source) = self.source.file() else {
+            return floor;
+        };
+        let mut slot = self.index.lock().unwrap();
+        if slot.is_none() {
+            *slot = match &self.origin {
+                Origin::Path(p) => load_or_build(Path::new(p), source, false).ok().map(|x| x.0),
+                Origin::Bytes(_) | Origin::Live => ChangeIndex::build(source).ok(),
+            };
+        }
+        slot.as_ref()
+            .and_then(|i| {
+                i.when(
+                    source,
+                    romlens_core::provenance::chain::region_of(target.memory),
+                    target.byte,
+                    1,
+                    frame,
+                    true,
+                )
+                .ok()
+                .flatten()
+            })
+            .unwrap_or(0)
+            .max(floor)
+    }
+
+    pub(crate) fn machine(&self) -> &dyn MachineStateSource {
+        self.source.dynamic()
+    }
+}
+
 /// The synthetic recording `romlens testrec` writes, for shell tests.
 #[uniffi::export]
 pub fn make_test_recording(frames: u32) -> Vec<u8> {
@@ -1188,6 +1372,33 @@ mod tests {
         );
         assert!(RecordingSession::open(path, false).is_ok());
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_pixel_names_the_bytes_it_was_drawn_from() {
+        let rec = RecordingSession::from_bytes(make_test_recording(40)).unwrap();
+        let rom = Rom::from_bytes(make_graphics_test_rom(), "g.sfc".to_owned()).unwrap();
+        let wb = crate::Workbench::new(rom);
+        let p = wb
+            .pixel_provenance_blocking(rec.clone(), 8, 150, 55)
+            .unwrap();
+        assert!(
+            p.summary.starts_with("(150, 55) at frame 8: sprite 3"),
+            "{}",
+            p.summary
+        );
+        let what: Vec<&str> = p.parts.iter().map(|x| x.what.as_str()).collect();
+        assert_eq!(
+            what,
+            [
+                "its tile's bytes for this row",
+                "its OAM entry",
+                "its colour"
+            ]
+        );
+        // The synthetic recording logs no writes, so none is found.
+        assert!(p.parts[0].links[0].summary.starts_with("no write logged"));
+        assert_eq!(wb.pixel_provenance_blocking(rec, 8, 999, 0), None);
     }
 
     #[test]

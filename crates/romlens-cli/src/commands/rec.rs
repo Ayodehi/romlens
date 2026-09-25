@@ -688,12 +688,8 @@ pub fn provenance(
     rom: Option<&Path>,
     log: Option<&Path>,
 ) -> Result<()> {
-    use romlens_core::graphics::compose::Winner;
     use romlens_core::memory::map::MemoryClass;
-    use romlens_core::provenance::Confidence;
-    use romlens_core::provenance::chain::{Link, chain, region_of};
-    use romlens_core::provenance::source::{RomSource, Written};
-    use romlens_core::recording::lines::Memory;
+    use romlens_core::provenance::chain::{chain, region_of, target_name};
     let rec = open(path, false)?;
     let rom = rom.map(load_rom).transpose()?;
     let log = match (log, &rom) {
@@ -726,24 +722,7 @@ pub fn provenance(
     };
     let c = chain(&rec, frame, x, y, rom.as_ref(), log.as_ref(), &earliest)?
         .ok_or_else(|| anyhow!("({x}, {y}) is off the screen"))?;
-    match c.winner {
-        Winner::Blank => println!("({x}, {y}) at frame {frame}: the screen is off (forced blank)"),
-        Winner::Backdrop => println!("({x}, {y}) at frame {frame}: the backdrop, CGRAM colour 0"),
-        Winner::Bg(p) => println!(
-            "({x}, {y}) at frame {frame}: BG{}, tile ${:03X}, pixel ({}, {}), colour {}",
-            p.layer, p.tile, p.x, p.y, p.colour
-        ),
-        Winner::Sprite(p) => println!(
-            "({x}, {y}) at frame {frame}: sprite {}, tile ${:03X}, pixel ({}, {}), colour {}",
-            p.sprite, p.tile, p.x, p.y, p.colour
-        ),
-    }
-    let snes = |o: romlens_core::FileOffset| {
-        rom.as_ref()
-            .and_then(|r| r.snes_address_for(o))
-            .map(|a| a.to_string())
-            .unwrap_or_default()
-    };
+    println!("{}", c.describe());
     let place = |a: romlens_core::SnesAddress| -> String {
         let Some(rom) = &rom else {
             return String::new();
@@ -758,147 +737,23 @@ pub fn provenance(
             _ => String::new(),
         }
     };
-    let name = |m: Memory| match m {
-        Memory::Vram => "VRAM",
-        Memory::Cgram => "CGRAM",
-        Memory::Oam => "OAM",
-    };
     for part in &c.parts {
         println!("  {}:", part.what);
         for g in &part.groups {
-            let head = match &g.link {
-                Link::NotFound { from, to } => {
-                    format!("no write logged from frame {from} to {to}: already there")
-                }
-                Link::Dma {
-                    frame,
-                    channel,
-                    started_at,
-                    source,
-                    bytes,
-                    b_bus,
-                    confidence,
-                } => format!(
-                    "frame {frame}: DMA channel {channel}{}, ${bytes:04X} bytes from {source} to $21{b_bus:02X} [{}]",
-                    started_at
-                        .map(|p| format!(" started at {p}"))
-                        .unwrap_or_default(),
-                    match confidence {
-                        Confidence::Exact => "exact",
-                        Confidence::Matched => "matched",
-                    }
-                ),
-                Link::Hblank { frame, line } => format!(
-                    "frame {frame} line {line}: written in a horizontal blank, by HDMA or an H-IRQ"
-                ),
-                Link::Cpu { frame, line } => {
-                    format!("frame {frame} line {line}: written by the CPU through the port")
-                }
-            };
-            println!("    {head}");
+            println!("    {}", g.link.describe());
             for b in &g.bytes {
                 match b.source {
-                    Some(s) => println!(
-                        "      {} ${:04X} from {s}{}",
-                        name(b.target.memory),
-                        b.target.byte,
-                        place(s)
-                    ),
-                    None => println!("      {} ${:04X}", name(b.target.memory), b.target.byte),
+                    Some(s) => println!("      {} from {s}{}", target_name(b.target), place(s)),
+                    None => println!("      {}", target_name(b.target)),
                 }
             }
         }
         let Some(hop) = &part.hop else { continue };
-        let written = match hop.written {
-            Written::Wram(o) => format!("WRAM ${:02X}:{:04X}", 0x7E + (o >> 16), o & 0xFFFF),
-            Written::Port(r) => format!("${r:04X}"),
-        };
-        match &hop.code {
-            None => println!(
-                "    (give --log with the session's .mxlog to name the code that wrote {written})"
-            ),
-            Some(code) if code.is_empty() => {
-                println!("    {written}: the execution log saw no code write it")
-            }
-            Some(code) => {
-                let list: Vec<String> = code
-                    .iter()
-                    .take(4)
-                    .map(|c| {
-                        format!(
-                            "{} ({} times{})",
-                            romlens_core::SnesAddress::from_u24(c.pc),
-                            c.count,
-                            if c.clears() { ", clearing memory" } else { "" }
-                        )
-                    })
-                    .collect();
-                println!(
-                    "    {written} is written by the code at {}",
-                    list.join(", ")
-                );
-            }
-        }
-        match &hop.placed {
-            Some(p) => {
-                let focus = p.focus_offset();
-                match p.source {
-                    RomSource::Verbatim { at, copies } => println!(
-                        "    {} {} in the ROM as {} at {} (file offset 0x{:06X}){}; this byte at {} (0x{:06X})",
-                        p.what,
-                        if p.what.starts_with("the tile") || p.what.starts_with("the palette") {
-                            "is"
-                        } else {
-                            "are"
-                        },
-                        if p.what.starts_with("the tile") || p.what.starts_with("the palette") {
-                            "it is"
-                        } else {
-                            "they are"
-                        },
-                        snes(at),
-                        at.0,
-                        if copies > 1 {
-                            format!(", one of {copies} places with the same bytes")
-                        } else {
-                            String::new()
-                        },
-                        snes(focus),
-                        focus.0
-                    ),
-                    RomSource::Compressed {
-                        stream,
-                        consumed,
-                        output_at,
-                        ..
-                    } => println!(
-                        "    {} {} decompressed from the Super Metroid LZ stream at {} (file offset 0x{:06X}, 0x{consumed:X} bytes), from output byte 0x{output_at:X}; this byte is output byte 0x{:X}, made from the stream's byte at {} (0x{:06X})",
-                        p.what,
-                        if p.what.starts_with("the tile") || p.what.starts_with("the palette") {
-                            "is"
-                        } else {
-                            "are"
-                        },
-                        snes(stream),
-                        stream.0,
-                        output_at as u32 + p.focus,
-                        snes(focus),
-                        focus.0
-                    ),
-                }
-            }
-            None => {
-                if let Some(label) = &hop.searched {
-                    println!(
-                        "    {label} is not in the ROM as it is{}",
-                        if log.is_some() {
-                            ", nor in a stream the log saw read"
-                        } else {
-                            "; with --log, the compressed streams the code read are searched too"
-                        }
-                    );
-                }
-            }
+        println!("    {}", hop.describe_code());
+        if let Some(rom) = &rom
+            && let Some(line) = hop.describe_placed(rom, log.is_some())
+        {
+            println!("    {line}");
         }
     }
     Ok(())

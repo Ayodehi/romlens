@@ -197,6 +197,35 @@ impl Workbench {
         }
     }
 
+    fn provenance_job(
+        &self,
+        recording: Arc<crate::graphics::RecordingSession>,
+        frame: u64,
+        x: u32,
+        y: u32,
+    ) -> impl FnOnce() -> Option<crate::graphics::ProvenanceInfo> + Send + 'static {
+        let image = self.rom.image.clone();
+        let log = self.lock().project.exec_log.clone();
+        move || {
+            let earliest = |t| recording.earliest(frame, t);
+            let c = romlens_core::provenance::chain::chain(
+                recording.machine(),
+                frame,
+                x,
+                y,
+                Some(&image),
+                log.as_deref(),
+                &earliest,
+            )
+            .ok()??;
+            Some(crate::graphics::ProvenanceInfo::from_chain(
+                &c,
+                &image,
+                log.is_some(),
+            ))
+        }
+    }
+
     fn screen_job(
         &self,
         file_offset: u32,
@@ -587,6 +616,32 @@ impl Workbench {
     /// The same on the calling thread.
     pub fn screen_at_blocking(&self, file_offset: u32) -> Option<crate::explain::ScreenSetupInfo> {
         self.screen_job(file_offset)()
+    }
+
+    /// Where the bytes of pixel (`x`, `y`) of a recording's `frame` came
+    /// from (docs/22, P5), off the calling thread: the writes behind each,
+    /// and with this project's execution log, the code before them and the
+    /// ROM bytes. `None` off the screen, or when the recording cannot say.
+    pub async fn pixel_provenance(
+        &self,
+        recording: Arc<crate::graphics::RecordingSession>,
+        frame: u64,
+        x: u32,
+        y: u32,
+    ) -> Option<crate::graphics::ProvenanceInfo> {
+        let job = self.provenance_job(recording, frame, x, y);
+        crate::future::spawn(Arc::new(AtomicBool::new(false)), job).await
+    }
+
+    /// The same on the calling thread.
+    pub fn pixel_provenance_blocking(
+        &self,
+        recording: Arc<crate::graphics::RecordingSession>,
+        frame: u64,
+        x: u32,
+        y: u32,
+    ) -> Option<crate::graphics::ProvenanceInfo> {
+        self.provenance_job(recording, frame, x, y)()
     }
 
     /// Whether the listing and the C carry the explanations.

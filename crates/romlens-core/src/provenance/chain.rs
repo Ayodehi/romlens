@@ -352,3 +352,165 @@ pub fn region_of(m: Memory) -> crate::recording::StateRegion {
         Memory::Oam => crate::recording::StateRegion::Oam,
     }
 }
+
+impl Link {
+    /// One line: how these bytes got where they are.
+    pub fn describe(&self) -> String {
+        match self {
+            Link::NotFound { from, to } => {
+                format!("no write logged from frame {from} to {to}: already there")
+            }
+            Link::Dma {
+                frame,
+                channel,
+                started_at,
+                source,
+                bytes,
+                b_bus,
+                confidence,
+            } => format!(
+                "frame {frame}: DMA channel {channel}{}, ${bytes:04X} bytes from {source} to $21{b_bus:02X} [{}]",
+                started_at
+                    .map(|p| format!(" started at {p}"))
+                    .unwrap_or_default(),
+                match confidence {
+                    Confidence::Exact => "exact",
+                    Confidence::Matched => "matched",
+                }
+            ),
+            Link::Hblank { frame, line } => format!(
+                "frame {frame} line {line}: written in a horizontal blank, by HDMA or an H-IRQ"
+            ),
+            Link::Cpu { frame, line } => {
+                format!("frame {frame} line {line}: written by the CPU through the port")
+            }
+        }
+    }
+}
+
+impl Hop {
+    /// Where the code wrote: `WRAM $7E:C000`, or `$2118`.
+    pub fn written_name(&self) -> String {
+        match self.written {
+            Written::Wram(o) => format!("WRAM ${:02X}:{:04X}", 0x7E + (o >> 16), o & 0xFFFF),
+            Written::Port(r) => format!("${r:04X}"),
+        }
+    }
+
+    /// Who writes it, from the execution log, in a line.
+    pub fn describe_code(&self) -> String {
+        let w = self.written_name();
+        match &self.code {
+            None => {
+                format!("an execution log from the session would name the code that writes {w}")
+            }
+            Some(code) if code.is_empty() => {
+                format!("{w}: the execution log saw no code write it")
+            }
+            Some(code) => {
+                let list: Vec<String> = code
+                    .iter()
+                    .take(4)
+                    .map(|c| {
+                        format!(
+                            "{} ({} times{})",
+                            SnesAddress::from_u24(c.pc),
+                            c.count,
+                            if c.clears() { ", clearing memory" } else { "" }
+                        )
+                    })
+                    .collect();
+                format!("{w} is written by the code at {}", list.join(", "))
+            }
+        }
+    }
+
+    /// Where the bytes are in the ROM, in a line; with `searched`, what was
+    /// not found.
+    pub fn describe_placed(&self, rom: &RomImage, have_log: bool) -> Option<String> {
+        let snes = |o: FileOffset| {
+            rom.snes_address_for(o)
+                .map(|a| a.to_string())
+                .unwrap_or_default()
+        };
+        let Some(p) = &self.placed else {
+            return self.searched.as_ref().map(|label| {
+                format!(
+                    "{label} is not in the ROM as it is{}",
+                    if have_log {
+                        ", nor in a stream the log saw read"
+                    } else {
+                        "; with an execution log, the compressed streams the code read are searched too"
+                    }
+                )
+            });
+        };
+        let one = p.what.starts_with("the tile") || p.what.starts_with("the palette");
+        let focus = p.focus_offset();
+        Some(match p.source {
+            RomSource::Verbatim { at, copies } => format!(
+                "{} {} in the ROM as {} at {} (file offset 0x{:06X}){}; this byte at {} (0x{:06X})",
+                p.what,
+                if one { "is" } else { "are" },
+                if one { "it is" } else { "they are" },
+                snes(at),
+                at.0,
+                if copies > 1 {
+                    format!(", one of {copies} places with the same bytes")
+                } else {
+                    String::new()
+                },
+                snes(focus),
+                focus.0
+            ),
+            RomSource::Compressed {
+                stream,
+                consumed,
+                output_at,
+                ..
+            } => format!(
+                "{} {} decompressed from the Super Metroid LZ stream at {} (file offset 0x{:06X}, 0x{consumed:X} bytes), from output byte 0x{output_at:X}; this byte is output byte 0x{:X}, made from the stream's byte at {} (0x{:06X})",
+                p.what,
+                if one { "is" } else { "are" },
+                snes(stream),
+                stream.0,
+                output_at as u32 + p.focus,
+                snes(focus),
+                focus.0
+            ),
+        })
+    }
+}
+
+impl Chain {
+    /// The pixel in a line: what drew it.
+    pub fn describe(&self) -> String {
+        let (x, y, frame) = (self.x, self.y, self.frame);
+        match self.winner {
+            Winner::Blank => {
+                format!("({x}, {y}) at frame {frame}: the screen is off (forced blank)")
+            }
+            Winner::Backdrop => {
+                format!("({x}, {y}) at frame {frame}: the backdrop, CGRAM colour 0")
+            }
+            Winner::Bg(p) => format!(
+                "({x}, {y}) at frame {frame}: BG{}, tile ${:03X}, pixel ({}, {}), colour {}",
+                p.layer, p.tile, p.x, p.y, p.colour
+            ),
+            Winner::Sprite(p) => format!(
+                "({x}, {y}) at frame {frame}: sprite {}, tile ${:03X}, pixel ({}, {}), colour {}",
+                p.sprite, p.tile, p.x, p.y, p.colour
+            ),
+        }
+    }
+}
+
+/// A byte of the PPU's memories in words: `VRAM $C024`.
+pub fn target_name(t: Target) -> String {
+    let m = match t.memory {
+        Memory::Vram => "VRAM",
+        Memory::Cgram => "CGRAM",
+        Memory::Oam => "OAM",
+    };
+    format!("{m} ${:04X}", t.byte)
+}
