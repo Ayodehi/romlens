@@ -422,6 +422,21 @@ enum Command {
         #[command(subcommand)]
         what: RecCommand,
     },
+    /// Where a pixel's bytes came from (docs/22): the writes that put its
+    /// tile, its tilemap or OAM entry and its colour where they are, and the
+    /// DMA and source address of each.
+    Provenance {
+        #[arg(long)]
+        rec: PathBuf,
+        #[arg(long)]
+        frame: u64,
+        /// `x,y`: a pixel of the frame.
+        #[arg(long)]
+        at: String,
+        /// The ROM, to place source addresses in it.
+        #[arg(long)]
+        rom: Option<PathBuf>,
+    },
     /// Draw from a recording with the bounded reference renderer: one BG
     /// layer, or one sprite.
     Render {
@@ -1339,6 +1354,12 @@ fn run() -> Result<()> {
             frames,
             keyframe_interval,
         } => commands::rec::testrec(&out, frames, keyframe_interval),
+        Command::Provenance {
+            rec,
+            frame,
+            at,
+            rom,
+        } => commands::rec::provenance(&rec, frame, &at, rom.as_deref()),
         Command::Rec { what } => match what {
             RecCommand::Info { rec, rom, recover } => {
                 commands::rec::info(&rec, rom.as_deref(), recover)

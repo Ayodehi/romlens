@@ -161,12 +161,34 @@ fn apply(s: &mut PpuState, l: &mut Latches, reg: u8, v: u8) {
 struct Ports {
     /// `VMADD`, a word address.
     vram: u16,
-    /// `CGADD`, and the first byte of a colour waiting for its second.
+    /// `CGADD`, and the first byte of a colour waiting for its second (with
+    /// the write it came from).
     cgram: u8,
-    cgram_low: Option<u8>,
+    cgram_low: Option<(u8, usize)>,
     /// The OAM byte address, and the even byte waiting for its odd one.
     oam: u16,
-    oam_low: u8,
+    oam_low: (u8, usize),
+}
+
+/// One of the PPU's three memories.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Memory {
+    Vram,
+    Cgram,
+    Oam,
+}
+
+/// A data-port write that reached a byte of memory: which write of the
+/// frame's log (its index) put which byte where. A colour's first byte, and
+/// OAM's even byte, are latched and land with the second write; they are
+/// named by the write that carried them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PortHit {
+    pub write: usize,
+    pub memory: Memory,
+    /// The byte address in that memory.
+    pub byte: u32,
+    pub value: u8,
 }
 
 /// `VMAIN`'s address translation (bits 2–3): the low 8, 9 or 10 bits
@@ -198,6 +220,8 @@ pub struct Replay {
     next: usize,
     /// The last visible scanline, after which the PPU no longer draws.
     last_visible: i16,
+    /// Where each data-port write landed, when asked for.
+    hits: Option<Vec<PortHit>>,
 }
 
 impl Replay {
@@ -234,7 +258,16 @@ impl Replay {
             } else {
                 224
             },
+            hits: None,
         }
+    }
+
+    /// Replay the whole frame, returning where every data-port write went,
+    /// with the frame's writes (which the hits index).
+    pub fn port_hits(mut self) -> (Vec<PortHit>, Vec<RegWrite>) {
+        self.hits = Some(Vec::new());
+        self.advance((i16::MAX, u16::MAX));
+        (self.hits.take().unwrap_or_default(), self.writes)
     }
 
     /// Apply every write before `(line, dot)`.
@@ -244,7 +277,7 @@ impl Replay {
             if (w.line, w.dot) >= until {
                 break;
             }
-            self.write(w);
+            self.write(w, self.next);
             self.next += 1;
         }
     }
@@ -257,8 +290,18 @@ impl Replay {
         (self.ppu, self.vram, self.cgram, self.oam)
     }
 
-    fn write(&mut self, w: RegWrite) {
+    fn write(&mut self, w: RegWrite, index: usize) {
         let v = w.value;
+        let mut hit = |memory: Memory, byte: u32, value: u8, write: usize| {
+            if let Some(h) = &mut self.hits {
+                h.push(PortHit {
+                    write,
+                    memory,
+                    byte,
+                    value,
+                });
+            }
+        };
         // VRAM and OAM take writes only in a blank: the vertical one, or a
         // forced blank.
         let blank =
@@ -284,13 +327,22 @@ impl Replay {
                 if blank {
                     if at < 0x200 {
                         if at & 1 == 0 {
-                            p.oam_low = v;
-                        } else if at < self.oam.len() {
-                            self.oam[at - 1] = p.oam_low;
-                            self.oam[at] = v;
+                            p.oam_low = (v, index);
+                        } else {
+                            let (low, from) = p.oam_low;
+                            if at < self.oam.len() {
+                                self.oam[at - 1] = low;
+                                self.oam[at] = v;
+                            }
+                            hit(Memory::Oam, at as u32 - 1, low, from);
+                            hit(Memory::Oam, at as u32, v, index);
                         }
-                    } else if let Some(b) = self.oam.get_mut(0x200 + (at & 0x1F)) {
-                        *b = v;
+                    } else {
+                        let at = 0x200 + (at & 0x1F);
+                        if let Some(b) = self.oam.get_mut(at) {
+                            *b = v;
+                        }
+                        hit(Memory::Oam, at as u32, v, index);
                     }
                 }
                 p.oam = (p.oam + 1) & 0x3FF;
@@ -304,6 +356,7 @@ impl Replay {
                     if let Some(b) = self.vram.get_mut(at) {
                         *b = v;
                     }
+                    hit(Memory::Vram, at as u32, v, index);
                 }
                 if high == (vmain & 0x80 != 0) {
                     p.vram = p.vram.wrapping_add(step);
@@ -314,13 +367,15 @@ impl Replay {
                 p.cgram_low = None;
             }
             0x2122 => match p.cgram_low.take() {
-                None => p.cgram_low = Some(v),
-                Some(low) => {
+                None => p.cgram_low = Some((v, index)),
+                Some((low, from)) => {
                     let at = usize::from(p.cgram) * 2;
                     if at + 1 < self.cgram.len() {
                         self.cgram[at] = low;
                         self.cgram[at + 1] = v & 0x7F;
                     }
+                    hit(Memory::Cgram, at as u32, low, from);
+                    hit(Memory::Cgram, at as u32 + 1, v & 0x7F, index);
                     p.cgram = p.cgram.wrapping_add(1);
                 }
             },
