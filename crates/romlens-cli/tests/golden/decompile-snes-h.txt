@@ -63,6 +63,9 @@ void WAI(void);
 void STP(void);
 void BRK(u8 n);
 void COP(u8 n);
+/* A jump table's index past the entries Romlens found: */
+/* the game jumps wherever the bytes after the table point. */
+_Noreturn void table_overrun(void);
 
 /* Hardware registers. */
 #define INIDISP MEM8(0x2100) /* Screen display: force blank and brightness */

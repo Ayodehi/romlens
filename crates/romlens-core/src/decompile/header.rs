@@ -8,7 +8,7 @@
 use crate::model::hardware::all_hardware_registers;
 
 /// The helpers `snes.h` declares, which a label must not shadow.
-pub const HELPERS: [&str; 27] = [
+pub const HELPERS: [&str; 28] = [
     "SET24",
     "SEI",
     "CLI",
@@ -32,6 +32,7 @@ pub const HELPERS: [&str; 27] = [
     "STP",
     "BRK",
     "COP",
+    "table_overrun",
     "MEM8",
     "MEM16",
     "MEM24",
@@ -129,6 +130,9 @@ pub fn snes_h() -> String {
          void STP(void);\n\
          void BRK(u8 n);\n\
          void COP(u8 n);\n\
+         /* A jump table's index past the entries Romlens found: */\n\
+         /* the game jumps wherever the bytes after the table point. */\n\
+         _Noreturn void table_overrun(void);\n\
          \n\
          /* Hardware registers. */\n",
     );

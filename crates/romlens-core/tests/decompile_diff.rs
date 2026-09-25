@@ -637,6 +637,7 @@ void WAI(void) {}
 void STP(void) { _exit(3); }
 void BRK(u8 n) { A ^= n; }
 void COP(u8 n) { A ^= n; }
+_Noreturn void table_overrun(void) { _exit(4); }
 /* A call: mixes what it reads (mask r) into what it writes (mask w). */
 static void stub(uint32_t id, unsigned r, unsigned w) {
     uint32_t in = id;

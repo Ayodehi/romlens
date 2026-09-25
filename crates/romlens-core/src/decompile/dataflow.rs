@@ -1683,6 +1683,8 @@ fn simplify_stmt(s: &mut Stmt) {
 /// or left shift depend only on the low bits of its operands.
 pub fn narrow(e: Expr, w: Width) -> Expr {
     match e {
+        // `LDA #$E000; XBA` folds to 0xE000E0: the store keeps 0x00E0.
+        Expr::Const(c) => Expr::Const(c & w.mask()),
         Expr::Cast(cw, x) if cw >= w => narrow(*x, w),
         Expr::Bin(op @ (BinOp::Add | BinOp::Sub | BinOp::And | BinOp::Or | BinOp::Xor), a, b) => {
             Expr::bin(op, narrow(*a, w), narrow(*b, w))

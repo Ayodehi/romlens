@@ -1355,9 +1355,8 @@ impl GotoLayout<'_> {
                     e.w.w(":");
                     e.w.end(&ts);
                     e.w.indent += 1;
-                    e.w.comment_line("not an entry in the table", &ts);
-                    e.kw("return");
-                    e.w.w(";");
+                    e.w.tok("table_overrun", CTokenKind::Helper, None);
+                    e.w.w("();");
                     e.w.end(&ts);
                     e.w.indent -= 1;
                     e.w.w("}");
@@ -1733,9 +1732,8 @@ impl TreeLayout<'_> {
                 e.w.w(":");
                 e.w.end(&ts);
                 e.w.indent += 1;
-                e.w.comment_line("not an entry in the table", &ts);
-                e.kw("return");
-                e.w.w(";");
+                e.w.tok("table_overrun", CTokenKind::Helper, None);
+                e.w.w("();");
                 e.w.end(&ts);
                 e.w.indent -= 1;
                 e.w.w("}");

@@ -413,6 +413,7 @@ const RUNTIME: &str = r#"
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 static uint8_t mem[1 << 24];
 #define MEM8(a) (mem[(uint32_t)(a) & 0xFFFFFF])
 #define MEM16(a) (*(uint16_t *)&mem[(uint32_t)(a) & 0xFFFFFF])
@@ -442,6 +443,7 @@ void WAI(void) {}
 void STP(void) {}
 void BRK(u8 n) { (void)n; }
 void COP(u8 n) { (void)n; }
+_Noreturn void table_overrun(void) { printf("table overrun\n"); _Exit(2); }
 /*INCLUDES*/
 static const uint8_t rom[] = {/*ROM*/};
 static int failures;
