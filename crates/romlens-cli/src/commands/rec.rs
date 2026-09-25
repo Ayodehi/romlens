@@ -681,41 +681,52 @@ pub fn render_frame(
 
 /// `provenance`: what a pixel was drawn from, and where each of those bytes
 /// came from.
-pub fn provenance(path: &Path, frame: u64, at: &str, rom: Option<&Path>) -> Result<()> {
-    use romlens_core::graphics::compose::{Lines, Winner, compose, compose_lines};
-    use romlens_core::provenance::{Writer, last_write, pixel_parts};
-    use romlens_core::recording::StateRegion;
+pub fn provenance(
+    path: &Path,
+    frame: u64,
+    at: &str,
+    rom: Option<&Path>,
+    log: Option<&Path>,
+) -> Result<()> {
+    use romlens_core::graphics::compose::Winner;
+    use romlens_core::memory::map::MemoryClass;
+    use romlens_core::provenance::Confidence;
+    use romlens_core::provenance::chain::{Link, chain, region_of};
+    use romlens_core::provenance::source::{RomSource, Written};
     use romlens_core::recording::lines::Memory;
     let rec = open(path, false)?;
     let rom = rom.map(load_rom).transpose()?;
+    let log = match (log, &rom) {
+        (Some(p), Some(r)) => {
+            let bytes = std::fs::read(p).with_context(|| format!("reading {}", p.display()))?;
+            Some(romlens_core::io::import::exec_log::read(&bytes, r.bytes())?)
+        }
+        (Some(_), None) => return Err(anyhow!("--log needs --rom")),
+        _ => None,
+    };
     let (x, y) = at
         .split_once(',')
         .and_then(|(x, y)| Some((x.trim().parse::<u32>().ok()?, y.trim().parse::<u32>().ok()?)))
         .ok_or_else(|| anyhow!("--at takes x,y"))?;
-    let state = rec.state_at(frame)?;
-    let ppu = state
-        .ppu()
-        .ok_or_else(|| anyhow!("the recording has no PPU registers"))?;
-    let f = match romlens_core::recording::lines::frame_replay(&rec, frame)? {
-        Some(mut r) => compose_lines(&mut r),
-        None => compose(
-            state.vram().ok_or_else(|| anyhow!("no VRAM"))?,
-            state.cgram().ok_or_else(|| anyhow!("no CGRAM"))?,
-            state.oam().ok_or_else(|| anyhow!("no OAM"))?,
-            Lines::Frame(&ppu),
-        ),
+    let index = romlens_core::recording::change_index::load_or_build(path, &rec, false)
+        .ok()
+        .map(|(i, _)| i);
+    // No need to look further back than a byte last changed; a later write
+    // of the same value is still found first. At most a minute of frames.
+    let earliest = |t: romlens_core::provenance::Target| {
+        index
+            .as_ref()
+            .and_then(|i| {
+                i.when(&rec, region_of(t.memory), t.byte, 1, frame, true)
+                    .ok()
+                    .flatten()
+            })
+            .unwrap_or(0)
+            .max(frame.saturating_sub(3600))
     };
-    let w = f
-        .winner(x, y)
+    let c = chain(&rec, frame, x, y, rom.as_ref(), log.as_ref(), &earliest)?
         .ok_or_else(|| anyhow!("({x}, {y}) is off the screen"))?;
-    let (bpp, mode7) = match w {
-        Winner::Bg(p) => {
-            let fmt = romlens_core::graphics::ppu_state::bg_format(ppu.bg_mode(), p.layer);
-            (fmt.map_or(4, |f| f.bpp()), ppu.bg_mode() == 7)
-        }
-        _ => (4, false),
-    };
-    match w {
+    match c.winner {
         Winner::Blank => println!("({x}, {y}) at frame {frame}: the screen is off (forced blank)"),
         Winner::Backdrop => println!("({x}, {y}) at frame {frame}: the backdrop, CGRAM colour 0"),
         Winner::Bg(p) => println!(
@@ -727,19 +738,16 @@ pub fn provenance(path: &Path, frame: u64, at: &str, rom: Option<&Path>) -> Resu
             p.sprite, p.tile, p.x, p.y, p.colour
         ),
     }
-    let index = romlens_core::recording::change_index::load_or_build(path, &rec, false)
-        .ok()
-        .map(|(i, _)| i);
-    let region_of = |m: Memory| match m {
-        Memory::Vram => StateRegion::Vram,
-        Memory::Cgram => StateRegion::Cgram,
-        Memory::Oam => StateRegion::Oam,
+    let snes = |o: romlens_core::FileOffset| {
+        rom.as_ref()
+            .and_then(|r| r.snes_address_for(o))
+            .map(|a| a.to_string())
+            .unwrap_or_default()
     };
     let place = |a: romlens_core::SnesAddress| -> String {
         let Some(rom) = &rom else {
             return String::new();
         };
-        use romlens_core::memory::map::MemoryClass;
         match rom.map().classify(a) {
             MemoryClass::Rom => rom
                 .file_offset_for(a)
@@ -755,81 +763,141 @@ pub fn provenance(path: &Path, frame: u64, at: &str, rom: Option<&Path>) -> Resu
         Memory::Cgram => "CGRAM",
         Memory::Oam => "OAM",
     };
-    for part in pixel_parts(&w, bpp, mode7) {
+    for part in &c.parts {
         println!("  {}:", part.what);
-        // Bytes one transfer wrote read as one line.
-        let mut lines: Vec<(String, Vec<String>)> = Vec::new();
-        for t in &part.targets {
-            // No need to look further back than the byte last changed; a
-            // later write of the same value is still found first.
-            let earliest = index
-                .as_ref()
-                .and_then(|i| {
-                    i.when(&rec, region_of(t.memory), t.byte, 1, frame, true)
-                        .ok()
-                        .flatten()
-                })
-                .unwrap_or(0)
-                .max(frame.saturating_sub(3600));
-            let found = last_write(&rec, frame, *t, earliest)?;
-            let here = format!("{} ${:04X}", name(t.memory), t.byte);
-            let (head, detail) = match found {
-                None => (
-                    format!("no write logged from frame {earliest} to {frame}: already there"),
-                    here,
-                ),
-                Some(f) => match f.writer {
-                    Writer::Dma {
-                        byte, transfer, pc, ..
-                    } => {
-                        let start = pc.map(|p| match &rom {
-                            Some(r) => romlens_core::provenance::mdmaen_store(r, p),
-                            None => p,
-                        });
-                        (
-                            format!(
-                                "frame {}: DMA channel {}{}, ${:04X} bytes from {} to $21{:02X} [{}]",
-                                f.frame,
-                                byte.channel,
-                                start
-                                    .map(|p| format!(" started at {p}"))
-                                    .unwrap_or_default(),
-                                transfer.bytes,
-                                transfer.source,
-                                transfer.b_bus,
-                                match byte.confidence {
-                                    romlens_core::provenance::Confidence::Exact => "exact",
-                                    romlens_core::provenance::Confidence::Matched => "matched",
-                                }
-                            ),
-                            format!("{here} from {}{}", byte.source, place(byte.source)),
-                        )
+        for g in &part.groups {
+            let head = match &g.link {
+                Link::NotFound { from, to } => {
+                    format!("no write logged from frame {from} to {to}: already there")
+                }
+                Link::Dma {
+                    frame,
+                    channel,
+                    started_at,
+                    source,
+                    bytes,
+                    b_bus,
+                    confidence,
+                } => format!(
+                    "frame {frame}: DMA channel {channel}{}, ${bytes:04X} bytes from {source} to $21{b_bus:02X} [{}]",
+                    started_at
+                        .map(|p| format!(" started at {p}"))
+                        .unwrap_or_default(),
+                    match confidence {
+                        Confidence::Exact => "exact",
+                        Confidence::Matched => "matched",
                     }
-                    Writer::Hblank => (
-                        format!(
-                            "frame {} line {}: written in a horizontal blank, by HDMA or an H-IRQ",
-                            f.frame, f.write.line
-                        ),
-                        here,
-                    ),
-                    Writer::Cpu => (
-                        format!(
-                            "frame {} line {}: written by the CPU through the port",
-                            f.frame, f.write.line
-                        ),
-                        here,
-                    ),
-                },
+                ),
+                Link::Hblank { frame, line } => format!(
+                    "frame {frame} line {line}: written in a horizontal blank, by HDMA or an H-IRQ"
+                ),
+                Link::Cpu { frame, line } => {
+                    format!("frame {frame} line {line}: written by the CPU through the port")
+                }
             };
-            match lines.iter_mut().find(|(h, _)| *h == head) {
-                Some((_, d)) => d.push(detail),
-                None => lines.push((head, vec![detail])),
+            println!("    {head}");
+            for b in &g.bytes {
+                match b.source {
+                    Some(s) => println!(
+                        "      {} ${:04X} from {s}{}",
+                        name(b.target.memory),
+                        b.target.byte,
+                        place(s)
+                    ),
+                    None => println!("      {} ${:04X}", name(b.target.memory), b.target.byte),
+                }
             }
         }
-        for (head, details) in lines {
-            println!("    {head}");
-            for d in details {
-                println!("      {d}");
+        let Some(hop) = &part.hop else { continue };
+        let written = match hop.written {
+            Written::Wram(o) => format!("WRAM ${:02X}:{:04X}", 0x7E + (o >> 16), o & 0xFFFF),
+            Written::Port(r) => format!("${r:04X}"),
+        };
+        match &hop.code {
+            None => println!(
+                "    (give --log with the session's .mxlog to name the code that wrote {written})"
+            ),
+            Some(code) if code.is_empty() => {
+                println!("    {written}: the execution log saw no code write it")
+            }
+            Some(code) => {
+                let list: Vec<String> = code
+                    .iter()
+                    .take(4)
+                    .map(|c| {
+                        format!(
+                            "{} ({} times{})",
+                            romlens_core::SnesAddress::from_u24(c.pc),
+                            c.count,
+                            if c.clears() { ", clearing memory" } else { "" }
+                        )
+                    })
+                    .collect();
+                println!(
+                    "    {written} is written by the code at {}",
+                    list.join(", ")
+                );
+            }
+        }
+        match &hop.placed {
+            Some(p) => {
+                let focus = p.focus_offset();
+                match p.source {
+                    RomSource::Verbatim { at, copies } => println!(
+                        "    {} {} in the ROM as {} at {} (file offset 0x{:06X}){}; this byte at {} (0x{:06X})",
+                        p.what,
+                        if p.what.starts_with("the tile") || p.what.starts_with("the palette") {
+                            "is"
+                        } else {
+                            "are"
+                        },
+                        if p.what.starts_with("the tile") || p.what.starts_with("the palette") {
+                            "it is"
+                        } else {
+                            "they are"
+                        },
+                        snes(at),
+                        at.0,
+                        if copies > 1 {
+                            format!(", one of {copies} places with the same bytes")
+                        } else {
+                            String::new()
+                        },
+                        snes(focus),
+                        focus.0
+                    ),
+                    RomSource::Compressed {
+                        stream,
+                        consumed,
+                        output_at,
+                        ..
+                    } => println!(
+                        "    {} {} decompressed from the Super Metroid LZ stream at {} (file offset 0x{:06X}, 0x{consumed:X} bytes), from output byte 0x{output_at:X}; this byte is output byte 0x{:X}, made from the stream's byte at {} (0x{:06X})",
+                        p.what,
+                        if p.what.starts_with("the tile") || p.what.starts_with("the palette") {
+                            "is"
+                        } else {
+                            "are"
+                        },
+                        snes(stream),
+                        stream.0,
+                        output_at as u32 + p.focus,
+                        snes(focus),
+                        focus.0
+                    ),
+                }
+            }
+            None => {
+                if let Some(label) = &hop.searched {
+                    println!(
+                        "    {label} is not in the ROM as it is{}",
+                        if log.is_some() {
+                            ", nor in a stream the log saw read"
+                        } else {
+                            "; with --log, the compressed streams the code read are searched too"
+                        }
+                    );
+                }
             }
         }
     }

@@ -250,3 +250,45 @@ fn replays_arrive_at_the_snapshots() {
     }
     println!("{bad} of {} frames differ", n - 1);
 }
+
+/// Where a write run's bytes are among the streams an execution log read.
+#[test]
+#[ignore]
+fn run_in_streams() {
+    use romlens_core::provenance::{Target, write_run};
+    use romlens_core::recording::lines::Memory;
+    let (Ok(rec), Ok(frame), Ok(byte), Ok(rom), Ok(log)) = (
+        std::env::var("ORACLE_REC"),
+        std::env::var("ORACLE_FRAME"),
+        std::env::var("ORACLE_VRAM"),
+        std::env::var("ORACLE_ROM"),
+        std::env::var("ORACLE_LOG"),
+    ) else {
+        return;
+    };
+    let src = RomrecSource::open(std::path::Path::new(&rec)).unwrap();
+    let t = Target {
+        memory: Memory::Vram,
+        byte: u32::from_str_radix(&byte, 16).unwrap(),
+    };
+    let r = write_run(&src, frame.parse().unwrap(), t).unwrap().unwrap();
+    println!(
+        "run of {} bytes from VRAM ${:04X}, target at {}",
+        r.bytes.len(),
+        r.start.byte,
+        r.at
+    );
+    println!("first bytes {:02X?}", &r.bytes[..16.min(r.bytes.len())]);
+    let rom = romlens_core::RomImage::load(std::path::Path::new(&rom)).unwrap();
+    let log = romlens_core::io::import::exec_log::read(&std::fs::read(&log).unwrap(), rom.bytes())
+        .unwrap();
+    let probe = &r.bytes[..32.min(r.bytes.len())];
+    println!(
+        "{:?}",
+        romlens_core::provenance::source::rom_source(&rom, Some(&log), &r.bytes, r.at)
+    );
+    println!(
+        "{:?}",
+        romlens_core::provenance::source::rom_source(&rom, Some(&log), probe, 0)
+    );
+}

@@ -436,6 +436,11 @@ enum Command {
         /// The ROM, to place source addresses in it.
         #[arg(long)]
         rom: Option<PathBuf>,
+        /// An execution log (`.mxlog`) from the same session: the code that
+        /// fills a WRAM buffer or writes VRAM itself, and the compressed
+        /// streams it read. Needs --rom.
+        #[arg(long)]
+        log: Option<PathBuf>,
     },
     /// Draw from a recording with the bounded reference renderer: one BG
     /// layer, or one sprite.
@@ -1359,7 +1364,8 @@ fn run() -> Result<()> {
             frame,
             at,
             rom,
-        } => commands::rec::provenance(&rec, frame, &at, rom.as_deref()),
+            log,
+        } => commands::rec::provenance(&rec, frame, &at, rom.as_deref(), log.as_deref()),
         Command::Rec { what } => match what {
             RecCommand::Info { rec, rom, recover } => {
                 commands::rec::info(&rec, rom.as_deref(), recover)

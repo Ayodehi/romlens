@@ -13,6 +13,9 @@
 //! [`attribute`] assigns a frame's port writes to the DMA transfers that
 //! made them.
 
+pub mod chain;
+pub mod source;
+
 use crate::graphics::compose::Winner;
 use crate::graphics::tile::byte_index;
 use crate::memory::address::SnesAddress;
@@ -304,6 +307,61 @@ pub fn last_write(
         }));
     }
     Ok(None)
+}
+
+/// The bytes one pass of writes put in a row around a target: a DMA's
+/// transfer, or the stretch a decompressor wrote through the port. Longer
+/// than the target, so it can be found in the ROM where a single tile is
+/// too common to place.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WriteRun {
+    pub bytes: Vec<u8>,
+    /// The memory byte the run starts at.
+    pub start: Target,
+    /// Where the target is in `bytes`.
+    pub at: usize,
+}
+
+/// The longest run of consecutive bytes, written one after another in
+/// `frame`, that holds `target` (at most 64 KB).
+pub fn write_run(
+    src: &dyn MachineStateSource,
+    frame: u64,
+    target: Target,
+) -> Result<Option<WriteRun>, RecordingError> {
+    let Some(writes) = src.line_writes(frame)? else {
+        return Ok(None);
+    };
+    let Ok(before) = src.state_at(frame.saturating_sub(1)) else {
+        return Ok(None);
+    };
+    let Some(ppu) = before.ppu() else {
+        return Ok(None);
+    };
+    let (hits, _) = Replay::new(&ppu, &[], &[], &[], writes).port_hits();
+    let Some(h) = hits
+        .iter()
+        .rposition(|x| x.memory == target.memory && x.byte == target.byte)
+    else {
+        return Ok(None);
+    };
+    let next_to = |a: &PortHit, b: &PortHit| a.memory == b.memory && a.byte + 1 == b.byte;
+    let mut first = h;
+    while first > 0 && next_to(&hits[first - 1], &hits[first]) && h - first < 0x8000 {
+        first -= 1;
+    }
+    let mut last = h;
+    while last + 1 < hits.len() && next_to(&hits[last], &hits[last + 1]) && last - h < 0x8000 {
+        last += 1;
+    }
+    Ok(Some(WriteRun {
+        bytes: hits[first..=last].iter().map(|x| x.value).collect(),
+        start: Target {
+            memory: target.memory,
+            byte: hits[first].byte,
+        },
+        at: h - first,
+    }))
 }
 
 /// A named part of what a pixel was drawn from, with its bytes.

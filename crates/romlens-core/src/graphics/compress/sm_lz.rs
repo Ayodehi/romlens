@@ -95,8 +95,25 @@ pub fn try_decompress(bytes: &[u8]) -> Result<(Vec<u8>, usize), SmLzError> {
     decompress(bytes).map(|d| (d.output, d.consumed))
 }
 
+/// [`decompress`], also saying for every output byte which input byte it
+/// came from: the literal, the fill's parameter, or (for a copy) whatever
+/// the copied byte came from. That is how a pixel's tile finds its byte in
+/// the compressed stream (docs/22, P4).
+pub fn decompress_traced(bytes: &[u8]) -> Result<(Decompressed, Vec<u32>), SmLzError> {
+    let mut origin = Vec::new();
+    let d = decompress_into(bytes, Some(&mut origin))?;
+    Ok((d, origin))
+}
+
 /// [`try_decompress`] with the per-command statistics `--stats` prints.
 pub fn decompress(bytes: &[u8]) -> Result<Decompressed, SmLzError> {
+    decompress_into(bytes, None)
+}
+
+fn decompress_into(
+    bytes: &[u8],
+    mut origin: Option<&mut Vec<u32>>,
+) -> Result<Decompressed, SmLzError> {
     let mut out: Vec<u8> = Vec::new();
     let mut commands = [0u32; 8];
     let mut long_headers = 0u32;
@@ -126,24 +143,39 @@ pub fn decompress(bytes: &[u8]) -> Result<Decompressed, SmLzError> {
             return Err(SmLzError::TooLarge { at });
         }
         commands[command as usize] += 1;
+        let from_input = |o: &mut Option<&mut Vec<u32>>, at: usize, n: usize| {
+            if let Some(o) = o {
+                o.extend(std::iter::repeat_n(at as u32, n));
+            }
+        };
         match command {
             0 => {
                 for _ in 0..len {
+                    let at = pos;
                     let b = next(&mut pos)?;
                     out.push(b);
+                    from_input(&mut origin, at, 1);
                 }
             }
             1 => {
+                let at = pos;
                 let b = next(&mut pos)?;
                 out.extend(std::iter::repeat_n(b, len));
+                from_input(&mut origin, at, len);
             }
             2 => {
+                let at = pos;
                 let pair = [next(&mut pos)?, next(&mut pos)?];
                 out.extend((0..len).map(|i| pair[i % 2]));
+                if let Some(o) = &mut origin {
+                    o.extend((0..len).map(|i| (at + i % 2) as u32));
+                }
             }
             3 => {
+                let at = pos;
                 let b = next(&mut pos)?;
                 out.extend((0..len).map(|i| b.wrapping_add(i as u8)));
+                from_input(&mut origin, at, len);
             }
             _ => {
                 let invert = if command & 1 != 0 { 0xFF } else { 0x00 };
@@ -159,6 +191,10 @@ pub fn decompress(bytes: &[u8]) -> Result<Decompressed, SmLzError> {
                     // Byte by byte, so an overlapping copy repeats itself.
                     let b = *out.get(from + i).ok_or(SmLzError::BadReference { at })?;
                     out.push(b ^ invert);
+                    if let Some(o) = &mut origin {
+                        let src = o[from + i];
+                        o.push(src);
+                    }
                 }
             }
         }
@@ -174,6 +210,18 @@ pub fn decompress(bytes: &[u8]) -> Result<Decompressed, SmLzError> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[test]
+    fn every_output_byte_knows_its_input_byte() {
+        // A literal "AB", a fill of three "C", then a sliding copy of 2 back.
+        let stream = [0x01, b'A', b'B', 0x22, b'C', 0xC1, 0x03, 0xFF];
+        let (d, origin) = decompress_traced(&stream).unwrap();
+        assert_eq!(d.output, b"ABCCCCC");
+        assert_eq!(origin.len(), d.output.len());
+        assert_eq!(&origin[..5], &[1, 2, 4, 4, 4]);
+        // The copied bytes came from the fill's parameter too.
+        assert_eq!(&origin[5..], &[4, 4]);
+    }
 
     /// A compressor, in the test module only: the round trip is the test, and
     /// there is no shippable ground truth to compare against. Greedy, and it
