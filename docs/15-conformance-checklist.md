@@ -151,6 +151,23 @@ Written from `19-graphs.md` on 24 September 2026.
 | 3.10 | What the recording saw | With an execution log, each block's run count and each edge's count; blocks that never ran dimmed | `romlens graph … --json` with a project that has a log | 🧪 | ⬜ | ⬜ |
 | 3.11 | Who calls this, and what it calls | Calls mode: callers on the left, callees on the right, with sites and how they call; double-click re-centres; Back and Forward | `romlens graph … --calls [--dot\|--json]` | 🧪 | ⬜ | ⬜ |
 
+### 3C — finishing Phase 3
+
+Written from `22-phase3-finish.md` on 25 September 2026.
+
+| # | Capability | Shell must expose | CLI scenario | macOS | Win | Linux |
+|---|---|---|---|---|---|---|
+| 3.12 | A recorded frame, drawn from the PPU state | A Frame view over the frame stepper; hovering names the layer, tile or sprite that drew the pixel; clicking selects its OAM entry or tilemap cell, tile and palette row | `romlens render frame <rec> <frame> [--at x,y]` | ⬜ | ⬜ | ⬜ |
+| 3.13 | The frame's layers apart | A Layers view: each enabled layer alone, in priority order, with the mode's rules | `romlens render bg …` | ⬜ | ⬜ | ⬜ |
+| 3.14 | From a pixel back to ROM | The inspector's Provenance chain: pixel, OAM or tilemap entry, VRAM word, the DMA, the WRAM buffer and its writer, the ROM bytes; each step a link with its evidence and confidence | `romlens provenance <rec> <frame> x,y [--project P]` | ⬜ | ⬜ | ⬜ |
+| 3.15 | The whole ROM as a map | An Atlas editor tab: banks, then blocks, then items, zoomed continuously; overlays for kind, confidence, entropy, coverage and call arcs; double-click opens the listing | `romlens map <rom> --from <a> --len <n>` | ⬜ | ⬜ | ⬜ |
+| 3.16 | Two versions of a ROM compared | File › Compare With…: a Compare tab listing changed, moved, added and removed routines and data, the two listings side by side; carry names over | `romlens diff <a> <b> [--routines] [--json]` | ⬜ | ⬜ | ⬜ |
+| 3.17 | Locals and arguments on the stack | `LDA $03,S` in the C as a named argument or local; arguments pushed before a call passed in the call | `romlens decompile <rom> <address>` | ⬜ | ⬜ | ⬜ |
+| 3.18 | A ca65 program with its source | File › Import reads a `.dbg`; a Source tab shows the source, a line selects its bytes and the bytes select their line | `romlens import-dbg <rom> <dbg> [--project P]` | ⬜ | ⬜ | ⬜ |
+| 3.19 | Ask the tutor | A Tutor pane: questions about the selection answered with cited addresses, the tool log, the cost; the key in the Keychain | `romlens tutor ask <rom> "<question>" [--at <a>]` | ⬜ | ⬜ | ⬜ |
+| 3.20 | The tutor proposes fixes | Proposal cards (label, region, flags, variable) the user accepts or rejects | `romlens tutor fix …` | ⬜ | ⬜ | ⬜ |
+| 3.21 | The tutor investigates a recording | A visible plan and tool log over the change index and provenance | `romlens tutor investigate <rec> "<question>"` | ⬜ | ⬜ | ⬜ |
+
 ### 4A — explanations
 
 Written from `20-explanations.md` on 24 September 2026.

@@ -185,6 +185,10 @@ valid C per routine, shown beside the disassembly.
 The control-flow graph and call graph views are planned in
 `19-graphs.md` (24 September 2026): a Graph tab with each routine's blocks
 and its callers and callees, laid out by the core.
+What is left of the phase is planned in `22-phase3-finish.md` (25 September
+2026): the Frame, Layers and Provenance views, the Atlas, comparing two
+ROMs, stack-relative locals, ca65 `.dbg` import with a Source view, and the
+tutor, in that order.
 
 - Function boundaries from analysis and user marks; basic blocks; CFG view.
 - Call graph with drill-down; "who calls this" and "what does this call".
