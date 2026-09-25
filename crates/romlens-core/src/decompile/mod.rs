@@ -216,6 +216,7 @@ pub fn render_with(
         if canonical && let Some(p) = program {
             canon::canonicalize(rom, f, &cfg, &mut lifted, p, &conv);
         }
+        dataflow::tests_own_steps(&mut lifted);
     }
     let mut warnings = lifted.warnings.clone();
     if f.truncated {

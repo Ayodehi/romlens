@@ -95,3 +95,72 @@ fn a_long_variable_names_the_pointer() {
         "the variable replaces the placeholder: {text}"
     );
 }
+
+/// A test that reads the flag an instruction with its own line set is the
+/// branch's alone; one made of a compare keeps the compare:
+///
+/// ```text
+/// $8000  SEI; CLC; XCE; SEP #$30; JSR $8020; STA $30; BRA self
+/// $8020  LDA $10 / SEC / SBC $12 / BMI $802C   ; A kept: its own line
+/// $8027  CMP #$05 / BCS $802C                  ; the compare is the test
+/// $802B  INC A
+/// $802C  RTS
+/// ```
+#[test]
+fn a_test_names_only_the_instructions_it_shows() {
+    let mut code = vec![0u8; 0x100];
+    let mut put = |at: usize, b: &[u8]| code[at..at + b.len()].copy_from_slice(b);
+    put(
+        0x00,
+        &[
+            0x78, 0x18, 0xFB, 0xE2, 0x30, 0x20, 0x20, 0x80, 0x85, 0x30, 0x80, 0xFE,
+        ],
+    );
+    put(
+        0x20,
+        &[
+            0xA5, 0x10, 0x38, 0xE5, 0x12, 0x30, 0x05, 0xC9, 0x05, 0xB0, 0x01, 0x1A, 0x60,
+        ],
+    );
+    put(0xF0, &[0x40]);
+    let mut vectors = [0x80F0; 12];
+    vectors[10] = 0x8000;
+    let rom = RomImage::from_bytes(
+        fixtures::build_custom(MappingMode::LoRom, 0x8000, false, &code, "TESTS", vectors),
+        "t.sfc",
+    )
+    .unwrap();
+    let project = Project::new(&rom);
+    let snap = analyze(&rom, &project, &AnalysisControl::silent()).unwrap();
+    let d = decompile::decompile(
+        &rom,
+        &project,
+        &snap,
+        SnesAddress::new(0, 0x8020),
+        &DecompileOptions::default(),
+    )
+    .unwrap();
+    let text: Vec<&str> = d.text.lines().collect();
+    let off = |a: u16| rom.file_offset_for(SnesAddress::new(0, a)).unwrap();
+    let shown = |a: u16| -> Vec<&str> {
+        d.lines_for(off(a))
+            .iter()
+            .map(|&i| text[i].trim())
+            .collect()
+    };
+    // The SBC is its own line only; the BMI is the first test of the if.
+    let sbc = shown(0x8023);
+    assert!(
+        sbc.len() == 1 && sbc[0].contains(" - ") && !sbc[0].starts_with("if"),
+        "{sbc:?}\n{}",
+        d.text
+    );
+    assert!(shown(0x8025)[0].starts_with("if ((s8)a >= 0"), "{}", d.text);
+    // The compare is in the test it became.
+    let cmp = shown(0x8027);
+    assert!(
+        cmp.iter().any(|l| l.starts_with("if") && l.contains("5")),
+        "{cmp:?}\n{}",
+        d.text
+    );
+}

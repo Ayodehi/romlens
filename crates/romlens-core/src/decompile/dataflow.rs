@@ -1285,6 +1285,22 @@ fn try_propagate(
     true
 }
 
+/// A test names only the instructions whose work it shows. `SBC $0B10;
+/// BMI` prints `a = … - ADDR_7E0B10;` then `if ((s16)a < 0)`: the test
+/// reads the N flag the SBC set, but the SBC is the line before, so the
+/// test is the branch's alone. A `CMP` has no line of its own, so it stays
+/// with the test it became.
+pub fn tests_own_steps(lifted: &mut Lifted) {
+    let printed: BTreeSet<usize> = lifted
+        .blocks
+        .iter()
+        .flat_map(|b| b.lines.iter().map(|l| l.step))
+        .collect();
+    for b in &mut lifted.blocks {
+        b.term_merged.retain(|s| !printed.contains(s));
+    }
+}
+
 /// Where the high byte is dead after an 8-bit store to the accumulator,
 /// store the whole of it: `A = MEM8(0x20);` rather than keeping a byte no
 /// one reads.
