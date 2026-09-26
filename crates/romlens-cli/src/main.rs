@@ -369,6 +369,11 @@ enum Command {
         #[command(subcommand)]
         action: ProjectCommand,
     },
+    /// The sound CPU's code (docs/23).
+    Spc {
+        #[command(subcommand)]
+        what: SpcCommand,
+    },
     /// The built-in hardware register names; with an address, what its bits
     /// mean, and with `--value` what that value would do.
     Registers {
@@ -542,6 +547,27 @@ enum ImportCommand {
         #[arg(long)]
         rom: Option<PathBuf>,
         file: PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
+enum SpcCommand {
+    /// SPC700 instructions from an audio RAM image, one after another, or
+    /// with `--walk` the code reached from the address.
+    Disasm {
+        /// A file of audio RAM bytes.
+        image: PathBuf,
+        /// Where the file's first byte goes (default $0000).
+        #[arg(long)]
+        base: Option<String>,
+        /// Where to start (default the base).
+        address: Option<String>,
+        #[arg(long, default_value_t = 32)]
+        count: usize,
+        /// Follow branches, jumps and calls from the address and list only
+        /// the code they reach.
+        #[arg(long)]
+        walk: bool,
     },
 }
 
@@ -1391,6 +1417,21 @@ fn run() -> Result<()> {
                     remove.as_deref(),
                 )
             }
+        },
+        Command::Spc { what } => match what {
+            SpcCommand::Disasm {
+                image,
+                base,
+                address,
+                count,
+                walk,
+            } => commands::spc::disasm(commands::spc::DisasmArgs {
+                image: &image,
+                base: base.as_deref(),
+                address: address.as_deref(),
+                count,
+                walk,
+            }),
         },
         Command::Registers { address, value } => {
             commands::registers::run(address.as_deref(), value.as_deref())

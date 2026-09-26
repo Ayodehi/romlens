@@ -8,7 +8,7 @@ that tracks progress against it.
 | Task | State |
 |---|---|
 | A0 this document, content-policy rule 11, the licensing note, the recording layer, the roadmap pointer, the checklist rows | done |
-| A1 the SPC700 instruction set: decode, format, encode, I/O names, `romlens spc disasm` | to do |
+| A1 the SPC700 instruction set: decode, format, encode, I/O names, `romlens spc disasm` | done, 26 September 2026: `spc700::OPCODES`, the 256 opcodes row by row with their operands, lengths and cycles (the cycles are checked against the single-step suite in A7); `decode` gives each operand's value (the two memory-to-memory forms take the source byte first), where control goes (`Flow`, with `TCALL`'s and `BRK`'s vectors) and the memory an operand names for either direct page; `format_instruction` prints the Sony syntax with the 65816 listing's token kinds, `$F0–$FF` by name (`MOV DSPADDR,#$4C`). `assemble` reads that syntax back with labels, equates, `.org`, `.db` and `.dw`, so tests and the sound fixture are written as code; every opcode's text assembles back to its bytes. `aram::walk` follows code from its entries through branches, calls and vectors, stopping at the boot ROM's page and at jumps through tables. `romlens spc disasm <image> [--base A] [<address>] [--count N] [--walk]`. Tests: seven (the round trip, the table, 36 instructions read by hand from fullsnes, operand order, flow, the walk, the assembler's errors) and a golden |
 | A2 BRR samples: `dsp::brr`, `DataKind::Sample`, `romlens brr` | to do |
 | A3 the DSP's registers and the SPC700's I/O registers explained field by field | to do |
 | A4 the recorder's audio layer | to do |

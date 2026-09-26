@@ -1,0 +1,24 @@
+$0200  CD EF     MOV X,#$EF
+$0202  BD        MOV SP,X
+$0203  8F 01 F1  MOV CONTROL,#$01
+$0206  3F 14 02  CALL !$0214
+$0209  E4 F4     MOV A,CPUIO0
+$020B  2E F4 FB  CBNE CPUIO0,$0209
+SUB_0200:
+$0200  CD EF     MOV X,#$EF
+$0202  BD        MOV SP,X
+$0203  8F 01 F1  MOV CONTROL,#$01      ; Timer enables, port clears, boot ROM at $FFC0
+$0206  3F 14 02  CALL !SUB_0214
+$0209  E4 F4     MOV A,CPUIO0          ; Port 0: read the S-CPU's byte, write one back
+$020B  2E F4 FB  CBNE CPUIO0,$0209     ; Port 0: read the S-CPU's byte, write one back
+$020E  C4 F4     MOV CPUIO0,A          ; Port 0: read the S-CPU's byte, write one back
+$0210  5D        MOV X,A
+$0211  1F 1B 02  JMP [!$021B+X]
+SUB_0214:
+$0214  8F 4C F2  MOV DSPADDR,#$4C      ; Which DSP register DSPDATA reads or writes
+$0217  8F 01 F3  MOV DSPDATA,#$01      ; The DSP register DSPADDR selects
+$021A  6F        RET
+
+12 instructions, 27 bytes of code, 2 routines; jumps through a table not followed at $0211
+[exit code 1]
+Error: 31 bytes from $FFF0 run past $FFFF: audio RAM is 64 KB

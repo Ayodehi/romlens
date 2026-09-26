@@ -1123,3 +1123,37 @@ fn dbg_import() {
     check("dbg-import", &log);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn spc_disasm() {
+    let dir = temp_dir("spc");
+    let program = romlens_core::spc700::assemble(
+        "
+        .org $0200
+        start:  MOV X,#$EF
+                MOV SP,X
+                MOV CONTROL,#$01    ; timer 0 on
+                CALL !keyon
+        main:   MOV A,CPUIO0
+                CBNE CPUIO0,main
+                MOV CPUIO0,A
+                MOV X,A
+                JMP [!table+X]
+        keyon:  MOV DSPADDR,#$4C
+                MOV DSPDATA,#$01
+                RET
+        table:  .dw main, keyon
+        ",
+    )
+    .unwrap();
+    let (at, bytes) = &program.chunks[0];
+    assert_eq!(*at, 0x0200);
+    let path = dir.join("driver.bin");
+    std::fs::write(&path, bytes).unwrap();
+    let path = path.to_str().unwrap();
+    let mut log = run(&["spc", "disasm", path, "--base", "$0200", "--count", "6"]);
+    log += &run(&["spc", "disasm", path, "--base", "$0200", "--walk"]);
+    log += &run(&["spc", "disasm", path, "--base", "$FFF0"]);
+    check("spc-disasm", &log);
+    let _ = std::fs::remove_dir_all(dir);
+}

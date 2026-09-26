@@ -22,6 +22,7 @@ pub mod screen;
 pub mod search;
 pub mod session;
 pub mod source;
+pub mod spc;
 pub mod tables;
 pub mod truth;
 pub mod xrefs;
