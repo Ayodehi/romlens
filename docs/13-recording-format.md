@@ -130,12 +130,17 @@ Sizes are fixed by the id; a mismatch is an error, not a variant.
 | 7 | `timing` | 16 | frame index (u64), then reserved |
 | 8 | `aram` | 65536 | the sound CPU's RAM (1.2, `23-audio.md`) |
 | 9 | `dsp` | 128 | the S-DSP's registers, as the SPC700 reads them |
-| 10 | `spc` | 32 | the SPC700: A, X, Y, SP, PSW, PC (u16), the ports as it reads them (4) and as the S-CPU reads them (4), AUXIO4/5, DSPADDR, flags (bit 0 boot ROM mapped, bits 2–4 timers on), the three timer dividers, their 4-bit counts (0 and 1 in a byte, then 2), and its cycle count (u64) at offset 24 |
+| 10 | `spc` | 48 | the SPC700: A, X, Y, SP, PSW, PC (u16), the ports as it reads them (4) and as the S-CPU reads them (4), AUXIO4/5, DSPADDR, flags (bit 0 boot ROM mapped, bits 2–4 timers on), the three timer dividers, their 4-bit counts (0 and 1 in a byte, then 2), and its cycle count (u64, 1.024 MHz) at offset 24; from 1.3, at offset 32, each timer's phase (cycles since its clock ticked) and at 35 its internal count, so a replay starts in step (1.2 wrote 32 bytes; readers still take them and read the rest as zero) |
 
 The three sound regions come together or not at all. Mesen runs the
 SPC700 behind the main CPU and catches it up when the game touches a port
 and after the frame's end, so the `spc` block's cycle count says how far
-it had run when the recorder read it.
+it had run when the recorder read it. It runs it a cycle at a time, so the
+snapshot is often inside an instruction: the registers from before it,
+the PC past its opcode (`23-audio.md`, A7, says how a replay copes).
+
+Mesen counts the SPC700's clock in halves (two for each cycle at normal
+speed); `rec pack` halves every count, so a recording counts whole cycles.
 
 A recording may carry any subset; one made from loose dumps typically has
 `ppu`, `vram`, `cgram` and `oam` only, and a view that needs an absent
@@ -264,7 +269,15 @@ The body is the frame (u64), `DSPADDR` when the frame began (u8), the
 event count (u32), a compression byte, then the events, 19 bytes each:
 kind (u8: 0 the S-CPU wrote port *address*, 1 the SPC700 wrote
 `$F0` + *address*), address (u8), value (u8), the SPC700's cycle count
-(u64) and, for kind 0, the master clock (u64). A write to the DSP is the
+(u64) and, for kind 0, the master clock (u64). An S-CPU write's cycle is
+worked out from its master clock by `rec pack` (1.3): Mesen calls the
+recorder before catching the SPC700 up, so the SPC700 cycle it reports can
+be a whole frame stale (15,590 cycles in Super Mario World's frame 222).
+The master clock times Mesen's own ratio (32,040 × 64 over the master
+clock's rate, found from the first snapshot and snapped to the rates Mesen
+uses) gives the cycle Mesen catches up to, and the byte shows from there
+or a cycle later, as Mesen decides by which half of the cycle it lands in.
+A write to the DSP is the
 pair `DSPADDR` then `DSPDATA`; `recording::apu::ApuEvents::dsp_writes`
 pairs them, starting from the frame's `DSPADDR`. Super Mario World's first
 900 frames from power-on hold 176,359 events, 14,666 of them DSP writes,

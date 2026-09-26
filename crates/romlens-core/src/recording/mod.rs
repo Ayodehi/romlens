@@ -59,7 +59,8 @@ pub enum StateRegion {
     Aram,
     /// The S-DSP's 128 registers, as the SPC700 reads them.
     DspRegisters,
-    /// The SPC700's registers, ports, timers and clock ([`SpcState`]): 32 bytes.
+    /// The SPC700's registers, ports, timers and clock ([`SpcState`]): 48 bytes
+    /// (32 in format 1.2, without the timers' phases and counters).
     SpcState,
 }
 
@@ -150,7 +151,7 @@ impl StateRegion {
             StateRegion::Timing => 16,
             StateRegion::Aram => 0x10000,
             StateRegion::DspRegisters => 128,
-            StateRegion::SpcState => 32,
+            StateRegion::SpcState => 48,
         }
     }
 
@@ -223,7 +224,7 @@ impl CpuRegisters {
     }
 }
 
-/// The SPC700 at a frame's end, 32 bytes:
+/// The SPC700 at a frame's end, 48 bytes:
 ///
 /// | Offset | Size | What |
 /// |---|---|---|
@@ -237,6 +238,9 @@ impl CpuRegisters {
 /// | 19 | 3 | the timers' dividers (0 is 256) |
 /// | 22 | 2 | the timers' 4-bit counts: 0 and 1, then 2 |
 /// | 24 | 8 | the SPC700's cycle count, 1.024 MHz |
+/// | 32 | 3 | each timer's phase: cycles since its clock last ticked, 0–127 (timer 2: 0–15) (1.3) |
+/// | 35 | 3 | each timer's internal count towards its divider (1.3) |
+/// | 38 | 10 | reserved, zero |
 ///
 /// Mesen runs the SPC700 behind the main CPU and catches it up at port
 /// accesses and the frame's end, after the recorder reads it; `cycle` says
@@ -258,11 +262,16 @@ pub struct SpcState {
     pub dividers: [u8; 3],
     pub counts: [u8; 3],
     pub cycle: u64,
+    /// Cycles since each timer's clock (8 kHz, 8 kHz, 64 kHz) last ticked.
+    pub timer_phase: [u8; 3],
+    /// Each timer's internal count; its output goes up when this reaches
+    /// the divider.
+    pub timer_counter: [u8; 3],
 }
 
 impl SpcState {
-    pub fn encode(&self) -> [u8; 32] {
-        let mut b = [0u8; 32];
+    pub fn encode(&self) -> [u8; 48] {
+        let mut b = [0u8; 48];
         b[..5].copy_from_slice(&[self.a, self.x, self.y, self.sp, self.psw]);
         b[5..7].copy_from_slice(&self.pc.to_le_bytes());
         b[7..11].copy_from_slice(&self.from_cpu);
@@ -277,12 +286,14 @@ impl SpcState {
         b[22] = self.counts[0] & 0xF | (self.counts[1] & 0xF) << 4;
         b[23] = self.counts[2] & 0xF;
         b[24..32].copy_from_slice(&self.cycle.to_le_bytes());
+        b[32..35].copy_from_slice(&self.timer_phase);
+        b[35..38].copy_from_slice(&self.timer_counter);
         b
     }
 
     pub fn decode(b: &[u8]) -> Self {
-        let mut p = [0u8; 32];
-        let n = b.len().min(32);
+        let mut p = [0u8; 48];
+        let n = b.len().min(48);
         p[..n].copy_from_slice(&b[..n]);
         SpcState {
             a: p[0],
@@ -300,6 +311,8 @@ impl SpcState {
             dividers: [p[19], p[20], p[21]],
             counts: [p[22] & 0xF, p[22] >> 4, p[23] & 0xF],
             cycle: u64::from_le_bytes(p[24..32].try_into().unwrap()),
+            timer_phase: [p[32], p[33], p[34]],
+            timer_counter: [p[35], p[36], p[37]],
         }
     }
 }

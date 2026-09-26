@@ -1221,6 +1221,20 @@ fn apu_commands() {
     log += &run(&["apu", "timeline", "--rec", rec]);
     log += &run(&["apu", "ports", "--rec", rec, "--frames", "0..2"]);
     log += &run(&["apu", "ports", "--rec", rec, "--frames", "3..9"]);
+    // Romlens's own SPC700 made this one, so the replay matches it.
+    let by_apu = dir.join("a.rlstream");
+    std::fs::write(&by_apu, encode::fixture_run_by_apu(&bytes, 5)).unwrap();
+    let by_apu_rec = dir.join("a.romrec");
+    let by_apu_rec = by_apu_rec.to_str().unwrap();
+    let _ = run_with(
+        &["rec", "pack", by_apu.to_str().unwrap(), "--rom", rom],
+        &["--out", by_apu_rec],
+    );
+    log += &run(&["apu", "replay", "--rec", by_apu_rec]);
+    log += &run(&[
+        "apu", "replay", "--rec", by_apu_rec, "--free", "--frames", "0..4",
+    ]);
+    log += &run(&["apu", "ports", "--rec", by_apu_rec, "--frames", "1..1"]);
     log += &run(&[
         "rec", "extract", rec, "--frame", "2", "--region", "aram", "--hex",
     ]);

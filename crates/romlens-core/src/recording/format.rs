@@ -20,7 +20,7 @@ use crate::recording::{Layers, RecordingError, StateRegion};
 
 pub const MAGIC: &[u8; 8] = b"ROMREC\0\0";
 pub const VERSION_MAJOR: u16 = 1;
-pub const VERSION_MINOR: u16 = 2;
+pub const VERSION_MINOR: u16 = 3;
 pub const HEADER_FIXED_LEN: usize = 128;
 pub const REGION_ENTRY_LEN: usize = 16;
 pub const FRAME_MAGIC: &[u8; 4] = b"FRM\0";
@@ -172,7 +172,9 @@ impl Header {
             let size = u32_at(b, at + 4) as usize;
             let r = StateRegion::from_id(id)
                 .ok_or_else(|| RecordingError::Corrupt(format!("unknown region id {id}")))?;
-            if size != r.size() {
+            // Format 1.2 kept the SPC700 in 32 bytes; the reader pads it.
+            let older_spc = r == StateRegion::SpcState && size == 32;
+            if size != r.size() && !older_spc {
                 return Err(RecordingError::Corrupt(format!(
                     "region {} is {size} bytes; the format fixes it at {}",
                     r.name(),
@@ -459,6 +461,22 @@ mod tests {
         assert!(matches!(
             Header::decode(b"NOTAREC!"),
             Err(RecordingError::BadFormat(_))
+        ));
+        // Format 1.2 kept the SPC700 in 32 bytes; that still opens. Any
+        // other size for a region does not.
+        let spc = h
+            .regions
+            .iter()
+            .position(|r| *r == StateRegion::SpcState)
+            .unwrap();
+        let size_at = HEADER_FIXED_LEN + spc * REGION_ENTRY_LEN + 4;
+        let mut older = b.clone();
+        older[size_at..size_at + 4].copy_from_slice(&32u32.to_le_bytes());
+        assert!(Header::decode(&older).is_ok());
+        older[size_at..size_at + 4].copy_from_slice(&40u32.to_le_bytes());
+        assert!(matches!(
+            Header::decode(&older),
+            Err(RecordingError::Corrupt(_))
         ));
     }
 

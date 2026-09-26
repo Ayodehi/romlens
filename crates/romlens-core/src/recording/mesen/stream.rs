@@ -713,6 +713,10 @@ pub mod encode {
                 dsp[0x08] = if n >= 3 { 0x20 } else { 0x7F };
                 dsp[0x4C] = 0;
             }
+            // Mesen counts the SPC700's clock in halves.
+            for e in &mut events {
+                e.spc_cycle *= 2;
+            }
             b.extend(record(&Record::Apu(Box::new(ApuRecord {
                 frame: n,
                 events,
@@ -727,7 +731,7 @@ pub mod encode {
             };
             b.extend(record(&Record::Audio(Box::new(AudioRecord {
                 frame: n,
-                spc_cycle: cycle,
+                spc_cycle: cycle * 2,
                 blocks,
                 dsp,
             }))));
@@ -743,6 +747,138 @@ pub mod encode {
             if n == 0 {
                 f.fields.extend([(base + 5, 0x50), (base + 6, 1)]);
             }
+            b.extend(record(&Record::Frame(f)));
+            n += 1;
+        }
+        b
+    }
+
+    /// [`fixture`] with a sound side made by Romlens's own SPC700 running
+    /// the fixture driver from `$0200`: in frame 1 the S-CPU writes `$01`
+    /// to port 0 and the driver echoes it. Counted as Mesen counts (the
+    /// SPC700's clock in halves, a master clock at 32,040 Hz × 64 over
+    /// NTSC's rate), so `rec pack` and `apu replay` see what they would
+    /// from Mesen, and a replay matches every frame.
+    pub fn fixture_run_by_apu(rom: &[u8], frames: u32) -> Vec<u8> {
+        use crate::apu::Apu;
+        use crate::recording::apu::{ApuEvent, ApuEventKind};
+        const RATIO: f64 = 32040.0 * 64.0 / 21_477_270.0;
+        let master = |halves: f64| (halves / RATIO).round() as i64;
+        let plain = fixture(rom, frames, true);
+        let mut reader = StreamReader::new(plain.as_slice()).unwrap();
+        let mut head = reader.header.clone();
+        head.flags = FLAG_AUDIO;
+        let names = [
+            "masterClock",
+            "spc.a",
+            "spc.x",
+            "spc.y",
+            "spc.sp",
+            "spc.ps",
+            "spc.pc",
+            "spc.cpuRegs[0]",
+            "spc.outputReg[0]",
+            "spc.dspReg",
+            "spc.romEnabled",
+            "spc.timer0.enabled",
+            "spc.timer0.target",
+            "spc.timer0.output",
+            "spc.timer0.stage0",
+            "spc.timer0.stage1",
+            "spc.timer0.stage2",
+        ];
+        let base = head.fields.len() as u16;
+        head.fields.extend(names.map(str::to_owned));
+        let mut b = header(&head);
+        let mut apu = Apu::new();
+        apu.bus.aram = fixture_aram();
+        apu.bus.io.rom_enabled = false;
+        apu.cpu.pc = 0x0200;
+        apu.bus.io_writes = Some(Vec::new());
+        let mut shown = vec![0u8; ARAM_LEN];
+        let mut n = 0u32;
+        while let Some(r) = reader.next_record().unwrap() {
+            let Record::Frame(mut f) = r else {
+                b.extend(record(&r));
+                continue;
+            };
+            let start = apu.bus.cycle;
+            let end = start + 17_088;
+            let mut events = Vec::new();
+            if n == 1 {
+                let at = start + 3_000;
+                apu.queue_port(at, 0, 0x01);
+                events.push(ApuEvent {
+                    kind: ApuEventKind::CpuPort,
+                    address: 0,
+                    value: 0x01,
+                    // Stale, as Mesen's often are: the master clock is right.
+                    spc_cycle: start * 2,
+                    master_clock: master(at as f64 * 2.0 + 0.5) as u64,
+                });
+            }
+            apu.run_until(end);
+            for w in apu.bus.io_writes.as_mut().unwrap().drain(..) {
+                events.push(ApuEvent {
+                    kind: ApuEventKind::SpcIo,
+                    address: w.register,
+                    value: w.value,
+                    spc_cycle: w.cycle * 2,
+                    master_clock: 0,
+                });
+            }
+            events.sort_by_key(|e| e.spc_cycle);
+            b.extend(record(&Record::Apu(Box::new(ApuRecord {
+                frame: n,
+                events,
+            }))));
+            let blocks = (0..ARAM_LEN / BLOCK)
+                .filter(|blk| {
+                    let r = blk * BLOCK..(blk + 1) * BLOCK;
+                    apu.bus.aram[r.clone()] != shown[r]
+                })
+                .map(|blk| {
+                    (
+                        blk as u16,
+                        apu.bus.aram[blk * BLOCK..(blk + 1) * BLOCK].to_vec(),
+                    )
+                })
+                .collect();
+            shown.copy_from_slice(&apu.bus.aram);
+            let halves = apu.bus.cycle * 2;
+            b.extend(record(&Record::Audio(Box::new(AudioRecord {
+                frame: n,
+                spc_cycle: halves,
+                blocks,
+                dsp: apu.bus.dsp,
+            }))));
+            let (c, io) = (apu.cpu, &apu.bus.io);
+            let t = io.timers[0];
+            let values: [i64; 17] = [
+                master(halves as f64),
+                c.a as i64,
+                c.x as i64,
+                c.y as i64,
+                c.sp as i64,
+                c.psw as i64,
+                c.pc as i64,
+                io.from_cpu[0] as i64,
+                io.to_cpu[0] as i64,
+                io.dspaddr as i64,
+                io.rom_enabled as i64,
+                t.enabled as i64,
+                t.divider as i64,
+                t.output as i64,
+                (t.phase % 64) as i64 * 2,
+                (t.phase / 64) as i64,
+                t.counter as i64,
+            ];
+            f.fields.extend(
+                values
+                    .iter()
+                    .enumerate()
+                    .map(|(i, v)| (base + i as u16, *v)),
+            );
             b.extend(record(&Record::Frame(f)));
             n += 1;
         }

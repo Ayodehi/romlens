@@ -96,4 +96,11 @@ below are therefore the plan for Phase 5, not near-term work. Items 1, 4 and
    bsnes, higan or blargg's snes_spc (GPL and LGPL), as item 5 says
    for the 65816. The DSP's 512-entry Gaussian table is a hardware
    constant and is included as data with its citation; the 64-byte IPL boot ROM is
-   Nintendo's code and is not, replaced by an IPL of our own.
+   Nintendo's code and is not, replaced by an IPL of our own
+   (`apu/ipl.rs`, written from fullsnes's description of the upload
+   protocol). Where a recording has to be read the way Mesen made it (its
+   SPC700 clock in halves, when it catches the SPC700 up, how its timer
+   fields count), Mesen's source was read to learn what its numbers mean,
+   as item 5 allows; `rec pack` converts them in code of our own, and the
+   SPC700 itself follows the hardware, checked against the single-step
+   suite.

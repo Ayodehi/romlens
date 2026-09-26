@@ -22,6 +22,7 @@ pub enum What {
     Samples,
     Timeline,
     Ports,
+    Replay,
 }
 
 pub struct ApuArgs<'a> {
@@ -33,6 +34,8 @@ pub struct ApuArgs<'a> {
     pub limit: usize,
     /// The SPC700's execution log; `<recording>.spc.mxlog` when there is one.
     pub log: Option<&'a Path>,
+    /// `replay`: run on from the first frame.
+    pub free: bool,
 }
 
 fn open(path: &Path) -> Result<RomrecSource> {
@@ -105,6 +108,10 @@ pub fn run(a: ApuArgs) -> Result<()> {
         What::Ports => {
             let (from, to) = range(a.frames, count)?;
             print_ports(&rec, from, to, a.limit)
+        }
+        What::Replay => {
+            let (from, to) = range(a.frames, count)?;
+            print_replay(&rec, from, to, a.free, a.limit)
         }
     }
 }
@@ -336,6 +343,80 @@ fn print_ports(rec: &RomrecSource, from: u64, to: u64, limit: usize) -> Result<(
     }
     if all.len() > limit {
         println!("  … {} more (--limit)", all.len() - limit);
+    }
+    Ok(())
+}
+
+fn print_replay(rec: &RomrecSource, from: u64, to: u64, free: bool, limit: usize) -> Result<()> {
+    use romlens_core::apu::replay::{check_frames, run_free};
+    let checks = if free {
+        run_free(rec, from, to)?
+    } else {
+        check_frames(rec, from, to)?
+    };
+    let good = checks.iter().filter(|c| c.matches()).count();
+    let at_end = checks
+        .iter()
+        .filter(|c| c.differs_only_at_the_end())
+        .count();
+    let skew = checks.iter().map(|c| c.io_skew).max().unwrap_or(0);
+    let writes: usize = checks.iter().map(|c| c.io_writes.1).sum();
+    println!(
+        "frames {} to {to}, {}: {} frames",
+        if free { from + 1 } else { from.max(1) },
+        if free {
+            format!("run on from frame {from}'s snapshot")
+        } else {
+            "each from the snapshot before it".to_owned()
+        },
+        checks.len(),
+    );
+    println!("  {good} match");
+    println!(
+        "  {at_end} match but for the registers or a byte at the frame's end, where Mesen stopped inside an instruction"
+    );
+    println!("  {} differ", checks.len() - good - at_end);
+    println!("  {writes} I/O writes by Mesen; where ours agree, at most {skew} cycles apart");
+    println!(
+        "(the DSP's own registers, ENVX, OUTX and ENDX, are not compared: A8 emulates the DSP)"
+    );
+    let differ: Vec<_> = checks
+        .iter()
+        .filter(|c| !c.matches() && !c.differs_only_at_the_end())
+        .collect();
+    for c in differ.iter().take(limit) {
+        let mut parts = c.registers.clone();
+        if !c.aram.is_empty() {
+            let first: Vec<String> = c.aram.iter().take(4).map(|a| format!("${a:04X}")).collect();
+            parts.push(format!(
+                "{} audio RAM bytes ({}…)",
+                c.aram.len(),
+                first.join(" ")
+            ));
+        }
+        if !c.dsp.is_empty() {
+            let regs: Vec<String> = c.dsp.iter().map(|r| format!("${r:02X}")).collect();
+            parts.push(format!("DSP {}", regs.join(" ")));
+        }
+        if c.io_writes.0 != c.io_writes.1 {
+            parts.push(format!(
+                "{} I/O writes, Mesen {}",
+                c.io_writes.0, c.io_writes.1
+            ));
+        }
+        if let Some(i) = c.io_mismatch {
+            parts.push(format!("I/O write {i} differs"));
+        }
+        if c.io_skew > 0 {
+            parts.push(format!(
+                "I/O writes up to {} cycles from Mesen's",
+                c.io_skew
+            ));
+        }
+        println!("  frame {:>5}  {}", c.frame, parts.join("; "));
+    }
+    if differ.len() > limit {
+        println!("  … {} more (--limit)", differ.len() - limit);
     }
     Ok(())
 }

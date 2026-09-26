@@ -620,6 +620,16 @@ enum ApuCommand {
     Timeline(ApuRange),
     /// The bytes the two CPUs wrote each other through the ports.
     Ports(ApuRange),
+    /// Run Romlens's SPC700 beside the recording, frame by frame, and say
+    /// where it differs from what Mesen recorded.
+    Replay {
+        #[command(flatten)]
+        range: ApuRange,
+        /// Run on from the first frame instead of starting each frame from
+        /// the recording's snapshot.
+        #[arg(long)]
+        free: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1492,6 +1502,7 @@ fn run() -> Result<()> {
         },
         Command::Apu { what } => {
             use commands::apu::{ApuArgs, What};
+            let mut free = false;
             let (what, rec, frame, frames, limit, log) = match what {
                 ApuCommand::Voices(f) => (What::Voices, f.rec, f.frame, None, 0, f.log),
                 ApuCommand::Dsp(f) => (What::Dsp, f.rec, f.frame, None, 0, f.log),
@@ -1499,6 +1510,10 @@ fn run() -> Result<()> {
                 ApuCommand::Samples(f) => (What::Samples, f.rec, f.frame, None, 0, f.log),
                 ApuCommand::Timeline(r) => (What::Timeline, r.rec, None, r.frames, r.limit, None),
                 ApuCommand::Ports(r) => (What::Ports, r.rec, None, r.frames, r.limit, None),
+                ApuCommand::Replay { range: r, free: f } => {
+                    free = f;
+                    (What::Replay, r.rec, None, r.frames, r.limit, None)
+                }
             };
             commands::apu::run(ApuArgs {
                 what,
@@ -1507,6 +1522,7 @@ fn run() -> Result<()> {
                 frames: frames.as_deref(),
                 limit,
                 log: log.as_deref(),
+                free,
             })
         }
         Command::Brr {

@@ -87,6 +87,22 @@ frames 0 to 2: 2 port writes, 1 from the S-CPU and 1 from the SPC700
   frame     1  cycle      17216  SPC700 → port 0  $01
 [exit code 1]
 Error: frames 3 to 9 are not in a recording of 5 frames (0 to 4)
+frames 1 to 4, each from the snapshot before it: 4 frames
+  4 match
+  0 match but for the registers or a byte at the frame's end, where Mesen stopped inside an instruction
+  0 differ
+  7 I/O writes by Mesen; where ours agree, at most 0 cycles apart
+(the DSP's own registers, ENVX, OUTX and ENDX, are not compared: A8 emulates the DSP)
+frames 1 to 4, run on from frame 0's snapshot: 4 frames
+  4 match
+  0 match but for the registers or a byte at the frame's end, where Mesen stopped inside an instruction
+  0 differ
+  7 I/O writes by Mesen; where ours agree, at most 0 cycles apart
+(the DSP's own registers, ENVX, OUTX and ENDX, are not compared: A8 emulates the DSP)
+frames 1 to 1: 3 port writes, 1 from the S-CPU and 2 from the SPC700
+  frame     1  cycle      20088  S-CPU  → port 0  $01
+  frame     1  cycle      20501  SPC700 → port 0  $01
+  frame     1  cycle      30742  SPC700 → port 0  $01
 [exit code 1]
 Error: audio RAM holds the game's samples and music, which Romlens does not export; `romlens apu map` shows what it holds
 [exit code 1]

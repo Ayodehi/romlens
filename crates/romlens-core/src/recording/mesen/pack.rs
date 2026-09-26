@@ -15,7 +15,7 @@ use std::io::{Read, Seek, Write};
 
 use crate::graphics::ppu_state::PpuState;
 use crate::memory::map::MappingMode;
-use crate::recording::apu::ApuEvents;
+use crate::recording::apu::{ApuEventKind, ApuEvents};
 use crate::recording::format::LAYER_MAGICS;
 use crate::recording::io_state::{self, IoState};
 use crate::recording::mesen::stream::{
@@ -246,6 +246,30 @@ impl Fields {
     }
 }
 
+/// Mesen counts the SPC700's clock in halves (2.048 MHz: two for each of
+/// the SPC700's cycles at normal speed); a recording counts whole cycles.
+const MESEN_SPC_HALF_CYCLES: u64 = 2;
+
+/// The SPC700 cycle from which the SPC700 sees an S-CPU port write made at
+/// `master` (Mesen's master clock). Mesen runs the SPC700 behind the S-CPU
+/// and calls the recorder before catching it up, so the SPC700 cycle the
+/// recorder reads for a port write can be a whole frame stale; the master
+/// clock is not. Mesen then runs the SPC700 to the write's moment (the
+/// first of its cycles from `master × ratio − 1` halves) and shows the byte
+/// at once when the write lands in that cycle's first half, else a cycle
+/// later.
+fn port_write_cycle(master: u64, ratio: f64) -> u64 {
+    let at = master as f64 * ratio;
+    let target = at as u64 - 1;
+    let caught_up = target + (target & 1);
+    let cycle = caught_up / MESEN_SPC_HALF_CYCLES;
+    if at - caught_up as f64 <= 1.0 {
+        cycle
+    } else {
+        cycle + 1
+    }
+}
+
 /// The SPC700 from Mesen's `spc.*` fields (stream version 3); `cycle` is
 /// the audio record's, read at the same moment.
 fn spc_state(f: &Fields, cycle: u64) -> SpcState {
@@ -266,6 +290,15 @@ fn spc_state(f: &Fields, cycle: u64) -> SpcState {
         dividers: std::array::from_fn(|i| b(&format!("spc.timer{i}.target"))),
         counts: std::array::from_fn(|i| b(&format!("spc.timer{i}.output")) & 0xF),
         cycle,
+        // Mesen counts a timer's clock in half cycles (`stage0`, to 128 or
+        // 16) and flips `stage1` each time it gets there; the timer ticks
+        // as `stage1` falls. So `stage1` says which half of the period it
+        // is in.
+        timer_phase: std::array::from_fn(|i| {
+            let half = if i == 2 { 8 } else { 64 };
+            (b(&format!("spc.timer{i}.stage1")) & 1) * half + b(&format!("spc.timer{i}.stage0")) / 2
+        }),
+        timer_counter: std::array::from_fn(|i| b(&format!("spc.timer{i}.stage2"))),
     }
 }
 
@@ -573,7 +606,10 @@ pub struct StreamDecoder {
     memory: Vec<Vec<u8>>,
     aram: Vec<u8>,
     dsp: [u8; DSP_LEN],
-    spc_cycle: u64,
+    /// The SPC700's clock at the last sound snapshot, in Mesen's halves.
+    spc_halves: u64,
+    /// Mesen's SPC700 halves per master clock, once known.
+    spc_ratio: Option<f64>,
     /// `DSPADDR` after the last events, for naming the next frame's first
     /// DSP writes.
     dspaddr: u8,
@@ -599,7 +635,8 @@ impl StreamDecoder {
             memory: MEMORY.iter().map(|(_, size)| vec![0u8; *size]).collect(),
             aram: vec![0u8; ARAM_LEN],
             dsp: [0; DSP_LEN],
-            spc_cycle: 0,
+            spc_halves: 0,
+            spc_ratio: None,
             dspaddr: 0,
             report,
         }
@@ -612,17 +649,53 @@ impl StreamDecoder {
             self.aram[at..at + bytes.len()].copy_from_slice(bytes);
         }
         self.dsp = s.dsp;
-        self.spc_cycle = s.spc_cycle;
+        self.spc_halves = s.spc_cycle;
+    }
+
+    /// Mesen's SPC700 clock against the master clock: the sample rate
+    /// times 64 over the master clock's rate. It is a fraction Mesen does
+    /// not export whole, so it is worked out from a snapshot (Mesen catches
+    /// the SPC700 up at every frame's end) and snapped to the rates Mesen
+    /// can use: 32,000 or 32,040 Hz samples, an NTSC or PAL console.
+    fn spc_ratio(&mut self) -> Option<f64> {
+        if self.spc_ratio.is_none() {
+            let master = self.fields.n("masterClock");
+            if master > 0 && self.spc_halves > 0 {
+                let seen = self.spc_halves as f64 / master as f64;
+                let rates = [32000.0, 32040.0];
+                let masters = [21_477_270.0, 21_281_370.0];
+                let near = rates
+                    .iter()
+                    .flat_map(|r| masters.iter().map(move |m| r * 64.0 / m))
+                    .min_by(|a, b| (a - seen).abs().total_cmp(&(b - seen).abs()))
+                    .unwrap();
+                self.spc_ratio = Some(if (near - seen).abs() / near < 1e-3 {
+                    near
+                } else {
+                    seen
+                });
+            }
+        }
+        self.spc_ratio
     }
 
     /// A frame's sound events, numbered `number`, with `DSPADDR` carried
     /// from the frame before.
     pub fn apu(&mut self, a: &ApuRecord, number: u64) -> ApuEvents {
-        let events = ApuEvents {
+        let mut events = ApuEvents {
             frame: number,
             dspaddr: self.dspaddr,
             events: a.events.clone(),
         };
+        let ratio = self.spc_ratio();
+        for e in &mut events.events {
+            e.spc_cycle = match (e.kind, ratio) {
+                (ApuEventKind::CpuPort, Some(r)) if e.master_clock > 0 => {
+                    port_write_cycle(e.master_clock, r)
+                }
+                _ => e.spc_cycle / MESEN_SPC_HALF_CYCLES,
+            };
+        }
         self.dspaddr = events.dspaddr_after();
         self.report.apu_events += events.events.len() as u64;
         self.report.dsp_writes += events.dsp_writes().len() as u64;
@@ -678,7 +751,9 @@ impl StreamDecoder {
                 .insert(StateRegion::DspRegisters, self.dsp.to_vec());
             state.regions.insert(
                 StateRegion::SpcState,
-                spc_state(&self.fields, self.spc_cycle).encode().to_vec(),
+                spc_state(&self.fields, self.spc_halves / MESEN_SPC_HALF_CYCLES)
+                    .encode()
+                    .to_vec(),
             );
         }
         state
