@@ -162,6 +162,7 @@ final class GraphicsModel {
     /// Attach a recording, refusing one of another ROM with the core's words.
     func attach(_ session: RecordingSession, name: String) throws {
         try session.checkRom(rom: rom)
+        screenLinesCache = nil
         recording = session
         recordingInfo = session.info()
         recordingName = name
@@ -176,6 +177,7 @@ final class GraphicsModel {
         live?.stop()
         live = nil
         liveStatus = nil
+        screenLinesCache = nil
         recording = nil
         recordingInfo = nil
         recordingName = nil
@@ -345,12 +347,37 @@ final class GraphicsModel {
     }
 
     /// Whether the screen was off or dimmed at this frame (INIDISP), which
-    /// is why a frame can show nothing that makes sense.
+    /// is why a frame can show nothing that makes sense. From the lines the
+    /// frame drew where the recording has its register writes: a game turns
+    /// the screen off in vertical blank for its uploads and on again before
+    /// drawing, so INIDISP as the frame ended says "off" of a frame drawn in
+    /// full.
     var screenNote: String? {
+        if let lines = screenLines() {
+            if lines.blank == lines.lines { return "screen off (forced blank)" }
+            if lines.blank > 0 { return "screen off on \(lines.blank) of \(lines.lines) lines" }
+            if lines.brightnessMax < 15 {
+                return lines.brightnessMin == lines.brightnessMax
+                    ? "brightness \(lines.brightnessMax)/15"
+                    : "brightness \(lines.brightnessMin)–\(lines.brightnessMax)/15"
+            }
+            return nil
+        }
         guard let inidisp = ppu?.inidisp else { return nil }
         if inidisp & 0x80 != 0 { return "screen off (forced blank)" }
         let brightness = inidisp & 0x0F
         return brightness < 15 ? "brightness \(brightness)/15" : nil
+    }
+
+    @ObservationIgnored private var screenLinesCache: (frame: UInt64, info: ScreenLinesInfo?)?
+
+    /// The screen's state on the drawn lines of this frame, kept per frame.
+    private func screenLines() -> ScreenLinesInfo? {
+        guard source == .recording, let recording else { return nil }
+        if let c = screenLinesCache, c.frame == frame { return c.info }
+        let info = (try? recording.screenLines(frame: frame)) ?? nil
+        screenLinesCache = (frame, info)
+        return info
     }
 
     // MARK: Bytes
@@ -586,6 +613,13 @@ final class GraphicsModel {
     func frameLayer(_ layer: UInt8) -> BitmapInfo? {
         guard let recording else { return nil }
         return try? recording.renderFrameLayer(frame: frame, layer: layer)
+    }
+
+    /// The layers some line of this frame draws, and its modes line by
+    /// line (a game can change mode part way down the screen).
+    func frameLayers() -> FrameLayersInfo? {
+        guard let recording else { return nil }
+        return try? recording.frameLayers(frame: frame)
     }
 
     func priorityOrder() -> [String] {

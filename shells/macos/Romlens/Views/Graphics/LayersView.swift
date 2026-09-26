@@ -89,41 +89,44 @@ struct LayersView: View {
     }
 
     private var layers: [Layer] {
-        guard let ppu = graphics.ppu else { return [] }
-        var out: [Layer] = ppu.layers.compactMap { l in
-            guard let format = l.format else { return nil }
-            let on = ppu.mainScreen & (1 << (l.bg - 1)) != 0
-            return Layer(
-                id: l.bg,
-                title: "BG\(l.bg)",
-                detail: "\(format.title)\(on ? "" : ", off on the main screen as the frame ended")"
-            )
+        guard let info = graphics.frameLayers() else { return [] }
+        return info.layers.map { l in
+            Layer(id: l.layer, title: l.layer == 5 ? "Sprites" : "BG\(l.layer)", detail: l.detail)
         }
-        out.append(Layer(
-            id: 5,
-            title: "Sprites",
-            detail: "4 bpp\(ppu.mainScreen & 0x10 != 0 ? "" : ", off on the main screen as the frame ended")"
-        ))
-        return out
     }
 
     private var legend: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Front to back").font(.headline)
-            if let ppu = graphics.ppu {
-                Text("Mode \(ppu.bgMode) puts the layers in this order; each pixel shows the first that draws there.")
-                    .font(.caption)
+        let spans = graphics.frameLayers()?.spans ?? []
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Front to back").font(.headline)
+                if spans.count > 1 {
+                    Text("The mode changes part way down the screen; each part puts its layers in its own order, and each pixel shows the first that draws there.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                ForEach(Array(spans.enumerated()), id: \.offset) { _, span in
+                    if spans.count > 1 {
+                        Text("Lines \(span.firstLine)–\(span.lastLine): Mode \(span.mode)")
+                            .font(.subheadline.weight(.semibold))
+                            .padding(.top, 4)
+                    } else {
+                        Text("Mode \(span.mode) puts the layers in this order; each pixel shows the first that draws there.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    ForEach(Array(span.order.enumerated()), id: \.offset) { i, name in
+                        Text("\(i + 1). \(name)").font(.callout)
+                    }
+                }
+                Text("then the backdrop, CGRAM colour 0")
+                    .font(.callout)
                     .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
-            ForEach(Array(graphics.priorityOrder().enumerated()), id: \.offset) { i, name in
-                Text("\(i + 1). \(name)").font(.callout)
-            }
-            Text("then the backdrop, CGRAM colour 0")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-            Spacer()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
         }
-        .padding(12)
     }
 }

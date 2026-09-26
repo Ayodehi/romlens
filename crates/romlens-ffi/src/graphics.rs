@@ -547,6 +547,57 @@ pub struct FrameImageInfo {
     pub unsupported: Vec<String>,
 }
 
+/// The screen's state on the lines a frame drew, from the recording's
+/// register writes: a game usually turns the screen off in vertical blank
+/// for its uploads and on again before the first line, so the registers as
+/// the frame ended say "off" of a frame drawn in full.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct ScreenLinesInfo {
+    pub lines: u32,
+    /// Lines drawn in forced blank.
+    pub blank: u32,
+    /// The lowest and highest brightness on the lines drawn.
+    pub brightness_min: u8,
+    pub brightness_max: u8,
+}
+
+/// A stretch of lines drawn in one BG mode, and the order its layers go in
+/// front to back.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct ModeSpanInfo {
+    pub first_line: u32,
+    pub last_line: u32,
+    pub mode: u8,
+    pub order: Vec<String>,
+}
+
+/// A layer some line of the frame draws: 1–4 a background, 5 the sprites,
+/// and in words what it is and on which lines.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct FrameLayerInfo {
+    pub layer: u8,
+    pub detail: String,
+}
+
+/// The layers and modes of a frame, line by line where the recording has
+/// the writes: a game can change mode part way down the screen (Final
+/// Fantasy III's intro is Mode 1 above a Mode 7 ground).
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct FrameLayersInfo {
+    pub spans: Vec<ModeSpanInfo>,
+    pub layers: Vec<FrameLayerInfo>,
+}
+
+fn format_words(f: romlens_core::graphics::tile::TileFormat) -> &'static str {
+    use romlens_core::graphics::tile::TileFormat::*;
+    match f {
+        Bpp2 => "2 bpp",
+        Bpp4 => "4 bpp",
+        Bpp8 => "8 bpp",
+        Mode7 => "Mode 7",
+    }
+}
+
 /// What drew one pixel of a composed frame.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
 pub enum PixelWinnerInfo {
@@ -1011,6 +1062,99 @@ impl RecordingSession {
             }
         };
         Ok(c.winner(x, y).map(Into::into))
+    }
+
+    /// The layers some line of `frame` draws, and its modes line by line.
+    pub fn frame_layers(&self, frame: u64) -> Result<FrameLayersInfo, RomlensError> {
+        use romlens_core::graphics::ppu_state::bg_format;
+        let src = self.source.dynamic();
+        let states = match romlens_core::recording::lines::frame_line_states(src, frame, 224)? {
+            Some(s) => s,
+            None => {
+                let ppu = src
+                    .state_at(frame)?
+                    .ppu()
+                    .ok_or(RecordingError::MissingRegion("ppu"))?;
+                vec![ppu; 224]
+            }
+        };
+        let mut spans: Vec<ModeSpanInfo> = Vec::new();
+        for (y, p) in states.iter().enumerate() {
+            let (mode, bg3) = (p.bg_mode(), p.register(0x2105) & 0x08 != 0);
+            let order = romlens_core::graphics::compose::priority_names(mode, bg3);
+            match spans.last_mut() {
+                Some(s) if s.mode == mode && s.order == order => s.last_line = y as u32,
+                _ => spans.push(ModeSpanInfo {
+                    first_line: y as u32,
+                    last_line: y as u32,
+                    mode,
+                    order,
+                }),
+            }
+        }
+        let whole = spans.len() == 1;
+        let mut layers = Vec::new();
+        for bg in 1..=4u8 {
+            // The format it has in each span, where it has one.
+            let parts: Vec<(String, &ModeSpanInfo)> = spans
+                .iter()
+                .filter_map(|s| bg_format(s.mode, bg).map(|f| (format_words(f).to_owned(), s)))
+                .collect();
+            if parts.is_empty() {
+                continue;
+            }
+            let detail = if whole {
+                parts[0].0.clone()
+            } else {
+                parts
+                    .iter()
+                    .map(|(f, s)| format!("{f} on lines {}–{}", s.first_line, s.last_line))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            let shown = states.iter().any(|p| {
+                bg_format(p.bg_mode(), bg).is_some() && p.register(0x212C) & (1 << (bg - 1)) != 0
+            });
+            let detail = if shown {
+                detail
+            } else {
+                format!("{detail}, off on the main screen")
+            };
+            layers.push(FrameLayerInfo { layer: bg, detail });
+        }
+        let sprites = states.iter().any(|p| p.register(0x212C) & 0x10 != 0);
+        layers.push(FrameLayerInfo {
+            layer: 5,
+            detail: if sprites {
+                "4 bpp"
+            } else {
+                "4 bpp, off on the main screen"
+            }
+            .to_owned(),
+        });
+        Ok(FrameLayersInfo { spans, layers })
+    }
+
+    /// The screen's state on the lines `frame` drew; `None` where the
+    /// recording has no line writes for it.
+    pub fn screen_lines(&self, frame: u64) -> Result<Option<ScreenLinesInfo>, RomlensError> {
+        let Some(states) =
+            romlens_core::recording::lines::frame_line_states(self.source.dynamic(), frame, 224)?
+        else {
+            return Ok(None);
+        };
+        let inidisp: Vec<u8> = states.iter().map(|p| p.register(0x2100)).collect();
+        let drawn: Vec<u8> = inidisp
+            .iter()
+            .filter(|v| *v & 0x80 == 0)
+            .map(|v| v & 0x0F)
+            .collect();
+        Ok(Some(ScreenLinesInfo {
+            lines: inidisp.len() as u32,
+            blank: (inidisp.len() - drawn.len()) as u32,
+            brightness_min: drawn.iter().copied().min().unwrap_or(0),
+            brightness_max: drawn.iter().copied().max().unwrap_or(0),
+        }))
     }
 
     /// The frame's layers front to back, in words, as its mode orders them
