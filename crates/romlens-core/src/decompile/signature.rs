@@ -43,6 +43,8 @@ pub struct Summary {
     pub preserves: LocSet,
     /// Reached in ways the analysis does not see; returns are the default.
     pub open: bool,
+    /// Bytes of its caller's stack it reads as arguments.
+    pub stack_args: u32,
 }
 
 /// Every routine and its summary.
@@ -57,6 +59,8 @@ pub struct Program {
     pub lift: LiftOptions,
     /// Values passed in RAM (`memory_args`).
     pub memory: MemoryArgs,
+    /// Per routine, the bytes of its caller's stack it reads as arguments.
+    pub stack_args: BTreeMap<SnesAddress, u32>,
 }
 
 /// Values passed in memory: RAM a caller stores just before a call, which
@@ -470,10 +474,19 @@ impl Program {
         for &e in &entries {
             if let Ok(f) = function::discover(rom, snap, &entries, e) {
                 let cfg = Cfg::build(&f);
-                let mut lifted = lift::lift(&f, &cfg, opts);
-                dataflow::stack_slots(&f, &cfg, &mut lifted);
+                let lifted = lift::lift(&f, &cfg, opts);
                 units.insert(f.entry, Unit { f, cfg, lifted });
             }
+        }
+        // What each routine reads of its caller's stack, before any push
+        // is made a temporary: a caller's push a callee reads stays a push.
+        let stack_args: BTreeMap<SnesAddress, u32> = units
+            .iter()
+            .map(|(a, u)| (*a, dataflow::stack_args(&u.f, &u.cfg, &u.lifted)))
+            .filter(|(_, n)| *n > 0)
+            .collect();
+        for u in units.values_mut() {
+            dataflow::stack_slots(&u.f, &u.cfg, &mut u.lifted, &stack_args);
         }
         // Where nothing gave the direct page and the program only ever
         // sets it to one value, that is the direct page.
@@ -487,7 +500,7 @@ impl Program {
             };
             for u in units.values_mut() {
                 let mut lifted = lift::lift(&u.f, &u.cfg, opts);
-                dataflow::stack_slots(&u.f, &u.cfg, &mut lifted);
+                dataflow::stack_slots(&u.f, &u.cfg, &mut lifted, &stack_args);
                 u.lifted = lifted;
             }
         }
@@ -577,6 +590,7 @@ impl Program {
                     calls: reads.clone(),
                     default_call: base.default_call.clone(),
                     call_defs: writes.clone(),
+                    stack_args: stack_args.clone(),
                 };
                 let flow = Flow::new(rom, &conv);
                 let live_out = dataflow::liveness(&flow, &u.cfg, &u.lifted);
@@ -657,6 +671,7 @@ impl Program {
                         returns: returns[a].clone(),
                         preserves: preserves[a].clone(),
                         open: open.contains(a),
+                        stack_args: stack_args.get(a).copied().unwrap_or(0),
                     },
                 )
             })
@@ -713,6 +728,7 @@ impl Program {
             abis,
             lift: opts,
             memory,
+            stack_args,
         }
     }
 
@@ -758,6 +774,7 @@ impl Program {
             calls,
             default_call: base.default_call,
             call_defs,
+            stack_args: self.stack_args.clone(),
         }
     }
 }
@@ -1019,7 +1036,15 @@ pub fn describe(s: &Summary) -> String {
         1 => v[0].to_owned(),
         n => format!("{} and {}", v[..n - 1].join(", "), v[n - 1]),
     };
-    let reads = name(&s.reads);
+    let mut reads = name(&s.reads);
+    let pushed = match s.stack_args {
+        0 => String::new(),
+        1 => "a byte its caller pushed".to_owned(),
+        n => format!("{n} bytes its caller pushed"),
+    };
+    if !pushed.is_empty() {
+        reads.push(&pushed);
+    }
     let returns = name(&s.returns);
     let mut out = format!("Reads {}; returns {}", list(reads), list(returns));
     let kept = name(&s.preserves);

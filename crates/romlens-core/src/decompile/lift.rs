@@ -4,6 +4,8 @@
 //! `every_opcode_lifts` checks all 256 opcodes in both width states. Flags
 //! are set in full here; the data-flow stage drops the ones nothing reads.
 
+use std::collections::BTreeMap;
+
 use crate::cpu65816::{AddressingMode, Instruction, Mnemonic};
 use crate::decompile::cfg::{Cfg, Term};
 use crate::decompile::function::{Callee, Function, Transfer};
@@ -31,6 +33,9 @@ pub struct Lifted {
     /// signature.
     pub vars: Vec<crate::decompile::ir::VarDecl>,
     pub abi: Option<crate::decompile::signature::Abi>,
+    /// Temporaries with a name of their own (`arg3`, an argument the
+    /// caller pushed); the rest print as `t1`, `t2`.
+    pub temp_names: BTreeMap<u32, String>,
 }
 
 /// The decimal flag, followed through the graph: `ADC` and `SBC` mean
@@ -153,6 +158,7 @@ pub fn lift(f: &Function, cfg: &Cfg, opts: LiftOptions) -> Lifted {
         warnings: l.warnings,
         vars: Vec::new(),
         abi: None,
+        temp_names: BTreeMap::new(),
     }
 }
 

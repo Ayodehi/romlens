@@ -625,6 +625,8 @@ pub struct Emitter<'a, 'n> {
     /// twice (a loop's tail copied into a branch) takes it once, and a goto
     /// goes to that copy, which does the same.
     pub labels_placed: BTreeSet<BlockId>,
+    /// Temporaries with names of their own (`Lifted::temp_names`).
+    pub temp_names: BTreeMap<u32, String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -645,6 +647,7 @@ impl<'a, 'n> Emitter<'a, 'n> {
             stats: Stats::default(),
             vars: Vec::new(),
             labels_placed: BTreeSet::new(),
+            temp_names: BTreeMap::new(),
             modern: false,
             mem_args: BTreeMap::new(),
             numbers: super::NumberStyle::Auto,
@@ -664,6 +667,13 @@ impl<'a, 'n> Emitter<'a, 'n> {
         self.w.tok(s, CTokenKind::Type, None);
     }
 
+    fn temp_name(&self, t: u32) -> String {
+        self.temp_names
+            .get(&t)
+            .cloned()
+            .unwrap_or_else(|| format!("t{t}"))
+    }
+
     fn local(&mut self, s: &str) {
         self.w.tok(s, CTokenKind::Local, None);
     }
@@ -680,7 +690,10 @@ impl<'a, 'n> Emitter<'a, 'n> {
                 self.local(r.name());
             }
             Expr::Flag(f) => self.local(f.name()),
-            Expr::Temp(t) => self.local(&format!("t{t}")),
+            Expr::Temp(t) => {
+                let name = self.temp_name(*t);
+                self.local(&name)
+            }
             Expr::Mem { addr, width } => self.mem(addr, *width),
             Expr::Un(op, inner) => {
                 self.w.w(match op {
@@ -826,7 +839,11 @@ impl<'a, 'n> Emitter<'a, 'n> {
     fn mem(&mut self, addr: &Expr, width: Width) {
         // The stack by offset, which no name covers.
         if crate::decompile::dataflow::stack_offset(addr).is_some() && width != Width::W24 {
-            let helper = if width == Width::W8 { "STACK8" } else { "STACK16" };
+            let helper = if width == Width::W8 {
+                "STACK8"
+            } else {
+                "STACK16"
+            };
             self.w.tok(helper, CTokenKind::Helper, None);
             self.w.w("(");
             self.expr(addr);
@@ -1004,7 +1021,10 @@ impl<'a, 'n> Emitter<'a, 'n> {
         match p {
             Place::Reg(r, _) => self.local(r.name()),
             Place::Flag(f) => self.local(f.name()),
-            Place::Temp(t) => self.local(&format!("t{t}")),
+            Place::Temp(t) => {
+                let name = self.temp_name(*t);
+                self.local(&name)
+            }
             Place::Mem { addr, width } => self.mem(addr, *width),
             Place::Var(v) => {
                 let name = self.var_name(*v);

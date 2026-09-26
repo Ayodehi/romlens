@@ -278,13 +278,18 @@ pub fn render_with(
         }
     }
     let used = used_temps(&lifted);
-    let renames: std::collections::BTreeMap<u32, u32> = used
+    // The unnamed temporaries numbered from 1, the named ones after them.
+    let (named, plain): (Vec<u32>, Vec<u32>) =
+        used.iter().partition(|t| lifted.temp_names.contains_key(t));
+    let renames: std::collections::BTreeMap<u32, u32> = plain
         .iter()
+        .chain(&named)
         .enumerate()
         .map(|(i, &t)| (t, i as u32 + 1))
         .collect();
     dataflow::rename_temps(&mut lifted, &renames);
     let used: Vec<u32> = (1..=renames.len() as u32).collect();
+    body.temp_names = lifted.temp_names.clone();
     // Structured first at `full`: the counted loops take their counters
     // out of the declarations.
     let structured = (opts.level == Level::Full).then(|| {
@@ -316,7 +321,16 @@ pub fn render_with(
     }
     if !used.is_empty() {
         body.w.tok("u32", CTokenKind::Type, None);
-        let temps: Vec<String> = used.iter().map(|t| format!("t{t}")).collect();
+        let temps: Vec<String> = used
+            .iter()
+            .map(|t| {
+                lifted
+                    .temp_names
+                    .get(t)
+                    .cloned()
+                    .unwrap_or_else(|| format!("t{t}"))
+            })
+            .collect();
         body.w.w(" ");
         body.w.w(&temps.join(", "));
         body.w.w(";");
