@@ -1086,11 +1086,6 @@ fn for_each_expr_mut(s: &mut Stmt, f: &mut impl FnMut(&mut Expr)) {
 /// read cannot take it (a 16-bit read of an accumulator whose high byte
 /// the definition did not set).
 fn substitute(e: &Expr, dst: &Place, v: &Expr) -> Option<Expr> {
-    // The stack by offset keeps S as it is: `STACK16(S + 1)` says what
-    // `MEM16(0x2000)` hides, and the stack is its own place to the reader.
-    if stack_offset(e).is_some() {
-        return Some(e.clone());
-    }
     let rec = |x: &Expr| substitute(x, dst, v);
     Some(match (e, dst) {
         (Expr::Reg(r, w), Place::Reg(dr, dw)) if r == dr => match (w, dw) {
@@ -1110,6 +1105,8 @@ fn substitute(e: &Expr, dst: &Place, v: &Expr) -> Option<Expr> {
                 v.clone()
             }
         }
+        // The stack by offset keeps S (`substitute_stmt`).
+        (Expr::Mem { addr, .. }, Place::Reg(Reg::S, _)) if stack_offset(addr).is_some() => return None,
         (Expr::Mem { addr, width }, _) => Expr::mem(rec(addr)?, *width),
         (Expr::Un(op, x), _) => Expr::un(*op, rec(x)?),
         (Expr::Bin(op, a, b), _) => Expr::bin(*op, rec(a)?, rec(b)?),
@@ -1121,6 +1118,12 @@ fn substitute(e: &Expr, dst: &Place, v: &Expr) -> Option<Expr> {
 }
 
 fn substitute_stmt(s: &Stmt, dst: &Place, v: &Expr) -> Option<Stmt> {
+    // The stack by offset keeps S as it is: `STACK16(S + 1)` says what
+    // `MEM16(0x2000)` hides, and the stack is its own place to the reader.
+    // A definition of S those read is not carried into them, and stays.
+    if matches!(dst, Place::Reg(Reg::S, _)) && stmt_addresses_stack(s) {
+        return None;
+    }
     let mut out = s.clone();
     let mut ok = true;
     for_each_expr_mut(&mut out, &mut |e| match substitute(e, dst, v) {
