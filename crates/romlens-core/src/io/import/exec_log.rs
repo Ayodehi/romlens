@@ -55,6 +55,11 @@ pub fn read(bytes: &[u8], rom: &[u8]) -> Result<ExecLog, ProjectError> {
             "version {version} is not one this reads (expected {VERSION})"
         )));
     }
+    if bytes[6] == 1 {
+        return Err(bad(
+            "this is the sound CPU's (SPC700) log, which goes with its recording: romlens apu map --rec R --log FILE",
+        ));
+    }
     if bytes[6] != 0 {
         return Err(bad(format!(
             "recorded for CPU {}, not the SNES main CPU",

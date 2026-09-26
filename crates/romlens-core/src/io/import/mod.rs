@@ -3,6 +3,7 @@
 pub mod cdl;
 pub mod dbg;
 pub mod exec_log;
+pub mod spc_log;
 pub mod symbols;
 pub mod usage_map;
 

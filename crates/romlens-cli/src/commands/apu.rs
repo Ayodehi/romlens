@@ -11,6 +11,7 @@ use romlens_core::audio::{
     NoteKind, aram_map, directory, note_name, port_messages, sample_tuning, timeline, voices,
 };
 use romlens_core::explain::sound::{describe_dsp, dsp_layout};
+use romlens_core::model::spc_log::{SpcAccess, SpcLog};
 use romlens_core::recording::{MachineStateSource, RomrecSource, SpcState, StateRegion};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,6 +31,8 @@ pub struct ApuArgs<'a> {
     /// `A..B`, inclusive.
     pub frames: Option<&'a str>,
     pub limit: usize,
+    /// The SPC700's execution log; `<recording>.spc.mxlog` when there is one.
+    pub log: Option<&'a Path>,
 }
 
 fn open(path: &Path) -> Result<RomrecSource> {
@@ -59,8 +62,30 @@ fn range(text: Option<&str>, count: u64) -> Result<(u64, u64)> {
     Ok((a, b))
 }
 
+/// The SPC700's log given, or the one beside the recording.
+fn spc_log(rec: &Path, given: Option<&Path>) -> Result<Option<SpcLog>> {
+    let beside = rec.with_extension("spc.mxlog");
+    let path = match given {
+        Some(p) => p.to_path_buf(),
+        None if beside.exists() => beside,
+        None => return Ok(None),
+    };
+    let bytes = std::fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
+    let log = romlens_core::io::import::spc_log::read(&bytes, None)
+        .with_context(|| format!("reading {}", path.display()))?;
+    println!(
+        "with the SPC700's execution log {}",
+        path.file_name().unwrap_or_default().to_string_lossy()
+    );
+    Ok(Some(log))
+}
+
 pub fn run(a: ApuArgs) -> Result<()> {
     let rec = open(a.rec)?;
+    let log = match a.what {
+        What::Map | What::Samples => spc_log(a.rec, a.log)?,
+        _ => None,
+    };
     let count = rec.frame_count().unwrap_or(0);
     let frame = a.frame.unwrap_or(count.saturating_sub(1));
     if frame >= count {
@@ -71,8 +96,8 @@ pub fn run(a: ApuArgs) -> Result<()> {
     match a.what {
         What::Voices => print_voices(&rec, frame),
         What::Dsp => print_dsp(&rec, frame),
-        What::Map => print_map(&rec, frame),
-        What::Samples => print_samples(&rec, frame),
+        What::Map => print_map(&rec, frame, log.as_ref()),
+        What::Samples => print_samples(&rec, frame, log.as_ref()),
         What::Timeline => {
             let (from, to) = range(a.frames, count)?;
             print_timeline(&rec, from, to, a.limit)
@@ -194,11 +219,11 @@ fn print_dsp(rec: &RomrecSource, frame: u64) -> Result<()> {
     Ok(())
 }
 
-fn print_map(rec: &RomrecSource, frame: u64) -> Result<()> {
+fn print_map(rec: &RomrecSource, frame: u64, log: Option<&SpcLog>) -> Result<()> {
     let f = frame_state(rec, frame)?;
     let used: Vec<u8> = voices(&f.dsp, None).iter().map(|v| v.source).collect();
     println!("frame {frame}: audio RAM, the SPC700 at ${:04X}", f.spc.pc);
-    for p in aram_map(&f.aram, &f.dsp, &f.spc, &used, &[]) {
+    for p in aram_map(&f.aram, &f.dsp, &f.spc, &used, &[], log) {
         let end = p.start as u32 + p.len - 1;
         println!(
             "  ${:04X}-${end:04X}  {:>6} bytes  {}",
@@ -208,7 +233,8 @@ fn print_map(rec: &RomrecSource, frame: u64) -> Result<()> {
     Ok(())
 }
 
-fn print_samples(rec: &RomrecSource, frame: u64) -> Result<()> {
+fn print_samples(rec: &RomrecSource, frame: u64, log: Option<&SpcLog>) -> Result<()> {
+    let played = log.map(|l| l.touched(SpcAccess::DspRead));
     let f = frame_state(rec, frame)?;
     let dir = f.dsp[0x5D];
     let used: Vec<u8> = voices(&f.dsp, None).iter().map(|v| v.source).collect();
@@ -225,8 +251,13 @@ fn print_samples(rec: &RomrecSource, frame: u64) -> Result<()> {
         } else {
             "stops at its end".to_owned()
         };
+        let heard = match &played {
+            Some(p) if p.contains(&e.start) => "played; ",
+            Some(_) => "not played while logged; ",
+            None => "",
+        };
         println!(
-            "  {:>3}  ${:04X}  {} blocks, {} bytes, {} samples; {lp}; at $1000 {}",
+            "  {:>3}  ${:04X}  {} blocks, {} bytes, {} samples; {lp}; {heard}at $1000 {}",
             e.index,
             e.start,
             e.blocks,

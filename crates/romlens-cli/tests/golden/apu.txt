@@ -91,3 +91,25 @@ Error: frames 3 to 9 are not in a recording of 5 frames (0 to 4)
 Error: audio RAM holds the game's samples and music, which Romlens does not export; `romlens apu map` shows what it holds
 [exit code 1]
 Error: <tmp>/p.romrec has no sound side: record it again with this Romlens's recorder (romlens rec script)
+wrote <tmp>/l.romrec: 5 frames from Mesen, 1 DMA transfers
+and the SPC700's execution log, 5 instructions, to <tmp>/l.spc.mxlog
+and the sound side: 22 events, 10 of them DSP writes
+this Mesen does not export 65 fields, among them cpu.a, cpu.x, cpu.y; their bits are zero
+Mesen does not export $212A, $212B, $2130, so they read as zero until the game writes them
+with the SPC700's execution log l.spc.mxlog
+frame 2: audio RAM, the SPC700 at $0209
+  $0000-$0003       4 bytes  echo buffer, 4 bytes and no delay (ESA = $00, EDL = 0)
+  $0004-$00EF     236 bytes  direct page
+  $00F0-$00FF      16 bytes  I/O registers
+  $0100-$01FF     256 bytes  stack
+  $0200-$0215      22 bytes  driver code
+  $0216-$1FFF    7658 bytes  data the driver did not touch while logged
+  $2000-$2001       2 bytes  driver data
+  $2002-$3BFF    7166 bytes  data the driver did not touch while logged
+  $3C00-$3C03       4 bytes  sample directory, 1 entry (DIR = $3C)
+  $3C04-$3FFF    1020 bytes  data the driver did not touch while logged
+  $4000-$4023      36 bytes  sample 0: 4 blocks, loops at $4012, played
+  $4024-$FFFF   49116 bytes  data the driver did not touch while logged
+with the SPC700's execution log l.spc.mxlog
+frame 2: the sample directory at $3C00 (DIR = $3C), 1 sample
+    0  $4000  4 blocks, 36 bytes, 64 samples; loops at $4012; played; at $1000 ≈ B6 +21 (2000 Hz, estimated from the loop)

@@ -1225,6 +1225,55 @@ fn apu_commands() {
         "rec", "extract", rec, "--frame", "2", "--region", "aram", "--hex",
     ]);
     log += &redact_tmp(&dir, &run(&["apu", "voices", "--rec", plain_rec]));
+    // With the SPC700's execution log beside the stream, `rec pack` puts it
+    // beside the recording and the map and the samples read it.
+    {
+        use romlens_core::model::spc_log::{SpcAccess, SpcAccessRun, SpcInsn, SpcLog};
+        let run_of = |pc, addr, len, access| SpcAccessRun {
+            pc,
+            addr,
+            len,
+            access,
+            count: len,
+        };
+        let spc = SpcLog {
+            rom_crc32: romlens_core::io::crc32::crc32(&bytes),
+            rom_size: bytes.len() as u32,
+            insns: [0x0200u16, 0x0202, 0x0203, 0x0206, 0x0209]
+                .map(|pc| SpcInsn {
+                    pc,
+                    boot_rom: false,
+                    count: 1,
+                })
+                .to_vec(),
+            accesses: vec![
+                run_of(0x0209, 0x2000, 2, SpcAccess::Read),
+                run_of(0xFFE2, 0x3000, 16, SpcAccess::Write),
+                run_of(0, 0x3C00, 4, SpcAccess::DspRead),
+                run_of(0, 0x4000, 9, SpcAccess::DspRead),
+            ],
+            flows: Vec::new(),
+        };
+        let logged = dir.join("l.rlstream");
+        std::fs::copy(stream, &logged).unwrap();
+        std::fs::write(
+            dir.join("l.spc.mxlog"),
+            romlens_core::io::import::spc_log::write(&spc),
+        )
+        .unwrap();
+        let logged_rec = dir.join("l.romrec");
+        let logged_rec = logged_rec.to_str().unwrap();
+        log += &redact_tmp(
+            &dir,
+            &run_with(
+                &["rec", "pack", logged.to_str().unwrap(), "--rom", rom],
+                &["--out", logged_rec],
+            ),
+        );
+        for what in ["map", "samples"] {
+            log += &run(&["apu", what, "--rec", logged_rec, "--frame", "2"]);
+        }
+    }
     check("apu", &log);
     let _ = std::fs::remove_dir_all(dir);
 }

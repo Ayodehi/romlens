@@ -10,6 +10,7 @@ pub mod label;
 pub mod project;
 pub mod region;
 pub mod source_map;
+pub mod spc_log;
 pub mod symbols;
 pub mod undo;
 pub mod variable;

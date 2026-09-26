@@ -588,6 +588,10 @@ struct ApuFrame {
     /// The frame (default the last).
     #[arg(long)]
     frame: Option<u64>,
+    /// The SPC700's execution log (default `<recording>.spc.mxlog` when
+    /// there is one), for `map` and `samples`.
+    #[arg(long)]
+    log: Option<PathBuf>,
 }
 
 #[derive(clap::Args)]
@@ -1488,13 +1492,13 @@ fn run() -> Result<()> {
         },
         Command::Apu { what } => {
             use commands::apu::{ApuArgs, What};
-            let (what, rec, frame, frames, limit) = match what {
-                ApuCommand::Voices(f) => (What::Voices, f.rec, f.frame, None, 0),
-                ApuCommand::Dsp(f) => (What::Dsp, f.rec, f.frame, None, 0),
-                ApuCommand::Map(f) => (What::Map, f.rec, f.frame, None, 0),
-                ApuCommand::Samples(f) => (What::Samples, f.rec, f.frame, None, 0),
-                ApuCommand::Timeline(r) => (What::Timeline, r.rec, None, r.frames, r.limit),
-                ApuCommand::Ports(r) => (What::Ports, r.rec, None, r.frames, r.limit),
+            let (what, rec, frame, frames, limit, log) = match what {
+                ApuCommand::Voices(f) => (What::Voices, f.rec, f.frame, None, 0, f.log),
+                ApuCommand::Dsp(f) => (What::Dsp, f.rec, f.frame, None, 0, f.log),
+                ApuCommand::Map(f) => (What::Map, f.rec, f.frame, None, 0, f.log),
+                ApuCommand::Samples(f) => (What::Samples, f.rec, f.frame, None, 0, f.log),
+                ApuCommand::Timeline(r) => (What::Timeline, r.rec, None, r.frames, r.limit, None),
+                ApuCommand::Ports(r) => (What::Ports, r.rec, None, r.frames, r.limit, None),
             };
             commands::apu::run(ApuArgs {
                 what,
@@ -1502,6 +1506,7 @@ fn run() -> Result<()> {
                 frame,
                 frames: frames.as_deref(),
                 limit,
+                log: log.as_deref(),
             })
         }
         Command::Brr {

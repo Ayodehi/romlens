@@ -49,7 +49,7 @@ Header, 20 bytes:
 |---|---|---|
 | 0 | char[4] | `MXLG` |
 | 4 | u16 | version, 1 |
-| 6 | u8 | CPU: 0 for the SNES main CPU |
+| 6 | u8 | CPU: 0 for the SNES main CPU, 1 for the SPC700 (below) |
 | 7 | u8 | reserved |
 | 8 | u32 | CRC32 of the PRG ROM (the value the CDL file uses) |
 | 12 | u32 | PRG ROM size |
@@ -71,8 +71,44 @@ it is a Romlens file offset. Counts saturate at 2³²−1.
 
 HDMA table reads that transfer nothing (line counts, indirect addresses) are
 not recorded. DMA reads and writes are paired per channel, so HDMA that
-interrupts a GP-DMA stays separate. Only the SNES main CPU is logged; an
-SA-1's CPU is not.
+interrupts a GP-DMA stays separate. An SA-1's CPU is not logged.
+
+### The SPC700's log (CPU 1)
+
+Added 26 September 2026 (docs/23, A6). The fork logs the sound CPU too,
+with `emu.startExecutionLog(emu.cpuType.spc)`; the five log functions take
+an optional CPU type, the SNES CPU by default. The format is the same with
+these differences:
+- Addresses are the SPC700's 16-bit ones. `kind` is 6 for audio RAM and 7
+  for the boot ROM at `$FFC0`; `abs` is the offset in that memory.
+- `ACCS` has two more access kinds: 2, the DSP read the bytes by itself
+  (the sample directory, BRR sample data, the echo buffer), and 3, the DSP
+  wrote them (the echo buffer). Their `pc` is 0.
+- `FLOW` adds `CBNE`, `DBNZ`, `BBS` and `BBC` to the branches, `PCALL` and
+  `TCALL` to the calls (`TCALL` as an indirect call, through its vector),
+  and `RETI` as RTI. There is no `DMA ` section.
+- `states` is always 0.
+
+Audio RAM is rewritten as the game runs (a new song, new samples), so this
+log belongs with the recording it was made beside, not with the ROM, and is
+not imported into a project: the main CPU's importer refuses it and says
+where it goes. The recorder writes it beside the stream as
+`<name>.spc.mxlog`; `romlens rec pack` checks it against the ROM and puts
+it beside the recording; `romlens apu map` and `apu samples` read it from
+there (or `--log FILE`).
+
+In the map, what the log saw run is code, what the driver's code read or
+wrote is the driver's data, and what the DSP read is sample data; each
+sample says whether it was played. Two things are left out on purpose:
+- The boot ROM's upload loop reads and writes every byte it uploads, code
+  and samples alike, so its accesses say nothing of what the bytes are.
+- Below `$0200` the DSP reads only through a directory entry not yet set
+  up (a sample at `$0000`).
+
+The walk from the logged code still finds the code of branches the log
+never saw taken, but it can wander into data from there, so it only fills
+bytes nothing else claims. Short gaps (16 bytes or fewer) between the
+driver's data are taken as one table read in part.
 
 ## What Romlens does with a log
 

@@ -11,8 +11,10 @@
 -- Where Mesen has an execution log (emu.startExecutionLog, in the MesenCE
 -- fork), the script also records one and writes it beside the stream as
 -- <name>.mxlog: every minute, so a crash loses little, and at the end. Import
--- it into Romlens as a trace (docs/17). Elsewhere the script records the
--- stream alone, as before.
+-- it into Romlens as a trace (docs/17). Where the fork also logs the SPC700,
+-- its log goes beside the stream as <name>.spc.mxlog, and `rec pack` puts it
+-- beside the recording (docs/23). Elsewhere the script records the stream
+-- alone, as before.
 --
 -- Live: with Mesen's network access on as well, the script also sends the
 -- stream to Romlens over a local connection (127.0.0.1, port 7462 or
@@ -94,16 +96,26 @@ if xlog then
   emu.startExecutionLog()
 end
 
+-- The SPC700's log too, where the fork has one (docs/23): its log calls
+-- take a CPU. Older builds refuse the argument, which says there is none.
+local spc_xlog_path = out_path:gsub("%.rlstream$", "") .. ".spc.mxlog"
+local spc_xlog = xlog and emu.cpuType.spc ~= nil
+  and pcall(emu.startExecutionLog, emu.cpuType.spc)
+
 -- Written to a .part file and renamed, so a reader never sees half a log.
-local function write_xlog()
-  if not xlog then return end
-  local data = emu.getExecutionLog()
-  local part = xlog_path .. ".part"
+local function write_log(path, data)
+  local part = path .. ".part"
   local f = assert(io.open(part, "wb"))
   f:write(data)
   f:close()
-  os.remove(xlog_path)
-  assert(os.rename(part, xlog_path))
+  os.remove(path)
+  assert(os.rename(part, path))
+end
+
+local function write_xlog()
+  if not xlog then return end
+  write_log(xlog_path, emu.getExecutionLog())
+  if spc_xlog then write_log(spc_xlog_path, emu.getExecutionLog(emu.cpuType.spc)) end
 end
 
 -- Memory regions in stream order: memory type, size.
@@ -476,6 +488,10 @@ function finish()
     write_xlog()
     emu.stopExecutionLog()
     emu.log("Romlens recorder: execution log to " .. xlog_path)
+    if spc_xlog then
+      emu.stopExecutionLog(emu.cpuType.spc)
+      emu.log("Romlens recorder: the SPC700's execution log to " .. spc_xlog_path)
+    end
   end
 end
 

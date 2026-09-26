@@ -53,7 +53,7 @@ fn the_map_finds_the_driver_directory_and_sample() {
         (d[0].start, d[0].loop_at, d[0].blocks, d[0].loops),
         (0x4000, 0x4012, 4, true)
     );
-    let map = aram_map(aram, dsp, &spc, &[0], &[]);
+    let map = aram_map(aram, dsp, &spc, &[0], &[], None);
     let at = |a: u16| {
         map.iter()
             .find(|p| p.start <= a && (a as u32) < p.start as u32 + p.len)
@@ -114,4 +114,142 @@ fn port_messages_run_both_ways() {
     assert_eq!(m.len(), 2);
     assert!(m[0].from_cpu && !m[1].from_cpu);
     assert_eq!((m[0].port, m[0].value, m[1].value), (0, 0x01, 0x01));
+}
+
+mod with_a_log {
+    use super::*;
+    use romlens_core::io::import::spc_log;
+    use romlens_core::model::spc_log::{SpcAccess, SpcAccessRun, SpcInsn, SpcLog};
+
+    /// A log of the fixture driver: the boot ROM uploaded `$3000`, the
+    /// driver's start-up code ran (which a walk from `main` cannot reach),
+    /// it read song bytes at `$2000` and `$2008`, and the DSP read the
+    /// directory entry, the sample's first block and, through an entry not
+    /// yet set up, the direct page.
+    fn log() -> SpcLog {
+        SpcLog {
+            rom_crc32: 0,
+            rom_size: 0,
+            insns: [0x0200u16, 0x0202, 0x0203, 0x0206, 0x0209]
+                .map(|pc| SpcInsn {
+                    pc,
+                    boot_rom: false,
+                    count: 1,
+                })
+                .to_vec(),
+            accesses: vec![
+                SpcAccessRun {
+                    pc: 0x0209,
+                    addr: 0x2000,
+                    len: 2,
+                    access: SpcAccess::Read,
+                    count: 4,
+                },
+                SpcAccessRun {
+                    pc: 0x0209,
+                    addr: 0x2008,
+                    len: 1,
+                    access: SpcAccess::Read,
+                    count: 1,
+                },
+                SpcAccessRun {
+                    pc: 0xFFE2,
+                    addr: 0x3000,
+                    len: 16,
+                    access: SpcAccess::Write,
+                    count: 16,
+                },
+                SpcAccessRun {
+                    pc: 0,
+                    addr: 0x0000,
+                    len: 9,
+                    access: SpcAccess::DspRead,
+                    count: 9,
+                },
+                SpcAccessRun {
+                    pc: 0,
+                    addr: 0x3C00,
+                    len: 4,
+                    access: SpcAccess::DspRead,
+                    count: 1,
+                },
+                SpcAccessRun {
+                    pc: 0,
+                    addr: 0x4000,
+                    len: 9,
+                    access: SpcAccess::DspRead,
+                    count: 9,
+                },
+            ],
+            flows: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn the_format_round_trips_and_is_told_apart() {
+        let l = log();
+        let bytes = spc_log::write(&l);
+        assert!(spc_log::is_spc_log(&bytes));
+        assert_eq!(spc_log::read(&bytes, None).unwrap(), l);
+        // The main CPU's reader sends it where it belongs.
+        let err = romlens_core::io::import::exec_log::read(&bytes, &[]).unwrap_err();
+        assert!(err.to_string().contains("sound CPU"), "{err}");
+        // A ROM that is not the one it was recorded from is refused.
+        assert!(spc_log::read(&bytes, Some(&[1, 2, 3])).is_err());
+    }
+
+    #[test]
+    fn merging_adds_counts_and_keeps_each_relationship_once() {
+        let mut a = log();
+        a.merge(&log());
+        assert_eq!(a.insns.len(), 5);
+        assert!(a.insns.iter().all(|i| i.count == 2));
+        let song = a.accesses.iter().find(|r| r.addr == 0x2000).unwrap();
+        assert_eq!((song.len, song.count), (2, 8));
+        assert_eq!(a.touched(SpcAccess::DspRead).len(), 22);
+        assert_eq!(a.touched_by_driver().len(), 3, "not the boot ROM's upload");
+    }
+
+    #[test]
+    fn the_map_takes_code_data_and_samples_from_it() {
+        let rec = recording();
+        let s = rec.state_at(2).unwrap();
+        let spc = SpcState::decode(s.region(StateRegion::SpcState).unwrap());
+        let map = aram_map(
+            s.region(StateRegion::Aram).unwrap(),
+            s.region(StateRegion::DspRegisters).unwrap(),
+            &spc,
+            &[0],
+            &[],
+            Some(&log()),
+        );
+        let at = |a: u16| {
+            map.iter()
+                .find(|p| p.start <= a && (a as u32) < p.start as u32 + p.len)
+                .unwrap()
+        };
+        assert_eq!(
+            at(0x0200).kind,
+            PartKind::Code,
+            "the start-up code the log saw run"
+        );
+        assert_eq!(at(0x0200).label, "driver code");
+        assert_eq!(at(0x2000).kind, PartKind::DriverData);
+        assert_eq!(at(0x2001).kind, PartKind::DriverData);
+        assert_eq!(
+            at(0x2004).kind,
+            PartKind::DriverData,
+            "a short gap in a table"
+        );
+        assert_ne!(
+            at(0x3000).kind,
+            PartKind::DriverData,
+            "the boot ROM uploaded it"
+        );
+        assert_eq!(at(0x0008).kind, PartKind::DirectPage);
+        assert_eq!(
+            at(0x4000).label,
+            "sample 0: 4 blocks, loops at $4012, played"
+        );
+    }
 }

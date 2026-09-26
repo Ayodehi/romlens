@@ -5,8 +5,10 @@
 //! songs, instruments, tables, variables.
 
 use crate::dsp::brr::decode_sample;
+use crate::model::spc_log::{SpcAccess, SpcLog};
 use crate::recording::SpcState;
 use crate::spc700::aram;
+use crate::spc700::decode_at;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PartKind {
@@ -24,6 +26,12 @@ pub enum PartKind {
     Sample(u8),
     /// The echo's ring buffer.
     Echo,
+    /// Bytes the DSP read by itself outside any sample the directory
+    /// names (an execution log saw it).
+    DspData,
+    /// Bytes the driver's code read or wrote (an execution log saw it):
+    /// its songs, tables and variables.
+    DriverData,
     /// `$FFC0–$FFFF` while the boot ROM is mapped over it.
     Boot,
     /// The driver's data, or nothing.
@@ -40,6 +48,8 @@ impl PartKind {
             PartKind::Directory => "sample directory",
             PartKind::Sample(_) => "sample",
             PartKind::Echo => "echo buffer",
+            PartKind::DspData => "data the DSP read",
+            PartKind::DriverData => "driver data",
             PartKind::Boot => "boot ROM",
             PartKind::Other => "data",
         }
@@ -54,7 +64,9 @@ impl PartKind {
             PartKind::Directory => 6,
             PartKind::Sample(_) => 5,
             PartKind::Code => 4,
+            PartKind::DspData => 3,
             PartKind::Stack => 3,
+            PartKind::DriverData => 2,
             PartKind::DirectPage => 2,
             PartKind::Other => 0,
         }
@@ -125,14 +137,22 @@ pub fn directory(aram: &[u8], dir: u8, used: &[u8]) -> Vec<DirEntry> {
     out
 }
 
+/// The longest run of untouched bytes between two of the driver's data
+/// that is taken to be part of the same table.
+const DATA_GAP: usize = 16;
+
 /// Audio RAM in parts. `used` are the directory entries the voices name;
-/// `entries` are places known to be code, beside the program counter.
+/// `entries` are places known to be code, beside the program counter. With
+/// the SPC700's execution log, every instruction it ran is code, what the
+/// code read or wrote is the driver's data, what the DSP read is sample
+/// data, and each sample says whether it was heard.
 pub fn aram_map(
     aram: &[u8],
     dsp: &[u8],
     spc: &SpcState,
     used: &[u8],
     entries: &[u16],
+    log: Option<&SpcLog>,
 ) -> Vec<AramPart> {
     let mut owner = vec![PartKind::Other; 0x10000];
     let mut claim = |start: usize, len: usize, kind: PartKind| {
@@ -154,9 +174,34 @@ pub fn aram_map(
     }
     let mut starts = vec![spc.pc];
     starts.extend_from_slice(entries);
+    if let Some(log) = log {
+        starts.extend(log.code_starts());
+    }
     let walk = aram::walk(aram, &starts);
-    for &a in &walk.code {
-        claim(a as usize, 1, PartKind::Code);
+    let dsp_read = log
+        .map(|l| l.touched(SpcAccess::DspRead))
+        .unwrap_or_default();
+    match log {
+        None => {
+            for &a in &walk.code {
+                claim(a as usize, 1, PartKind::Code);
+            }
+        }
+        Some(log) => {
+            // What ran is code.
+            for pc in log.code_starts() {
+                let len = decode_at(aram, pc).len() as usize;
+                claim(pc as usize, len, PartKind::Code);
+            }
+            for a in log.touched_by_driver() {
+                claim(a as usize, 1, PartKind::DriverData);
+            }
+            // Below $0200 the DSP reads only through a directory entry not
+            // yet set up (a sample at $0000), which says nothing of the page.
+            for &a in dsp_read.range(0x0200..) {
+                claim(a as usize, 1, PartKind::DspData);
+            }
+        }
     }
     let dir = dsp.get(0x5D).copied().unwrap_or(0);
     let d = directory(aram, dir, used);
@@ -176,6 +221,34 @@ pub fn aram_map(
         let len = if edl == 0 { 4 } else { edl as usize * 2048 };
         claim(esa << 8, len, PartKind::Echo);
     }
+    if log.is_some() {
+        // The walk goes on past branches the log never saw taken, and from
+        // there can wander into data, so the code it finds beyond what ran
+        // only fills bytes nothing else claims.
+        for &a in &walk.code {
+            if owner[a as usize] == PartKind::Other {
+                owner[a as usize] = PartKind::Code;
+            }
+        }
+        // A table the driver read only some entries of: short gaps between
+        // its data are its data too.
+        let mut i = 0usize;
+        while i < 0x10000 {
+            if owner[i] != PartKind::Other {
+                i += 1;
+                continue;
+            }
+            let mut j = i;
+            while j < 0x10000 && owner[j] == PartKind::Other {
+                j += 1;
+            }
+            let data = |k: usize| owner.get(k) == Some(&PartKind::DriverData);
+            if j - i <= DATA_GAP && i > 0 && data(i - 1) && data(j) {
+                owner[i..j].fill(PartKind::DriverData);
+            }
+            i = j;
+        }
+    }
 
     let mut out: Vec<AramPart> = Vec::new();
     let mut i = 0usize;
@@ -193,7 +266,12 @@ pub fn aram_map(
                 } else {
                     String::new()
                 };
-                format!("sample {n}: {} blocks{lp}", e.blocks)
+                let heard = match log {
+                    Some(_) if dsp_read.contains(&e.start) => ", played",
+                    Some(_) => ", not played while logged",
+                    None => "",
+                };
+                format!("sample {n}: {} blocks{lp}{heard}", e.blocks)
             }
             PartKind::Directory => format!(
                 "sample directory, {} entr{} (DIR = ${dir:02X})",
@@ -209,8 +287,12 @@ pub fn aram_map(
                 },
                 if writes_on { "" } else { ", writes off" }
             ),
+            PartKind::Code if log.is_some() => "driver code".to_owned(),
             PartKind::Code => format!("driver code reached from ${:04X}", spc.pc),
             PartKind::Boot => "boot ROM (mapped over RAM)".to_owned(),
+            PartKind::Other if log.is_some() => {
+                "data the driver did not touch while logged".to_owned()
+            }
             k => k.name().to_owned(),
         };
         out.push(AramPart {
