@@ -111,7 +111,7 @@ struct DocumentView: View {
                     .menuStyle(.button)
                     .controlSize(.large)
                     .fixedSize()
-                    .help("Hex (⌥⌘1), Disassembly (⌥⌘2), Both (⌥⌘3), C (⌥⌘8) or Graph (⌥⌘9)")
+                    .help("Hex (⌥⌘1), Disassembly (⌥⌘2), Both (⌥⌘3), C (⌥⌘8), Graph (⌥⌘9) or Atlas (⌥⌘A)")
                 } else {
                     Picker("Editor", selection: editorTab) {
                         ForEach(RomViewModel.EditorTab.allCases) { tab in
@@ -120,7 +120,7 @@ struct DocumentView: View {
                     }
                     .pickerStyle(.segmented)
                     .controlSize(.large)
-                    .help("Hex (⌥⌘1), Disassembly (⌥⌘2), Both (⌥⌘3), C (⌥⌘8) or Graph (⌥⌘9)")
+                    .help("Hex (⌥⌘1), Disassembly (⌥⌘2), Both (⌥⌘3), C (⌥⌘8), Graph (⌥⌘9) or Atlas (⌥⌘A)")
                 }
             }
             ToolbarItem(placement: .principal) {

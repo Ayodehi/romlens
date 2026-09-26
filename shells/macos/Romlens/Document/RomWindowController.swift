@@ -71,14 +71,23 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
     @objc func showC(_ sender: Any?) { model.editorTab = .c }
     @objc func decompileRoutine(_ sender: Any?) { model.showDecompiled() }
     @objc func showGraph(_ sender: Any?) { model.showGraph() }
+    @objc func showAtlas(_ sender: Any?) { model.editorTab = .atlas }
     /// View › Show Explanations, remembered for the next window.
     @objc func toggleExplanations(_ sender: Any?) {
         model.showExplanations.toggle()
         UserDefaults.standard.set(!model.showExplanations, forKey: RomViewModel.hideExplanationsKey)
     }
-    @objc func zoomGraphIn(_ sender: Any?) { model.graph.requestZoom(.zoomIn) }
-    @objc func zoomGraphOut(_ sender: Any?) { model.graph.requestZoom(.zoomOut) }
-    @objc func zoomGraphToFit(_ sender: Any?) { model.graph.requestZoom(.fit) }
+    /// Zoom In, Zoom Out and Zoom to Fit act on the Graph or the Atlas,
+    /// whichever shows.
+    @objc func zoomGraphIn(_ sender: Any?) {
+        if model.editorTab == .atlas { model.atlas.requestZoom(.zoomIn) } else { model.graph.requestZoom(.zoomIn) }
+    }
+    @objc func zoomGraphOut(_ sender: Any?) {
+        if model.editorTab == .atlas { model.atlas.requestZoom(.zoomOut) } else { model.graph.requestZoom(.zoomOut) }
+    }
+    @objc func zoomGraphToFit(_ sender: Any?) {
+        if model.editorTab == .atlas { model.atlas.requestZoom(.fit) } else { model.graph.requestZoom(.fit) }
+    }
 
     /// Export C…: the routine's translation unit and the snes.h it
     /// includes, side by side.
@@ -207,8 +216,10 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
         case #selector(showGraph(_:)):
             item.state = model.graphicsTab == nil && model.editorTab == .graph ? .on : .off
             return model.hasDisassembly
+        case #selector(showAtlas(_:)):
+            item.state = model.graphicsTab == nil && model.editorTab == .atlas ? .on : .off
         case #selector(zoomGraphIn(_:)), #selector(zoomGraphOut(_:)), #selector(zoomGraphToFit(_:)):
-            return model.graphicsTab == nil && model.editorTab == .graph
+            return model.graphicsTab == nil && (model.editorTab == .graph || model.editorTab == .atlas)
         case #selector(decompileRoutine(_:)):
             return model.hasDisassembly && model.instruction != nil
         case #selector(exportC(_:)):

@@ -17,7 +17,7 @@ final class RomViewModel {
     }
 
     enum EditorTab: String, CaseIterable, Identifiable {
-        case hex, disassembly, both, c, graph
+        case hex, disassembly, both, c, graph, atlas
         var id: String { rawValue }
         var title: String {
             switch self {
@@ -26,6 +26,7 @@ final class RomViewModel {
             case .both: "Both"
             case .c: "C"
             case .graph: "Graph"
+            case .atlas: "Atlas"
             }
         }
     }
@@ -52,6 +53,7 @@ final class RomViewModel {
     /// The C tab's routine and text (docs/18).
     let decompiler = DecompileModel()
     let graph = GraphModel()
+    let atlas = AtlasModel()
     @ObservationIgnored let cache: HexRowCache
     @ObservationIgnored let asmCache: AsmLineCache
     let metrics = MonoMetrics()

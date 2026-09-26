@@ -1,7 +1,7 @@
 import RomlensKit
 import SwiftUI
 
-/// The centre of the window: Hex, Disassembly, Both, C or Graph, or one of
+/// The centre of the window: Hex, Disassembly, Both, C, Graph or Atlas, or one of
 /// the graphics views.
 struct EditorView: View {
     @Bindable var model: RomViewModel
@@ -43,6 +43,8 @@ struct EditorView: View {
             } else {
                 analyzing
             }
+        case .atlas:
+            AtlasView(model: model)
         }
     }
 
