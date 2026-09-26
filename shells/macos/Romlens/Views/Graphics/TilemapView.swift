@@ -7,37 +7,57 @@ import SwiftUI
 struct TilemapView: View {
     let model: RomViewModel
     @Bindable var graphics: GraphicsModel
-    static let cell: CGFloat = 16
 
     var body: some View {
         let cells = graphics.cells()
         let size = graphics.mapCells
+        let image = graphics.layerImage()
+        // Map pixels a cell: 8, or 16 for 16×16 tiles.
+        let unit = image.map { CGFloat($0.width) / CGFloat(max(size.columns, 1)) } ?? 8
         VStack(spacing: 0) {
             controls
             Divider()
             HStack(alignment: .top, spacing: 0) {
-                ScrollView([.horizontal, .vertical]) {
-                    ZStack(alignment: .topLeading) {
-                        if let image = graphics.layerImage() {
-                            PixelImage(bitmap: image, scale: Self.cell / 8)
-                        } else {
-                            numbers(cells, size: size)
-                        }
-                        changedCells(cells, size: size)
-                        grid(size: size)
+                if graphics.tilemapScale == 0 {
+                    GeometryReader { geo in
+                        let pad: CGFloat = 16
+                        let across = (geo.size.width - 2 * pad) / (CGFloat(size.columns) * unit)
+                        let down = (geo.size.height - 2 * pad) / (CGFloat(size.rows) * unit)
+                        map(cells, size: size, image: image, cell: unit * max(0.1, min(across, down)))
+                            .padding(pad)
                     }
-                    .onTapGesture(coordinateSpace: .local) { p in
-                        let col = Int(p.x / Self.cell), row = Int(p.y / Self.cell)
-                        if let i = cells.firstIndex(where: { Int($0.col) == col && Int($0.row) == row }) {
-                            graphics.selectCell(i)
-                        }
+                } else {
+                    ScrollView([.horizontal, .vertical]) {
+                        map(cells, size: size, image: image, cell: unit * CGFloat(graphics.tilemapScale))
+                            .padding()
                     }
-                    .padding()
                 }
                 if let i = graphics.selectedCell, cells.indices.contains(i) {
                     Divider()
                     CellDetail(cell: cells[i], graphics: graphics).frame(width: 220)
                 }
+            }
+        }
+    }
+
+    private func map(
+        _ cells: [TilemapCellInfo], size: (columns: Int, rows: Int), image: BitmapInfo?, cell: CGFloat
+    ) -> some View {
+        ZStack(alignment: .topLeading) {
+            if let image {
+                PixelImage(bitmap: image, scale: cell * CGFloat(size.columns) / CGFloat(max(image.width, 1)))
+            } else {
+                numbers(cells, size: size, cell: cell)
+            }
+            changedCells(cells, size: size, cell: cell)
+            grid(size: size, cell: cell)
+        }
+        .frame(width: CGFloat(size.columns) * cell, height: CGFloat(size.rows) * cell, alignment: .topLeading)
+        .contentShape(Rectangle())
+        .onTapGesture(coordinateSpace: .local) { p in
+            let col = Int(p.x / cell), row = Int(p.y / cell)
+            if let i = cells.firstIndex(where: { Int($0.col) == col && Int($0.row) == row }) {
+                graphics.selectCell(i)
             }
         }
     }
@@ -70,62 +90,77 @@ struct TilemapView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
+            Picker("Size", selection: $graphics.tilemapScale) {
+                Text("Fit").tag(0)
+                Text("1:1").tag(1)
+                ForEach([2, 3, 4], id: \.self) { Text("\($0)×").tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .fixedSize()
+            .help("Fit the whole map in the window, or draw each map pixel as 1 to 4 screen pixels")
         }
         .controlSize(.small)
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
     }
 
-    private func numbers(_ cells: [TilemapCellInfo], size: (columns: Int, rows: Int)) -> some View {
+    private func numbers(_ cells: [TilemapCellInfo], size: (columns: Int, rows: Int), cell: CGFloat) -> some View {
         Canvas { ctx, _ in
             for c in cells {
-                let rect = CGRect(x: CGFloat(c.col) * Self.cell, y: CGFloat(c.row) * Self.cell, width: Self.cell, height: Self.cell)
+                let rect = CGRect(x: CGFloat(c.col) * cell, y: CGFloat(c.row) * cell, width: cell, height: cell)
                 let shade = Double(c.palette) / 8
                 ctx.fill(Path(rect), with: .color(Color(hue: shade, saturation: 0.25, brightness: 0.95).opacity(0.5)))
-                ctx.draw(
-                    Text(GraphicsStyle.hex(c.tile, 3)).font(.system(size: 6).monospaced()),
-                    at: CGPoint(x: rect.midX, y: rect.midY)
-                )
+                // Too small to read below 12 points a cell.
+                if cell >= 12 {
+                    ctx.draw(
+                        Text(GraphicsStyle.hex(c.tile, 3)).font(.system(size: cell * 0.375).monospaced()),
+                        at: CGPoint(x: rect.midX, y: rect.midY)
+                    )
+                }
             }
         }
-        .frame(width: CGFloat(size.columns) * Self.cell, height: CGFloat(size.rows) * Self.cell)
+        .frame(width: CGFloat(size.columns) * cell, height: CGFloat(size.rows) * cell)
     }
 
     /// Cells whose entry changed since the previous frame, outlined.
-    private func changedCells(_ cells: [TilemapCellInfo], size: (columns: Int, rows: Int)) -> some View {
+    private func changedCells(_ cells: [TilemapCellInfo], size: (columns: Int, rows: Int), cell: CGFloat) -> some View {
         let changed = cells.filter { c in
             guard let at = graphics.cellVram(c) else { return false }
             return graphics.changed(.vram, offset: Int(at.offset), len: Int(at.len))
         }
         return Canvas { ctx, _ in
             for c in changed {
-                let rect = CGRect(x: CGFloat(c.col) * Self.cell, y: CGFloat(c.row) * Self.cell, width: Self.cell, height: Self.cell)
+                let rect = CGRect(x: CGFloat(c.col) * cell, y: CGFloat(c.row) * cell, width: cell, height: cell)
                 ctx.stroke(Path(rect.insetBy(dx: 1, dy: 1)), with: .color(.orange), lineWidth: 1.5)
             }
         }
-        .frame(width: CGFloat(size.columns) * Self.cell, height: CGFloat(size.rows) * Self.cell)
+        .frame(width: CGFloat(size.columns) * cell, height: CGFloat(size.rows) * cell)
         .allowsHitTesting(false)
     }
 
-    private func grid(size: (columns: Int, rows: Int)) -> some View {
+    private func grid(size: (columns: Int, rows: Int), cell: CGFloat) -> some View {
         Canvas { ctx, canvas in
             var path = Path()
+            // Lines every cell would hide a map drawn this small.
+            let lines = cell >= 12
             for c in 0...size.columns {
-                path.move(to: CGPoint(x: CGFloat(c) * Self.cell, y: 0))
-                path.addLine(to: CGPoint(x: CGFloat(c) * Self.cell, y: canvas.height))
+                path.move(to: CGPoint(x: CGFloat(c) * cell, y: 0))
+                path.addLine(to: CGPoint(x: CGFloat(c) * cell, y: canvas.height))
             }
             for r in 0...size.rows {
-                path.move(to: CGPoint(x: 0, y: CGFloat(r) * Self.cell))
-                path.addLine(to: CGPoint(x: canvas.width, y: CGFloat(r) * Self.cell))
+                path.move(to: CGPoint(x: 0, y: CGFloat(r) * cell))
+                path.addLine(to: CGPoint(x: canvas.width, y: CGFloat(r) * cell))
             }
-            ctx.stroke(path, with: .color(.secondary.opacity(0.25)), lineWidth: 0.5)
+            if lines {
+                ctx.stroke(path, with: .color(.secondary.opacity(0.25)), lineWidth: 0.5)
+            }
             if let i = graphics.selectedCell {
                 let cols = size.columns
-                let rect = CGRect(x: CGFloat(i % cols) * Self.cell, y: CGFloat(i / cols) * Self.cell, width: Self.cell, height: Self.cell)
+                let rect = CGRect(x: CGFloat(i % cols) * cell, y: CGFloat(i / cols) * cell, width: cell, height: cell)
                 ctx.stroke(Path(rect), with: .color(.accentColor), lineWidth: 2)
             }
         }
-        .frame(width: CGFloat(size.columns) * Self.cell, height: CGFloat(size.rows) * Self.cell)
+        .frame(width: CGFloat(size.columns) * cell, height: CGFloat(size.rows) * cell)
         .allowsHitTesting(false)
     }
 }

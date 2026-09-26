@@ -326,6 +326,16 @@ import Testing
                 content.layoutSubtreeIfNeeded()
                 content.display()
                 #expect(m.graphicsTab == tab)
+                if tab == .tilemap {
+                    // Fitted to the window, and 1:1.
+                    for scale in [0, 1] {
+                        m.graphics.tilemapScale = scale
+                        Fixture.spin(0.05)
+                        content.layoutSubtreeIfNeeded()
+                        content.display()
+                    }
+                    m.graphics.tilemapScale = 2
+                }
             }
         }
     }

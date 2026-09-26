@@ -116,6 +116,9 @@ final class GraphicsModel {
     var hoverPixel: (x: Int, y: Int)?
     /// How many screen pixels a frame pixel takes.
     var frameScale: Int = 2
+    /// The Tilemap view's size: fitted to the window (0), or screen pixels
+    /// a map pixel.
+    var tilemapScale: Int = 2
     /// The Layers view scales its grid to the window; off, 1:1.
     var layersFit = true
 
