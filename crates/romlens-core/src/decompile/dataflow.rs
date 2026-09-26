@@ -1577,6 +1577,7 @@ fn arg_ranges(
 ) -> Result<(BTreeMap<u32, u32>, Option<usize>), &'static str> {
     let mut ranges: BTreeMap<u32, u32> = BTreeMap::new();
     let mut step = None;
+    // `ranges` is keyed by where a piece starts; `out` the pieces kept.
     for (b, block) in lifted.blocks.iter().enumerate() {
         for (i, l) in block.lines.iter().enumerate() {
             let Some(&d) = before.get(&(b, i)) else {
@@ -1593,21 +1594,34 @@ fn arg_ranges(
                 if w > 2 {
                     return Err("it reads a long pointer its caller pushed");
                 }
-                match ranges.insert(k - d, w) {
-                    Some(have) if have != w => {
-                        return Err("it reads its arguments in overlapping pieces");
-                    }
-                    _ => {}
-                }
+                let e = k - d;
+                let have = ranges.get(&e).copied().unwrap_or(0);
+                ranges.insert(e, have.max(w));
                 step.get_or_insert(l.step);
             }
         }
     }
+    // Pieces read in overlapping ways (a word at $0B,S and one at $0C,S)
+    // are taken a byte at a time.
     let starts: Vec<(u32, u32)> = ranges.iter().map(|(&e, &w)| (e, w)).collect();
-    if starts.windows(2).any(|p| p[0].0 + p[0].1 > p[1].0) {
-        return Err("it reads its arguments in overlapping pieces");
+    let mut out: BTreeMap<u32, u32> = BTreeMap::new();
+    let mut i = 0;
+    while i < starts.len() {
+        // The pieces that overlap this one, one after another.
+        let mut end = starts[i].0 + starts[i].1;
+        let mut j = i + 1;
+        while j < starts.len() && starts[j].0 < end {
+            end = end.max(starts[j].0 + starts[j].1);
+            j += 1;
+        }
+        if j == i + 1 {
+            out.insert(starts[i].0, starts[i].1);
+        } else {
+            out.extend((starts[i].0..end).map(|b| (b, 1)));
+        }
+        i = j;
     }
-    Ok((ranges, step))
+    Ok((out, step))
 }
 
 /// Whether a routine works on what its call left on the stack: it pulls
@@ -1677,8 +1691,75 @@ pub fn stack_slots(
         && addresses
     {
         lifted.warnings.push(format!(
-            "the stack is left as memory, `MEM(S + k)`, because {why}"
+            "the stack is left as memory, `STACK16(S + k)`, because {why}"
         ));
+        callers_bytes_as_in_c(f, cfg, lifted);
+    }
+}
+
+/// Where the stack is left as memory, its caller's bytes read as a call in
+/// C leaves them: just above S, with no return address below them. Only
+/// where the depth is known; the return address itself has nothing to
+/// stand for it.
+fn callers_bytes_as_in_c(f: &Function, cfg: &Cfg, lifted: &mut Lifted) {
+    let Ok(before) = depths(f, cfg, lifted) else {
+        return;
+    };
+    let ret_len: u32 = if f.steps.iter().any(|s| s.insn.mnemonic == Mnemonic::RTL) {
+        3
+    } else {
+        2
+    };
+    fn moved(k: u32, d: u32, ret_len: u32) -> Option<Expr> {
+        (k > d + ret_len)
+            .then(|| Expr::sum(Expr::Reg(Reg::S, Width::W16), Expr::Const(k - ret_len)))
+    }
+    fn shift(e: &mut Expr, d: u32, ret_len: u32) {
+        match e {
+            Expr::Mem { addr, .. } => match stack_offset(addr).and_then(|k| moved(k, d, ret_len)) {
+                Some(a) => **addr = a,
+                None => shift(addr, d, ret_len),
+            },
+            Expr::Un(_, x) | Expr::Cast(_, x) | Expr::Signed(_, x) => shift(x, d, ret_len),
+            Expr::Bin(_, a, b) => {
+                shift(a, d, ret_len);
+                shift(b, d, ret_len);
+            }
+            Expr::Call(_, args) => args.iter_mut().for_each(|a| shift(a, d, ret_len)),
+            _ => {}
+        }
+    }
+    for (b, block) in lifted.blocks.iter_mut().enumerate() {
+        for (i, l) in block.lines.iter_mut().enumerate() {
+            let Some(&d) = before.get(&(b, i)) else {
+                continue;
+            };
+            let d = d as u32;
+            let dst_moved = match &l.stmt {
+                Stmt::Assign {
+                    dst: Place::Mem { addr, .. },
+                    ..
+                } => stack_offset(addr).and_then(|k| moved(k, d, ret_len)),
+                _ => None,
+            };
+            // The destination's own address first; `for_each_expr_mut`
+            // hands it over bare, not as memory.
+            for_each_expr_mut(&mut l.stmt, &mut |e| {
+                if stack_offset(e).is_none() {
+                    shift(e, d, ret_len)
+                }
+            });
+            if let (
+                Some(a),
+                Stmt::Assign {
+                    dst: Place::Mem { addr, .. },
+                    ..
+                },
+            ) = (dst_moved, &mut l.stmt)
+            {
+                *addr = a;
+            }
+        }
     }
 }
 
