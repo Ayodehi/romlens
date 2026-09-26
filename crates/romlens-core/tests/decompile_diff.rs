@@ -765,6 +765,9 @@ int main(int argc, char **argv) {
                 }
                 u16 a0 = A, x0 = X, y0 = Y, d0 = D; u8 dbr0 = DBR, c0 = C, n0 = N, v0 = V, z0 = Z;
                 entries[i].fn();
+                /* The time is for the routine; printing what it wrote is not timed. */
+                struct itimerval off = {{0, 0}, {0, 0}};
+                setitimer(ITIMER_REAL, &off, NULL);
                 printf("R %d %d | %04X %04X %04X %04X %04X %02X %X %X %X %X | %04X %04X %04X 1FFF %04X %02X %X %X %X %X |",
                        entries[i].index, s, A, X, Y, S, D, DBR, C, N, V, Z, a0, x0, y0, d0, dbr0, c0, n0, v0, z0);
                 for (uint32_t a = 0; a < (1u << 24); a += 8) {
