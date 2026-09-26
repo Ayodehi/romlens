@@ -1,8 +1,8 @@
 //! The SPC700's I/O registers, `$F0–$FF` of its address space.
 //!
-//! Names follow fullsnes. The SPC700 reaches them as direct-page bytes
-//! while P is clear (page 0), which is how every driver runs, or with an
-//! absolute address.
+//! Names follow fullsnes ("SNES APU SPC700 I/O Ports"). The SPC700
+//! reaches them as direct-page bytes while P is clear (page 0), which is
+//! how every driver runs, or with an absolute address.
 
 /// Whether the SPC700 reads a register, writes it, or both.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -99,21 +99,21 @@ pub static IO_REGISTERS: [IoRegister; 16] = [
     ),
     reg(
         0xFA,
-        "T0TARGET",
+        "T0DIV",
         Write,
-        "Timer 0's period, in 8 kHz ticks (0 means 256)",
+        "Timer 0's divider of its 8 kHz clock (0 means 256)",
     ),
     reg(
         0xFB,
-        "T1TARGET",
+        "T1DIV",
         Write,
-        "Timer 1's period, in 8 kHz ticks (0 means 256)",
+        "Timer 1's divider of its 8 kHz clock (0 means 256)",
     ),
     reg(
         0xFC,
-        "T2TARGET",
+        "T2DIV",
         Write,
-        "Timer 2's period, in 64 kHz ticks (0 means 256)",
+        "Timer 2's divider of its 64 kHz clock (0 means 256)",
     ),
     reg(
         0xFD,

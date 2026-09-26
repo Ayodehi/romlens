@@ -60,7 +60,7 @@ impl Field {
     }
 
     /// The field in the short form, or nothing for a flag that is off.
-    fn short(&self, value: u32) -> Option<String> {
+    pub(crate) fn short(&self, value: u32) -> Option<String> {
         let zero = self.raw(value) == 0;
         match self.kind {
             Kind::Flag {
@@ -254,6 +254,17 @@ fn part(address: u16, l: &Layout, value: Option<u32>, width: u8) -> Part {
     } else {
         name
     };
+    fields_part(address, name, l, value, width)
+}
+
+/// A part named `name`, its fields read from `value`.
+pub(crate) fn fields_part(
+    address: u16,
+    name: String,
+    l: &Layout,
+    value: Option<u32>,
+    width: u8,
+) -> Part {
     let fields = l
         .fields
         .iter()
@@ -289,7 +300,12 @@ fn part(address: u16, l: &Layout, value: Option<u32>, width: u8) -> Part {
 
 // ---- field constructors ----
 
-const fn flag(bit: u8, name: &'static str, on: &'static str, off: &'static str) -> Field {
+pub(crate) const fn flag(
+    bit: u8,
+    name: &'static str,
+    on: &'static str,
+    off: &'static str,
+) -> Field {
     Field {
         hi: bit,
         lo: bit,
@@ -303,7 +319,12 @@ const fn flag(bit: u8, name: &'static str, on: &'static str, off: &'static str) 
 }
 
 /// A flag whose off state is worth saying even in the short form.
-const fn flag2(bit: u8, name: &'static str, on: &'static str, off: &'static str) -> Field {
+pub(crate) const fn flag2(
+    bit: u8,
+    name: &'static str,
+    on: &'static str,
+    off: &'static str,
+) -> Field {
     Field {
         hi: bit,
         lo: bit,
@@ -316,7 +337,12 @@ const fn flag2(bit: u8, name: &'static str, on: &'static str, off: &'static str)
     }
 }
 
-const fn choice(hi: u8, lo: u8, name: &'static str, names: &'static [&'static str]) -> Field {
+pub(crate) const fn choice(
+    hi: u8,
+    lo: u8,
+    name: &'static str,
+    names: &'static [&'static str],
+) -> Field {
     Field {
         hi,
         lo,
@@ -329,7 +355,12 @@ const fn choice(hi: u8, lo: u8, name: &'static str, names: &'static [&'static st
 }
 
 /// A choice whose first entry means "none", left out of the short form.
-const fn choice0(hi: u8, lo: u8, name: &'static str, names: &'static [&'static str]) -> Field {
+pub(crate) const fn choice0(
+    hi: u8,
+    lo: u8,
+    name: &'static str,
+    names: &'static [&'static str],
+) -> Field {
     Field {
         hi,
         lo,
@@ -341,7 +372,7 @@ const fn choice0(hi: u8, lo: u8, name: &'static str, names: &'static [&'static s
     }
 }
 
-const fn number(hi: u8, lo: u8, name: &'static str, f: fn(u32) -> String) -> Field {
+pub(crate) const fn number(hi: u8, lo: u8, name: &'static str, f: fn(u32) -> String) -> Field {
     Field {
         hi,
         lo,
@@ -350,7 +381,11 @@ const fn number(hi: u8, lo: u8, name: &'static str, f: fn(u32) -> String) -> Fie
     }
 }
 
-const fn settings(address: u16, about: &'static str, fields: &'static [Field]) -> Layout {
+pub(crate) const fn settings(
+    address: u16,
+    about: &'static str,
+    fields: &'static [Field],
+) -> Layout {
     Layout {
         address,
         pair: None,
@@ -388,7 +423,7 @@ const fn twice(address: u16, about: &'static str) -> Layout {
     }
 }
 
-const fn data(address: u16, about: &'static str) -> Layout {
+pub(crate) const fn data(address: u16, about: &'static str) -> Layout {
     Layout {
         address,
         pair: None,

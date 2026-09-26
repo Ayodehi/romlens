@@ -8,7 +8,18 @@ use romlens_core::explain::{RegisterWrite, describe};
 use romlens_core::model::{all_hardware_registers, hardware_register};
 use romlens_core::{AddressExpr, parse_address_expr};
 
-pub fn run(address: Option<&str>, value: Option<&str>) -> Result<()> {
+/// Which register file: the 65816's, the S-DSP's or the SPC700's I/O.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Bank {
+    Cpu,
+    Dsp,
+    Spc,
+}
+
+pub fn run(bank: Bank, address: Option<&str>, value: Option<&str>) -> Result<()> {
+    if bank != Bank::Cpu {
+        return sound(bank, address, value);
+    }
     match address {
         Some(text) => {
             let a = match parse_address_expr(text)? {
@@ -52,6 +63,81 @@ pub fn run(address: Option<&str>, value: Option<&str>) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// The DSP's registers (`$00–$7F`, or by name) and the SPC700's
+/// (`$F0–$FF`), as the 65816's above.
+fn sound(bank: Bank, address: Option<&str>, value: Option<&str>) -> Result<()> {
+    use romlens_core::explain::sound::{
+        describe_dsp, describe_spc_io, dsp_layout, dsp_register_name, dsp_register_named,
+    };
+    use romlens_core::spc700::{IO_REGISTERS, io_named};
+    let value = value.map(super::rec::number).transpose()?;
+    if value.is_some_and(|v| v > 0xFF) {
+        return Err(anyhow!("a sound register takes one byte"));
+    }
+    let value = value.map(|v| v as u8);
+    let Some(text) = address else {
+        if value.is_some() {
+            return Err(anyhow!("--value needs a register"));
+        }
+        match bank {
+            Bank::Dsp => {
+                for r in 0..0x80u8 {
+                    let l = dsp_layout(r);
+                    if l.data && l.about.starts_with("Not used") {
+                        continue;
+                    }
+                    println!(
+                        "${r:02X}  {:<9} {}",
+                        dsp_register_name(r),
+                        first_sentence(l.about)
+                    );
+                }
+            }
+            _ => {
+                for r in &IO_REGISTERS {
+                    println!("${:02X}  {:<9} {}", r.address, r.name, r.description);
+                }
+            }
+        }
+        return Ok(());
+    };
+    let w = match bank {
+        Bank::Dsp => {
+            let reg = match dsp_register_named(text) {
+                Some(r) => r,
+                None => {
+                    let v = super::rec::number(text)?;
+                    u8::try_from(v)
+                        .ok()
+                        .filter(|v| *v < 0x80)
+                        .ok_or_else(|| anyhow!("DSP registers are $00-$7F"))?
+                }
+            };
+            describe_dsp(reg, value)
+        }
+        _ => {
+            let a = match io_named(text) {
+                Some(r) => r.address,
+                None => {
+                    let v = super::rec::number(text)?;
+                    u16::try_from(v).map_err(|_| anyhow!("the SPC700's I/O is $F0-$FF"))?
+                }
+            };
+            describe_spc_io(a, value).ok_or_else(|| anyhow!("the SPC700's I/O is $F0-$FF"))?
+        }
+    };
+    let p = &w.parts[0];
+    println!("${:02X}  {}", p.address, p.name);
+    print!("{}", write_text(&w, "  "));
+    Ok(())
+}
+
+fn first_sentence(s: &str) -> &str {
+    s.split_once(". ")
+        .map_or(s, |(a, _)| a)
+        .trim_end_matches('.')
 }
 
 /// A write, register by register: what each is for, its fields as a table,

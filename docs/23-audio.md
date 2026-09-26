@@ -10,7 +10,7 @@ that tracks progress against it.
 | A0 this document, content-policy rule 11, the licensing note, the recording layer, the roadmap pointer, the checklist rows | done |
 | A1 the SPC700 instruction set: decode, format, encode, I/O names, `romlens spc disasm` | done, 26 September 2026: `spc700::OPCODES`, the 256 opcodes row by row with their operands, lengths and cycles (the cycles are checked against the single-step suite in A7); `decode` gives each operand's value (the two memory-to-memory forms take the source byte first), where control goes (`Flow`, with `TCALL`'s and `BRK`'s vectors) and the memory an operand names for either direct page; `format_instruction` prints the Sony syntax with the 65816 listing's token kinds, `$F0–$FF` by name (`MOV DSPADDR,#$4C`). `assemble` reads that syntax back with labels, equates, `.org`, `.db` and `.dw`, so tests and the sound fixture are written as code; every opcode's text assembles back to its bytes. `aram::walk` follows code from its entries through branches, calls and vectors, stopping at the boot ROM's page and at jumps through tables. `romlens spc disasm <image> [--base A] [<address>] [--count N] [--walk]`. Tests: seven (the round trip, the table, 36 instructions read by hand from fullsnes, operand order, flow, the walk, the assembler's errors) and a golden |
 | A2 BRR samples: `dsp::brr`, `DataKind::Sample`, `romlens brr` | done, 26 September 2026: `dsp::brr::decode_block` decodes a block and keeps each value's steps: the nibble, the shift (13–15 give 0 or -2048), the previous two results, the filter's prediction in the DSP's integer form, the 16-bit clamp, the 15-bit wrap, and the doubled output; `decode_sample` walks from a start to the end flag, carrying the history from block to block and marking the loop point's block. A new data kind `sample` (batch code 13) marks BRR in the ROM, in the core, the FFI, the CLI's map (`a`) and the app's mark sheet, strip and Atlas. `romlens brr <rom> <at> [--loop L] [--blocks] [--ascii] [--max N]`: the blocks with their headers and ranges, every value's decoding, and a text waveform. `fixtures::sound` holds a sample of our own (a ramp, a decay filter 1 predicts, a looping square wave). Tests: seven, each case worked by hand (the shift, the filters, the history, a wrap and a clip, the walk, the loop), and a golden |
-| A3 the DSP's registers and the SPC700's I/O registers explained field by field | to do |
+| A3 the DSP's registers and the SPC700's I/O registers explained field by field | done, 26 September 2026: `explain::sound` gives all 128 DSP registers and `$F0–$FF` the 65816 registers' shape (`RegisterWrite`, its fields and short form), checked against fullsnes's text (`problemkaputt.de/fullsnes.txt`, its APU chapters), which also renamed the timer dividers `T0DIV`–`T2DIV` and key-off `KOFF`: volumes signed with their share of full and phase, KON/KOFF/ENDX/NON/EON as voice lists, PMON as who follows whom, DIR and ESA as the memory they point to, EDL as delay and buffer size, FLG's reset, mute, echo-write and noise clock, ADSR1/2 and GAIN with each rate's time worked out from fullsnes's step rules and rate table (attack 0 full in 4.0 s, decay 0 halving in 326 ms), SRCN as its directory entry, CONTROL's timers, port clears and boot ROM, TEST's settings, DSPADDR naming the DSP register it picks, the dividers as periods; `pitch_words` gives a pitch's sample rate and semitones. `explain::spc` follows a walk's code keeping A, X, Y and the DSP register picked between joins, so `MOV $F3,A`, `MOVW $F2,YA` and `INC $F2` read as the DSP write they make (`KON = $01: voice 0`), and names two waits: a timer's count (with its period when the divider was set) and a port, telling a loop that waits for a new byte from one that reads until two reads agree. `romlens registers --dsp|--spc [<reg>] [--value V]`; `spc disasm --walk` comments each write with its meaning and puts a `▸` note above each wait. Tests: five (names, global and voice writes, I/O writes, the pass) and two goldens |
 | A4 the recorder's audio layer | to do |
 | A5 audio RAM, voices, notes and the ports over a recording, and the CLI | to do |
 | A6 the SPC700 execution log (MesenCE), imported | to do |
@@ -158,7 +158,7 @@ Sound on the SNES is a second computer, and that is what this track teaches:
 - `names.rs` names `$F0–$FF`:
   - TEST, CONTROL, DSPADDR, DSPDATA;
   - CPUIO0–3, AUXIO4/5;
-  - T0–2TARGET, T0–2OUT.
+  - T0–2DIV, T0–2OUT.
 - `aram.rs` lists an audio RAM image. It walks the reachable code from the
   driver's entry and marks the rest data, unless an execution log says
   otherwise.
@@ -184,7 +184,7 @@ Sound on the SNES is a second computer, and that is what this track teaches:
   - ENVX, OUTX.
 - The globals:
   - MVOL, EVOL;
-  - KON, KOF, ENDX (as voice lists);
+  - KON, KOFF, ENDX (as voice lists);
   - FLG (reset, mute, echo writes off, noise clock);
   - EFB, PMON, NON, EON;
   - DIR (the directory's address);
@@ -259,7 +259,7 @@ Sound on the SNES is a second computer, and that is what this track teaches:
   - the mix with MVOL, EVOL and FLG.
 - `render(n)` gives stereo 16-bit frames, with per-voice mute and solo and a
   tap per voice for the scopes.
-- Every KON, KOF, pitch and sample change is an event for the timeline, so
+- Every KON, KOFF, pitch and sample change is an event for the timeline, so
   an emulated run and a recorded one give the same data.
 
 ### From the ROM (`audio/upload.rs`)

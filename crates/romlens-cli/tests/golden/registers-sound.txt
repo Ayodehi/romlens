@@ -1,0 +1,174 @@
+$00  V0VOLL    The voice's left volume; negative inverts the wave
+$01  V0VOLR    The voice's right volume; negative inverts the wave
+$02  V0PITCHL  The pitch's low byte
+$03  V0PITCHH  The pitch's high six bits
+$04  V0SRCN    Which sample the voice plays: an entry of the sample directory, read when the voice is keyed on or loops
+$05  V0ADSR1   The envelope's shape: ADSR or GAIN, and the attack and decay rates
+$06  V0ADSR2   The level the decay falls to, and how fast the sustain then fades
+$07  V0GAIN    The envelope when ADSR1 picks GAIN: a fixed level, or a rising or falling slope
+$08  V0ENVX    The envelope's level now; the DSP rewrites it every sample
+$09  V0OUTX    The voice's sample now, after its envelope and before its volume
+$0C  MVOLL     The master volume, over every voice
+$0D  EFB       How much of the echo is fed back into it; 0 is a single echo
+$0F  FIR0      A tap of the echo's 8-tap FIR filter; the eight usually add to 128
+$10  V1VOLL    The voice's left volume; negative inverts the wave
+$11  V1VOLR    The voice's right volume; negative inverts the wave
+$12  V1PITCHL  The pitch's low byte
+$13  V1PITCHH  The pitch's high six bits
+$14  V1SRCN    Which sample the voice plays: an entry of the sample directory, read when the voice is keyed on or loops
+$15  V1ADSR1   The envelope's shape: ADSR or GAIN, and the attack and decay rates
+$16  V1ADSR2   The level the decay falls to, and how fast the sustain then fades
+$17  V1GAIN    The envelope when ADSR1 picks GAIN: a fixed level, or a rising or falling slope
+$18  V1ENVX    The envelope's level now; the DSP rewrites it every sample
+$19  V1OUTX    The voice's sample now, after its envelope and before its volume
+$1C  MVOLR     The master volume, over every voice
+$1F  FIR1      A tap of the echo's 8-tap FIR filter; the eight usually add to 128
+$20  V2VOLL    The voice's left volume; negative inverts the wave
+$21  V2VOLR    The voice's right volume; negative inverts the wave
+$22  V2PITCHL  The pitch's low byte
+$23  V2PITCHH  The pitch's high six bits
+$24  V2SRCN    Which sample the voice plays: an entry of the sample directory, read when the voice is keyed on or loops
+$25  V2ADSR1   The envelope's shape: ADSR or GAIN, and the attack and decay rates
+$26  V2ADSR2   The level the decay falls to, and how fast the sustain then fades
+$27  V2GAIN    The envelope when ADSR1 picks GAIN: a fixed level, or a rising or falling slope
+$28  V2ENVX    The envelope's level now; the DSP rewrites it every sample
+$29  V2OUTX    The voice's sample now, after its envelope and before its volume
+$2C  EVOLL     The echo's volume in the output
+$2D  PMON      Pitch modulation: each voice's pitch follows the voice before's wave
+$2F  FIR2      A tap of the echo's 8-tap FIR filter; the eight usually add to 128
+$30  V3VOLL    The voice's left volume; negative inverts the wave
+$31  V3VOLR    The voice's right volume; negative inverts the wave
+$32  V3PITCHL  The pitch's low byte
+$33  V3PITCHH  The pitch's high six bits
+$34  V3SRCN    Which sample the voice plays: an entry of the sample directory, read when the voice is keyed on or loops
+$35  V3ADSR1   The envelope's shape: ADSR or GAIN, and the attack and decay rates
+$36  V3ADSR2   The level the decay falls to, and how fast the sustain then fades
+$37  V3GAIN    The envelope when ADSR1 picks GAIN: a fixed level, or a rising or falling slope
+$38  V3ENVX    The envelope's level now; the DSP rewrites it every sample
+$39  V3OUTX    The voice's sample now, after its envelope and before its volume
+$3C  EVOLR     The echo's volume in the output
+$3D  NON       These voices play the noise generator instead of their sample
+$3F  FIR3      A tap of the echo's 8-tap FIR filter; the eight usually add to 128
+$40  V4VOLL    The voice's left volume; negative inverts the wave
+$41  V4VOLR    The voice's right volume; negative inverts the wave
+$42  V4PITCHL  The pitch's low byte
+$43  V4PITCHH  The pitch's high six bits
+$44  V4SRCN    Which sample the voice plays: an entry of the sample directory, read when the voice is keyed on or loops
+$45  V4ADSR1   The envelope's shape: ADSR or GAIN, and the attack and decay rates
+$46  V4ADSR2   The level the decay falls to, and how fast the sustain then fades
+$47  V4GAIN    The envelope when ADSR1 picks GAIN: a fixed level, or a rising or falling slope
+$48  V4ENVX    The envelope's level now; the DSP rewrites it every sample
+$49  V4OUTX    The voice's sample now, after its envelope and before its volume
+$4C  KON       Key on: start these voices' samples from the beginning, envelope from silence
+$4D  EON       These voices are also sent into the echo
+$4F  FIR4      A tap of the echo's 8-tap FIR filter; the eight usually add to 128
+$50  V5VOLL    The voice's left volume; negative inverts the wave
+$51  V5VOLR    The voice's right volume; negative inverts the wave
+$52  V5PITCHL  The pitch's low byte
+$53  V5PITCHH  The pitch's high six bits
+$54  V5SRCN    Which sample the voice plays: an entry of the sample directory, read when the voice is keyed on or loops
+$55  V5ADSR1   The envelope's shape: ADSR or GAIN, and the attack and decay rates
+$56  V5ADSR2   The level the decay falls to, and how fast the sustain then fades
+$57  V5GAIN    The envelope when ADSR1 picks GAIN: a fixed level, or a rising or falling slope
+$58  V5ENVX    The envelope's level now; the DSP rewrites it every sample
+$59  V5OUTX    The voice's sample now, after its envelope and before its volume
+$5C  KOFF      Key off: these voices fade out, a step every sample, until keyed on again
+$5D  DIR       Where the sample directory is: four bytes a sample, its start and its loop point
+$5F  FIR5      A tap of the echo's 8-tap FIR filter; the eight usually add to 128
+$60  V6VOLL    The voice's left volume; negative inverts the wave
+$61  V6VOLR    The voice's right volume; negative inverts the wave
+$62  V6PITCHL  The pitch's low byte
+$63  V6PITCHH  The pitch's high six bits
+$64  V6SRCN    Which sample the voice plays: an entry of the sample directory, read when the voice is keyed on or loops
+$65  V6ADSR1   The envelope's shape: ADSR or GAIN, and the attack and decay rates
+$66  V6ADSR2   The level the decay falls to, and how fast the sustain then fades
+$67  V6GAIN    The envelope when ADSR1 picks GAIN: a fixed level, or a rising or falling slope
+$68  V6ENVX    The envelope's level now; the DSP rewrites it every sample
+$69  V6OUTX    The voice's sample now, after its envelope and before its volume
+$6C  FLG       Reset, mute, echo writes, and the noise generator's clock
+$6D  ESA       Where the echo's ring buffer is in audio RAM
+$6F  FIR6      A tap of the echo's 8-tap FIR filter; the eight usually add to 128
+$70  V7VOLL    The voice's left volume; negative inverts the wave
+$71  V7VOLR    The voice's right volume; negative inverts the wave
+$72  V7PITCHL  The pitch's low byte
+$73  V7PITCHH  The pitch's high six bits
+$74  V7SRCN    Which sample the voice plays: an entry of the sample directory, read when the voice is keyed on or loops
+$75  V7ADSR1   The envelope's shape: ADSR or GAIN, and the attack and decay rates
+$76  V7ADSR2   The level the decay falls to, and how fast the sustain then fades
+$77  V7GAIN    The envelope when ADSR1 picks GAIN: a fixed level, or a rising or falling slope
+$78  V7ENVX    The envelope's level now; the DSP rewrites it every sample
+$79  V7OUTX    The voice's sample now, after its envelope and before its volume
+$7C  ENDX      The voices whose sample reached a block with the end flag
+$7D  EDL       The echo's delay, which is its buffer's size
+$7F  FIR7      A tap of the echo's 8-tap FIR filter; the eight usually add to 128
+$4C  KON
+
+  Key on: start these voices' samples from the beginning, envelope from
+  silence.
+
+  Bits  Field   Value  Meaning
+  0–7   voices  $81    voices 0, 7
+
+  KON = $81: voices 0, 7
+$25  V2ADSR1
+
+  The envelope's shape: ADSR or GAIN, and the attack and decay rates. Key
+  on starts the attack from silence.
+
+  Bits  Field     Value  Meaning
+  7     envelope  1      ADSR
+  4–6   decay     0      decay 0: halves in 326 ms
+  0–3   attack    15     attack 15: full at once
+
+  V2ADSR1 = $8F: ADSR, decay 0: halves in 326 ms, attack 15: full at once
+$6C  FLG
+
+  Reset, mute, echo writes, and the noise generator's clock.
+
+  Bits  Field        Value  Meaning
+  7     reset        1      soft reset: every voice off, envelopes 0
+  6     mute         1      output muted
+  5     echo writes  1      echo writes off
+  0–4   noise        0      noise stopped
+
+  FLG = $E0: soft reset: every voice off, envelopes 0, output muted, echo writes off, noise stopped
+$F0  TEST      Test settings; drivers leave it at $0A
+$F1  CONTROL   Timer enables, port clears, boot ROM at $FFC0
+$F2  DSPADDR   Which DSP register DSPDATA reads or writes
+$F3  DSPDATA   The DSP register DSPADDR selects
+$F4  CPUIO0    Port 0: read the S-CPU's byte, write one back
+$F5  CPUIO1    Port 1: read the S-CPU's byte, write one back
+$F6  CPUIO2    Port 2: read the S-CPU's byte, write one back
+$F7  CPUIO3    Port 3: read the S-CPU's byte, write one back
+$F8  AUXIO4    A spare byte, not connected on the SNES
+$F9  AUXIO5    A spare byte, not connected on the SNES
+$FA  T0DIV     Timer 0's divider of its 8 kHz clock (0 means 256)
+$FB  T1DIV     Timer 1's divider of its 8 kHz clock (0 means 256)
+$FC  T2DIV     Timer 2's divider of its 64 kHz clock (0 means 256)
+$FD  T0OUT     Timer 0's count of periods since it was last read
+$FE  T1OUT     Timer 1's count of periods since it was last read
+$FF  T2OUT     Timer 2's count of periods since it was last read
+$F1  CONTROL
+
+  Starts and stops the three timers, clears the ports' input from the
+  S-CPU, and maps the boot ROM over the top 64 bytes.
+
+  Bits  Field            Value  Meaning
+  7     boot ROM         1      boot ROM at $FFC0
+  5     clear ports 2/3  1      clear ports 2 and 3
+  4     clear ports 0/1  1      clear ports 0 and 1
+  2     timer 2          0      timer 2 off
+  1     timer 1          0      timer 1 off
+  0     timer 0          0      timer 0 off
+
+  CONTROL = $B0: boot ROM at $FFC0, clear ports 2 and 3, clear ports 0 and 1
+$F2  DSPADDR
+
+  Picks the DSP register that DSPDATA reads and writes.
+
+  Bits  Field     Value  Meaning
+  0–7   register  $4C    KON
+
+  DSPADDR = $4C: KON
+[exit code 1]
+Error: DSP registers are $00-$7F

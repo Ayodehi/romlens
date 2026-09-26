@@ -104,7 +104,7 @@ fn known_instructions_read_as_fullsnes_writes_them() {
         ([0x8E, 0x00, 0x00], "POP PSW"),
         ([0x19, 0x00, 0x00], "OR (X),(Y)"),
         ([0x18, 0x0F, 0x12], "OR $12,#$0F"),
-        ([0xD8, 0xFA, 0x00], "MOV T0TARGET,X"),
+        ([0xD8, 0xFA, 0x00], "MOV T0DIV,X"),
         ([0x0C, 0xF1, 0x00], "ASL !CONTROL"),
     ];
     for (bytes, want) in cases {

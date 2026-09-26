@@ -59,6 +59,7 @@ pub fn disasm(args: DisasmArgs) -> Result<()> {
         return Ok(());
     }
     let walk = aram::walk(&image, &[from]);
+    let explained = romlens_core::explain::spc::explain_spc(&image, &walk);
     let names = Routines(walk.routines.clone());
     let mut last: Option<u16> = None;
     for &at in &walk.starts {
@@ -69,9 +70,17 @@ pub fn disasm(args: DisasmArgs) -> Result<()> {
         if walk.routines.contains(&at) {
             println!("SUB_{at:04X}:");
         }
+        if let Some(i) = explained.idiom_at(at) {
+            println!("                 ; ▸ {}: {}", i.title, i.summary);
+        }
         let f = format_instruction(&insn, &names);
-        let line = match f.register {
-            Some(r) => format!("{:<22}; {}", f.text, r.description),
+        let comment = match (explained.writes.get(&at), f.register) {
+            (Some(w), _) => Some(w.write.short()),
+            (None, Some(r)) => Some(r.description.to_owned()),
+            _ => None,
+        };
+        let line = match comment {
+            Some(c) => format!("{:<22}; {c}", f.text),
             None => f.text,
         };
         println!("${at:04X}  {:<9} {line}", format_bytes(insn.raw()));

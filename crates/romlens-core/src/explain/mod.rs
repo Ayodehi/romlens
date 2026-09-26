@@ -10,6 +10,8 @@ pub mod fields;
 pub mod idioms;
 pub mod screen;
 pub mod setup;
+pub mod sound;
+pub mod spc;
 pub mod values;
 
 use std::collections::{BTreeMap, HashMap};

@@ -1,24 +1,32 @@
 $0200  CD EF     MOV X,#$EF
 $0202  BD        MOV SP,X
-$0203  8F 01 F1  MOV CONTROL,#$01
-$0206  3F 14 02  CALL !$0214
-$0209  E4 F4     MOV A,CPUIO0
-$020B  2E F4 FB  CBNE CPUIO0,$0209
+$0203  8F 50 FA  MOV T0DIV,#$50
+$0206  8F 01 F1  MOV CONTROL,#$01
+$0209  8F 5D F2  MOV DSPADDR,#$5D
+$020C  8F 3C F3  MOV DSPDATA,#$3C
 SUB_0200:
 $0200  CD EF     MOV X,#$EF
 $0202  BD        MOV SP,X
-$0203  8F 01 F1  MOV CONTROL,#$01      ; Timer enables, port clears, boot ROM at $FFC0
-$0206  3F 14 02  CALL !SUB_0214
-$0209  E4 F4     MOV A,CPUIO0          ; Port 0: read the S-CPU's byte, write one back
-$020B  2E F4 FB  CBNE CPUIO0,$0209     ; Port 0: read the S-CPU's byte, write one back
-$020E  C4 F4     MOV CPUIO0,A          ; Port 0: read the S-CPU's byte, write one back
-$0210  5D        MOV X,A
-$0211  1F 1B 02  JMP [!$021B+X]
-SUB_0214:
-$0214  8F 4C F2  MOV DSPADDR,#$4C      ; Which DSP register DSPDATA reads or writes
-$0217  8F 01 F3  MOV DSPDATA,#$01      ; The DSP register DSPADDR selects
-$021A  6F        RET
+$0203  8F 50 FA  MOV T0DIV,#$50        ; T0DIV = $50: divide by 80
+$0206  8F 01 F1  MOV CONTROL,#$01      ; CONTROL = $01: RAM at $FFC0, timer 0 on
+$0209  8F 5D F2  MOV DSPADDR,#$5D      ; DSPADDR = $5D: DIR
+$020C  8F 3C F3  MOV DSPDATA,#$3C      ; DIR = $3C: sample directory at $3C00
+$020F  3F 21 02  CALL !SUB_0221
+                 ; ▸ Wait for the S-CPU: Reads CPUIO0 until two reads in a row agree, so a byte read just as the S-CPU writes it is not trusted.
+$0212  E4 F4     MOV A,CPUIO0          ; Port 0: read the S-CPU's byte, write one back
+$0214  2E F4 FB  CBNE CPUIO0,$0212     ; Port 0: read the S-CPU's byte, write one back
+$0217  C4 F4     MOV CPUIO0,A          ; CPUIO0
+                 ; ▸ Wait for timer 0: Reads T0OUT until timer 0 ticks, every 10 ms (T0DIV = 80).
+$0219  EB FD     MOV Y,T0OUT           ; Timer 0's count of periods since it was last read
+$021B  F0 FC     BEQ $0219
+$021D  5D        MOV X,A
+$021E  1F 28 02  JMP [!$0228+X]
+SUB_0221:
+$0221  E8 4C     MOV A,#$4C
+$0223  8D 01     MOV Y,#$01
+$0225  DA F2     MOVW DSPADDR,YA       ; KON = $01: voice 0
+$0227  6F        RET
 
-12 instructions, 27 bytes of code, 2 routines; jumps through a table not followed at $0211
+18 instructions, 40 bytes of code, 2 routines; jumps through a table not followed at $021E
 [exit code 1]
-Error: 31 bytes from $FFF0 run past $FFFF: audio RAM is 64 KB
+Error: 44 bytes from $FFF0 run past $FFFF: audio RAM is 64 KB

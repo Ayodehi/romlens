@@ -400,6 +400,12 @@ enum Command {
         /// store covering the next register too.
         #[arg(long)]
         value: Option<String>,
+        /// The sound chip's registers (`$00-$7F`, or a name such as KON).
+        #[arg(long, conflicts_with = "spc")]
+        dsp: bool,
+        /// The sound CPU's I/O registers (`$F0-$FF`, or a name).
+        #[arg(long)]
+        spc: bool,
     },
     /// Decode bytes as 8×8 tiles: the index grid, the planes, or a picture.
     Tiles {
@@ -1466,8 +1472,21 @@ fn run() -> Result<()> {
                 walk,
             }),
         },
-        Command::Registers { address, value } => {
-            commands::registers::run(address.as_deref(), value.as_deref())
+        Command::Registers {
+            address,
+            value,
+            dsp,
+            spc,
+        } => {
+            use commands::registers::Bank;
+            let bank = if dsp {
+                Bank::Dsp
+            } else if spc {
+                Bank::Spc
+            } else {
+                Bank::Cpu
+            };
+            commands::registers::run(bank, address.as_deref(), value.as_deref())
         }
         Command::Tiles {
             rom,

@@ -1132,15 +1132,21 @@ fn spc_disasm() {
         .org $0200
         start:  MOV X,#$EF
                 MOV SP,X
+                MOV T0DIV,#$50
                 MOV CONTROL,#$01    ; timer 0 on
+                MOV DSPADDR,#$5D
+                MOV DSPDATA,#$3C
                 CALL !keyon
         main:   MOV A,CPUIO0
                 CBNE CPUIO0,main
                 MOV CPUIO0,A
+        tick:   MOV Y,T0OUT
+                BEQ tick
                 MOV X,A
                 JMP [!table+X]
-        keyon:  MOV DSPADDR,#$4C
-                MOV DSPDATA,#$01
+        keyon:  MOV A,#$4C
+                MOV Y,#$01
+                MOVW DSPADDR,YA
                 RET
         table:  .dw main, keyon
         ",
@@ -1155,6 +1161,15 @@ fn spc_disasm() {
     log += &run(&["spc", "disasm", path, "--base", "$0200", "--walk"]);
     log += &run(&["spc", "disasm", path, "--base", "$FFF0"]);
     check("spc-disasm", &log);
+    let mut log = run(&["registers", "--dsp"]);
+    log += &run(&["registers", "--dsp", "kon", "--value", "$81"]);
+    log += &run(&["registers", "--dsp", "$25", "--value", "$8F"]);
+    log += &run(&["registers", "--dsp", "$6C", "--value", "$E0"]);
+    log += &run(&["registers", "--spc"]);
+    log += &run(&["registers", "--spc", "CONTROL", "--value", "$B0"]);
+    log += &run(&["registers", "--spc", "$F2", "--value", "$4C"]);
+    log += &run(&["registers", "--dsp", "$80"]);
+    check("registers-sound", &log);
     let _ = std::fs::remove_dir_all(dir);
 }
 
