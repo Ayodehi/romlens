@@ -1169,11 +1169,23 @@ impl RecordingSession {
     }
 
     /// One layer of `frame` on its own, where it shows on the main screen:
-    /// 1–4 a background, 5 the sprites. No colour math; transparent where
-    /// the layer draws nothing.
-    pub fn render_frame_layer(&self, frame: u64, layer: u8) -> Result<BitmapInfo, RomlensError> {
+    /// 1–4 a background, 5 the sprites; transparent where the layer draws
+    /// nothing. With `colour_math`, as it shows on screen: its colour math
+    /// done against the whole sub screen or the fixed colour (a gradient
+    /// HDMA makes that way); without, its own colours.
+    pub fn render_frame_layer(
+        &self,
+        frame: u64,
+        layer: u8,
+        colour_math: bool,
+    ) -> Result<BitmapInfo, RomlensError> {
         use romlens_core::graphics::compose::ComposeOptions;
-        let (f, ..) = self.compose(frame, ComposeOptions::alone(layer))?;
+        let options = if colour_math {
+            ComposeOptions::alone_with_colour_math(layer)
+        } else {
+            ComposeOptions::alone(layer)
+        };
+        let (f, ..) = self.compose(frame, options)?;
         Ok(f.bitmap.into())
     }
 }
@@ -1566,7 +1578,7 @@ mod tests {
         );
         assert_eq!(rec.frame_pixel(8, 300, 4).unwrap(), None);
         // The sprites alone: the sprite, and transparency where BG1 was.
-        let objs = rec.render_frame_layer(8, 5).unwrap();
+        let objs = rec.render_frame_layer(8, 5, false).unwrap();
         let alpha = |b: &BitmapInfo, x: u32, y: u32| b.rgba[((y * b.width + x) * 4 + 3) as usize];
         assert_eq!(alpha(&objs, 150, 55), 255);
         assert_eq!(alpha(&objs, 68, 52), 0);

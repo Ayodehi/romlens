@@ -31,6 +31,9 @@ struct LayersView: View {
             }
             .pickerStyle(.segmented)
             .fixedSize()
+            Toggle("Colour math", isOn: $graphics.layersColourMath)
+                .toggleStyle(.checkbox)
+                .help("Show each layer with its colour math done, as on screen: a gradient made by adding or subtracting a colour (CGADSUB, COLDATA) shows. Off: the layer's own colours.")
             Spacer()
         }
         .padding(.horizontal)

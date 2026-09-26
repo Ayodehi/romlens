@@ -283,6 +283,10 @@ pub struct ComposeOptions {
     pub layers: u8,
     /// Colour math and the sub screen.
     pub colour_math: bool,
+    /// Which layers the sub screen may draw, for colour math (the same bits
+    /// as `layers`): a layer shown alone still takes its colour math from
+    /// the whole sub screen.
+    pub sub_layers: u8,
     /// Leave the backdrop transparent, to show a layer alone.
     pub transparent_backdrop: bool,
 }
@@ -292,6 +296,7 @@ impl Default for ComposeOptions {
         ComposeOptions {
             layers: 0x1F,
             colour_math: true,
+            sub_layers: 0x1F,
             transparent_backdrop: false,
         }
     }
@@ -304,7 +309,20 @@ impl ComposeOptions {
         ComposeOptions {
             layers: 1 << (layer.clamp(1, 5) - 1),
             colour_math: false,
+            sub_layers: 0,
             transparent_backdrop: true,
+        }
+    }
+
+    /// One layer alone as it shows on screen: its colour math still done,
+    /// against the whole sub screen or the fixed colour (Final Fantasy
+    /// III's text boxes are one blue, graded by adding and subtracting a
+    /// fixed colour HDMA changes every few lines).
+    pub fn alone_with_colour_math(layer: u8) -> Self {
+        ComposeOptions {
+            colour_math: true,
+            sub_layers: 0x1F,
+            ..Self::alone(layer)
         }
     }
 }
@@ -364,7 +382,7 @@ pub fn compose_lines_with(src: &mut dyn LineSource, options: ComposeOptions) -> 
                 ppu,
                 y,
                 line,
-                ppu.register(0x212D) & options.layers,
+                ppu.register(0x212D) & options.sub_layers,
                 ppu.register(0x212F),
                 &windows,
             )
@@ -1118,6 +1136,29 @@ mod tests {
         );
         assert!(matches!(f.winner(33, 9), Some(Winner::Bg(_))));
         assert_eq!(f.winner(18, 10), Some(Winner::Backdrop));
+    }
+
+    #[test]
+    fn a_layer_alone_can_keep_its_colour_math() {
+        let (mut vram, cg, oam, mut ppu) = machine();
+        let at = (32 + 4) * 2;
+        vram[at..at + 2].copy_from_slice(&1u16.to_le_bytes());
+        // BG1 adds the fixed colour: its red cell and blue make magenta, as
+        // Final Fantasy III grades its text boxes.
+        ppu.set_register(0x2131, 0x01);
+        ppu.set_fixed_colour(0x7C00);
+        let alone = |o| compose_with(&vram, &cg, &oam, Lines::Frame(&ppu), o);
+        assert_eq!(
+            alone(ComposeOptions::alone(1)).bitmap.get(33, 9),
+            [255, 0, 0, 255]
+        );
+        let shown = alone(ComposeOptions::alone_with_colour_math(1));
+        assert_eq!(shown.bitmap.get(33, 9), [255, 0, 255, 255]);
+        assert_eq!(
+            shown.bitmap.get(100, 100)[3],
+            0,
+            "the backdrop stays transparent"
+        );
     }
 
     #[test]

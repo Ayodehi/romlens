@@ -121,6 +121,9 @@ final class GraphicsModel {
     var tilemapScale: Int = 2
     /// The Layers view scales its grid to the window; off, 1:1.
     var layersFit = true
+    /// The Layers view shows each layer with its colour math done, as it
+    /// shows on screen; off, in its own colours.
+    var layersColourMath = true
 
     // Recording
     private(set) var recording: RecordingSession?
@@ -612,7 +615,7 @@ final class GraphicsModel {
     /// One layer alone: 1–4 a background, 5 the sprites.
     func frameLayer(_ layer: UInt8) -> BitmapInfo? {
         guard let recording else { return nil }
-        return try? recording.renderFrameLayer(frame: frame, layer: layer)
+        return try? recording.renderFrameLayer(frame: frame, layer: layer, colourMath: layersColourMath)
     }
 
     /// The layers some line of this frame draws, and its modes line by

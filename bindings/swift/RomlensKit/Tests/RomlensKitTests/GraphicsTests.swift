@@ -53,7 +53,7 @@ import Testing
         #expect(sprite == 3)
         #expect(try rec.framePixel(frame: 8, x: 4, y: 4) == .backdrop)
         #expect(try rec.priorityOrder(frame: 8).contains("sprites of priority 3"))
-        let objs = try rec.renderFrameLayer(frame: 8, layer: 5)
+        let objs = try rec.renderFrameLayer(frame: 8, layer: 5, colourMath: false)
         #expect(objs.width == 256)
     }
 }
