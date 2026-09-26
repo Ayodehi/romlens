@@ -8,6 +8,7 @@
 //! batches, header spans and the byte inspector.
 
 pub mod analysis;
+pub mod audio;
 pub mod cpu65816;
 pub mod decompile;
 pub mod diff;

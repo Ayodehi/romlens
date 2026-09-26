@@ -18,8 +18,8 @@ Format:       1.2
 Producer:     Mesen recorder stream 3
 ROM SHA-256:  a2462f1d74f993d0b3e10ae9425cd9b48253ac82c99913f07ef704d9c85dc6ee
 Frames:       5 (1 keyframe, every 60 frames)
-Storage:      4572 bytes, zstd, WRAM in keyframes only
-              keyframes 925 bytes each on average, deltas 568
+Storage:      4928 bytes, zstd, WRAM in keyframes only
+              keyframes 1332 bytes each on average, deltas 556
 Regions:      cpu 16, ppu 256, io 128, wram 131072, vram 65536, cgram 512, oam 544, timing 16, aram 65536, dsp 128, spc 32
 Layers:       write log, register writes by line, sound events
 wrote <tmp>/r.romrec: 12 frames from Mesen, 1 DMA transfers

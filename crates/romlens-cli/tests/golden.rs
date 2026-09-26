@@ -1194,3 +1194,37 @@ fn brr() {
     check("brr", &log);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn apu_commands() {
+    use romlens_core::recording::mesen::stream::encode;
+    let dir = temp_dir("apu");
+    let rom = write_fixture(&dir, MappingMode::LoRom);
+    let bytes = std::fs::read(&rom).unwrap();
+    let rom = rom.to_str().unwrap();
+    let stream = dir.join("s.rlstream");
+    std::fs::write(&stream, encode::fixture_with_audio(&bytes, 5)).unwrap();
+    let stream = stream.to_str().unwrap();
+    let rec = dir.join("s.romrec");
+    let rec = rec.to_str().unwrap();
+    let plain = dir.join("p.rlstream");
+    std::fs::write(&plain, encode::fixture(&bytes, 3, true)).unwrap();
+    let plain = plain.to_str().unwrap();
+    let plain_rec = dir.join("p.romrec");
+    let plain_rec = plain_rec.to_str().unwrap();
+    let _ = run_with(&["rec", "pack", plain, "--rom", rom], &["--out", plain_rec]);
+    let _ = run_with(&["rec", "pack", stream, "--rom", rom], &["--out", rec]);
+    let mut log = String::new();
+    for what in ["voices", "dsp", "map", "samples"] {
+        log += &run(&["apu", what, "--rec", rec, "--frame", "2"]);
+    }
+    log += &run(&["apu", "timeline", "--rec", rec]);
+    log += &run(&["apu", "ports", "--rec", rec, "--frames", "0..2"]);
+    log += &run(&["apu", "ports", "--rec", rec, "--frames", "3..9"]);
+    log += &run(&[
+        "rec", "extract", rec, "--frame", "2", "--region", "aram", "--hex",
+    ]);
+    log += &redact_tmp(&dir, &run(&["apu", "voices", "--rec", plain_rec]));
+    check("apu", &log);
+    let _ = std::fs::remove_dir_all(dir);
+}

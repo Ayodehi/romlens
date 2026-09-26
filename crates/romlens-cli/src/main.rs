@@ -369,6 +369,12 @@ enum Command {
         #[command(subcommand)]
         action: ProjectCommand,
     },
+    /// A recording's sound side (docs/23): the voices, the DSP, audio
+    /// RAM, the samples, the notes and the ports.
+    Apu {
+        #[command(subcommand)]
+        what: ApuCommand,
+    },
     /// A BRR sound sample, decoded block by block (docs/23).
     Brr {
         rom: PathBuf,
@@ -572,6 +578,44 @@ enum ImportCommand {
         rom: Option<PathBuf>,
         file: PathBuf,
     },
+}
+
+#[derive(clap::Args)]
+struct ApuFrame {
+    /// The recording.
+    #[arg(long)]
+    rec: PathBuf,
+    /// The frame (default the last).
+    #[arg(long)]
+    frame: Option<u64>,
+}
+
+#[derive(clap::Args)]
+struct ApuRange {
+    #[arg(long)]
+    rec: PathBuf,
+    /// `A..B`, inclusive (default the whole recording).
+    #[arg(long)]
+    frames: Option<String>,
+    /// Print at most this many.
+    #[arg(long, default_value_t = 200)]
+    limit: usize,
+}
+
+#[derive(Subcommand)]
+enum ApuCommand {
+    /// The eight voices: sample, pitch and note, volume, envelope.
+    Voices(ApuFrame),
+    /// The DSP's registers, each explained.
+    Dsp(ApuFrame),
+    /// What each part of audio RAM holds.
+    Map(ApuFrame),
+    /// The sample directory and its samples.
+    Samples(ApuFrame),
+    /// Notes keyed on, bent and keyed off.
+    Timeline(ApuRange),
+    /// The bytes the two CPUs wrote each other through the ports.
+    Ports(ApuRange),
 }
 
 #[derive(Subcommand)]
@@ -1442,6 +1486,24 @@ fn run() -> Result<()> {
                 )
             }
         },
+        Command::Apu { what } => {
+            use commands::apu::{ApuArgs, What};
+            let (what, rec, frame, frames, limit) = match what {
+                ApuCommand::Voices(f) => (What::Voices, f.rec, f.frame, None, 0),
+                ApuCommand::Dsp(f) => (What::Dsp, f.rec, f.frame, None, 0),
+                ApuCommand::Map(f) => (What::Map, f.rec, f.frame, None, 0),
+                ApuCommand::Samples(f) => (What::Samples, f.rec, f.frame, None, 0),
+                ApuCommand::Timeline(r) => (What::Timeline, r.rec, None, r.frames, r.limit),
+                ApuCommand::Ports(r) => (What::Ports, r.rec, None, r.frames, r.limit),
+            };
+            commands::apu::run(ApuArgs {
+                what,
+                rec: &rec,
+                frame,
+                frames: frames.as_deref(),
+                limit,
+            })
+        }
         Command::Brr {
             rom,
             at,

@@ -1,0 +1,93 @@
+frame 2: 1 of 8 voices sounding
+
+voice 0  envelope 127/127, sample now 0
+  sample 0 at $4000, loop $4012
+  pitch $1000: 32000 Hz sample rate, ×1.000 (+0.00 semitones)
+  note ≈ B6 +21 (2000 Hz, estimated from the loop)
+  volume 127 left, 127 right
+  ADSR: decay 0: halves in 326 ms, attack 15: full at once, sustain at 8/8, sustain rate 0: never steps
+
+voice 1  silent, not set up
+
+voice 2  silent, not set up
+
+voice 3  silent, not set up
+
+voice 4  silent, not set up
+
+voice 5  silent, not set up
+
+voice 6  silent, not set up
+
+voice 7  silent, not set up
+frame 2: the DSP's registers
+
+global:
+  $0C  MVOLL = $00: 0 (0%)
+  $0D  EFB = $00: 0 (0%)
+  $0F  FIR0 = $00: 0
+  $1C  MVOLR = $00: 0 (0%)
+  $1F  FIR1 = $00: 0
+  $2C  EVOLL = $00: 0 (0%)
+  $2D  PMON = $00: no voices
+  $2F  FIR2 = $00: 0
+  $3C  EVOLR = $00: 0 (0%)
+  $3D  NON = $00: no voices
+  $3F  FIR3 = $00: 0
+  $4C  KON = $00: no voices
+  $4D  EON = $00: no voices
+  $4F  FIR4 = $00: 0
+  $5C  KOFF = $00: no voices
+  $5D  DIR = $3C: sample directory at $3C00
+  $5F  FIR5 = $00: 0
+  $6C  FLG = $00: echo writes on, noise stopped
+  $6D  ESA = $00: echo buffer at $0000
+  $6F  FIR6 = $00: 0
+  $7C  ENDX = $00: no voices
+  $7D  EDL = $00: 4 bytes of echo buffer, no delay
+  $7F  FIR7 = $00: 0
+
+voices:
+  $00  V0VOLL = $7F: 127 (99%)
+  $01  V0VOLR = $7F: 127 (99%)
+  $02  V0PITCHL = $00
+  $03  V0PITCHH = $10
+  $04  V0SRCN = $00: sample 0, the directory's entry at +$000
+  $05  V0ADSR1 = $8F: ADSR, decay 0: halves in 326 ms, attack 15: full at once
+  $06  V0ADSR2 = $E0: sustain at 8/8, sustain rate 0: never steps
+  $07  V0GAIN = $00: fixed level 0/127
+  $08  V0ENVX = $7F: envelope 127/127
+  $09  V0OUTX = $00: sample high byte 0
+  $10  V1: all zero
+  $20  V2: all zero
+  $30  V3: all zero
+  $40  V4: all zero
+  $50  V5: all zero
+  $60  V6: all zero
+  $70  V7: all zero
+frame 2: audio RAM, the SPC700 at $0209
+  $0000-$0003       4 bytes  echo buffer, 4 bytes and no delay (ESA = $00, EDL = 0)
+  $0004-$00EF     236 bytes  direct page
+  $00F0-$00FF      16 bytes  I/O registers
+  $0100-$01FF     256 bytes  stack
+  $0200-$0208       9 bytes  data
+  $0209-$0215      13 bytes  driver code reached from $0209
+  $0216-$3BFF   14826 bytes  data
+  $3C00-$3C03       4 bytes  sample directory, 1 entry (DIR = $3C)
+  $3C04-$3FFF    1020 bytes  data
+  $4000-$4023      36 bytes  sample 0: 4 blocks, loops at $4012
+  $4024-$FFFF   49116 bytes  data
+frame 2: the sample directory at $3C00 (DIR = $3C), 1 sample
+    0  $4000  4 blocks, 36 bytes, 64 samples; loops at $4012; at $1000 ≈ B6 +21 (2000 Hz, estimated from the loop)
+frames 0 to 4: 2 note events
+  frame     1  cycle      17351  voice 0  on     pitch $1000  sample 0  ≈ B6 +21 (2000 Hz, estimated from the loop)
+  frame     3  cycle      51403  voice 0  off  
+frames 0 to 2: 2 port writes, 1 from the S-CPU and 1 from the SPC700
+  frame     1  cycle      17166  S-CPU  → port 0  $01
+  frame     1  cycle      17216  SPC700 → port 0  $01
+[exit code 1]
+Error: frames 3 to 9 are not in a recording of 5 frames (0 to 4)
+[exit code 1]
+Error: audio RAM holds the game's samples and music, which Romlens does not export; `romlens apu map` shows what it holds
+[exit code 1]
+Error: <tmp>/p.romrec has no sound side: record it again with this Romlens's recorder (romlens rec script)

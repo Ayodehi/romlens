@@ -936,7 +936,7 @@ mod tests {
         let dsp = s.region(StateRegion::DspRegisters).unwrap();
         assert_eq!((dsp[0x5D], dsp[0x03], dsp[0x08]), (0x3C, 0x10, 0x7F));
         let spc = SpcState::decode(s.region(StateRegion::SpcState).unwrap());
-        assert_eq!((spc.pc, spc.dspaddr, spc.a), (0x0202, 0x4C, 0x12));
+        assert_eq!((spc.pc, spc.dspaddr, spc.a), (0x0209, 0x4C, 0x12));
         assert_eq!((spc.timers_on[0], spc.dividers[0]), (true, 0x50));
         assert_eq!(spc.cycle, 3 * 17_066);
         // Frame 1's events: the S-CPU's command, the reply, nine DSP writes.

@@ -604,11 +604,29 @@ pub mod encode {
         b
     }
 
-    /// The sound fixture's audio RAM: the sample directory at `$3C00`
+    /// The sound fixture's driver at `$0200`: set up the stack and timer 0,
+    /// then answer each command on port 0 and wait for the timer. The
+    /// SPC700 is at `main` ([`FIXTURE_MAIN`]) at every frame's end.
+    pub const FIXTURE_DRIVER: &str = "
+        .org $0200
+        start:  MOV X,#$EF
+                MOV SP,X
+                MOV T0DIV,#$50
+                MOV CONTROL,#$01
+        main:   MOV A,CPUIO0
+                CBNE CPUIO0,main
+                MOV CPUIO0,A
+        tick:   MOV Y,T0OUT
+                BEQ tick
+                BRA main
+    ";
+    pub const FIXTURE_MAIN: u16 = 0x0209;
+
+    /// The sound fixture's audio RAM: the driver, the sample directory at `$3C00`
     /// (entry 0 is [`crate::fixtures::sound::brr_sample`] at `$4000`, its
     /// loop 18 bytes in) and the sample.
     pub fn fixture_aram() -> Vec<u8> {
-        let mut aram = vec![0u8; ARAM_LEN];
+        let mut aram = crate::spc700::assemble(FIXTURE_DRIVER).unwrap().image();
         aram[0x3C00..0x3C04].copy_from_slice(&[0x00, 0x40, 0x12, 0x40]);
         let s = crate::fixtures::sound::brr_sample();
         aram[0x4000..0x4000 + s.len()].copy_from_slice(&s);
@@ -716,7 +734,7 @@ pub mod encode {
             let base = spc_fields as u16;
             f.fields.extend([
                 (base, 0x12),
-                (base + 1, 0x0200 + n as i64),
+                (base + 1, FIXTURE_MAIN as i64),
                 (base + 2, if n >= 1 { 0x4C } else { 0 }),
             ]);
             if n == 1 {

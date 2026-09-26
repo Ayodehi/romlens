@@ -2,6 +2,7 @@
 
 pub mod accuracy;
 pub mod analyze;
+pub mod apu;
 pub mod brr;
 pub mod decompile;
 pub mod diff;
