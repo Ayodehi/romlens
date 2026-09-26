@@ -160,6 +160,21 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Two versions of a ROM compared: bytes aligned, routines paired, data
+    /// that changed (docs/22, D1).
+    Diff {
+        a: PathBuf,
+        b: PathBuf,
+        #[arg(long)]
+        project_a: Option<PathBuf>,
+        #[arg(long)]
+        project_b: Option<PathBuf>,
+        /// Each changed routine's instructions side by side.
+        #[arg(long)]
+        routines: bool,
+        #[arg(long)]
+        json: bool,
+    },
     /// The whole-ROM overview the shell's strip draws, or a window of it.
     Map {
         rom: PathBuf,
@@ -1092,6 +1107,23 @@ fn run() -> Result<()> {
             from.as_deref(),
             to.as_deref(),
             json,
+        ),
+        Command::Diff {
+            a,
+            b,
+            project_a,
+            project_b,
+            routines,
+            json,
+        } => commands::diff::run(
+            &a,
+            &b,
+            commands::diff::DiffOptions {
+                project_a: project_a.as_deref(),
+                project_b: project_b.as_deref(),
+                routines,
+                json,
+            },
         ),
         Command::Map {
             rom,

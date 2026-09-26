@@ -1071,3 +1071,22 @@ fn decompile_commands() {
     );
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// Two versions of a ROM compared (docs/22, D1), on the fixture pair.
+#[test]
+fn diff_commands() {
+    let dir = temp_dir("diff");
+    let (a, b) = fixtures::diff_pair();
+    let (pa, pb) = (dir.join("a.sfc"), dir.join("b.sfc"));
+    std::fs::write(&pa, a).unwrap();
+    std::fs::write(&pb, b).unwrap();
+    let (pa, pb) = (pa.to_str().unwrap(), pb.to_str().unwrap());
+    check(
+        "diff-pair",
+        &format!(
+            "{}{}",
+            run(&["diff", pa, pb, "--routines"]),
+            run(&["diff", pa, pb, "--json"]),
+        ),
+    );
+}

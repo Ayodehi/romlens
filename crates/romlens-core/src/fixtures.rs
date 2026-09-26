@@ -279,6 +279,39 @@ pub fn routines_lorom() -> Vec<u8> {
     build_with_code(MappingMode::LoRom, 0x8000, false, &code, ROUTINES_TITLE)
 }
 
+/// Two versions of a ROM for comparing (docs/22, D1): the routines
+/// fixture with 1 KB of table data at file offset 0x1000, and a second
+/// version of it in which `SUB_008020` clears 32 bytes rather than 16
+/// (`LDX #$1F`) and 64 bytes are inserted in the table at 0x1200, the
+/// image keeping its size by losing 64 bytes of filler before the header.
+pub fn diff_pair() -> (Vec<u8>, Vec<u8>) {
+    let mut a = routines_lorom();
+    let mut x: u32 = 0x9E37_79B9;
+    let mut noise = |n: usize| -> Vec<u8> {
+        (0..n)
+            .map(|_| {
+                x ^= x << 13;
+                x ^= x >> 17;
+                x ^= x << 5;
+                x as u8
+            })
+            .collect()
+    };
+    let table = noise(0x400);
+    a[0x1000..0x1400].copy_from_slice(&table);
+    let inserted = noise(64);
+    let mut b = a.clone();
+    b[0x21] = 0x1F;
+    let b = [
+        &b[..0x1200],
+        &inserted[..],
+        &b[0x1200..0x7F00],
+        &b[0x7F40..],
+    ]
+    .concat();
+    (a, b)
+}
+
 pub const EXPLAIN_TITLE: &str = "ROMLENS EXPLAIN";
 
 /// 32 KB LoROM whose reset handler does what every SNES game's setup code

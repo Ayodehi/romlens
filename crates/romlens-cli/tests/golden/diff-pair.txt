@@ -1,0 +1,36 @@
+Bytes: 32703 the same, 1 changed, 64 inserted, 64 deleted; 0 moved blocks
+  changed  0x000021..0x000022 -> 0x000021..0x000022 (1 byte)
+  inserted 0x001200..0x001200 -> 0x001200..0x001240 (64 bytes)
+  deleted  0x007F80..0x007FC0 -> 0x007FC0..0x007FC0 (64 bytes)
+
+Routines: 5 the same, 0 moved, 1 changed, 0 added, 0 removed
+  changed  $00:8020 SUB_008020 -> $00:8020 SUB_008020 (1 of 5 lines)
+    ~ 0x000020 LDX #$0F                  | 0x000020 LDX #$1F
+      0x000022 STZ $0200,X               | 0x000022 STZ $0200,X
+      0x000025 DEX                       | 0x000025 DEX
+      0x000026 BPL LOOP_008022           | 0x000026 BPL LOOP_008022
+      0x000028 RTS                       | 0x000028 RTS
+
+Data: 2 regions with changed bytes
+  a 0x007F00..0x007FC0 byte       64 changed
+  b 0x001000..0x001500 unknown    64 changed
+{
+  "sameRoutines": 5,
+  "runs": [
+    {"kind": "same", "a": [0, 33], "b": [0, 33]},
+    {"kind": "changed", "a": [33, 34], "b": [33, 34]},
+    {"kind": "same", "a": [34, 4608], "b": [34, 4608]},
+    {"kind": "inserted", "a": [4608, 4608], "b": [4608, 4672]},
+    {"kind": "same", "a": [4608, 32640], "b": [4672, 32704]},
+    {"kind": "deleted", "a": [32640, 32704], "b": [32704, 32704]},
+    {"kind": "same", "a": [32704, 32768], "b": [32704, 32768]}
+  ],
+  "moves": [],
+  "routines": [
+    {"pairing": "changed", "a": {"entry": "$00:8020", "offset": 32, "name": "SUB_008020", "instructions": 5, "bytes": 9}, "b": {"entry": "$00:8020", "offset": 32, "name": "SUB_008020", "instructions": 5, "bytes": 9}, "lines": [{"op": "changed", "a": {"offset": 32, "text": "LDX #$0F"}, "b": {"offset": 32, "text": "LDX #$1F"}}, {"op": "same", "a": {"offset": 34, "text": "STZ $0200,X"}, "b": {"offset": 34, "text": "STZ $0200,X"}}, {"op": "same", "a": {"offset": 37, "text": "DEX"}, "b": {"offset": 37, "text": "DEX"}}, {"op": "same", "a": {"offset": 38, "text": "BPL LOOP_008022"}, "b": {"offset": 38, "text": "BPL LOOP_008022"}}, {"op": "same", "a": {"offset": 40, "text": "RTS"}, "b": {"offset": 40, "text": "RTS"}}]}
+  ],
+  "data": [
+    {"side": "a", "start": 32512, "len": 192, "kind": "byte", "name": null, "changed": 64},
+    {"side": "b", "start": 4096, "len": 1280, "kind": "unknown", "name": null, "changed": 64}
+  ]
+}
