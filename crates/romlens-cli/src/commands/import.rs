@@ -179,3 +179,101 @@ pub fn symbols(
     }
     Ok(())
 }
+
+pub fn dbg(dir: &Path, rom: Option<&Path>, file: &Path) -> Result<()> {
+    use romlens_core::io::import::dbg;
+    let rom = rom_for_project(dir, rom)?;
+    let mut project = load_project(&rom, dir)?;
+    let text =
+        std::fs::read_to_string(file).with_context(|| format!("reading {}", file.display()))?;
+    let name = file
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| file.display().to_string());
+    let folder = std::path::absolute(file)
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.display().to_string()))
+        .unwrap_or_default();
+    let parsed = dbg::read(&text, &rom, &name, &folder)?;
+    let plan = symbols::plan(&rom, &project, &parsed.symbols);
+    let labels = parsed.symbols.labels.len();
+    let undo = if plan.commands.is_empty() {
+        None
+    } else {
+        Some(project.apply_batch(&rom, plan.commands, Origin::Import(name.clone()))?)
+    };
+    project.add_import(ImportRecord {
+        source: name.clone(),
+        format: "dbg".to_owned(),
+        labels: labels as u64,
+        comments: 0,
+        notice: String::new(),
+    });
+    let map = parsed.map;
+    let (lines, bytes, files) = (map.lines.len(), map.bytes_covered(), map.files.len());
+    let per_file: Vec<(String, usize)> = map
+        .files
+        .iter()
+        .enumerate()
+        .map(|(i, f)| {
+            let n = map.lines.iter().filter(|l| l.file == i as u32).count();
+            (f.name.clone(), n)
+        })
+        .collect();
+    project.add_source_map(map);
+    save_project(&rom, dir, &project)?;
+
+    println!(
+        "imported {name}, ld65 debug information for {}: {} {} added, {} replaced",
+        if parsed.output.is_empty() {
+            "an unnamed output"
+        } else {
+            &parsed.output
+        },
+        plan.labels_added,
+        if plan.labels_added == 1 {
+            "label"
+        } else {
+            "labels"
+        },
+        plan.replaced
+    );
+    if let Some(entry) = undo {
+        println!("undo entry: {}", entry.title);
+    }
+    if !plan.kept_user.is_empty() {
+        println!("{} kept: you had already named them", plan.kept_user.len());
+    }
+    println!(
+        "{lines} source lines made {bytes} bytes ({:.1}% of the ROM), from {files} files:",
+        bytes as f64 * 100.0 / rom.len() as f64
+    );
+    for (file, n) in per_file {
+        println!("  {file}: {n} lines");
+    }
+    if parsed.not_labels > 0 {
+        println!(
+            "{} symbols are not labels (equates, imports, constants)",
+            parsed.not_labels
+        );
+    }
+    if parsed.spans_unplaced > 0 {
+        println!(
+            "{} spans or symbols could not be placed in this ROM",
+            parsed.spans_unplaced
+        );
+    }
+    if !parsed.symbols.rewritten.is_empty() {
+        println!(
+            "{} names rewritten to be usable:",
+            parsed.symbols.rewritten.len()
+        );
+        for (from, to) in parsed.symbols.rewritten.iter().take(10) {
+            println!("  {from} -> {to}");
+        }
+    }
+    if !parsed.symbols.skipped.is_empty() {
+        println!("{} records not understood", parsed.symbols.skipped.len());
+    }
+    Ok(())
+}

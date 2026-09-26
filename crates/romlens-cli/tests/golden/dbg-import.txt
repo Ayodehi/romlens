@@ -1,0 +1,34 @@
+created <tmp>/Fixture.romlens for "DBG FIXTURE"
+imported fixture.dbg, ld65 debug information for fixture.sfc: 10 labels added, 0 replaced
+undo entry: Import from fixture.dbg
+43 source lines made 134 bytes (0.4% of the ROM), from 3 files:
+  main.s: 31 lines
+  macros.inc: 3 lines
+  palette.s: 9 lines
+2 symbols are not labels (equates, imports, constants)
+3 names rewritten to be usable:
+  Reset@wait -> Reset_wait
+  ClearBuffer@loop -> ClearBuffer_loop
+  ClearPalette@next -> ClearPalette_next
+fixture.dbg: 43 lines making 134 bytes, sources in <tmp>
+  main.s: 1374 bytes
+  macros.inc: 309 bytes
+  palette.s: 522 bytes
+main.s:24 (source):         brightness $80          ; forced blank while we set up
+  $00:800B–$00:800F (5 bytes)
+macros.inc:5 (macro):         lda #level
+  $00:800B–$00:800C (2 bytes)
+  $00:8016–$00:8017 (2 bytes)
+palette.s:15 (source): @next:  lda Palette,x
+  $00:8031–$00:8033 (3 bytes)
+main.s:15 made no bytes
+0x000000  $00:8000  Reset                    imported:fixture.dbg
+0x00001B  $00:801B  Reset_wait               imported:fixture.dbg
+0x000020  $00:8020  ClearBuffer              imported:fixture.dbg
+0x000023  $00:8023  ClearBuffer_loop         imported:fixture.dbg
+0x00002A  $00:802A  Nmi                      imported:fixture.dbg
+0x00002B  $00:802B  ClearPalette             imported:fixture.dbg
+0x000031  $00:8031  ClearPalette_next        imported:fixture.dbg
+0x00003E  $00:803E  Palette                  imported:fixture.dbg
+          $7E:0000  frame                    imported:fixture.dbg
+          $7E:0200  buffer                   imported:fixture.dbg

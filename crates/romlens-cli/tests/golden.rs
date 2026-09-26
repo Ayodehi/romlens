@@ -1090,3 +1090,36 @@ fn diff_commands() {
         ),
     );
 }
+
+/// ca65's `.dbg`: the labels and the source lines, on the fixture cc65
+/// built (`romlens-core/tests/data/ca65`), copied so its sources sit beside
+/// it.
+#[test]
+fn dbg_import() {
+    let dir = temp_dir("dbg");
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../romlens-core/tests/data/ca65");
+    for name in [
+        "fixture.sfc",
+        "fixture.dbg",
+        "main.s",
+        "macros.inc",
+        "palette.s",
+    ] {
+        std::fs::copy(src.join(name), dir.join(name)).unwrap();
+    }
+    let rom = dir.join("fixture.sfc");
+    let rom = rom.to_str().unwrap();
+    let dbg = dir.join("fixture.dbg");
+    let dbg = dbg.to_str().unwrap();
+    let pkg = dir.join("Fixture.romlens");
+    let pkg = pkg.to_str().unwrap();
+    let mut log = redact_tmp(&dir, &run(&["project", pkg, "init", "--rom", rom]));
+    log += &run(&["import", "dbg", pkg, "--rom", rom, dbg]);
+    log += &redact_tmp(&dir, &run(&["source", rom, "--project", pkg]));
+    log += &run(&["source", rom, "--project", pkg, "$00:800C"]);
+    log += &run(&["source", rom, "--project", pkg, "--line", "palette.s:15"]);
+    log += &run(&["source", rom, "--project", pkg, "--line", "main.s:15"]);
+    log += &run(&["labels", rom, "--project", pkg]);
+    check("dbg-import", &log);
+    let _ = std::fs::remove_dir_all(dir);
+}

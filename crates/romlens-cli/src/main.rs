@@ -230,6 +230,17 @@ enum Command {
         #[arg(long)]
         count: Option<u32>,
     },
+    /// The source lines an imported `.dbg` ties to the ROM: those that made
+    /// an address, the bytes a line made, or with neither the files.
+    Source {
+        rom: PathBuf,
+        #[arg(long)]
+        project: PathBuf,
+        address: Option<String>,
+        /// `FILE:LINE`, such as `main.s:24`.
+        #[arg(long)]
+        line: Option<String>,
+    },
     /// References to and from an address.
     Xrefs {
         rom: PathBuf,
@@ -521,6 +532,16 @@ enum ImportCommand {
         /// The name the labels are attributed to; the file name by default.
         #[arg(long)]
         source: Option<String>,
+    },
+    /// ca65's debug information, the `.dbg` ld65 writes with `--dbgfile`:
+    /// its labels, and which source line made which bytes.
+    Dbg {
+        /// The `.romlens` package to import into.
+        project: PathBuf,
+        /// The ROM, when it is not beside the package.
+        #[arg(long)]
+        rom: Option<PathBuf>,
+        file: PathBuf,
     },
 }
 
@@ -1080,6 +1101,9 @@ fn run() -> Result<()> {
                 format.as_deref(),
                 source.as_deref(),
             ),
+            ImportCommand::Dbg { project, rom, file } => {
+                commands::import::dbg(&project, rom.as_deref(), &file)
+            }
         },
         Command::Truth { what } => match what {
             TruthCommand::FromCdl { rom, file, out } => {
@@ -1155,6 +1179,17 @@ fn run() -> Result<()> {
             entries,
             unresolved,
         } => commands::tables::run(&rom, project.as_deref(), json, entries, unresolved),
+        Command::Source {
+            rom,
+            project,
+            address,
+            line,
+        } => commands::source::run(commands::source::SourceArgs {
+            rom: &rom,
+            project: &project,
+            address: address.as_deref(),
+            line: line.as_deref(),
+        }),
         Command::Labels {
             rom,
             project,

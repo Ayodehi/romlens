@@ -5,6 +5,8 @@ roms/*
 !roms/README.md
 !roms/.gitkeep
 *.sfc
+# Our own ca65 test program, built from the sources beside it (0BSD).
+!crates/romlens-core/tests/data/ca65/fixture.sfc
 *.smc
 *.fig
 *.swc

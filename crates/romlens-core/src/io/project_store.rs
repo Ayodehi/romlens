@@ -22,6 +22,7 @@ use crate::model::project::{
 use crate::model::region::{
     BankRule, DataKind, OverrideKind, RegionOverride, RegionParams, TableElem,
 };
+use crate::model::source_map::{LineKind, SourceFile, SourceLine, SourceMap};
 use crate::model::variable::{VarType, VarWidth};
 use crate::rom::image::RomImage;
 use crate::viewmodel::hex_rows::AddressStyle;
@@ -41,6 +42,8 @@ pub const VARIABLES_FILE: &str = "variables.json";
 pub const COVERAGE_FILE: &str = "traces/coverage.cdl";
 /// Where the merged execution log lives, in the format the fork writes.
 pub const EXEC_LOG_FILE: &str = "traces/execution.mxlog";
+/// Source lines from imported debug information (`io::import::dbg`).
+pub const SOURCES_FILE: &str = "imports/sources.json";
 
 pub const PROJECT_FILES: [&str; 5] = [
     "project.json",
@@ -81,6 +84,37 @@ struct RecordingDto {
     producer: String,
     #[serde(default)]
     fingerprint: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SourceMapDto {
+    source: String,
+    #[serde(default)]
+    dir: String,
+    files: Vec<SourceFileDto>,
+    lines: Vec<SourceLineDto>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SourceFileDto {
+    name: String,
+    #[serde(default)]
+    size: u32,
+    #[serde(default)]
+    mtime: u32,
+}
+
+/// `ranges` are `[file offset, length]` pairs: a package of a large program
+/// holds tens of thousands of lines, so they are numbers, not addresses.
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SourceLineDto {
+    file: u32,
+    line: u32,
+    kind: String,
+    ranges: Vec<[u32; 2]>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -406,6 +440,36 @@ pub fn to_files(rom: &RomImage, project: &Project) -> BTreeMap<String, Vec<u8>> 
         })
         .collect();
     files.insert("flags.json".to_owned(), to_bytes(&flags));
+    if !project.source_maps.is_empty() {
+        let maps: Vec<SourceMapDto> = project
+            .source_maps
+            .iter()
+            .map(|m| SourceMapDto {
+                source: m.source.clone(),
+                dir: m.dir.clone(),
+                files: m
+                    .files
+                    .iter()
+                    .map(|f| SourceFileDto {
+                        name: f.name.clone(),
+                        size: f.size,
+                        mtime: f.mtime,
+                    })
+                    .collect(),
+                lines: m
+                    .lines
+                    .iter()
+                    .map(|l| SourceLineDto {
+                        file: l.file,
+                        line: l.line,
+                        kind: l.kind.name().to_owned(),
+                        ranges: l.ranges.iter().map(|(o, n)| [o.0, *n]).collect(),
+                    })
+                    .collect(),
+            })
+            .collect();
+        files.insert(SOURCES_FILE.to_owned(), to_bytes(&maps));
+    }
     // Every imported trace, merged, folded to one byte per ROM byte. A
     // bsnes-plus usage map is 16.8 MB of mostly nothing and a package must not
     // carry that; `project.json`'s `traces` array says what went in.
@@ -659,6 +723,47 @@ pub fn from_files(
             fingerprint: r.fingerprint.clone(),
         })
         .collect();
+    let maps: Vec<SourceMapDto> = read_list(files, SOURCES_FILE)?;
+    project.source_maps = maps
+        .into_iter()
+        .map(|m| {
+            let lines = m
+                .lines
+                .into_iter()
+                .map(|l| {
+                    Ok(SourceLine {
+                        file: l.file,
+                        line: l.line,
+                        kind: LineKind::parse(&l.kind).ok_or_else(|| {
+                            ProjectError::BadFormat(format!(
+                                "{SOURCES_FILE}: unknown line kind {:?}",
+                                l.kind
+                            ))
+                        })?,
+                        ranges: l
+                            .ranges
+                            .into_iter()
+                            .map(|[o, n]| (FileOffset(o), n))
+                            .collect(),
+                    })
+                })
+                .collect::<Result<Vec<_>, ProjectError>>()?;
+            Ok(SourceMap {
+                source: m.source,
+                dir: m.dir,
+                files: m
+                    .files
+                    .into_iter()
+                    .map(|f| SourceFile {
+                        name: f.name,
+                        size: f.size,
+                        mtime: f.mtime,
+                    })
+                    .collect(),
+                lines,
+            })
+        })
+        .collect::<Result<Vec<_>, ProjectError>>()?;
     project.traces = dto
         .traces
         .iter()

@@ -150,6 +150,9 @@ pub struct Project {
     pub imports: Vec<ImportRecord>,
     /// Recordings attached to the project, by reference.
     pub recordings: Vec<RecordingRef>,
+    /// Source lines from assemblers' debug information, one per file
+    /// imported. Like a trace, an observation rather than an edit.
+    pub source_maps: Vec<crate::model::source_map::SourceMap>,
     pub settings: Settings,
 }
 
@@ -167,6 +170,7 @@ impl Project {
             traces: Vec::new(),
             imports: Vec::new(),
             recordings: Vec::new(),
+            source_maps: Vec::new(),
             settings: Settings::default(),
         }
     }
@@ -195,6 +199,12 @@ impl Project {
     pub fn add_import(&mut self, record: ImportRecord) {
         self.imports.retain(|i| i.source != record.source);
         self.imports.push(record);
+    }
+
+    /// Keep a source map, replacing an earlier import of the same file.
+    pub fn add_source_map(&mut self, map: crate::model::source_map::SourceMap) {
+        self.source_maps.retain(|m| m.source != map.source);
+        self.source_maps.push(map);
     }
 
     /// Refer to a recording, replacing any earlier reference to the same

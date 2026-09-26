@@ -21,6 +21,7 @@ pub mod rom;
 pub mod screen;
 pub mod search;
 pub mod session;
+pub mod source;
 pub mod tables;
 pub mod truth;
 pub mod xrefs;

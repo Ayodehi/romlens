@@ -9,6 +9,7 @@ pub mod hardware;
 pub mod label;
 pub mod project;
 pub mod region;
+pub mod source_map;
 pub mod symbols;
 pub mod undo;
 pub mod variable;

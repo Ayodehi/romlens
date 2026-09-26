@@ -215,7 +215,7 @@ enum Section {
 
 /// Two names that sanitize to the same thing are kept apart, because two
 /// labels at different addresses must not become one.
-fn unique(name: String, seen: &mut HashSet<String>) -> String {
+pub(crate) fn unique(name: String, seen: &mut HashSet<String>) -> String {
     if seen.insert(name.clone()) {
         return name;
     }
