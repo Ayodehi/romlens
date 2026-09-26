@@ -34,7 +34,7 @@ Total raw state: about 197 KB per frame.
 | Layer | Size | What it enables |
 |---|---|---|
 | Framebuffer | 256×224 (or 512×448 for hi-res) RGB, QOI or PNG compressed, typically 20–60 KB | The Frame view shows the emulator's own image instead of our reference render |
-| APU RAM and DSP registers | 64 KB + 128 B | Audio study, SPC engine visualization |
+| APU RAM, DSP registers and SPC700 state | 64 KB + 128 B + 32 B, and an `APUL` chunk of timestamped port and DSP writes | Audio study, SPC engine visualization; designed in `23-audio.md` (A4) |
 | SRAM | up to 128 KB | Save-file structure lessons |
 | Input | 4–12 B | Controller state per frame, for "what did the player do" |
 | Write log | variable | Every write to WRAM, VRAM, CGRAM, OAM with the writing PC or DMA channel; gives exact provenance instead of inferred |

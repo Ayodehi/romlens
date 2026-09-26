@@ -6,8 +6,10 @@ not legal advice.
 ## Framing
 
 Romlens is a study and visualization tool first. Through Phase 4 it runs no
-game code; the Phase 5 debugger track adds an embedded core for stepping a
-ROM the user supplies. It never ships or fetches a ROM, and does not need a
+game code on the main CPU, with one exception: the sound track
+(`23-audio.md`) runs a game's sound driver on Romlens's own SPC700 and DSP,
+so that its music can be heard and followed note by note. The Phase 5
+debugger track adds an embedded core for stepping a ROM the user supplies. It never ships or fetches a ROM, and does not need a
 commercial ROM to be useful: its natural purpose includes helping people develop their own
 SNES ROMs for real hardware or an emulator, and everything in it works on a
 homebrew build. Recordings come from outside in a published format. The
@@ -66,6 +68,16 @@ ask users where theirs came from.
    from project packages meant for sharing, and the export path warns.
 5. Decoded tiles and frames are displayed in the app for study. The app has
    no "export sprite sheet" feature; that is what ROM hacking tools are for.
+
+**Sound**
+
+11. Samples, voices and songs are played in the app for study, as rule 5 lets
+    frames be displayed; the sound is made on the fly from the ROM or a
+    recording and never kept. There is no export of WAV, `.spc`, BRR or
+    rendered audio, and the CLI prints a rendered run only as a digest. A
+    recording's audio RAM is a copyrighted asset like its VRAM, under rule 4.
+    Nintendo's IPL boot ROM is never in the repository or the app: Romlens
+    boots a driver with its own IPL (`23-audio.md`).
 
 **Third-party disassemblies and symbols**
 

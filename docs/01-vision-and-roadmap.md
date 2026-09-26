@@ -214,6 +214,12 @@ the APU handshake and so on) named where they appear. What those writes add
 up to, the screen a routine sets up and where its graphics were loaded
 from, is planned in `21-screen-setup.md` (24 September 2026).
 
+Sound is planned in `23-audio.md` (26 September 2026): the SPC700's code
+disassembled and its registers explained, BRR samples decoded step by step,
+a recording's voices, notes and port messages, and Romlens's own SPC700 and
+DSP so that samples, voices and songs can be heard, from a recording or from
+the upload traced in the ROM.
+
 - Recording scrubber: step a recording frame by frame with register and
   memory views, and instruction by instruction where the recording carries
   an execution trace. No game code runs inside Romlens in this phase.

@@ -90,3 +90,10 @@ below are therefore the plan for Phase 5, not near-term work. Items 1, 4 and
 5. **Opcode tables and test oracles** come from the WDC datasheet and
    hand-built cases, not from GPL emulator source. Reading GPL code to
    understand behaviour is fine; copying it is not.
+6. **Romlens's own SPC700 and S-DSP** (`23-audio.md`, 26 September 2026)
+   are written in Rust from the public documentation (fullsnes, anomie's
+   S-DSP and SPC700 documents, the SNESdev wiki). No code comes from Mesen,
+   bsnes, higan or blargg's snes_spc (GPL and LGPL), as item 5 says
+   for the 65816. The DSP's 512-entry Gaussian table is a hardware
+   constant and is included as data with its citation; the 64-byte IPL boot ROM is
+   Nintendo's code and is not, replaced by an IPL of our own.
