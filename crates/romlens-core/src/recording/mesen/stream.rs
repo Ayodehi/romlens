@@ -753,9 +753,42 @@ pub mod encode {
         b
     }
 
-    /// [`fixture`] with a sound side made by Romlens's own SPC700 running
-    /// the fixture driver from `$0200`: in frame 1 the S-CPU writes `$01`
-    /// to port 0 and the driver echoes it. Counted as Mesen counts (the
+    /// The emulated fixture's driver: as [`FIXTURE_DRIVER`], and on a new
+    /// command `$01` it sets up voice 0 (sample 0, pitch `$1000`, a fast
+    /// attack, full volume) and keys it on.
+    pub const FIXTURE_PLAYER: &str = "
+        .org $0200
+        start:  MOV X,#$EF
+                MOV SP,X
+                MOV T0DIV,#$50
+                MOV CONTROL,#$01
+        main:   MOV A,CPUIO0
+                CBNE CPUIO0,main
+                MOV CPUIO0,A
+                CMP A,$10
+                BEQ tick
+                MOV $10,A
+                CMP A,#$01
+                BNE tick
+                MOV Y,#$00
+        setup:  MOV A,!voice+Y
+                MOV DSPADDR,A
+                INC Y
+                MOV A,!voice+Y
+                MOV DSPDATA,A
+                INC Y
+                CMP Y,#$18
+                BNE setup
+        tick:   MOV Y,T0OUT
+                BEQ tick
+                BRA main
+        voice:  .db $5D,$3C, $04,$00, $02,$00, $03,$10, $05,$8F, $06,$E0
+                .db $00,$7F, $01,$7F, $0C,$7F, $1C,$7F, $6C,$20, $4C,$01
+    ";
+
+    /// [`fixture`] with a sound side made by Romlens's own SPC700 and DSP
+    /// running [`FIXTURE_PLAYER`] from `$0200`: in frame 1 the S-CPU writes
+    /// `$01` to port 0 and the driver echoes it and plays a note. Counted as Mesen counts (the
     /// SPC700's clock in halves, a master clock at 32,040 Hz × 64 over
     /// NTSC's rate), so `rec pack` and `apu replay` see what they would
     /// from Mesen, and a replay matches every frame.
@@ -792,6 +825,10 @@ pub mod encode {
         let mut b = header(&head);
         let mut apu = Apu::new();
         apu.bus.aram = fixture_aram();
+        let player = crate::spc700::assemble(FIXTURE_PLAYER).unwrap();
+        for (at, bytes) in &player.chunks {
+            apu.bus.aram[*at as usize..*at as usize + bytes.len()].copy_from_slice(bytes);
+        }
         apu.bus.io.rom_enabled = false;
         apu.cpu.pc = 0x0200;
         apu.bus.io_writes = Some(Vec::new());

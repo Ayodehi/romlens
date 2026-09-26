@@ -620,6 +620,21 @@ enum ApuCommand {
     Timeline(ApuRange),
     /// The bytes the two CPUs wrote each other through the ports.
     Ports(ApuRange),
+    /// Play the machine from a frame and describe the sound: its digest,
+    /// levels and voices. No audio is written (content policy rule 11).
+    Render {
+        /// The recording.
+        #[arg(long)]
+        rec: PathBuf,
+        /// The frame to start from (default 0).
+        #[arg(long, default_value_t = 0)]
+        frame: u64,
+        #[arg(long, default_value_t = 1.0)]
+        seconds: f64,
+        /// Leave out the recording's port writes: the driver plays on alone.
+        #[arg(long)]
+        alone: bool,
+    },
     /// Run Romlens's SPC700 beside the recording, frame by frame, and say
     /// where it differs from what Mesen recorded.
     Replay {
@@ -1510,6 +1525,14 @@ fn run() -> Result<()> {
                 ApuCommand::Samples(f) => (What::Samples, f.rec, f.frame, None, 0, f.log),
                 ApuCommand::Timeline(r) => (What::Timeline, r.rec, None, r.frames, r.limit, None),
                 ApuCommand::Ports(r) => (What::Ports, r.rec, None, r.frames, r.limit, None),
+                ApuCommand::Render {
+                    rec,
+                    frame,
+                    seconds,
+                    alone,
+                } => {
+                    return commands::apu::render(&rec, frame, seconds, !alone);
+                }
                 ApuCommand::Replay { range: r, free: f } => {
                     free = f;
                     (What::Replay, r.rec, None, r.frames, r.limit, None)

@@ -377,8 +377,25 @@ fn print_replay(rec: &RomrecSource, from: u64, to: u64, free: bool, limit: usize
     );
     println!("  {} differ", checks.len() - good - at_end);
     println!("  {writes} I/O writes by Mesen; where ours agree, at most {skew} cycles apart");
+    let n = checks.len();
+    let of = |pick: &dyn Fn(u8) -> bool| {
+        checks
+            .iter()
+            .map(|c| c.dsp_own.iter().filter(|r| pick(r.0)).count())
+            .sum::<usize>()
+    };
+    let (envx, outx, endx) = (
+        of(&|r| r != 0x7C && r & 0xF == 8),
+        of(&|r| r & 0xF == 9),
+        of(&|r| r == 0x7C),
+    );
     println!(
-        "(the DSP's own registers, ENVX, OUTX and ENDX, are not compared: A8 emulates the DSP)"
+        "  the DSP, started from rest: ENVX {} of {} match, OUTX {} of {}, ENDX {} of {n}",
+        8 * n - envx,
+        8 * n,
+        8 * n - outx,
+        8 * n,
+        n - endx
     );
     let differ: Vec<_> = checks
         .iter()
@@ -417,6 +434,59 @@ fn print_replay(rec: &RomrecSource, from: u64, to: u64, free: bool, limit: usize
     }
     if differ.len() > limit {
         println!("  … {} more (--limit)", differ.len() - limit);
+    }
+    Ok(())
+}
+
+/// `apu render`: the sound from a frame, described but never written out.
+pub fn render(path: &Path, frame: u64, seconds: f64, follow: bool) -> Result<()> {
+    use romlens_core::apu::render::{SAMPLE_RATE, digest, render};
+    let rec = open(path)?;
+    let count = rec.frame_count().unwrap_or(0);
+    if frame >= count {
+        return Err(anyhow!(
+            "frame {frame} is past the end of the recording ({count} frames)"
+        ));
+    }
+    if !(0.0..=600.0).contains(&seconds) {
+        return Err(anyhow!("--seconds is 0 to 600"));
+    }
+    let n = (seconds * SAMPLE_RATE as f64) as usize;
+    let out = render(&rec, frame, n, follow)?;
+    println!(
+        "from frame {frame}, {:.2} s: {} samples at 32 kHz, {}",
+        out.len() as f64 / SAMPLE_RATE as f64,
+        out.len(),
+        if follow {
+            "the S-CPU's port writes following the recording"
+        } else {
+            "the driver on its own"
+        }
+    );
+    println!("  digest {}", digest(&out));
+    let peak = |v: &mut dyn Iterator<Item = i16>| v.map(|x| (x as i32).abs()).max().unwrap_or(0);
+    let rms = |v: &mut dyn Iterator<Item = i16>| {
+        let (s, k) = v.fold((0f64, 0usize), |(s, k), x| (s + (x as f64).powi(2), k + 1));
+        if k == 0 { 0.0 } else { (s / k as f64).sqrt() }
+    };
+    println!(
+        "  left peak {}, RMS {:.0}; right peak {}, RMS {:.0} (of 32767)",
+        peak(&mut out.iter().map(|f| f.left)),
+        rms(&mut out.iter().map(|f| f.left)),
+        peak(&mut out.iter().map(|f| f.right)),
+        rms(&mut out.iter().map(|f| f.right)),
+    );
+    for v in 0..8 {
+        let p = peak(&mut out.iter().map(|f| f.voices[v]));
+        let sounding = out.iter().filter(|f| f.voices[v] != 0).count();
+        if p == 0 {
+            println!("  voice {v}  silent");
+        } else {
+            println!(
+                "  voice {v}  peak {p}, sounding {:.0}% of the time",
+                100.0 * sounding as f64 / out.len().max(1) as f64
+            );
+        }
     }
     Ok(())
 }

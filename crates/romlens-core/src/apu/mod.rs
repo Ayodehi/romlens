@@ -1,12 +1,13 @@
 //! The sound side as a machine (docs/23, A7): the SPC700, its 64 KB of
 //! audio RAM, its I/O and timers, and the boot program, cycle by cycle.
 //!
-//! The DSP here is its register file for now: the SPC700 writes and reads
-//! it through `$F2`/`$F3`, but nothing plays (A8 adds the voices).
+//! The DSP runs beside it on the same clock (A8): a sample every 32
+//! cycles, from the registers the SPC700 writes through `$F2`/`$F3`.
 
 pub mod cpu;
 pub mod io;
 pub mod ipl;
+pub mod render;
 pub mod replay;
 
 pub use cpu::{Spc700, SpcBus};
@@ -28,7 +29,14 @@ pub struct IoWrite {
 #[derive(Debug, Clone)]
 pub struct ApuBus {
     pub aram: Vec<u8>,
+    /// The DSP's 128 registers, as the SPC700 reads and writes them.
     pub dsp: [u8; 128],
+    /// The DSP's inside: its voices, envelopes and echo.
+    pub chip: crate::dsp::Dsp,
+    /// Cycles into the DSP's current sample, 0-31.
+    pub dsp_clock: u8,
+    /// The samples made, when kept.
+    pub output: Option<Vec<crate::dsp::Frame>>,
     pub io: Io,
     /// SPC700 cycles run, at 1.024 MHz.
     pub cycle: u64,
@@ -69,6 +77,22 @@ impl ApuBus {
         }
         self.cycle += 1;
         self.io.cycle();
+        if let Some(f) = self
+            .chip
+            .step(self.dsp_clock, &mut self.dsp, &mut self.aram)
+            && let Some(out) = &mut self.output
+        {
+            out.push(f);
+        }
+        self.dsp_clock = (self.dsp_clock + 1) & 31;
+    }
+
+    /// Put the DSP where it is `cycle` SPC700 cycles after power on.
+    pub fn set_dsp_clock(&mut self, cycle: u64) {
+        let samples = cycle / 32;
+        self.dsp_clock = (cycle % 32) as u8;
+        self.chip.counter = crate::dsp::chip::counter_after(samples);
+        self.chip.even = samples % 2 == 1;
     }
 
     /// A byte as the SPC700 would read it, without the read's side effects.
@@ -135,9 +159,11 @@ impl SpcBus for ApuBus {
                 let d = self.io.dspaddr;
                 if d < 0x80 {
                     self.dsp[d as usize] = value;
-                    if d == 0x7C {
+                    match d {
                         // Writing ENDX clears it.
-                        self.dsp[0x7C] = 0;
+                        0x7C => self.dsp[0x7C] = 0,
+                        0x4C => self.chip.write_kon(value),
+                        _ => {}
                     }
                 }
             }
@@ -175,6 +201,9 @@ impl Apu {
             bus: ApuBus {
                 aram: vec![0; 0x10000],
                 dsp: [0; 128],
+                chip: crate::dsp::Dsp::default(),
+                dsp_clock: 0,
+                output: None,
                 io: Io::default(),
                 cycle: 0,
                 io_writes: None,
@@ -182,8 +211,12 @@ impl Apu {
                 port_writes: Default::default(),
             },
         };
+        // The DSP comes up keyed off, muted and not writing echo, as if FLG
+        // held $E0 (anomie).
+        apu.bus.dsp[0x6C] = 0xE0;
         apu.cpu.reset(&mut apu.bus);
         apu.bus.cycle = 0;
+        apu.bus.dsp_clock = 0;
         apu
     }
 
@@ -217,6 +250,10 @@ impl Apu {
             };
         }
         apu.bus.cycle = s.cycle;
+        // The DSP's clock runs from power on, as the SPC700's cycle count
+        // does: the samples since then place its step within a sample, its
+        // global counter and which sample polls KON.
+        apu.bus.set_dsp_clock(s.cycle);
         apu
     }
 

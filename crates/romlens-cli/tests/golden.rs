@@ -1235,6 +1235,17 @@ fn apu_commands() {
         "apu", "replay", "--rec", by_apu_rec, "--free", "--frames", "0..4",
     ]);
     log += &run(&["apu", "ports", "--rec", by_apu_rec, "--frames", "1..1"]);
+    log += &run(&["apu", "voices", "--rec", by_apu_rec, "--frame", "3"]);
+    log += &run(&["apu", "render", "--rec", by_apu_rec, "--seconds", "0.1"]);
+    log += &run(&[
+        "apu",
+        "render",
+        "--rec",
+        by_apu_rec,
+        "--seconds",
+        "0.1",
+        "--alone",
+    ]);
     log += &run(&[
         "rec", "extract", rec, "--frame", "2", "--region", "aram", "--hex",
     ]);

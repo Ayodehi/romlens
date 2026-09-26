@@ -5,8 +5,9 @@
 //! SPC700 made to its I/O registers.
 //!
 //! Two things shape the comparison:
-//! - The DSP is not emulated yet, so the registers it changes by itself
-//!   (each voice's ENVX and OUTX, and ENDX) are left out.
+//! - The registers the DSP changes by itself (each voice's ENVX and OUTX,
+//!   and ENDX) are compared apart, since the DSP's inside is not in a
+//!   snapshot and a replay starts it from rest.
 //! - Mesen runs the SPC700 a cycle at a time and stops it at the frame's
 //!   end wherever it is, often inside an instruction, and does not say
 //!   where. Its registers are then those from before that instruction (or
@@ -30,6 +31,12 @@ pub struct FrameCheck {
     pub aram: Vec<u16>,
     /// DSP registers that differ, the DSP's own left out.
     pub dsp: Vec<u8>,
+    /// The registers the DSP sets itself (each voice's ENVX and OUTX, and
+    /// ENDX) that differ. Its inside is not in a snapshot, so a replay
+    /// starts it from rest: these match only once every voice has been
+    /// keyed on since.
+    /// Each as (register, ours, the recording's).
+    pub dsp_own: Vec<(u8, u8, u8)>,
     /// The SPC700's I/O writes, ours and the recording's.
     pub io_writes: (usize, usize),
     /// The first I/O write that differs in register or value, by index.
@@ -223,6 +230,10 @@ fn run_frame(
             !dsp_owned(r) && now != w && pre_dsp(r, now) != w
         })
         .collect();
+    c.dsp_own = (0..0x80u8)
+        .filter(|&r| dsp_owned(r) && apu.bus.dsp[r as usize] != want.dsp[r as usize])
+        .map(|r| (r, apu.bus.dsp[r as usize], want.dsp[r as usize]))
+        .collect();
     for (i, (o, t)) in ours.iter().zip(&theirs).enumerate() {
         if (o.register, o.value) != (t.register, t.value) {
             c.io_mismatch = Some(i);
@@ -377,12 +388,7 @@ pub fn run_free(
     let mut out = Vec::new();
     for frame in from + 1..=to {
         let want = snapshot(src, frame)?;
-        let c = run_frame(&mut apu, src, frame, &want, &mut carried)?;
-        // The DSP's own registers come from the recording, as it plays.
-        for r in (0..0x80u8).filter(|&r| dsp_owned(r)) {
-            apu.bus.dsp[r as usize] = want.dsp[r as usize];
-        }
-        out.push(c);
+        out.push(run_frame(&mut apu, src, frame, &want, &mut carried)?);
     }
     Ok(out)
 }
