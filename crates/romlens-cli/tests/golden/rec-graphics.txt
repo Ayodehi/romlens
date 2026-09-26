@@ -5,12 +5,12 @@ M1 error: the recording was made from a different ROM (the SHA-256 differs)
 [exit code 1]
 Error: the recording is not valid
 F1 error: there is no footer: the recording is in progress or was cut short (--recover checks what is on disk)
-T2 error: the chunk at 0x81d8 runs past the end of the frames
+T2 error: the chunk at 0x81d9 runs past the end of the frames
 <tmp>/cut.romrec: 60 frames, 0 sampled; 2 errors, 0 warnings
 [exit code 1]
 Error: the recording is not valid
 F1 warning: there is no footer: the recording is in progress or was cut short; checking the frames on disk
-T2 warning: the last chunk at 0x81d8 was cut short
+T2 warning: the last chunk at 0x81d9 was cut short
 <tmp>/cut.romrec: 60 frames, 16 sampled; 0 errors, 2 warnings
 [exit code 1]
 Error: the recording is not valid
@@ -20,20 +20,20 @@ vram 0x00a0+1: next changes at frame 5
 [exit code 1]
 Error: frames 80 to 95 are not in a recording of 90 frames (0 to 89)
 Format:       1.1
-Producer:     romlens testrec 0.9.0
+Producer:     romlens testrec 0.10.0
 ROM SHA-256:  cfd385e8107dc5977e88d9b3f4b4b9ce866c707732e4fb7fef36ba5687b20f77
               matches romlens-graphics.sfc
 Frames:       90 (2 keyframes, every 60 frames)
-Storage:      54474 bytes, zstd
+Storage:      54475 bytes, zstd
               keyframes 5535 bytes each on average, deltas 464
 Regions:      cpu 16, ppu 256, io 128, wram 131072, vram 65536, cgram 512, oam 544, timing 16
 Layers:       none
 Format:       1.1
-Producer:     romlens testrec 0.9.0
+Producer:     romlens testrec 0.10.0
 ROM SHA-256:  cfd385e8107dc5977e88d9b3f4b4b9ce866c707732e4fb7fef36ba5687b20f77
               the recording was made from a different ROM (expected SHA-256 cfd385e8107dc5977e88d9b3f4b4b9ce866c707732e4fb7fef36ba5687b20f77, found a2462f1d74f993d0b3e10ae9425cd9b48253ac82c99913f07ef704d9c85dc6ee)
 Frames:       90 (2 keyframes, every 60 frames)
-Storage:      54474 bytes, zstd
+Storage:      54475 bytes, zstd
               keyframes 5535 bytes each on average, deltas 464
 Regions:      cpu 16, ppu 256, io 128, wram 131072, vram 65536, cgram 512, oam 544, timing 16
 Layers:       none
@@ -124,10 +124,10 @@ wrote 544 bytes of oam at frame 0 to <tmp>/oam.bin
 wrote 256 bytes of ppu at frame 0 to <tmp>/ppu.bin
 wrote <tmp>/raw.romrec: one frame with ppu, vram, cgram, oam
 Format:       1.1
-Producer:     romlens import-raw 0.9.0
+Producer:     romlens import-raw 0.10.0
 ROM SHA-256:  cfd385e8107dc5977e88d9b3f4b4b9ce866c707732e4fb7fef36ba5687b20f77
 Frames:       1 (1 keyframe, every 60 frames)
-Storage:      5572 bytes, zstd
+Storage:      5573 bytes, zstd
 Regions:      ppu 256, vram 65536, cgram 512, oam 544
 Layers:       none
 frame 0: BG1, mode 1, 4bpp 32x32, map at word $1000, tiles at $0000

@@ -10,6 +10,7 @@ pub mod graphics;
 pub mod graphs;
 pub mod live;
 pub mod records;
+pub mod source;
 pub mod workbench;
 
 use std::sync::Arc;
@@ -450,6 +451,26 @@ pub fn make_compare_test_roms() -> Vec<Vec<u8>> {
     vec![a, b]
 }
 
+/// A file of a test program: its name and bytes.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct TestFile {
+    pub name: String,
+    pub bytes: Vec<u8>,
+}
+
+/// The ca65 test program (docs/22, S1): `fixture.sfc`, `fixture.dbg` and
+/// the three sources it names.
+#[uniffi::export]
+pub fn make_ca65_test_program() -> Vec<TestFile> {
+    fixtures::ca65_program()
+        .into_iter()
+        .map(|(name, bytes)| TestFile {
+            name: name.to_owned(),
+            bytes: bytes.to_vec(),
+        })
+        .collect()
+}
+
 /// A test ROM whose reset does one of each common setup step, for the
 /// explanations (docs/20).
 #[uniffi::export]
@@ -642,6 +663,37 @@ mod tests {
             new.label_at(0x008020).map(|l| l.name),
             Some("ClearTable".into())
         );
+    }
+
+    #[test]
+    fn imports_a_dbg_and_answers_for_its_lines() {
+        use crate::source::SourceLineKind;
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../romlens-core/tests/data/ca65");
+        let rom = std::fs::read(dir.join("fixture.sfc")).unwrap();
+        let wb = Workbench::new(Rom::from_bytes(rom, "fixture.sfc".into()).unwrap());
+        let text = std::fs::read_to_string(dir.join("fixture.dbg")).unwrap();
+        let r = wb
+            .import_dbg("fixture.dbg".into(), dir.display().to_string(), text)
+            .unwrap();
+        assert_eq!(r.labels_added, 10);
+        assert_eq!(r.format, "dbg");
+        let files = wb.source_files();
+        let names: Vec<&str> = files.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(names, ["main.s", "macros.inc", "palette.s"]);
+        assert!(std::path::Path::new(&files[0].path).is_file());
+        // A byte of the first `brightness`: its line, then the macro's.
+        let at = wb.source_lines_at(12);
+        assert_eq!((at[0].file, at[0].line), (0, 24));
+        assert_eq!(at[1].kind, SourceLineKind::Macro);
+        assert_eq!(at[1].ranges.len(), 2);
+        let lines = wb.source_file_lines(0, 0);
+        assert!(lines.windows(2).all(|w| w[0].line <= w[1].line));
+        assert_eq!(wb.label_at(0x008000).unwrap().name, "Reset");
+        // The labels are one undo step; the lines stay, as a trace does.
+        assert!(wb.undo().unwrap());
+        assert!(wb.label_at(0x008000).is_none_or(|l| l.name != "Reset"));
+        assert_eq!(wb.source_files().len(), 3);
     }
 
     #[test]

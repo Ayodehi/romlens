@@ -54,6 +54,7 @@ enum MainMenu {
         let importMenu = submenu("Import", [
             item("Execution Trace…", #selector(RomWindowController.importTrace(_:))),
             item("Symbols…", #selector(RomWindowController.importSymbols(_:))),
+            item("ca65 Debug Information…", #selector(RomWindowController.importDbg(_:))),
         ])
         return submenu("File", [
             // AppKit inserts Open Recent after Open… by itself, as it does
@@ -134,6 +135,7 @@ enum MainMenu {
             item("Both", #selector(RomWindowController.showBoth(_:)), "3", modifiers: [.command, .option]),
             item("C", #selector(RomWindowController.showC(_:)), "8", modifiers: [.command, .option]),
             item("Graph", #selector(RomWindowController.showGraph(_:)), "9", modifiers: [.command, .option]),
+            item("Source", #selector(RomWindowController.showSource(_:)), ""),
             item("Atlas", #selector(RomWindowController.showAtlas(_:)), "a", modifiers: [.command, .option]),
             item("Compare", #selector(RomWindowController.showCompare(_:)), ""),
             submenu("Graphics", [

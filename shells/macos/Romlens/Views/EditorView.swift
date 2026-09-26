@@ -43,6 +43,12 @@ struct EditorView: View {
             } else {
                 analyzing
             }
+        case .source:
+            if model.hasDisassembly {
+                SourceSplitView(model: model)
+            } else {
+                analyzing
+            }
         case .atlas:
             AtlasView(model: model)
         case .compare:

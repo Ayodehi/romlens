@@ -91,6 +91,11 @@ impl Workbench {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    /// Read the project, for queries in other modules.
+    pub(crate) fn with_project<R>(&self, f: impl FnOnce(&Project) -> R) -> R {
+        f(&self.lock().project)
+    }
+
     fn emit(&self, event: WorkbenchEvent) {
         let listener = self
             .listener
@@ -1417,6 +1422,73 @@ impl Workbench {
             view_generation: generation,
         });
         Ok(added)
+    }
+
+    /// Import ca65's debug information (`.dbg`): its labels, as one undo
+    /// entry, and its source lines, which the project keeps. `dir` is the
+    /// folder it was read from, where its sources are looked for.
+    pub fn import_dbg(
+        &self,
+        source: String,
+        dir: String,
+        text: String,
+    ) -> Result<ImportResult, RomlensError> {
+        use romlens_core::io::import::{dbg, symbols};
+        let file = dbg::read(&text, &self.rom.image, &source, &dir)?;
+        let (result, generation, dirty) = {
+            let mut inner = self.lock();
+            let plan = symbols::plan(&self.rom.image, &inner.project, &file.symbols);
+            let map = &file.map;
+            let detail = format!(
+                "{} source lines made {} bytes, from {} files",
+                map.lines.len(),
+                map.bytes_covered(),
+                map.files.len()
+            );
+            let result = ImportResult {
+                source: source.clone(),
+                format: "dbg".to_owned(),
+                labels_added: plan.labels_added as u32,
+                labels_replaced: plan.replaced as u32,
+                comments_added: 0,
+                kept_user: plan.kept_user.len() as u32,
+                rewritten: file
+                    .symbols
+                    .rewritten
+                    .iter()
+                    .map(|(from, to)| format!("{from} -> {to}"))
+                    .collect(),
+                skipped: file.symbols.skipped.clone(),
+                notice: String::new(),
+                detail,
+                executed_bytes: 0,
+                read_bytes: 0,
+                has_widths: false,
+            };
+            if !plan.commands.is_empty() {
+                let entry = inner.project.apply_batch(
+                    &self.rom.image,
+                    plan.commands,
+                    model::Origin::Import(source.clone()),
+                )?;
+                inner.undo.push(entry);
+            }
+            inner.project.add_import(model::ImportRecord {
+                source,
+                format: "dbg".to_owned(),
+                labels: file.symbols.labels.len() as u64,
+                comments: 0,
+                notice: String::new(),
+            });
+            inner.project.add_source_map(file.map);
+            let (generation, dirty) = self.after_edit(&mut inner, true);
+            (result, generation, dirty)
+        };
+        self.emit(WorkbenchEvent::ProjectChanged { dirty });
+        self.emit(WorkbenchEvent::ViewChanged {
+            view_generation: generation,
+        });
+        Ok(result)
     }
 
     /// Import a symbol file. One undo entry, all or nothing.

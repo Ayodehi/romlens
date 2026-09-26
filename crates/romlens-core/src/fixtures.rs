@@ -646,3 +646,25 @@ pub fn file_name(mode: MappingMode) -> &'static str {
         MappingMode::ExHiRom => "romlens-test-exhirom.sfc",
     }
 }
+
+/// The ca65 program in `tests/data/ca65`, as its files: the ROM, the
+/// `.dbg` ld65 wrote for it, and the sources it names, by file name. For the
+/// shells' tests, which cannot read the repository.
+pub fn ca65_program() -> Vec<(&'static str, &'static [u8])> {
+    vec![
+        (
+            "fixture.sfc",
+            include_bytes!("../tests/data/ca65/fixture.sfc"),
+        ),
+        (
+            "fixture.dbg",
+            include_bytes!("../tests/data/ca65/fixture.dbg"),
+        ),
+        ("main.s", include_bytes!("../tests/data/ca65/main.s")),
+        (
+            "macros.inc",
+            include_bytes!("../tests/data/ca65/macros.inc"),
+        ),
+        ("palette.s", include_bytes!("../tests/data/ca65/palette.s")),
+    ]
+}

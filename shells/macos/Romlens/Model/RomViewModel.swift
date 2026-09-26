@@ -17,7 +17,7 @@ final class RomViewModel {
     }
 
     enum EditorTab: String, CaseIterable, Identifiable {
-        case hex, disassembly, both, c, graph, atlas, compare
+        case hex, disassembly, both, c, graph, source, atlas, compare
         var id: String { rawValue }
         var title: String {
             switch self {
@@ -26,6 +26,7 @@ final class RomViewModel {
             case .both: "Both"
             case .c: "C"
             case .graph: "Graph"
+            case .source: "Source"
             case .atlas: "Atlas"
             case .compare: "Compare"
             }
@@ -56,10 +57,19 @@ final class RomViewModel {
     let graph = GraphModel()
     let atlas = AtlasModel()
     let compare = CompareModel()
+    /// The Source tab's files, from the project's imported `.dbg` files.
+    let source = SourceModel()
 
-    /// The tabs the toolbar offers: Compare only while comparing.
+    /// The tabs the toolbar offers: Source only with sources imported,
+    /// Compare only while comparing.
     var editorTabs: [EditorTab] {
-        EditorTab.allCases.filter { $0 != .compare || compare.isActive }
+        EditorTab.allCases.filter {
+            switch $0 {
+            case .compare: compare.isActive
+            case .source: source.hasFiles
+            default: true
+            }
+        }
     }
     @ObservationIgnored let cache: HexRowCache
     @ObservationIgnored let asmCache: AsmLineCache
@@ -186,6 +196,7 @@ final class RomViewModel {
         if !explanationsShown {
             workbench.setShowExplanations(show: false)
         }
+        source.reload(workbench: workbench)
         if startAnalysis {
             session.startAnalysis()
         }
@@ -316,6 +327,7 @@ final class RomViewModel {
             decompiler.invalidate()
             graph.invalidate()
             refreshDecompile()
+            source.reload(workbench: workbench)
             if compare.state == .ready {
                 let generation = asmGeneration
                 Task { await compare.refresh(this: workbench, generation: generation) }

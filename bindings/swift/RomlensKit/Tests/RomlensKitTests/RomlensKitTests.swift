@@ -30,7 +30,7 @@ import Testing
         #expect(formatSnesAddress(address: 0x80841C) == "$80:841C")
         #expect(formatFileOffset(offset: 0x41C) == "0x00041C")
         #expect(throws: RomlensError.self) { try rom.resolve(text: "$7E:0000") }
-        #expect(apiVersion() == "0.9.0")
+        #expect(apiVersion() == "0.10.0")
     }
 
     @Test func inspectorAndSpans() throws {

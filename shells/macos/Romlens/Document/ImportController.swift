@@ -2,7 +2,8 @@ import AppKit
 import RomlensKit
 import UniformTypeIdentifiers
 
-/// File › Import: an execution trace or a symbol file.
+/// File › Import: an execution trace, a symbol file or ca65's debug
+/// information.
 ///
 /// The report is not optional. An importer that rewrote forty names and did
 /// not say so would be the exact failure `io::import::symbols` is written to
@@ -10,12 +11,13 @@ import UniformTypeIdentifiers
 @MainActor
 enum ImportController {
     enum Kind {
-        case trace, symbols
+        case trace, symbols, dbg
 
         var title: String {
             switch self {
             case .trace: "Import Execution Trace"
             case .symbols: "Import Symbols"
+            case .dbg: "Import ca65 Debug Information"
             }
         }
 
@@ -26,6 +28,8 @@ enum ImportController {
                 return "A Mesen .cdl or execution log (.mxlog), or a bsnes-plus usage map."
             case .symbols:
                 return "A WLA-DX or bsnes-plus .sym, a no$sns .sym, or a VICE .lbl. Your own names are never overwritten."
+            case .dbg:
+                return "The .dbg ld65 writes with --dbgfile: its labels, and which source line made which bytes."
             }
         }
 
@@ -33,6 +37,7 @@ enum ImportController {
             switch self {
             case .trace: ["cdl", "map", "bin", "usage", "mxlog"]
             case .symbols: ["sym", "lbl", "txt"]
+            case .dbg: ["dbg"]
             }
         }
     }
@@ -50,12 +55,37 @@ enum ImportController {
         let host = window ?? NSApp.keyWindow
         let finish: (NSApplication.ModalResponse) -> Void = { response in
             guard response == .OK, let url = panel.url else { return }
-            apply(kind, url: url, session: session, document: document, window: host)
+            if kind == .dbg {
+                withSources(of: url, window: host) {
+                    apply(kind, url: url, session: session, document: document, window: host)
+                }
+            } else {
+                apply(kind, url: url, session: session, document: document, window: host)
+            }
         }
         if let host {
             panel.beginSheetModal(for: host, completionHandler: finish)
         } else {
             finish(panel.runModal())
+        }
+    }
+
+    /// The sources are read beside the `.dbg`, which the sandbox allows
+    /// only in a folder the person chose: ask once, unless it is remembered.
+    /// Declining still imports; the Source tab asks again.
+    private static func withSources(of dbg: URL, window: NSWindow?, then: @escaping @MainActor () -> Void) {
+        let folder = dbg.deletingLastPathComponent()
+        if SourceFolders.folder(holding: folder.appendingPathComponent("x").path) != nil {
+            then()
+            return
+        }
+        SourceFolders.ask(
+            start: folder,
+            message: "Romlens shows the sources \(dbg.lastPathComponent) names. Choose the folder that holds them (usually this one) to let it read them.",
+            window: window
+        ) { _ in
+            // The sheet must be gone before the report's alert appears.
+            DispatchQueue.main.async { then() }
         }
     }
 
@@ -77,6 +107,16 @@ enum ImportController {
                     source: name,
                     text: try String(contentsOf: url, encoding: .utf8)
                 )
+            case .dbg:
+                result = try session.importDbg(
+                    source: name,
+                    dir: url.deletingLastPathComponent().path,
+                    text: try String(contentsOf: url, encoding: .utf8)
+                )
+                if let model = document.model {
+                    model.source.reload(workbench: model.workbench)
+                    model.editorTab = .source
+                }
             }
             document.updateChangeCount(.changeDone)
             report(kind, result, window: window)
@@ -115,6 +155,20 @@ enum ImportController {
             if !r.skipped.isEmpty {
                 lines.append("\(r.skipped.count) lines not understood.")
             }
+        case .dbg:
+            lines.append("\(r.labelsAdded) labels added, \(r.labelsReplaced) replaced. \(r.detail).")
+            if r.keptUser > 0 {
+                lines.append("\(r.keptUser) kept: you had already named them.")
+            }
+            if !r.rewritten.isEmpty {
+                let shown = r.rewritten.prefix(8).joined(separator: "\n  ")
+                let more = r.rewritten.count > 8 ? "\n  … and \(r.rewritten.count - 8) more" : ""
+                lines.append("\(r.rewritten.count) names rewritten to be usable:\n  \(shown)\(more)")
+            }
+            if !r.skipped.isEmpty {
+                lines.append("\(r.skipped.count) records not understood.")
+            }
+            lines.append("The Source tab shows each line beside the bytes it made.")
         }
         if !r.notice.isEmpty {
             lines.append("Notice kept with the project:\n\(r.notice)")

@@ -218,6 +218,12 @@ final class WorkbenchSession {
         finishCommand(affectsAnalysis: true)
     }
 
+    func importDbg(source: String, dir: String, text: String) throws -> ImportResult {
+        let result = try workbench.importDbg(source: source, dir: dir, text: text)
+        finishCommand(affectsAnalysis: true)
+        return result
+    }
+
     func importSymbols(source: String, text: String) throws -> ImportResult {
         let result = try workbench.importSymbols(source: source, text: text)
         finishCommand(affectsAnalysis: true)

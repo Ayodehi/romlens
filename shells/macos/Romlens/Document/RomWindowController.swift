@@ -71,6 +71,7 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
     @objc func showC(_ sender: Any?) { model.editorTab = .c }
     @objc func decompileRoutine(_ sender: Any?) { model.showDecompiled() }
     @objc func showGraph(_ sender: Any?) { model.showGraph() }
+    @objc func showSource(_ sender: Any?) { model.editorTab = .source }
     @objc func showAtlas(_ sender: Any?) { model.editorTab = .atlas }
     @objc func showCompare(_ sender: Any?) { model.editorTab = .compare }
     @objc func compareWith(_ sender: Any?) { CompareController.open(model: model, window: window) }
@@ -181,6 +182,7 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
 
     @objc func importTrace(_ sender: Any?) { importFile(.trace) }
     @objc func importSymbols(_ sender: Any?) { importFile(.symbols) }
+    @objc func importDbg(_ sender: Any?) { importFile(.dbg) }
 
     private func importFile(_ kind: ImportController.Kind) {
         guard let document = projectDocument else { return }
@@ -223,6 +225,9 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
         case #selector(showCompare(_:)):
             item.state = model.graphicsTab == nil && model.editorTab == .compare ? .on : .off
             return model.compare.isActive
+        case #selector(showSource(_:)):
+            item.state = model.graphicsTab == nil && model.editorTab == .source ? .on : .off
+            return model.source.hasFiles
         case #selector(zoomGraphIn(_:)), #selector(zoomGraphOut(_:)), #selector(zoomGraphToFit(_:)):
             return model.graphicsTab == nil && (model.editorTab == .graph || model.editorTab == .atlas)
         case #selector(decompileRoutine(_:)):
