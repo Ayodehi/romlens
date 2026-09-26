@@ -628,13 +628,20 @@ mod tests {
         let r = &c.routines[0];
         assert_eq!(r.pairing, RoutinePairing::Changed);
         assert_eq!(r.a.as_ref().unwrap().name, "ClearTable");
-        let changed = r.lines.iter().find(|l| l.op == DiffLineOp::Changed).unwrap();
+        let changed = r
+            .lines
+            .iter()
+            .find(|l| l.op == DiffLineOp::Changed)
+            .unwrap();
         assert_eq!(changed.b_text.as_deref(), Some("LDX #$1F"));
         assert_eq!(c.names_to_carry.len(), 1);
         new.carry_names(c.names_to_carry).unwrap();
         assert_eq!(new.label_at(0x008020).unwrap().name, "ClearTable");
         assert!(new.undo().unwrap());
-        assert_ne!(new.label_at(0x008020).map(|l| l.name), Some("ClearTable".into()));
+        assert_ne!(
+            new.label_at(0x008020).map(|l| l.name),
+            Some("ClearTable".into())
+        );
     }
 
     #[test]
