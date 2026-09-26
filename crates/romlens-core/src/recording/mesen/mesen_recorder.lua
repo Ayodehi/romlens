@@ -231,6 +231,9 @@ local frame = 0
 
 -- Each write's master clock, placed on its scanline at the frame's end:
 -- the clock and scanline of the previous frame end give the line and dot.
+-- Both clocks come from getMasterClock: getState's masterClock is 32 bits
+-- and wraps to 0 after about 13,700 frames, which would put every later
+-- write billions of cycles away.
 local ends = nil
 local w_clock, w_reg, w_value, w_count = {}, {}, {}, 0
 local get_clock = emu.getMasterClock
@@ -244,7 +247,7 @@ local function on_ppu_write(address, value)
 end
 
 local function line_writes(state)
-  local now = value_of(state["masterClock"])
+  local now = get_clock()
   local line = value_of(state["ppu.scanline"])
   local h = value_of(state["memoryManager.hClock"])
   local r = nil

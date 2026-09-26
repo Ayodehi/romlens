@@ -351,9 +351,11 @@ Little-endian; `s1`/`s2` are strings with a u8/u16 length.
 - **`R`, the register writes of a frame** (version 2): frame (u32), count
   (u32), then 6 bytes a write as in the `LINE` chunk. Written just before the
   frame's `F`, from the second frame on. The script notes `emu.getMasterClock()`
-  at each write, and at each frame end reads `masterClock`, `ppu.scanline` and
-  `memoryManager.hClock`; 1,364 master cycles a line place each write on its
-  scanline and dot, on stock Mesen as on the fork.
+  at each write, and at each frame end notes it again and reads `ppu.scanline`
+  and `memoryManager.hClock` from `getState()`; 1,364 master cycles a line place each write on its
+  scanline and dot, on stock Mesen as on the fork. (`getState()`'s
+  `masterClock` is 32 bits and wraps after about 13,700 frames, so it is not
+  used for this.)
 - **`L`:** frame (u32); a savestate was loaded before it.
 - **`E`:** frames written (u32), the clean end. A stream without it was
   cut short; `rec pack` keeps every whole frame and says so.
