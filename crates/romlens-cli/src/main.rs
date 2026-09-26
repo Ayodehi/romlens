@@ -369,6 +369,24 @@ enum Command {
         #[command(subcommand)]
         action: ProjectCommand,
     },
+    /// A BRR sound sample, decoded block by block (docs/23).
+    Brr {
+        rom: PathBuf,
+        /// Where its first block starts.
+        at: String,
+        /// The loop point, as the sample directory gives it.
+        #[arg(long = "loop")]
+        loop_at: Option<String>,
+        /// Every value's decoding: nibble, shift, filter, clamp, wrap.
+        #[arg(long)]
+        blocks: bool,
+        /// A text waveform.
+        #[arg(long)]
+        ascii: bool,
+        /// Stop after this many blocks without an end flag.
+        #[arg(long, default_value_t = 4096)]
+        max: usize,
+    },
     /// The sound CPU's code (docs/23).
     Spc {
         #[command(subcommand)]
@@ -1418,6 +1436,21 @@ fn run() -> Result<()> {
                 )
             }
         },
+        Command::Brr {
+            rom,
+            at,
+            loop_at,
+            blocks,
+            ascii,
+            max,
+        } => commands::brr::run(commands::brr::BrrArgs {
+            rom: &rom,
+            at: &at,
+            loop_at: loop_at.as_deref(),
+            blocks,
+            ascii,
+            max,
+        }),
         Command::Spc { what } => match what {
             SpcCommand::Disasm {
                 image,

@@ -14,6 +14,7 @@ enum AsmLineKind: UInt8 {
 enum AsmRegionKind: UInt8 {
     case unknown = 0, code = 1, byte = 2, word = 3, long = 4, pointer = 5, table = 6
     case string = 7, graphics = 8, tilemap = 9, palette = 10, compressed = 11, structure = 12
+    case sample = 13
 
     var isData: Bool { rawValue >= 2 }
 }

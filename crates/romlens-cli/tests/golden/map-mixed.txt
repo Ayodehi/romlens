@@ -1,5 +1,5 @@
 # code   + mostly code   . byte   t table/pointer   s string
-g graphics   p palette   m tilemap   z compressed   h header   (space) unknown
+g graphics   p palette   m tilemap   z compressed   h header   a sample   (space) unknown
 
 0x000000  ....p...........................
 0x008000  ................................

@@ -25,6 +25,7 @@ fn glyph(b: &SummaryBucket) -> char {
             DataKind::String => 's',
             DataKind::Pointer { .. } | DataKind::Table { .. } => 't',
             DataKind::Struct => 'h',
+            DataKind::Sample => 'a',
             _ => '.',
         },
     };
@@ -151,7 +152,9 @@ pub fn run(
     }
 
     println!("# code   + mostly code   . byte   t table/pointer   s string");
-    println!("g graphics   p palette   m tilemap   z compressed   h header   (space) unknown");
+    println!(
+        "g graphics   p palette   m tilemap   z compressed   h header   a sample   (space) unknown"
+    );
     println!();
     for (i, row) in map.chunks(width.max(1) as usize).enumerate() {
         let at = row.first().map(|b| b.start).unwrap_or(0);

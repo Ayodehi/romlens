@@ -107,7 +107,7 @@ pub fn mark(args: MarkArgs<'_>) -> Result<()> {
             "unknown" => OverrideKind::Unknown,
             other => OverrideKind::Data(
                 DataKind::parse_with(other, args.stride, args.bpp, args.elem, bank)
-                    .ok_or_else(|| anyhow!("unknown kind {other:?} or element {:?}; kinds are code, byte, word, long, pointer, table, string, graphics, tilemap, palette, compressed, struct and unknown; elements are raw, pointer and code", args.elem))?,
+                    .ok_or_else(|| anyhow!("unknown kind {other:?} or element {:?}; kinds are code, byte, word, long, pointer, table, string, graphics, tilemap, palette, compressed, struct, sample and unknown; elements are raw, pointer and code", args.elem))?,
             ),
         };
         Ok(Command::MarkRegion {

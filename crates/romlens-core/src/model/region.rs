@@ -117,14 +117,23 @@ pub enum DataKind {
     Byte,
     Word,
     Long,
-    Pointer { bank: BankRule },
-    Table { stride: u8, elem: TableElem },
+    Pointer {
+        bank: BankRule,
+    },
+    Table {
+        stride: u8,
+        elem: TableElem,
+    },
     String,
-    Graphics { bpp: u8 },
+    Graphics {
+        bpp: u8,
+    },
     Tilemap,
     Palette,
     Compressed,
     Struct,
+    /// BRR sound samples (docs/23): 9-byte blocks the S-DSP plays.
+    Sample,
 }
 
 impl DataKind {
@@ -141,6 +150,7 @@ impl DataKind {
             DataKind::Palette => "palette",
             DataKind::Compressed => "compressed",
             DataKind::Struct => "struct",
+            DataKind::Sample => "sample",
         }
     }
 
@@ -180,6 +190,7 @@ impl DataKind {
             "palette" => DataKind::Palette,
             "compressed" => DataKind::Compressed,
             "struct" => DataKind::Struct,
+            "sample" => DataKind::Sample,
             _ => return None,
         })
     }
@@ -236,6 +247,7 @@ impl DataKind {
             DataKind::Palette => 10,
             DataKind::Compressed => 11,
             DataKind::Struct => 12,
+            DataKind::Sample => 13,
         }
     }
 }

@@ -67,6 +67,7 @@ enum RegionStrip {
         case 9: .systemYellow        // tilemap
         case 10: .systemPink         // palette
         case 11: .systemRed          // compressed
+        case 13: .systemIndigo       // sample
         default: .systemBrown        // struct, and anything new
         }
     }

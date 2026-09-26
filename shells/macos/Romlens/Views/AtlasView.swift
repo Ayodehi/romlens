@@ -528,6 +528,7 @@ final class AtlasCanvasView: NSView {
         case 9: "tilemap"
         case 10: "palette"
         case 11: "compressed"
+        case 13: "sample"
         default: "struct"
         }
     }

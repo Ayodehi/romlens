@@ -176,6 +176,7 @@ pub enum DataKind {
     Palette,
     Compressed,
     Struct,
+    Sample,
 }
 
 /// Which bank a 16-bit pointer's target is in.
@@ -241,6 +242,7 @@ impl From<model::DataKind> for DataKind {
             model::DataKind::Palette => DataKind::Palette,
             model::DataKind::Compressed => DataKind::Compressed,
             model::DataKind::Struct => DataKind::Struct,
+            model::DataKind::Sample => DataKind::Sample,
         }
     }
 }
@@ -274,6 +276,7 @@ pub fn core_data_kind(
         DataKind::Palette => model::DataKind::Palette,
         DataKind::Compressed => model::DataKind::Compressed,
         DataKind::Struct => model::DataKind::Struct,
+        DataKind::Sample => model::DataKind::Sample,
     }
 }
 

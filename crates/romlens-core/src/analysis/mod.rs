@@ -629,6 +629,7 @@ fn kind_from_code(code: u8) -> RegionKind {
         9 => RegionKind::Data(DataKind::Tilemap),
         10 => RegionKind::Data(DataKind::Palette),
         11 => RegionKind::Data(DataKind::Compressed),
+        13 => RegionKind::Data(DataKind::Sample),
         _ => RegionKind::Data(DataKind::Struct),
     }
 }

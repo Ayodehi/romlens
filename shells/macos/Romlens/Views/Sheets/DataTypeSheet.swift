@@ -43,6 +43,7 @@ struct DataTypeSheet: View {
         (.palette, "Palette"),
         (.compressed, "Compressed"),
         (.struct, "Struct"),
+        (.sample, "Sound Sample (BRR)"),
     ]
 
     private var takesElem: Bool { kind == .table }

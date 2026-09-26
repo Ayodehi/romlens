@@ -1157,3 +1157,20 @@ fn spc_disasm() {
     check("spc-disasm", &log);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn brr() {
+    let dir = temp_dir("brr");
+    let path = dir.join("sound.sfc");
+    std::fs::write(&path, fixtures::sound_lorom()).unwrap();
+    let rom = path.to_str().unwrap();
+    let at = format!("0x{:X}", fixtures::sound::SAMPLE_OFFSET);
+    let lp = format!(
+        "0x{:X}",
+        fixtures::sound::SAMPLE_OFFSET + fixtures::sound::SAMPLE_LOOP
+    );
+    let mut log = run(&["brr", rom, &at, "--loop", &lp, "--ascii"]);
+    log += &run(&["brr", rom, &at, "--blocks", "--max", "2"]);
+    check("brr", &log);
+    let _ = std::fs::remove_dir_all(dir);
+}
