@@ -29,6 +29,7 @@ import Testing
         // pixels and a click lands on the byte asked for.
         for _ in 0..<40 where canvas.ppb < 8 { canvas.zoom(by: 1.5, at: canvas.point(ofOffset: 0)) }
         #expect(canvas.ppb >= 8)
+        #expect(canvas.clipsToBounds, "rows scrolled above the top must not draw over the header")
         let p = canvas.point(ofOffset: 0x20)
         #expect(canvas.offset(at: p) == 0x20)
         canvas.mouseMovedForTesting(p)

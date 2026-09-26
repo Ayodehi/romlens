@@ -189,6 +189,9 @@ final class AtlasCanvasView: NSView {
         romLength = max(1, model.byteCount)
         bankSize = model.info.mapping == .loRom ? 0x8000 : 0x1_0000
         super.init(frame: .zero)
+        // Since macOS 14 a view draws past its bounds unless told not to,
+        // and zoomed rows above the top would cover the header.
+        clipsToBounds = true
     }
 
     @available(*, unavailable)
