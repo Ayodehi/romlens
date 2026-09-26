@@ -506,9 +506,25 @@ impl Program {
         // routine whose arguments can be named, and that nothing reaches in
         // a way the analysis does not see.
         let unseen = open_routines(snap, &units);
+        // Only calls pass arguments: a routine a dispatch table, a pointer
+        // or a vector reaches is entered with nothing passed, and reads its
+        // arguments from the stack itself.
+        let indirect: BTreeSet<SnesAddress> = snap
+            .jump_tables
+            .iter()
+            .flat_map(|t| t.targets.iter().map(|(a, _)| *a))
+            .chain(units.keys().copied().filter(|a| {
+                snap.xrefs_to(*a).iter().any(|x| {
+                    matches!(
+                        x.kind,
+                        XRefKind::Pointer | XRefKind::Vector | XRefKind::JumpTable
+                    )
+                })
+            }))
+            .collect();
         let stack_params: BTreeMap<SnesAddress, Vec<(u32, u32)>> = units
             .iter()
-            .filter(|(a, _)| !unseen.contains(a))
+            .filter(|(a, _)| !unseen.contains(a) && !indirect.contains(a))
             .map(|(a, u)| (*a, dataflow::stack_param_ranges(&u.f, &u.cfg, &u.lifted)))
             .filter(|(_, r)| !r.is_empty())
             .collect();
