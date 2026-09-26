@@ -1,0 +1,42 @@
+# code   + mostly code   . byte   t table/pointer   s string
+g graphics   p palette   m tilemap   z compressed   h header   (space) unknown
+
+0x000000  #+# # #+# #     
+
+16 columns of 8 bytes: 8 mostly code, 8 mostly unknown, 6 blended
+
+Calls between columns, most first:
+       0 -> 4      1 call
+       1 -> 6      1 call
+       2 -> 8      1 call
+       2 -> 10     1 call
+
+0x000000  $00:8000   1 byte  instruction in code
+0x000001  $00:8001   1 byte  instruction in code
+0x000002  $00:8002   1 byte  instruction in code
+0x000003  $00:8003   2 bytes  instruction in code
+0x000005  $00:8005   3 bytes  instruction in code
+0x000008  $00:8008   3 bytes  instruction in code
+0x00000B  $00:800B   2 bytes  instruction in code
+0x00000D  $00:800D   1 byte  row of unknown
+(more items in the window)
+{
+  "romBytes": 32768,
+  "buckets": [
+    {"start": 0, "len": 24, "kind": "code", "confidence": 0.90, "share": 0.92, "mixed": false, "entropy": 2.16, "executed": 0.00},
+    {"start": 24, "len": 24, "kind": "unknown", "confidence": 0.00, "share": 0.62, "mixed": true, "entropy": 2.16, "executed": 0.00},
+    {"start": 48, "len": 24, "kind": "code", "confidence": 0.90, "share": 0.83, "mixed": true, "entropy": 2.16, "executed": 0.00},
+    {"start": 72, "len": 24, "kind": "code", "confidence": 0.90, "share": 0.50, "mixed": true, "entropy": 2.16, "executed": 0.00}
+  ],
+  "arcs": [
+    {"from": "0", "to": "2", "calls": 2, "observed": false},
+    {"from": "0", "to": "1", "calls": 1, "observed": false},
+    {"from": "0", "to": "3", "calls": 1, "observed": false}
+  ],
+  "more": true,
+  "items": [
+    {"offset": 0, "len": 1, "instruction": true, "kind": "code"},
+    {"offset": 1, "len": 1, "instruction": true, "kind": "code"},
+    {"offset": 2, "len": 1, "instruction": true, "kind": "code"}
+  ]
+}

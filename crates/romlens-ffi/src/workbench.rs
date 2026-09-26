@@ -801,6 +801,69 @@ impl Workbench {
         region_summary::encode_summary(&map, len)
     }
 
+    /// The Atlas's columns (docs/22, A1): [`region_map`](Self::region_map)
+    /// over `len` bytes from `start` only, in the same batch layout.
+    pub fn region_map_window(&self, start: u32, len: u32, buckets: u32) -> Vec<u8> {
+        let entropy = Arc::clone(
+            self.entropy
+                .get_or_init(|| Arc::new(EntropyProfile::build(&self.rom.image))),
+        );
+        let inner = self.lock();
+        let rom_len = self.rom.image.len() as u32;
+        let map = region_summary::summarize_window(
+            &inner.snapshot,
+            rom_len,
+            start,
+            len,
+            buckets,
+            Some(&entropy),
+            inner.project.coverage.as_deref(),
+        );
+        region_summary::encode_summary(&map, rom_len)
+    }
+
+    /// The calls between the Atlas's columns for the same window, most
+    /// first.
+    pub fn atlas_call_arcs(&self, start: u32, len: u32, buckets: u32) -> Vec<CallArcInfo> {
+        let inner = self.lock();
+        romlens_core::viewmodel::atlas::call_arcs(
+            &inner.snapshot,
+            self.rom.image.len() as u32,
+            start,
+            len,
+            buckets,
+        )
+        .into_iter()
+        .map(Into::into)
+        .collect()
+    }
+
+    /// The instructions and data rows starting in the window, at most
+    /// `limit`, for the Atlas's finest zoom.
+    pub fn atlas_items(&self, start: u32, len: u32, limit: u32) -> AtlasItemsInfo {
+        let inner = self.lock();
+        let (items, more) = romlens_core::viewmodel::atlas::items(
+            &inner.snapshot,
+            &inner.lines,
+            start,
+            len,
+            limit as usize,
+        );
+        AtlasItemsInfo {
+            items: items
+                .into_iter()
+                .map(|i| AtlasItemInfo {
+                    offset: i.offset,
+                    len: i.len,
+                    instruction: i.instruction,
+                    kind_code: i.kind.code(),
+                    confidence: i.confidence,
+                })
+                .collect(),
+            more,
+        }
+    }
+
     // ---- labels, xrefs, comments, warnings --------------------------------
 
     pub fn labels(&self) -> Vec<LabelInfo> {

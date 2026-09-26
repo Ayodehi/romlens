@@ -1,6 +1,7 @@
 //! Presentation-ready view models: shells draw these, they never compute them.
 
 pub mod asm_lines;
+pub mod atlas;
 pub mod graphics;
 pub mod hex_rows;
 pub mod inspector;

@@ -58,18 +58,41 @@ pub fn summarize(
     entropy: Option<&EntropyProfile>,
     coverage: Option<&Coverage>,
 ) -> Vec<SummaryBucket> {
-    let buckets = buckets.clamp(1, rom_len.max(1));
+    summarize_window(snapshot, rom_len, 0, rom_len, buckets, entropy, coverage)
+}
+
+/// [`summarize`] over `len` bytes from `start` only, so a zoomed view asks
+/// for the columns it shows rather than resampling the whole image's. The
+/// window is clipped to the image.
+pub fn summarize_window(
+    snapshot: &AnalysisSnapshot,
+    rom_len: u32,
+    start: u32,
+    len: u32,
+    buckets: u32,
+    entropy: Option<&EntropyProfile>,
+    coverage: Option<&Coverage>,
+) -> Vec<SummaryBucket> {
+    let base = start.min(rom_len);
+    let span = len.min(rom_len - base);
+    if span == 0 {
+        return Vec::new();
+    }
+    let buckets = buckets.clamp(1, span);
     let mut out = Vec::with_capacity(buckets as usize);
     // Regions are sorted and cover the image, so one pass over them fills every
     // column: the alternative, a region lookup per column, is a binary search
     // per pixel for no gain.
-    let mut region_i = 0usize;
+    let mut region_i = snapshot
+        .regions
+        .partition_point(|r| r.end() <= base)
+        .min(snapshot.regions.len().saturating_sub(1));
     for i in 0..buckets {
         // Spread the remainder rather than leaving a short last column, so the
         // strip's columns stay within a byte of each other.
-        let start = (i as u64 * rom_len as u64 / buckets as u64) as u32;
-        let end = ((i as u64 + 1) * rom_len as u64 / buckets as u64) as u32;
-        let end = end.max(start + 1).min(rom_len);
+        let start = base + (i as u64 * span as u64 / buckets as u64) as u32;
+        let end = base + ((i as u64 + 1) * span as u64 / buckets as u64) as u32;
+        let end = end.max(start + 1).min(base + span);
         // Bytes per kind code, and the confidence they carry.
         let mut bytes = [0u32; 16];
         let mut weighted = [0f32; 16];

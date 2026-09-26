@@ -601,6 +601,27 @@ mod tests {
     }
 
     #[test]
+    fn the_atlas_zooms_by_asking_for_a_window() {
+        let rom = Rom::from_bytes(make_routines_test_rom(), "r.sfc".into()).unwrap();
+        let wb = Workbench::new(rom);
+        block_on(wb.analyze()).unwrap();
+        // The whole map's first 16 of 256 columns are the window's 16.
+        let whole = wb.region_map(256);
+        let window = wb.region_map_window(0, 0x800, 16);
+        assert_eq!(window[8..], whole[8..8 + 16 * 16]);
+        let arcs = wb.atlas_call_arcs(0, 0x80, 16);
+        assert!(!arcs.is_empty());
+        assert!(
+            arcs.iter()
+                .all(|a| matches!(a.from, ArcEndInfo::Column { .. })
+                    || matches!(a.to, ArcEndInfo::Column { .. }))
+        );
+        let items = wb.atlas_items(0, 0x10, 4);
+        assert_eq!((items.items.len(), items.more), (4, true));
+        assert!(items.items[0].instruction && items.items[0].kind_code == 1);
+    }
+
+    #[test]
     fn graphs_a_routine_and_its_calls() {
         let rom = Rom::from_bytes(make_routines_test_rom(), "r.sfc".into()).unwrap();
         let wb = Workbench::new(rom);

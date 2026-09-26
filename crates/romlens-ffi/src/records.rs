@@ -396,6 +396,68 @@ impl From<&model::Evidence> for EvidenceInfo {
     }
 }
 
+/// Where one end of an Atlas call arc falls.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum ArcEndInfo {
+    /// Before the window.
+    Before,
+    Column {
+        index: u32,
+    },
+    /// After the window, or outside the ROM.
+    After,
+}
+
+impl From<romlens_core::viewmodel::atlas::ArcEnd> for ArcEndInfo {
+    fn from(e: romlens_core::viewmodel::atlas::ArcEnd) -> Self {
+        use romlens_core::viewmodel::atlas::ArcEnd;
+        match e {
+            ArcEnd::Before => ArcEndInfo::Before,
+            ArcEnd::Column(index) => ArcEndInfo::Column { index },
+            ArcEnd::After => ArcEndInfo::After,
+        }
+    }
+}
+
+/// The calls from one Atlas column to another.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
+pub struct CallArcInfo {
+    pub from: ArcEndInfo,
+    pub to: ArcEndInfo,
+    pub calls: u32,
+    /// Some of them an emulator saw happen.
+    pub observed: bool,
+}
+
+impl From<romlens_core::viewmodel::atlas::CallArc> for CallArcInfo {
+    fn from(a: romlens_core::viewmodel::atlas::CallArc) -> Self {
+        CallArcInfo {
+            from: a.from.into(),
+            to: a.to.into(),
+            calls: a.calls,
+            observed: a.observed,
+        }
+    }
+}
+
+/// One instruction or data row at the Atlas's finest zoom.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct AtlasItemInfo {
+    pub offset: u32,
+    pub len: u32,
+    pub instruction: bool,
+    /// Its region's kind, in the summary batch's encoding.
+    pub kind_code: u8,
+    pub confidence: f32,
+}
+
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct AtlasItemsInfo {
+    pub items: Vec<AtlasItemInfo>,
+    /// The window held more than the limit.
+    pub more: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct RegionInfo {
     pub start: u32,

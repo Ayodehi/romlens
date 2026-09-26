@@ -925,6 +925,43 @@ fn graph_commands() {
         text.push_str(&run(&["graph", rom, at, "--calls"]));
     }
     check("graph-routines", &text);
+    // The Atlas's queries (docs/22, A1): a window of the map, the calls
+    // between its columns, and its items.
+    check(
+        "map-routines-window",
+        &format!(
+            "{}{}",
+            run(&[
+                "map",
+                rom,
+                "--from",
+                "$00:8000",
+                "--len",
+                "0x80",
+                "--buckets",
+                "16",
+                "--width",
+                "16",
+                "--arcs",
+                "--items",
+                "8"
+            ]),
+            run(&[
+                "map",
+                rom,
+                "--from",
+                "0x0",
+                "--len",
+                "0x60",
+                "--buckets",
+                "4",
+                "--arcs",
+                "--items",
+                "3",
+                "--json"
+            ]),
+        ),
+    );
     check(
         "graph-routines-dot",
         &format!(

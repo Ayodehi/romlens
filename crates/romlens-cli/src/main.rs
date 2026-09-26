@@ -160,7 +160,7 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// The whole-ROM overview the shell's strip draws.
+    /// The whole-ROM overview the shell's strip draws, or a window of it.
     Map {
         rom: PathBuf,
         #[arg(long)]
@@ -173,6 +173,19 @@ enum Command {
         width: u32,
         #[arg(long)]
         json: bool,
+        /// Map only a window from here (an address expression), as the
+        /// Atlas asks when zoomed; the columns then cover the window.
+        #[arg(long)]
+        from: Option<String>,
+        /// The window's length in bytes (0x for hex); to the end if absent.
+        #[arg(long)]
+        len: Option<String>,
+        /// Also list the calls between columns.
+        #[arg(long)]
+        arcs: bool,
+        /// Also list the window's instructions and data rows, up to N.
+        #[arg(long)]
+        items: Option<usize>,
     },
     /// List the dispatch tables the analyzer resolved.
     Tables {
@@ -1086,7 +1099,23 @@ fn run() -> Result<()> {
             buckets,
             width,
             json,
-        } => commands::map::run(&rom, project.as_deref(), buckets, width, json),
+            from,
+            len,
+            arcs,
+            items,
+        } => commands::map::run(
+            &rom,
+            project.as_deref(),
+            buckets,
+            width,
+            json,
+            commands::map::MapOptions {
+                start: from.as_deref(),
+                len: len.as_deref(),
+                arcs,
+                items,
+            },
+        ),
         Command::Tables {
             rom,
             project,
