@@ -109,7 +109,7 @@ bytes from the start of the structure.
 | 52 | 4 | region count |
 | 56 | 8 | frame count; `$FFFFFFFFFFFFFFFF` while the file is being written |
 | 64 | 8 | created, Unix seconds (0 when the producer does not say) |
-| 72 | 4 | layers present: bit 0 framebuffer, 1 write log, 2 trace, 3 read log, 4 register writes by line (1.1) |
+| 72 | 4 | layers present: bit 0 framebuffer, 1 write log, 2 trace, 3 read log, 4 register writes by line (1.1), 5 sound events (1.2) |
 | 76 | 4 | compression: 0 none, 1 zstd (one frame per payload) |
 | 80 | 4 + 4 | producer name: offset into the string area, length |
 | 88 | 4 + 4 | producer version, likewise |
@@ -128,6 +128,14 @@ Sizes are fixed by the id; a mismatch is an error, not a variant.
 | 5 | `cgram` | 512 | 256 BGR15 colours |
 | 6 | `oam` | 544 | low table then high table |
 | 7 | `timing` | 16 | frame index (u64), then reserved |
+| 8 | `aram` | 65536 | the sound CPU's RAM (1.2, `23-audio.md`) |
+| 9 | `dsp` | 128 | the S-DSP's registers, as the SPC700 reads them |
+| 10 | `spc` | 32 | the SPC700: A, X, Y, SP, PSW, PC (u16), the ports as it reads them (4) and as the S-CPU reads them (4), AUXIO4/5, DSPADDR, flags (bit 0 boot ROM mapped, bits 2–4 timers on), the three timer dividers, their 4-bit counts (0 and 1 in a byte, then 2), and its cycle count (u64) at offset 24 |
+
+The three sound regions come together or not at all. Mesen runs the
+SPC700 behind the main CPU and catches it up when the game touches a port
+and after the frame's end, so the `spc` block's cycle count says how far
+it had run when the recorder read it.
 
 A recording may carry any subset; one made from loose dumps typically has
 `ppu`, `vram`, `cgram` and `oam` only, and a view that needs an absent
@@ -249,6 +257,20 @@ VRAM, CGRAM and OAM each visible line was drawn with, and arrive exactly at
 the frame's own snapshot: every frame of ten games' recordings does
 (`22-phase3-finish.md`, P1).
 
+**`APUL`, the sound side's events** (format 1.2). One chunk after each
+frame of a recording with the sound regions: every byte the game wrote to
+`$2140`–`$2143`, and every write the SPC700 made to `$F0`–`$FF`, in order.
+The body is the frame (u64), `DSPADDR` when the frame began (u8), the
+event count (u32), a compression byte, then the events, 19 bytes each:
+kind (u8: 0 the S-CPU wrote port *address*, 1 the SPC700 wrote
+`$F0` + *address*), address (u8), value (u8), the SPC700's cycle count
+(u64) and, for kind 0, the master clock (u64). A write to the DSP is the
+pair `DSPADDR` then `DSPDATA`; `recording::apu::ApuEvents::dsp_writes`
+pairs them, starting from the frame's `DSPADDR`. Super Mario World's first
+900 frames from power-on hold 176,359 events, 14,666 of them DSP writes,
+most of the rest the driver's upload; with them the recording is 24%
+larger (11.9 MB against 9.6 MB).
+
 **Index**, `IDX\0`, a length, then 24 bytes per frame: frame (u64), file
 offset of its chunk (u64), chunk length (u32), kind (u8), 3 reserved.
 
@@ -330,13 +352,14 @@ What `mesen_recorder.lua` writes and only `rec pack` reads
 promise beyond its version number, since Romlens ships both ends.
 Little-endian; `s1`/`s2` are strings with a u8/u16 length.
 
-- **Header:** `RLSTREAM`, version (u16, now 2; `rec pack` reads 1 and 2), producer (`s2`), Mesen's
+- **Header:** `RLSTREAM`, version (u16, now 3; `rec pack` reads 1 to 3), producer (`s2`), Mesen's
   ROM SHA-1 (`s2`, informational), start time (i64 Unix seconds), PRG ROM
   size (u32), 64 samples of 16 bytes taken at `size / 64 × i`, and the
   field names (u16 count, `s1` each): every numeric or boolean
   `emu.getState()` key under `cpu.`, `ppu.`, `internalRegisters.` and
-  `dmaController.`, plus `frameCount`, `masterClock` and
-  `memoryManager.hClock`.
+  `dmaController.` and (version 3) `spc.` but not `spc.dsp.`, plus
+  `frameCount`, `masterClock` and `memoryManager.hClock`. From version 3,
+  a flags byte: bit 0, the stream carries the sound side.
 - **`F`, a frame end:** frame (u32); the fields that changed (u16 count,
   then u16 index and i64 value each); 52 bytes, the last byte written to
   each of `$2100`–`$2133`; 52 bytes, whether each has been written; the 128
@@ -356,6 +379,18 @@ Little-endian; `s1`/`s2` are strings with a u8/u16 length.
   scanline and dot, on stock Mesen as on the fork. (`getState()`'s
   `masterClock` is 32 bits and wraps after about 13,700 frames, so it is not
   used for this.)
+- **`A`, the sound side's events** (version 3, with the sound side): frame
+  (u32), count (u32), then 19 bytes an event as in the `APUL` chunk. The
+  callbacks are on stock Mesen: a write callback on `snesRegister`
+  `$2140`–`$2143`, and one on the SPC700's `spcMemory` `$F0`–`$FF`; each
+  notes `emu.getCpuCycleCount(emu.cpuType.spc)`, which runs on the
+  SPC700's own clock however Mesen interleaves the two CPUs.
+- **`S`, the sound side at the frame's end** (version 3): frame (u32), the
+  SPC700's cycle count (u64), audio RAM's changed 256-byte blocks (u16
+  count, then u16 block and the block each), and the 128 DSP registers,
+  read with `read32` on `spcRam` and `spcDspRegisters`. About 1 ms a frame.
+  `A` then `S` are written just before the frame's `F`; a new live
+  connection gets every block once.
 - **`L`:** frame (u32); a savestate was loaded before it.
 - **`E`:** frames written (u32), the clean end. A stream without it was
   cut short; `rec pack` keeps every whole frame and says so.

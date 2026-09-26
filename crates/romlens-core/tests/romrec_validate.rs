@@ -23,7 +23,7 @@ fn good_with(options: WriterOptions) -> Vec<u8> {
     let mut w = RomrecWriter::new(
         Cursor::new(Vec::new()),
         &fixtures::identity(),
-        &StateRegion::ALL,
+        &StateRegion::MAIN,
         options,
         0,
     )

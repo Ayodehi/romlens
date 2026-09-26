@@ -339,7 +339,7 @@ pub fn validate(mut file: Box<dyn ReadSeek>, options: ValidateOptions) -> Valida
     // T, K, D, R, P, L, W: walk every chunk from the header to the index.
     let mut seen: Vec<Seen> = Vec::new();
     let mut wlog_chunks = 0u32;
-    let mut other_layers = [false; 5];
+    let mut other_layers = [false; 6];
     let mut at = header_len as u64;
     let interval = header.keyframe_interval.max(1) as u64;
     let whole: Vec<StateRegion> = header.regions.clone();
@@ -400,6 +400,12 @@ pub fn validate(mut file: Box<dyn ReadSeek>, options: ValidateOptions) -> Valida
                 if i == 4 {
                     check_lines(&mut out, &chunk, seen.last().map(|s| s.frame));
                 }
+                if i == 5
+                    && chunk.len() >= 8
+                    && let Err(e) = crate::recording::apu::ApuEvents::decode(&chunk[8..])
+                {
+                    out.error("A1", seen.last().map(|s| s.frame), e.to_string());
+                }
                 other_layers[i] = true;
             }
         } else {
@@ -424,6 +430,7 @@ pub fn validate(mut file: Box<dyn ReadSeek>, options: ValidateOptions) -> Valida
         trace: other_layers[2],
         read_log: other_layers[3],
         line_writes: other_layers[4],
+        apu_events: other_layers[5],
     };
     for (name, d, p) in [
         ("framebuffer", declared.framebuffer, present.framebuffer),
@@ -431,6 +438,7 @@ pub fn validate(mut file: Box<dyn ReadSeek>, options: ValidateOptions) -> Valida
         ("trace", declared.trace, present.trace),
         ("read log", declared.read_log, present.read_log),
         ("line write", declared.line_writes, present.line_writes),
+        ("APU event", declared.apu_events, present.apu_events),
     ] {
         if p && !d {
             out.error(

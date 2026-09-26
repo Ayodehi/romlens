@@ -56,6 +56,7 @@ fn recording() -> RomrecSource {
         rom_size: size as u32,
         samples,
         fields: Vec::new(),
+        flags: 0,
     };
     let mut registers = [0u8; DMA_LEN];
     let ch = 2 * 16;

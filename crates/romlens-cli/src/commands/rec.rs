@@ -81,7 +81,7 @@ pub fn testrec(out: &Path, frames: u32, interval: u16) -> Result<()> {
         ..WriterOptions::default()
     };
     let (staged, file) = Staged::create(out)?;
-    let mut w = RomrecWriter::new(file, &fixtures::identity(), &StateRegion::ALL, options, 0)?;
+    let mut w = RomrecWriter::new(file, &fixtures::identity(), &StateRegion::MAIN, options, 0)?;
     for s in &states {
         w.write_frame(s)?;
     }
@@ -177,6 +177,7 @@ pub fn info(path: &Path, rom: Option<&Path>, recover: bool) -> Result<()> {
         (l.trace, "trace"),
         (l.read_log, "read log"),
         (l.line_writes, "register writes by line"),
+        (l.apu_events, "sound events"),
     ]
     .iter()
     .filter(|(on, _)| *on)
@@ -195,8 +196,16 @@ pub fn info(path: &Path, rom: Option<&Path>, recover: bool) -> Result<()> {
 
 pub fn extract(path: &Path, frame: u64, region: &str, out: Option<&Path>, hex: bool) -> Result<()> {
     let region = StateRegion::parse(region).ok_or_else(|| {
-        anyhow!("--region is one of cpu, ppu, io, wram, vram, cgram, oam, timing")
+        anyhow!("--region is one of cpu, ppu, io, wram, vram, cgram, oam, timing, dsp, spc")
     })?;
+    // Audio RAM holds the game's samples and music, which nothing exports
+    // (12-content-policy.md, rule 11); the DSP's and SPC700's registers are
+    // settings, not content.
+    if region == StateRegion::Aram {
+        return Err(anyhow!(
+            "audio RAM holds the game's samples and music, which Romlens does not export; `romlens apu map` shows what it holds"
+        ));
+    }
     let rec = open(path, false)?;
     let bytes = rec.region_at(frame, region)?;
     if let Some(out) = out {
@@ -420,6 +429,12 @@ pub fn pack(stream: &Path, rom: &Path, out: &Path, options: PackOptions) -> Resu
         report.producer,
         report.dma_events
     );
+    if report.apu_events > 0 {
+        println!(
+            "and the sound side: {} events, {} of them DSP writes",
+            report.apu_events, report.dsp_writes
+        );
+    }
     if report.truncated {
         println!(
             "the stream ends mid-recording (the emulator closed first); every whole frame was kept"

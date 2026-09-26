@@ -782,12 +782,17 @@ fn mesen_recorder_commands() {
         path("r.romrec"),
     );
     std::fs::write(&clean, encode::fixture(&bytes, 12, true)).unwrap();
+    let sound = path("sound.rlstream");
+    std::fs::write(&sound, encode::fixture_with_audio(&bytes, 5)).unwrap();
     let mut short = encode::fixture(&bytes, 12, false);
     short.truncate(short.len() - 100);
     std::fs::write(&cut, short).unwrap();
 
     let mut out = run_with(&["rec", "pack", &clean, "--rom", rom], &["--out", &rec]);
     out += &run(&["rec", "info", &rec, "--rom", rom]);
+    out += &run_with(&["rec", "pack", &sound, "--rom", rom], &["--out", &rec]);
+    out += &run(&["rec", "info", &rec]);
+    out += &run_with(&["rec", "pack", &clean, "--rom", rom], &["--out", &rec]);
     out += &run_with(
         &["rec", "extract", &rec, "--frame", "11", "--region", "cpu"],
         &["--hex"],

@@ -25,10 +25,18 @@
 -- once a second what the CPU did since ('X' records), so Romlens can fill in
 -- the disassembly as the game plays.
 --
--- Stream format 2, little-endian (docs/13, "The Mesen stream"):
+-- The sound side (stream version 3, docs/23): where this Mesen can read the
+-- sound CPU's RAM and the DSP's registers (every 2.x can), the script also
+-- records every byte the game writes to the four APU ports, every write the
+-- SPC700 makes to its I/O registers (the DSP's among them), each on the
+-- SPC700's own clock, and at each frame end audio RAM's changed blocks and
+-- the DSP's registers.
+--
+-- Stream format 3, little-endian (docs/13, "The Mesen stream"):
 --   header  "RLSTREAM", u16 version, s2 producer, s2 ROM SHA-1,
 --           i8 created (Unix seconds), u32 ROM size, 64 x 16 bytes of ROM
---           at offsets size / 64 * i, u16 field count, s1 each field name
+--           at offsets size / 64 * i, u16 field count, s1 each field name,
+--           u8 flags (1 = the sound side)
 --   'F'     u32 frame, u16 changed fields then (u16 index, i8 value) each,
 --           52 bytes $2100-$2133 last written, 52 bytes seen flags,
 --           128 bytes $4300-$437F, then per memory region
@@ -43,11 +51,18 @@
 --           frame was drawn; the scanline counts from the frame's first
 --           line, the vertical blank before it negative. Written before
 --           the frame's 'F', from the second frame on
+--   'A'     u32 frame, u32 count, then (u8 kind, u8 address, u8 value,
+--           u64 SPC700 cycle, u64 master clock) each: kind 0 the game wrote
+--           $2140 + address, kind 1 the SPC700 wrote $F0 + address. Before
+--           the frame's 'F', with the sound side only
+--   'S'     u32 frame, u64 SPC700 cycle, u16 changed audio RAM blocks then
+--           (u16 block, 256 bytes) each, 128 bytes of DSP registers. After
+--           the frame's 'A'
 --   'L'     u32 frame: a savestate was loaded before this frame
 --   'E'     u32 frames written, the stream's clean end
 
 local M = emu.memType
-local VERSION = 2
+local VERSION = 3
 local BLOCK = 256
 local REGISTER_FORMAT = "<" .. string.rep("B", 104)
 
@@ -125,8 +140,11 @@ end
 -- The getState() fields worth keeping: numbers and booleans under these
 -- prefixes. Romlens picks the ones it knows by name, so a Mesen version that
 -- exports more needs no change here.
-local prefixes = { "cpu.", "ppu.", "internalRegisters.", "dmaController.", "memoryManager.hClock", "frameCount", "masterClock" }
+local prefixes = { "cpu.", "ppu.", "internalRegisters.", "dmaController.", "memoryManager.hClock", "frameCount", "masterClock", "spc." }
 local function wanted(key)
+  -- The DSP's internal state is large and changes every sample; its
+  -- registers come whole in the 'S' record instead.
+  if key:sub(1, 8) == "spc.dsp." then return false end
   for _, p in ipairs(prefixes) do
     if key:sub(1, #p) == p then return true end
   end
@@ -164,6 +182,11 @@ local header = { "RLSTREAM", string.pack("<I2", VERSION), string.pack("<s2", "Me
   string.pack("<I4", rom_size), table.concat(samples),
   string.pack("<I2", #fields) }
 for _, k in ipairs(fields) do header[#header + 1] = string.pack("<s1", k) end
+
+-- The sound side, where this Mesen has it.
+local audio = M.spcRam ~= nil and M.spcDspRegisters ~= nil and emu.cpuType.spc ~= nil
+  and emu.getCpuCycleCount ~= nil
+header[#header + 1] = string.pack("<B", audio and 1 or 0)
 local header_bytes = table.concat(header)
 out:write(header_bytes)
 
@@ -310,6 +333,57 @@ local cpu = emu.cpuType.snes
 emu.addMemoryCallback(guarded(on_ppu_write), emu.callbackType.write, 0x2100, 0x2133, cpu, M.snesRegister)
 emu.addMemoryCallback(guarded(on_dma), emu.callbackType.write, 0x420B, 0x420B, cpu, M.snesRegister)
 
+-- The sound side's events, as parallel arrays until the frame's end.
+local a_kind, a_addr, a_value, a_cycle, a_clock, a_count = {}, {}, {}, {}, {}, 0
+local spc = emu.cpuType.spc
+local function spc_cycle() return emu.getCpuCycleCount(spc) end
+local function on_port(address, value)
+  a_count = a_count + 1
+  a_kind[a_count], a_addr[a_count], a_value[a_count] = 0, address & 3, value
+  a_cycle[a_count], a_clock[a_count] = spc_cycle(), get_clock()
+end
+local function on_spc_io(address, value)
+  a_count = a_count + 1
+  a_kind[a_count], a_addr[a_count], a_value[a_count] = 1, address & 0x0F, value
+  a_cycle[a_count], a_clock[a_count] = spc_cycle(), 0
+end
+if audio then
+  emu.addMemoryCallback(guarded(on_port), emu.callbackType.write, 0x2140, 0x2143, cpu, M.snesRegister)
+  emu.addMemoryCallback(guarded(on_spc_io), emu.callbackType.write, 0x00F0, 0x00FF, spc, M.spcMemory)
+end
+
+local aram_previous = {}
+local function dsp_registers()
+  local parts = {}
+  for i = 0, 31 do parts[i + 1] = string.pack("<I4", emu.read32(i * 4, M.spcDspRegisters)) end
+  return table.concat(parts)
+end
+
+-- The frame's 'A' record, then its 'S' as a delta and, for a new live
+-- connection, whole.
+local function audio_records()
+  local events = { "A", string.pack("<I4I4", frame, a_count) }
+  for i = 1, a_count do
+    events[i + 2] = string.pack("<BBBI8I8", a_kind[i], a_addr[i], a_value[i], a_cycle[i], a_clock[i])
+  end
+  a_count = 0
+  local head = "S" .. string.pack("<I4I8", frame, spc_cycle())
+  local delta, whole, changed = {}, {}, 0
+  for b = 0, 255 do
+    local bytes = read_block(M.spcRam, b * BLOCK, BLOCK)
+    whole[b + 1] = string.pack("<I2", b) .. bytes
+    if aram_previous[b] ~= bytes then
+      aram_previous[b] = bytes
+      changed = changed + 1
+      delta[changed] = whole[b + 1]
+    end
+  end
+  local dsp = dsp_registers()
+  return table.concat(events),
+    head .. string.pack("<I2", changed) .. table.concat(delta) .. dsp,
+    head .. string.pack("<I2", 256) .. table.concat(whole) .. dsp
+end
+
 local previous = {}
 
 local function write_frame()
@@ -318,6 +392,12 @@ local function write_frame()
   if r then
     out:write(r)
     live_send(r)
+  end
+  if audio then
+    local a, s, s_whole = audio_records()
+    out:write(a, s)
+    live_send(a)
+    live_send(live and live.fresh and s_whole or s)
   end
   local changed = {}
   for i, k in ipairs(fields) do

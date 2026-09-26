@@ -385,6 +385,21 @@ impl MachineStateSource for RomrecSource {
         }
         Ok(out)
     }
+
+    fn apu_events(
+        &self,
+        frame: u64,
+    ) -> Result<Option<crate::recording::apu::ApuEvents>, RecordingError> {
+        if !self.header.layers.apu_events {
+            return Ok(None);
+        }
+        for (magic, body) in self.layer_chunks(frame)? {
+            if &magic == LAYER_MAGICS[5] {
+                return crate::recording::apu::ApuEvents::decode(&body).map(Some);
+            }
+        }
+        Ok(None)
+    }
 }
 
 fn read_exact(r: &mut dyn ReadSeek, buf: &mut [u8], what: &str) -> Result<(), RecordingError> {

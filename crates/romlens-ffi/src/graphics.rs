@@ -448,6 +448,12 @@ pub enum StateRegion {
     Cgram,
     Oam,
     Timing,
+    /// The sound CPU's RAM (docs/23).
+    Aram,
+    /// The S-DSP's registers.
+    Dsp,
+    /// The SPC700's registers, ports and timers.
+    Spc,
 }
 
 impl From<StateRegion> for CoreRegion {
@@ -461,6 +467,9 @@ impl From<StateRegion> for CoreRegion {
             StateRegion::Cgram => CoreRegion::Cgram,
             StateRegion::Oam => CoreRegion::Oam,
             StateRegion::Timing => CoreRegion::Timing,
+            StateRegion::Aram => CoreRegion::Aram,
+            StateRegion::Dsp => CoreRegion::DspRegisters,
+            StateRegion::Spc => CoreRegion::SpcState,
         }
     }
 }
@@ -476,6 +485,9 @@ impl From<CoreRegion> for StateRegion {
             CoreRegion::Cgram => StateRegion::Cgram,
             CoreRegion::Oam => StateRegion::Oam,
             CoreRegion::Timing => StateRegion::Timing,
+            CoreRegion::Aram => StateRegion::Aram,
+            CoreRegion::DspRegisters => StateRegion::Dsp,
+            CoreRegion::SpcState => StateRegion::Spc,
         }
     }
 }
@@ -1382,7 +1394,7 @@ pub fn make_test_recording(frames: u32) -> Vec<u8> {
     let mut w = RomrecWriter::new(
         std::io::Cursor::new(Vec::new()),
         &fixtures::identity(),
-        &CoreRegion::ALL,
+        &CoreRegion::MAIN,
         WriterOptions::default(),
         0,
     )
@@ -1472,7 +1484,7 @@ mod tests {
         let mut w = RomrecWriter::new(
             std::io::Cursor::new(Vec::new()),
             &fixtures::identity(),
-            &CoreRegion::ALL,
+            &CoreRegion::MAIN,
             WriterOptions::default(),
             0,
         )

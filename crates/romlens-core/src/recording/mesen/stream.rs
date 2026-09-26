@@ -10,7 +10,13 @@
 use std::io::Read;
 
 pub const STREAM_MAGIC: &[u8; 8] = b"RLSTREAM";
-pub const STREAM_VERSION: u16 = 2;
+pub const STREAM_VERSION: u16 = 3;
+/// Header flag (stream version 3): the stream carries the sound side,
+/// `A` and `S` records (docs/23).
+pub const FLAG_AUDIO: u8 = 1;
+/// Audio RAM, in blocks of [`BLOCK`].
+pub const ARAM_LEN: usize = 0x10000;
+pub const DSP_LEN: usize = 128;
 /// The oldest stream this reads: version 1 has no line writes and no DMA
 /// context.
 pub const OLDEST_STREAM_VERSION: u16 = 1;
@@ -66,9 +72,16 @@ pub struct StreamHeader {
     pub samples: Vec<u8>,
     /// The `emu.getState()` keys each frame's field changes index into.
     pub fields: Vec<String>,
+    /// [`FLAG_AUDIO`] (version 3; 0 before).
+    pub flags: u8,
 }
 
 impl StreamHeader {
+    /// Whether the stream carries the sound side.
+    pub fn audio(&self) -> bool {
+        self.flags & FLAG_AUDIO != 0
+    }
+
     /// Where sample `i` was taken.
     pub fn sample_offset(&self, i: usize) -> usize {
         (self.rom_size as usize / SAMPLES) * i
@@ -148,11 +161,35 @@ pub struct LineRecord {
     pub writes: Vec<crate::recording::lines::RegWrite>,
 }
 
+/// The sound side's events in one frame (stream version 3): the `A`
+/// record before its frame's `F`, in [`ApuEvents`]'s event layout.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApuRecord {
+    pub frame: u32,
+    pub events: Vec<crate::recording::apu::ApuEvent>,
+}
+
+/// The sound side at one frame's end (stream version 3): the `S` record
+/// before its frame's `F`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AudioRecord {
+    pub frame: u32,
+    /// The SPC700's cycle count when it was read.
+    pub spc_cycle: u64,
+    /// Audio RAM's changed blocks: (block, 256 bytes).
+    pub blocks: Vec<(u16, Vec<u8>)>,
+    pub dsp: [u8; DSP_LEN],
+}
+
+pub use crate::recording::apu::ApuEvents;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Record {
     Frame(Box<FrameRecord>),
     Dma(Box<DmaEvent>),
     Lines(Box<LineRecord>),
+    Apu(Box<ApuRecord>),
+    Audio(Box<AudioRecord>),
     /// A savestate was loaded before this frame.
     StateLoaded {
         frame: u32,
@@ -274,6 +311,7 @@ impl<R: Read> StreamReader<R> {
         for _ in 0..count {
             fields.push(need!(t.string(false)));
         }
+        let flags = if version >= 3 { need!(t.u8()) } else { 0 };
         Ok(Some(StreamHeader {
             version,
             producer,
@@ -282,6 +320,7 @@ impl<R: Read> StreamReader<R> {
             rom_size,
             samples,
             fields,
+            flags,
         }))
     }
 
@@ -397,6 +436,40 @@ impl<R: Read> StreamReader<R> {
                     .collect();
                 Ok(Some(Record::Lines(Box::new(LineRecord { frame, writes }))))
             }
+            b'A' => {
+                let frame = need!(t.u32());
+                let count = need!(t.u32()) as usize;
+                if count > crate::recording::apu::MAX_EVENTS {
+                    return Err(StreamError::Corrupt(format!(
+                        "frame {frame} claims {count} sound events"
+                    )));
+                }
+                let raw = need!(t.bytes(count * crate::recording::apu::EVENT_LEN));
+                let events = ApuEvents::parse_events(&raw).map_err(StreamError::Corrupt)?;
+                Ok(Some(Record::Apu(Box::new(ApuRecord { frame, events }))))
+            }
+            b'S' => {
+                let frame = need!(t.u32());
+                let spc_cycle = need!(t.i64()) as u64;
+                let count = need!(t.u16());
+                let mut blocks = Vec::with_capacity(count as usize);
+                for _ in 0..count {
+                    let block = need!(t.u16());
+                    if block as usize * BLOCK >= ARAM_LEN {
+                        return Err(StreamError::Corrupt(format!(
+                            "frame {frame} has audio RAM block {block}, past its end"
+                        )));
+                    }
+                    blocks.push((block, need!(t.bytes(BLOCK))));
+                }
+                let dsp: [u8; DSP_LEN] = need!(t.array());
+                Ok(Some(Record::Audio(Box::new(AudioRecord {
+                    frame,
+                    spc_cycle,
+                    blocks,
+                    dsp,
+                }))))
+            }
             b'L' => Ok(Some(Record::StateLoaded {
                 frame: need!(t.u32()),
             })),
@@ -439,6 +512,9 @@ pub mod encode {
             b.push(f.len() as u8);
             b.extend_from_slice(f.as_bytes());
         }
+        if h.version >= 3 {
+            b.push(h.flags);
+        }
         b
     }
 
@@ -467,6 +543,7 @@ pub mod encode {
                 "ppu.bgMode".to_owned(),
                 "ppu.layers[0].tilemapAddress".to_owned(),
             ],
+            flags: 0,
         };
         let mut b = header(&head);
         for n in 0..frames {
@@ -527,6 +604,133 @@ pub mod encode {
         b
     }
 
+    /// The sound fixture's audio RAM: the sample directory at `$3C00`
+    /// (entry 0 is [`crate::fixtures::sound::brr_sample`] at `$4000`, its
+    /// loop 18 bytes in) and the sample.
+    pub fn fixture_aram() -> Vec<u8> {
+        let mut aram = vec![0u8; ARAM_LEN];
+        aram[0x3C00..0x3C04].copy_from_slice(&[0x00, 0x40, 0x12, 0x40]);
+        let s = crate::fixtures::sound::brr_sample();
+        aram[0x4000..0x4000 + s.len()].copy_from_slice(&s);
+        aram
+    }
+
+    /// [`fixture`] with a sound side (stream version 3): frame 0 holds the
+    /// directory and sample in audio RAM; in frame 1 the S-CPU writes `$01`
+    /// to port 0 and the driver answers, sets up voice 0 (sample 0, pitch
+    /// `$1000`, ADSR, full volume) and keys it on; in frame 3 it keys it off.
+    pub fn fixture_with_audio(rom: &[u8], frames: u32) -> Vec<u8> {
+        use crate::recording::apu::{ApuEvent, ApuEventKind};
+        let plain = fixture(rom, frames, true);
+        let mut reader = StreamReader::new(plain.as_slice()).unwrap();
+        let mut head = reader.header.clone();
+        head.flags = FLAG_AUDIO;
+        head.fields.extend(
+            [
+                "spc.a",
+                "spc.pc",
+                "spc.dspReg",
+                "spc.cpuRegs[0]",
+                "spc.outputReg[0]",
+                "spc.timer0.target",
+                "spc.timer0.enabled",
+            ]
+            .map(str::to_owned),
+        );
+        let spc_fields = head.fields.len() - 7;
+        let mut b = header(&head);
+        let aram = fixture_aram();
+        let mut dsp = [0u8; DSP_LEN];
+        let mut cycle = 0u64;
+        let io = |address: u8, value: u8, spc_cycle: u64| ApuEvent {
+            kind: ApuEventKind::SpcIo,
+            address,
+            value,
+            spc_cycle,
+            master_clock: 0,
+        };
+        let mut n = 0u32;
+        while let Some(r) = reader.next_record().unwrap() {
+            let Record::Frame(mut f) = r else {
+                b.extend(record(&r));
+                continue;
+            };
+            // Each frame is 17,066 SPC700 cycles (1.024 MHz at 60 Hz).
+            let start = cycle;
+            cycle += 17_066;
+            let mut events = Vec::new();
+            let mut writes: Vec<(u8, u8)> = Vec::new();
+            if n == 1 {
+                events.push(ApuEvent {
+                    kind: ApuEventKind::CpuPort,
+                    address: 0,
+                    value: 0x01,
+                    spc_cycle: start + 100,
+                    master_clock: 357_366 + 2000,
+                });
+                events.push(io(4, 0x01, start + 150));
+                writes = vec![
+                    (0x5D, 0x3C),
+                    (0x04, 0x00),
+                    (0x02, 0x00),
+                    (0x03, 0x10),
+                    (0x05, 0x8F),
+                    (0x06, 0xE0),
+                    (0x00, 0x7F),
+                    (0x01, 0x7F),
+                    (0x4C, 0x01),
+                ];
+            }
+            if n == 3 {
+                writes = vec![(0x5C, 0x01)];
+            }
+            for (i, (reg, value)) in writes.iter().enumerate() {
+                let at = start + 200 + i as u64 * 10;
+                events.push(io(2, *reg, at));
+                events.push(io(3, *value, at + 5));
+                dsp[*reg as usize] = *value;
+            }
+            if n >= 1 {
+                // The envelope rises after key on: ENVX as the DSP rewrites it.
+                dsp[0x08] = if n >= 3 { 0x20 } else { 0x7F };
+                dsp[0x4C] = 0;
+            }
+            b.extend(record(&Record::Apu(Box::new(ApuRecord {
+                frame: n,
+                events,
+            }))));
+            let blocks = if n == 0 {
+                (0..ARAM_LEN / BLOCK)
+                    .filter(|blk| aram[blk * BLOCK..(blk + 1) * BLOCK].iter().any(|&x| x != 0))
+                    .map(|blk| (blk as u16, aram[blk * BLOCK..(blk + 1) * BLOCK].to_vec()))
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            b.extend(record(&Record::Audio(Box::new(AudioRecord {
+                frame: n,
+                spc_cycle: cycle,
+                blocks,
+                dsp,
+            }))));
+            let base = spc_fields as u16;
+            f.fields.extend([
+                (base, 0x12),
+                (base + 1, 0x0200 + n as i64),
+                (base + 2, if n >= 1 { 0x4C } else { 0 }),
+            ]);
+            if n == 1 {
+                f.fields.extend([(base + 3, 0x01), (base + 4, 0x01)]);
+            }
+            if n == 0 {
+                f.fields.extend([(base + 5, 0x50), (base + 6, 1)]);
+            }
+            b.extend(record(&Record::Frame(f)));
+            n += 1;
+        }
+        b
+    }
+
     pub fn record(r: &Record) -> Vec<u8> {
         let mut b = Vec::new();
         match r {
@@ -575,6 +779,23 @@ pub mod encode {
                     b.extend_from_slice(&[w.reg, w.value]);
                 }
             }
+            Record::Apu(a) => {
+                b.push(b'A');
+                b.extend_from_slice(&a.frame.to_le_bytes());
+                b.extend_from_slice(&(a.events.len() as u32).to_le_bytes());
+                b.extend(ApuEvents::raw_events(&a.events));
+            }
+            Record::Audio(s) => {
+                b.push(b'S');
+                b.extend_from_slice(&s.frame.to_le_bytes());
+                b.extend_from_slice(&s.spc_cycle.to_le_bytes());
+                b.extend_from_slice(&(s.blocks.len() as u16).to_le_bytes());
+                for (block, bytes) in &s.blocks {
+                    b.extend_from_slice(&block.to_le_bytes());
+                    b.extend_from_slice(bytes);
+                }
+                b.extend_from_slice(&s.dsp);
+            }
             Record::StateLoaded { frame } => {
                 b.push(b'L');
                 b.extend_from_slice(&frame.to_le_bytes());
@@ -606,6 +827,7 @@ mod tests {
             rom_size: 0x1000,
             samples: vec![0; SAMPLES * SAMPLE_LEN],
             fields: vec!["cpu.a".to_owned(), "ppu.bgMode".to_owned()],
+            flags: FLAG_AUDIO,
         }
     }
 

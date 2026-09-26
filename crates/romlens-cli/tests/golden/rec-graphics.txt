@@ -19,7 +19,7 @@ wrote <tmp>/window.romrec: frames 25 to 35 of <tmp>/t.romrec, 11 frames
 vram 0x00a0+1: next changes at frame 5
 [exit code 1]
 Error: frames 80 to 95 are not in a recording of 90 frames (0 to 89)
-Format:       1.1
+Format:       1.2
 Producer:     romlens testrec 0.10.0
 ROM SHA-256:  cfd385e8107dc5977e88d9b3f4b4b9ce866c707732e4fb7fef36ba5687b20f77
               matches romlens-graphics.sfc
@@ -28,7 +28,7 @@ Storage:      54475 bytes, zstd
               keyframes 5535 bytes each on average, deltas 464
 Regions:      cpu 16, ppu 256, io 128, wram 131072, vram 65536, cgram 512, oam 544, timing 16
 Layers:       none
-Format:       1.1
+Format:       1.2
 Producer:     romlens testrec 0.10.0
 ROM SHA-256:  cfd385e8107dc5977e88d9b3f4b4b9ce866c707732e4fb7fef36ba5687b20f77
               the recording was made from a different ROM (expected SHA-256 cfd385e8107dc5977e88d9b3f4b4b9ce866c707732e4fb7fef36ba5687b20f77, found a2462f1d74f993d0b3e10ae9425cd9b48253ac82c99913f07ef704d9c85dc6ee)
@@ -82,7 +82,7 @@ vram between frames 29 and 30: 1 run, 32 bytes
 [exit code 1]
 Error: frame 90 is past the end of the recording (90 frames)
 [exit code 1]
-Error: --region is one of cpu, ppu, io, wram, vram, cgram, oam, timing
+Error: --region is one of cpu, ppu, io, wram, vram, cgram, oam, timing, dsp, spc
 frame 0: BG1, mode 1, 4bpp 32x32, map at word $1000, tiles at $0000
 256x256 sha256=70a8e82dd859ec92ce3c2a4da7faf1a738da9a868e98eb62f3c874e6527f567b
 frame 30: BG1, mode 1, 4bpp 32x32, map at word $1000, tiles at $0000
@@ -123,7 +123,7 @@ wrote 512 bytes of cgram at frame 0 to <tmp>/cgram.bin
 wrote 544 bytes of oam at frame 0 to <tmp>/oam.bin
 wrote 256 bytes of ppu at frame 0 to <tmp>/ppu.bin
 wrote <tmp>/raw.romrec: one frame with ppu, vram, cgram, oam
-Format:       1.1
+Format:       1.2
 Producer:     romlens import-raw 0.10.0
 ROM SHA-256:  cfd385e8107dc5977e88d9b3f4b4b9ce866c707732e4fb7fef36ba5687b20f77
 Frames:       1 (1 keyframe, every 60 frames)

@@ -15,15 +15,16 @@ use std::io::{Read, Seek, Write};
 
 use crate::graphics::ppu_state::PpuState;
 use crate::memory::map::MappingMode;
+use crate::recording::apu::ApuEvents;
 use crate::recording::format::LAYER_MAGICS;
 use crate::recording::io_state::{self, IoState};
 use crate::recording::mesen::stream::{
-    BLOCK, DmaEvent, FrameRecord, MEMORY, PPU_PORTS, Record, StreamError, StreamHeader,
-    StreamReader,
+    ARAM_LEN, ApuRecord, AudioRecord, BLOCK, DSP_LEN, DmaEvent, FrameRecord, MEMORY, PPU_PORTS,
+    Record, StreamError, StreamHeader, StreamReader,
 };
 use crate::recording::writer::{RomrecWriter, WriterOptions};
 use crate::recording::{
-    CpuRegisters, Layers, MachineState, RecordingError, RecordingIdentity, StateRegion,
+    CpuRegisters, Layers, MachineState, RecordingError, RecordingIdentity, SpcState, StateRegion,
 };
 use crate::rom::image::RomImage;
 
@@ -63,6 +64,11 @@ pub struct PackReport {
     pub dma_events: u64,
     /// PPU register writes placed on their scanlines (stream version 2).
     pub line_writes: u64,
+    /// The sound side's events: port writes both ways and the SPC700's I/O
+    /// writes (stream version 3).
+    pub apu_events: u64,
+    /// Of those, writes to the DSP's registers.
+    pub dsp_writes: u64,
     pub state_loads: u64,
     /// The stream ended without its end record: the emulator closed
     /// mid-recording. Every whole frame was kept.
@@ -237,6 +243,29 @@ impl Fields {
 
     fn b(&self, name: &str) -> u8 {
         (self.n(name) != 0) as u8
+    }
+}
+
+/// The SPC700 from Mesen's `spc.*` fields (stream version 3); `cycle` is
+/// the audio record's, read at the same moment.
+fn spc_state(f: &Fields, cycle: u64) -> SpcState {
+    let b = |n: &str| f.n(n) as u8;
+    SpcState {
+        a: b("spc.a"),
+        x: b("spc.x"),
+        y: b("spc.y"),
+        sp: b("spc.sp"),
+        psw: b("spc.ps"),
+        pc: f.n("spc.pc") as u16,
+        from_cpu: std::array::from_fn(|i| b(&format!("spc.cpuRegs[{i}]"))),
+        to_cpu: std::array::from_fn(|i| b(&format!("spc.outputReg[{i}]"))),
+        aux: [b("spc.ramReg[0]"), b("spc.ramReg[1]")],
+        dspaddr: b("spc.dspReg"),
+        rom_enabled: f.n("spc.romEnabled") != 0,
+        timers_on: std::array::from_fn(|i| f.n(&format!("spc.timer{i}.enabled")) != 0),
+        dividers: std::array::from_fn(|i| b(&format!("spc.timer{i}.target"))),
+        counts: std::array::from_fn(|i| b(&format!("spc.timer{i}.output")) & 0xF),
+        cycle,
     }
 }
 
@@ -542,6 +571,12 @@ fn mapping_byte(m: MappingMode) -> u8 {
 pub struct StreamDecoder {
     fields: Fields,
     memory: Vec<Vec<u8>>,
+    aram: Vec<u8>,
+    dsp: [u8; DSP_LEN],
+    spc_cycle: u64,
+    /// `DSPADDR` after the last events, for naming the next frame's first
+    /// DSP writes.
+    dspaddr: u8,
     pub report: PackReport,
 }
 
@@ -562,8 +597,36 @@ impl StreamDecoder {
         StreamDecoder {
             fields,
             memory: MEMORY.iter().map(|(_, size)| vec![0u8; *size]).collect(),
+            aram: vec![0u8; ARAM_LEN],
+            dsp: [0; DSP_LEN],
+            spc_cycle: 0,
+            dspaddr: 0,
             report,
         }
+    }
+
+    /// Apply a frame's sound snapshot, which comes before its frame record.
+    pub fn audio(&mut self, s: &AudioRecord) {
+        for (block, bytes) in &s.blocks {
+            let at = *block as usize * BLOCK;
+            self.aram[at..at + bytes.len()].copy_from_slice(bytes);
+        }
+        self.dsp = s.dsp;
+        self.spc_cycle = s.spc_cycle;
+    }
+
+    /// A frame's sound events, numbered `number`, with `DSPADDR` carried
+    /// from the frame before.
+    pub fn apu(&mut self, a: &ApuRecord, number: u64) -> ApuEvents {
+        let events = ApuEvents {
+            frame: number,
+            dspaddr: self.dspaddr,
+            events: a.events.clone(),
+        };
+        self.dspaddr = events.dspaddr_after();
+        self.report.apu_events += events.events.len() as u64;
+        self.report.dsp_writes += events.dsp_writes().len() as u64;
+        events
     }
 
     /// Apply one frame record and return the machine after it, numbered
@@ -608,6 +671,16 @@ impl StreamDecoder {
                 state.regions.insert(region, image.clone());
             }
         }
+        if regions.contains(&StateRegion::Aram) {
+            state.regions.insert(StateRegion::Aram, self.aram.clone());
+            state
+                .regions
+                .insert(StateRegion::DspRegisters, self.dsp.to_vec());
+            state.regions.insert(
+                StateRegion::SpcState,
+                spc_state(&self.fields, self.spc_cycle).encode().to_vec(),
+            );
+        }
         state
     }
 }
@@ -637,6 +710,9 @@ pub fn pack<R: Read, W: Write + Seek>(
     if options.wram != WramMode::Off {
         regions.push(StateRegion::Wram);
     }
+    if header.audio() {
+        regions.extend(StateRegion::AUDIO);
+    }
     let identity = RecordingIdentity {
         rom_sha256: *rom.sha256(),
         producer: header.producer.clone(),
@@ -650,6 +726,7 @@ pub fn pack<R: Read, W: Write + Seek>(
         layers: Layers {
             write_log: true,
             line_writes: header.version >= 2,
+            apu_events: header.audio(),
             ..Layers::default()
         },
     };
@@ -663,6 +740,7 @@ pub fn pack<R: Read, W: Write + Seek>(
 
     let mut pending: Vec<DmaEvent> = Vec::new();
     let mut lines: Option<Vec<crate::recording::lines::RegWrite>> = None;
+    let mut apu: Option<ApuRecord> = None;
     while let Some(record) = reader.next_record()? {
         match record {
             Record::Frame(f) => {
@@ -690,10 +768,17 @@ pub fn pack<R: Read, W: Write + Seek>(
                     let body = crate::recording::lines::encode(report.frames, &w, options.compress);
                     writer.write_layer(LAYER_MAGICS[4], &body)?;
                 }
+                if let Some(a) = apu.take() {
+                    let events = decoder.apu(&a, frames);
+                    writer.write_layer(LAYER_MAGICS[5], &events.encode(options.compress))?;
+                }
+                let report = &mut decoder.report;
                 report.frames += 1;
             }
             Record::Dma(d) => pending.push(*d),
             Record::Lines(l) => lines = Some(l.writes),
+            Record::Apu(a) => apu = Some(*a),
+            Record::Audio(s) => decoder.audio(&s),
             Record::StateLoaded { .. } => decoder.report.state_loads += 1,
             // A live connection's; a file keeps its log beside it instead.
             Record::ExecLog(_) => {}
@@ -725,6 +810,7 @@ mod tests {
             rom_size: 0,
             samples: Vec::new(),
             fields: pairs.iter().map(|(k, _)| (*k).to_owned()).collect(),
+            flags: 0,
         };
         let mut f = Fields::new(&header);
         let changes: Vec<(u16, i64)> = pairs
@@ -826,6 +912,57 @@ mod tests {
         let vram = s.vram().unwrap();
         // Each frame wrote one more block; earlier ones persist.
         assert_eq!((vram[0], vram[3 * 256], vram[4 * 256]), (1, 4, 0));
+    }
+
+    #[test]
+    fn the_sound_side_packs_into_its_regions_and_events() {
+        let rom = rom();
+        let mut out = std::io::Cursor::new(Vec::new());
+        let stream = encode::fixture_with_audio(rom.bytes(), 5);
+        let report = pack(stream.as_slice(), &rom, &mut out, PackOptions::default()).unwrap();
+        assert_eq!(
+            (report.frames, report.apu_events, report.dsp_writes),
+            (5, 22, 10)
+        );
+        let rec = RomrecSource::from_bytes(out.into_inner(), false).unwrap();
+        for r in StateRegion::AUDIO {
+            assert!(rec.regions().contains(&r), "{}", r.name());
+        }
+        assert!(rec.layers().apu_events);
+        let s = rec.state_at(2).unwrap();
+        let aram = s.region(StateRegion::Aram).unwrap();
+        assert_eq!(&aram[0x3C00..0x3C04], &[0x00, 0x40, 0x12, 0x40]);
+        assert_eq!(aram[0x4000], 0xB0, "the sample's first header");
+        let dsp = s.region(StateRegion::DspRegisters).unwrap();
+        assert_eq!((dsp[0x5D], dsp[0x03], dsp[0x08]), (0x3C, 0x10, 0x7F));
+        let spc = SpcState::decode(s.region(StateRegion::SpcState).unwrap());
+        assert_eq!((spc.pc, spc.dspaddr, spc.a), (0x0202, 0x4C, 0x12));
+        assert_eq!((spc.timers_on[0], spc.dividers[0]), (true, 0x50));
+        assert_eq!(spc.cycle, 3 * 17_066);
+        // Frame 1's events: the S-CPU's command, the reply, nine DSP writes.
+        let e = rec.apu_events(1).unwrap().unwrap();
+        assert_eq!(e.events.len(), 20);
+        let w = e.dsp_writes();
+        assert_eq!(w.len(), 9);
+        assert_eq!((w[0].register, w[0].value), (0x5D, 0x3C));
+        assert_eq!((w[8].register, w[8].value), (0x4C, 0x01));
+        // Frame 3 keys the voice off.
+        let e = rec.apu_events(3).unwrap().unwrap();
+        assert_eq!(e.dspaddr, 0x4C, "DSPADDR carried from frame 1");
+        assert_eq!(e.dsp_writes()[0].register, 0x5C);
+        assert!(rec.apu_events(2).unwrap().unwrap().events.is_empty());
+        // A recording without the layer has none.
+        let mut plain = std::io::Cursor::new(Vec::new());
+        pack(
+            stream_for(&rom, 2).as_slice(),
+            &rom,
+            &mut plain,
+            PackOptions::default(),
+        )
+        .unwrap();
+        let plain = RomrecSource::from_bytes(plain.into_inner(), false).unwrap();
+        assert!(!plain.regions().contains(&StateRegion::Aram));
+        assert_eq!(plain.apu_events(0).unwrap(), None);
     }
 
     #[test]

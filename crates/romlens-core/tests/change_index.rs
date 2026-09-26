@@ -16,7 +16,7 @@ fn recording(options: WriterOptions) -> RomrecSource {
     let mut w = RomrecWriter::new(
         Cursor::new(Vec::new()),
         &fixtures::identity(),
-        &StateRegion::ALL,
+        &StateRegion::MAIN,
         options,
         0,
     )
