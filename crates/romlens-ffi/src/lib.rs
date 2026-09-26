@@ -3,6 +3,7 @@
 //! core never depends on `uniffi`. Hot paths (`hex_rows`) return flat buffers
 //! (docs/10); everything else returns typed records.
 
+pub mod compare;
 pub mod explain;
 mod future;
 pub mod graphics;
@@ -441,6 +442,14 @@ pub fn make_routines_test_rom() -> Vec<u8> {
     fixtures::routines_lorom()
 }
 
+/// Two versions of the routines test ROM, for comparing (docs/22, D2): the
+/// second patches `SUB_008020` and inserts 64 bytes in a table.
+#[uniffi::export]
+pub fn make_compare_test_roms() -> Vec<Vec<u8>> {
+    let (a, b) = fixtures::diff_pair();
+    vec![a, b]
+}
+
 /// A test ROM whose reset does one of each common setup step, for the
 /// explanations (docs/20).
 #[uniffi::export]
@@ -598,6 +607,34 @@ mod tests {
         assert_eq!(irq.rows[0].text, "NMI on, joypad auto-read on");
         assert_eq!(irq.rows[0].set_at, [0x53]);
         assert!(wb.screen_at_blocking(0x7FF0).is_none());
+    }
+
+    #[test]
+    fn compares_two_versions_and_carries_names() {
+        use crate::compare::{DiffLineOp, RoutinePairing};
+        let (a, b) = romlens_core::fixtures::diff_pair();
+        let old = Workbench::new(Rom::from_bytes(a, "a.sfc".into()).unwrap());
+        let new = Workbench::new(Rom::from_bytes(b, "b.sfc".into()).unwrap());
+        block_on(old.analyze()).unwrap();
+        block_on(new.analyze()).unwrap();
+        old.execute(Command::SetLabel {
+            address: 0x008020,
+            name: Some("ClearTable".into()),
+        })
+        .unwrap();
+        let c = block_on(new.compare_with(old.clone())).unwrap();
+        assert_eq!((c.changed_bytes, c.inserted_bytes), (1, 64));
+        assert_eq!(c.routines.len(), 1);
+        let r = &c.routines[0];
+        assert_eq!(r.pairing, RoutinePairing::Changed);
+        assert_eq!(r.a.as_ref().unwrap().name, "ClearTable");
+        let changed = r.lines.iter().find(|l| l.op == DiffLineOp::Changed).unwrap();
+        assert_eq!(changed.b_text.as_deref(), Some("LDX #$1F"));
+        assert_eq!(c.names_to_carry.len(), 1);
+        new.carry_names(c.names_to_carry).unwrap();
+        assert_eq!(new.label_at(0x008020).unwrap().name, "ClearTable");
+        assert!(new.undo().unwrap());
+        assert_ne!(new.label_at(0x008020).map(|l| l.name), Some("ClearTable".into()));
     }
 
     #[test]

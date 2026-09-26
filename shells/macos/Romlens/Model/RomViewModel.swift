@@ -17,7 +17,7 @@ final class RomViewModel {
     }
 
     enum EditorTab: String, CaseIterable, Identifiable {
-        case hex, disassembly, both, c, graph, atlas
+        case hex, disassembly, both, c, graph, atlas, compare
         var id: String { rawValue }
         var title: String {
             switch self {
@@ -27,6 +27,7 @@ final class RomViewModel {
             case .c: "C"
             case .graph: "Graph"
             case .atlas: "Atlas"
+            case .compare: "Compare"
             }
         }
     }
@@ -54,6 +55,12 @@ final class RomViewModel {
     let decompiler = DecompileModel()
     let graph = GraphModel()
     let atlas = AtlasModel()
+    let compare = CompareModel()
+
+    /// The tabs the toolbar offers: Compare only while comparing.
+    var editorTabs: [EditorTab] {
+        EditorTab.allCases.filter { $0 != .compare || compare.isActive }
+    }
     @ObservationIgnored let cache: HexRowCache
     @ObservationIgnored let asmCache: AsmLineCache
     let metrics = MonoMetrics()
@@ -309,6 +316,10 @@ final class RomViewModel {
             decompiler.invalidate()
             graph.invalidate()
             refreshDecompile()
+            if compare.state == .ready {
+                let generation = asmGeneration
+                Task { await compare.refresh(this: workbench, generation: generation) }
+            }
             Task { await navigator.reload(workbench: workbench, rom: rom) }
         case .project:
             break

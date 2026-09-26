@@ -45,6 +45,8 @@ struct EditorView: View {
             }
         case .atlas:
             AtlasView(model: model)
+        case .compare:
+            CompareView(model: model)
         }
     }
 

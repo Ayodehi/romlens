@@ -72,6 +72,8 @@ enum MainMenu {
             item("Close Recording", #selector(RomWindowController.closeRecording(_:))),
             item("Start Live Session", #selector(RomWindowController.toggleLiveSession(_:)), "l", modifiers: [.command, .option]),
             .separator(),
+            item("Compare With…", #selector(RomWindowController.compareWith(_:)), "d", modifiers: [.command, .option]),
+            .separator(),
             importMenu,
             export,
         ])
@@ -133,6 +135,7 @@ enum MainMenu {
             item("C", #selector(RomWindowController.showC(_:)), "8", modifiers: [.command, .option]),
             item("Graph", #selector(RomWindowController.showGraph(_:)), "9", modifiers: [.command, .option]),
             item("Atlas", #selector(RomWindowController.showAtlas(_:)), "a", modifiers: [.command, .option]),
+            item("Compare", #selector(RomWindowController.showCompare(_:)), ""),
             submenu("Graphics", [
                 item("Frame", #selector(RomWindowController.showFrame(_:)), ""),
                 item("Layers", #selector(RomWindowController.showLayers(_:)), ""),

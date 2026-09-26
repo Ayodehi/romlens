@@ -72,6 +72,8 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
     @objc func decompileRoutine(_ sender: Any?) { model.showDecompiled() }
     @objc func showGraph(_ sender: Any?) { model.showGraph() }
     @objc func showAtlas(_ sender: Any?) { model.editorTab = .atlas }
+    @objc func showCompare(_ sender: Any?) { model.editorTab = .compare }
+    @objc func compareWith(_ sender: Any?) { CompareController.open(model: model, window: window) }
     /// View › Show Explanations, remembered for the next window.
     @objc func toggleExplanations(_ sender: Any?) {
         model.showExplanations.toggle()
@@ -218,6 +220,9 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
             return model.hasDisassembly
         case #selector(showAtlas(_:)):
             item.state = model.graphicsTab == nil && model.editorTab == .atlas ? .on : .off
+        case #selector(showCompare(_:)):
+            item.state = model.graphicsTab == nil && model.editorTab == .compare ? .on : .off
+            return model.compare.isActive
         case #selector(zoomGraphIn(_:)), #selector(zoomGraphOut(_:)), #selector(zoomGraphToFit(_:)):
             return model.graphicsTab == nil && (model.editorTab == .graph || model.editorTab == .atlas)
         case #selector(decompileRoutine(_:)):

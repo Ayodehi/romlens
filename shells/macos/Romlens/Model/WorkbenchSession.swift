@@ -128,6 +128,14 @@ final class WorkbenchSession {
         try execute(.setLabel(address: address, name: nil))
     }
 
+    /// Name routines from another version of the ROM, as one undo step
+    /// (docs/22, D2).
+    func carryNames(_ names: [CarriedNameInfo]) throws {
+        guard !names.isEmpty else { return }
+        try workbench.carryNames(names: names)
+        finishCommand(affectsAnalysis: false)
+    }
+
     /// Name and type an address as one undo step ("Define Variable").
     func defineVariable(address: UInt32, name: String, type: VarTypeInfo) throws {
         try workbench.defineVariable(snesAddress: address, name: name, ty: type)

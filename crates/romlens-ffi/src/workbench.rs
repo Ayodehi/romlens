@@ -1738,7 +1738,21 @@ fn variable_info(
 
 impl Workbench {
     /// Apply `commands` as one undo step of the user's.
-    fn apply_user_batch(&self, commands: Vec<model::Command>) -> Result<(), RomlensError> {
+    /// The ROM, project and snapshot as they are now, for work done off
+    /// the lock (comparing two versions).
+    pub(crate) fn parts(&self) -> (romlens_core::RomImage, Project, Arc<AnalysisSnapshot>) {
+        let inner = self.lock();
+        (
+            self.rom.image.clone(),
+            inner.project.clone(),
+            Arc::clone(&inner.snapshot),
+        )
+    }
+
+    pub(crate) fn apply_user_batch(
+        &self,
+        commands: Vec<model::Command>,
+    ) -> Result<(), RomlensError> {
         let affects = commands.iter().any(model::Command::affects_analysis);
         let (generation, dirty) = {
             let mut inner = self.lock();

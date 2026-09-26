@@ -73,3 +73,46 @@ fn a_patch_and_an_insertion() {
             >= 4
     );
 }
+
+#[test]
+fn names_carry_to_paired_routines_without_one() {
+    use romlens_core::SnesAddress;
+    use romlens_core::diff::names_to_carry;
+    use romlens_core::model::{Command, Origin};
+    let (a, b) = fixtures::diff_pair();
+    let (ra, mut pa, _) = open(a);
+    let (rb, mut pb, sb) = open(b);
+    let name = |p: &mut Project, rom: &RomImage, at: u16, n: &str| {
+        p.apply_batch(
+            rom,
+            vec![Command::SetLabel {
+                address: SnesAddress::new(0, at),
+                name: Some(n.into()),
+            }],
+            Origin::User,
+        )
+        .unwrap();
+    };
+    name(&mut pa, &ra, 0x8020, "ClearTable");
+    name(&mut pa, &ra, 0x8030, "Add16");
+    // The second version has its own name for one of them: it stays.
+    name(&mut pb, &rb, 0x8030, "Sum");
+    let sa = analyze(&ra, &pa, &AnalysisControl::silent()).unwrap();
+    let (a, b) = (
+        Side {
+            rom: &ra,
+            project: &pa,
+            snap: &sa,
+        },
+        Side {
+            rom: &rb,
+            project: &pb,
+            snap: &sb,
+        },
+    );
+    let c = compare(a, b);
+    assert_eq!(
+        names_to_carry(&c, a, b),
+        vec![(SnesAddress::new(0, 0x8020), "ClearTable".to_owned())]
+    );
+}

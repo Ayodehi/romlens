@@ -98,7 +98,7 @@ struct DocumentView: View {
                 if compactToolbar {
                     Menu {
                         Picker("Editor", selection: editorTab) {
-                            ForEach(RomViewModel.EditorTab.allCases) { tab in
+                            ForEach(model.editorTabs) { tab in
                                 Text(tab.title).tag(Optional(tab))
                             }
                         }
@@ -114,7 +114,7 @@ struct DocumentView: View {
                     .help("Hex (⌥⌘1), Disassembly (⌥⌘2), Both (⌥⌘3), C (⌥⌘8), Graph (⌥⌘9) or Atlas (⌥⌘A)")
                 } else {
                     Picker("Editor", selection: editorTab) {
-                        ForEach(RomViewModel.EditorTab.allCases) { tab in
+                        ForEach(model.editorTabs) { tab in
                             Text(tab.title).tag(Optional(tab))
                         }
                     }

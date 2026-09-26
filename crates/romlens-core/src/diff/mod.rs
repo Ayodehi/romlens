@@ -30,6 +30,30 @@ pub struct Comparison {
     pub data: Vec<DataChange>,
 }
 
+/// The names to carry from `a` to `b`: each paired routine that has a
+/// user's or an imported name in `a`, and none but an automatic one in
+/// `b`, as `b`'s entry and `a`'s name.
+pub fn names_to_carry(
+    c: &Comparison,
+    a: Side<'_>,
+    b: Side<'_>,
+) -> Vec<(crate::SnesAddress, String)> {
+    let mut out = Vec::new();
+    for r in &c.routines {
+        let (Some(ra), Some(rb)) = (&r.a, &r.b) else {
+            continue;
+        };
+        let Some(label) = a.project.labels.get(&ra.entry) else {
+            continue;
+        };
+        if b.project.labels.contains_key(&rb.entry) {
+            continue;
+        }
+        out.push((rb.entry, label.name.clone()));
+    }
+    out
+}
+
 /// Compare two versions of a ROM.
 pub fn compare(a: Side<'_>, b: Side<'_>) -> Comparison {
     let bytes = align(a.rom.bytes(), b.rom.bytes());
