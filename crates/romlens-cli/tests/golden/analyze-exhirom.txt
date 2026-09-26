@@ -1,7 +1,7 @@
 Code:          13 bytes (0.0%) in 2 blocks, 8 instructions
 Data:          4259827 bytes (100.0%)
 Unknown:       0 bytes (0.0%)
-Regions:       6
+Regions:       7
 Labels:        3
 Xrefs:         14
 Warnings:      0 (0 flag conflicts)
@@ -12,7 +12,7 @@ Warnings:      0 (0 flag conflicts)
   "unknownBytes": 0,
   "instructions": 8,
   "blocks": 2,
-  "regions": 6,
+  "regions": 7,
   "labels": 3,
   "xrefs": 14,
   "warnings": 0,

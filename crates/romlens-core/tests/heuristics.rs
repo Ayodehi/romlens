@@ -203,3 +203,36 @@ fn a_cached_profile_gives_the_same_answer() {
     assert!(profile.at(0x1600) >= heuristics::entropy::COMPRESSED_BITS);
     assert!(profile.at(0x2000) <= heuristics::entropy::SPARSE_BITS);
 }
+
+/// In a HiROM bank every 16-bit value is an address in the ROM, so landing
+/// there says nothing: arbitrary bytes are not a pointer table, and a table
+/// shows itself by its order (Final Fantasy III read as 94% data before).
+#[test]
+fn in_a_hirom_bank_only_a_tables_shape_makes_it_pointers() {
+    let mut bytes = fixtures::minimal_hirom();
+    let mut x: u32 = 0x1234_5678;
+    for b in &mut bytes[0x2000..0x3000] {
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        *b = x as u8;
+    }
+    for i in 0..128u16 {
+        bytes[0x4000 + 2 * i as usize..][..2].copy_from_slice(&(0x8000 + i * 0x20).to_le_bytes());
+    }
+    let rom = RomImage::from_bytes(bytes, "h.sfc").unwrap();
+    let s = run(&rom);
+    let pointers = |off: u32| {
+        hit_at(&s, off).is_some_and(|h| {
+            matches!(
+                h.kind,
+                RegionKind::Data(DataKind::Pointer { .. } | DataKind::Long)
+            )
+        })
+    };
+    assert!(
+        (0x2000..0x3000).step_by(0x100).all(|o| !pointers(o)),
+        "random words taken for pointers"
+    );
+    assert!(pointers(0x4000), "the ordered table was missed");
+}
