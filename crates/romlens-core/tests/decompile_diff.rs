@@ -608,6 +608,9 @@ static uint16_t *touch16(uint32_t a) {
 }
 #define MEM8(a) (*touch((uint32_t)(a)))
 #define MEM16(a) (*touch16((uint32_t)(a)))
+#define STACK8(a) (stack[(u16)(a)])
+#define STACK16(a) (*(uint16_t *)&stack[(u16)(a)])
+static uint8_t stack[0x10002];
 #include "snes.h"
 u16 A, X, Y, S, D;
 u8 DBR;
@@ -618,9 +621,10 @@ void SED(void) {}
 void CLD(void) {}
 void native_mode(void) {}
 void emulation_mode(void) {}
-/* The stack is its own memory: at lift the pushes write it and at clean
- * the saved temporaries do not, so it must not be memory a routine reads. */
-static uint8_t stack[0x10000];
+/* The stack is its own memory, as far from the data the routine reads as
+ * it is on the CPU: the pushes write it, and `LDA $03,S` (STACK8 and
+ * STACK16) reads it. At clean the pushes a routine pulls again are
+ * temporaries and write nothing. */
 void push8(u8 v) { stack[S] = v; S--; }
 void push16(u16 v) { push8(v >> 8); push8(v & 0xFF); }
 u8 pull8(void) { S++; return stack[S]; }
@@ -687,7 +691,7 @@ int main(int argc, char **argv) {
                 uint32_t r = hash(0xC0FFEE);
                 A = r; X = r >> 8; Y = r >> 12; D = hash(1) & 0xFF00; DBR = 0x7E;
                 if (entries[i].x8) { X &= 0xFF; Y &= 0xFF; }
-                S = 0x01FF; C = r & 1; N = r >> 1 & 1; V = r >> 2 & 1; Z = r >> 3 & 1;
+                S = 0x1FFF; C = r & 1; N = r >> 1 & 1; V = r >> 2 & 1; Z = r >> 3 & 1;
                 if (variant) {
                     /* Change what the summary says is not read. */
                     unsigned k = ~entries[i].reads;
@@ -704,7 +708,7 @@ int main(int argc, char **argv) {
                 }
                 u16 a0 = A, x0 = X, y0 = Y, d0 = D; u8 dbr0 = DBR, c0 = C, n0 = N, v0 = V, z0 = Z;
                 entries[i].fn();
-                printf("R %d %d | %04X %04X %04X %04X %04X %02X %X %X %X %X | %04X %04X %04X 01FF %04X %02X %X %X %X %X |",
+                printf("R %d %d | %04X %04X %04X %04X %04X %02X %X %X %X %X | %04X %04X %04X 1FFF %04X %02X %X %X %X %X |",
                        entries[i].index, s, A, X, Y, S, D, DBR, C, N, V, Z, a0, x0, y0, d0, dbr0, c0, n0, v0, z0);
                 for (uint32_t a = 0; a < (1u << 24); a += 8) {
                     if (!touched[a >> 3]) continue;

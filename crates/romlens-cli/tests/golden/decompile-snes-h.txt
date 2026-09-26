@@ -34,6 +34,14 @@ extern u8 N, V, Z, C;
 #define MEM16(a) (*(volatile u16 *)(uintptr_t)(a))
 #endif
 #define MEM24(a) ((u32)MEM16(a) | (u32)MEM8((a) + 2) << 16)
+/* The stack by offset from S (`LDA $03,S`), in bank 0. Define STACK8
+* and STACK16 before including this to keep the stack apart. */
+#ifndef STACK8
+#define STACK8(a) MEM8((u16)(a))
+#endif
+#ifndef STACK16
+#define STACK16(a) MEM16((u16)(a))
+#endif
 /* Store a 24-bit value: C has no 24-bit type. */
 #define SET24(a, v) (MEM16((uintptr_t)(a)) = (u16)(v), MEM8((uintptr_t)(a) + 2) = (u8)((u32)(v) >> 16))
 /* A 24-bit value held in a three-byte array. */

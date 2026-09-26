@@ -621,6 +621,10 @@ pub struct Emitter<'a, 'n> {
     pub mem_args: BTreeMap<usize, BTreeSet<u32>>,
     /// How numbers print.
     pub numbers: super::NumberStyle,
+    /// Blocks whose goto label is printed: a block the structure prints
+    /// twice (a loop's tail copied into a branch) takes it once, and a goto
+    /// goes to that copy, which does the same.
+    pub labels_placed: BTreeSet<BlockId>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -640,6 +644,7 @@ impl<'a, 'n> Emitter<'a, 'n> {
             names,
             stats: Stats::default(),
             vars: Vec::new(),
+            labels_placed: BTreeSet::new(),
             modern: false,
             mem_args: BTreeMap::new(),
             numbers: super::NumberStyle::Auto,
@@ -819,6 +824,15 @@ impl<'a, 'n> Emitter<'a, 'n> {
 
     /// Memory at `addr`: by name where it has one.
     fn mem(&mut self, addr: &Expr, width: Width) {
+        // The stack by offset, which no name covers.
+        if crate::decompile::dataflow::stack_offset(addr).is_some() && width != Width::W24 {
+            let helper = if width == Width::W8 { "STACK8" } else { "STACK16" };
+            self.w.tok(helper, CTokenKind::Helper, None);
+            self.w.w("(");
+            self.expr(addr);
+            self.w.w(")");
+            return;
+        }
         if self.names.use_names {
             match addr {
                 Expr::Const(a) => {
@@ -1109,7 +1123,8 @@ impl<'a, 'n> Emitter<'a, 'n> {
                 self.w.w("(");
                 self.ty("void");
                 self.w.w(")");
-                self.expr(e);
+                // A cast binds tighter than any operator.
+                self.paren_if(e, matches!(e, Expr::Bin(..)));
                 self.w.w(";");
                 self.w.end(steps);
             }
@@ -1517,7 +1532,7 @@ impl TreeLayout<'_> {
     }
 
     fn put_label(&self, e: &mut Emitter, b: BlockId, empty: bool) {
-        if !self.gotos.contains(&b) {
+        if !self.gotos.contains(&b) || !e.labels_placed.insert(b) {
             return;
         }
         let indent = e.w.indent;

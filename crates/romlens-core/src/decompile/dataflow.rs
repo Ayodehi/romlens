@@ -20,7 +20,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::cpu65816::{AddressingMode, Mnemonic};
+use crate::cpu65816::Mnemonic;
 use crate::decompile::cfg::{BlockId, Cfg, Term};
 use crate::decompile::function::Function;
 use crate::decompile::ir::{BinOp, CallTarget, Expr, Flag, Line, Place, Reg, Stmt, UnOp, Width};
@@ -1081,6 +1081,11 @@ fn for_each_expr_mut(s: &mut Stmt, f: &mut impl FnMut(&mut Expr)) {
 /// read cannot take it (a 16-bit read of an accumulator whose high byte
 /// the definition did not set).
 fn substitute(e: &Expr, dst: &Place, v: &Expr) -> Option<Expr> {
+    // The stack by offset keeps S as it is: `STACK16(S + 1)` says what
+    // `MEM16(0x2000)` hides, and the stack is its own place to the reader.
+    if stack_offset(e).is_some() {
+        return Some(e.clone());
+    }
     let rec = |x: &Expr| substitute(x, dst, v);
     Some(match (e, dst) {
         (Expr::Reg(r, w), Place::Reg(dr, dw)) if r == dr => match (w, dw) {
@@ -1423,15 +1428,29 @@ fn split_pushes(rom: &RomImage, lifted: &mut Lifted) {
 /// argument for a callee, a bank for `PLB` in a different width) stays a
 /// push.
 pub fn stack_slots(f: &Function, cfg: &Cfg, lifted: &mut Lifted) {
+    let addresses = lifted
+        .blocks
+        .iter()
+        .any(|b| b.lines.iter().any(|l| stmt_addresses_stack(&l.stmt)));
+    if let Err(why) = slots(f, cfg, lifted)
+        && addresses
+    {
+        lifted
+            .warnings
+            .push(format!("the stack is left as memory, `MEM(S + k)`, because {why}"));
+    }
+}
+
+fn slots(f: &Function, cfg: &Cfg, lifted: &mut Lifted) -> Result<(), &'static str> {
     use Mnemonic::*;
-    let stack_relative = f.steps.iter().any(|s| {
-        matches!(
-            s.insn.mode,
-            AddressingMode::StackRelative | AddressingMode::StackRelativeIndirectIndexed
-        )
-    });
-    if stack_relative {
-        return;
+    // Lines that read or write the stack by offset (`LDA $03,S`).
+    let mut ref_lines: BTreeSet<(BlockId, usize)> = BTreeSet::new();
+    for (b, block) in lifted.blocks.iter().enumerate() {
+        for (i, l) in block.lines.iter().enumerate() {
+            if stmt_addresses_stack(&l.stmt) {
+                ref_lines.insert((b, i));
+            }
+        }
     }
     let moves_s = |step: usize| matches!(f.steps[step].insn.mnemonic, TSC | TSX | TCS | TXS);
     // Stack effect of a line: pushed bytes (positive) or pulled (negative).
@@ -1464,11 +1483,11 @@ pub fn stack_slots(f: &Function, cfg: &Cfg, lifted: &mut Lifted) {
             // With something pushed, S is not what it was at lift once the
             // slots are temporaries.
             if d != 0 && moves_s(l.step) {
-                return;
+                return Err("it moves S with something pushed");
             }
             d += delta(&l.stmt);
             if d < 0 {
-                return;
+                return Err("it pulls more than it pushed");
             }
         }
         // Every way out leaves the stack as it found it; a push left for
@@ -1479,7 +1498,7 @@ pub fn stack_slots(f: &Function, cfg: &Cfg, lifted: &mut Lifted) {
         );
         let to_stub = cfg.succs(b).iter().any(|&s| cfg.blocks[s].is_stub());
         if (exits || to_stub) && d != 0 {
-            return;
+            return Err("it leaves with bytes still pushed");
         }
         for s in cfg.succs(b) {
             match depth_in[s] {
@@ -1487,7 +1506,7 @@ pub fn stack_slots(f: &Function, cfg: &Cfg, lifted: &mut Lifted) {
                     depth_in[s] = Some(d);
                     work.push(s);
                 }
-                Some(old) if old != d => return,
+                Some(old) if old != d => return Err("the depth of the stack differs between paths"),
                 Some(_) => {}
             }
         }
@@ -1536,6 +1555,8 @@ pub fn stack_slots(f: &Function, cfg: &Cfg, lifted: &mut Lifted) {
     }
     // Pulls whose bytes did not line up with one kind of push.
     let mut spoiled: BTreeSet<usize> = BTreeSet::new();
+    // The stack before each line that addresses it by offset.
+    let mut stack_at: BTreeMap<(BlockId, usize), Stack> = BTreeMap::new();
     let mut stack_in: Vec<Option<Stack>> = vec![None; n];
     stack_in[cfg.entry] = Some(Vec::new());
     let mut changed = true;
@@ -1546,6 +1567,9 @@ pub fn stack_slots(f: &Function, cfg: &Cfg, lifted: &mut Lifted) {
                 continue;
             };
             for (i, l) in lifted.blocks[b].lines.iter().enumerate() {
+                if ref_lines.contains(&(b, i)) {
+                    stack_at.insert((b, i), st.clone());
+                }
                 let Some(&id) = ids.get(&(b, i)) else {
                     continue;
                 };
@@ -1609,8 +1633,67 @@ pub fn stack_slots(f: &Function, cfg: &Cfg, lifted: &mut Lifted) {
             next += if kinds[r].1 == P { 4 } else { 1 };
         }
     }
-    if temp_of.is_empty() {
-        return;
+    if temp_of.is_empty() && ref_lines.is_empty() {
+        return Ok(());
+    }
+    // Each line that addresses the stack, rewritten to read and write the
+    // temporaries its bytes belong to. If any cannot be, the routine keeps
+    // the stack as memory, as it is.
+    let mut rewritten: BTreeMap<(BlockId, usize), Vec<Stmt>> = BTreeMap::new();
+    // What the call that entered it left: `RTL` returns through three bytes.
+    let ret_len: u32 = if f.steps.iter().any(|s| s.insn.mnemonic == RTL) { 3 } else { 2 };
+    for &(b, i) in &ref_lines {
+        let (Some(st), Some(&d)) = (stack_at.get(&(b, i)), before.get(&(b, i))) else {
+            return Err("a line that reads the stack is never reached");
+        };
+        let mut why = "a value read more than once has effects";
+        // The temporary and byte of the value at `S + m`.
+        let mut byte_at = |m: u32| -> Option<(u32, u32, u32)> {
+            if m == 0 {
+                why = "it reads below the stack pointer";
+                return None;
+            }
+            if m > d as u32 {
+                // Above what the routine pushed: the return address, then
+                // what its caller pushed.
+                why = if m - d as u32 <= ret_len {
+                    "it reads its return address (data placed after the call)"
+                } else {
+                    "it reads arguments its caller pushed"
+                };
+                return None;
+            }
+            let idx = (d as u32 - m) as usize;
+            let origins = st.get(idx)?;
+            let mut which = None;
+            for &(p, j) in origins {
+                let r = find(&mut parent, p);
+                let Some(&t) = temp_of.get(&r) else {
+                    why = "a value it reads there is pushed but never pulled";
+                    return None;
+                };
+                let k = kinds[r].1;
+                if k == P {
+                    why = "it reads the flags it pushed";
+                    return None;
+                }
+                let wt = bytes_of(k) as u32;
+                // A push puts its high byte on first, deeper in the stack.
+                let at = (t, wt, wt - 1 - j as u32);
+                if which.is_some_and(|w| w != at) {
+                    why = "a byte it reads comes from different pushes on different paths";
+                    return None;
+                }
+                which = Some(at);
+            }
+            which
+        };
+        match stack_rewrite(&lifted.blocks[b].lines[i].stmt, &mut byte_at) {
+            Some(stmts) => {
+                rewritten.insert((b, i), stmts);
+            }
+            None => return Err(why),
+        }
     }
     let mut renamed: BTreeMap<(BlockId, usize), (u32, i32)> = BTreeMap::new();
     for (&line, &id) in &ids {
@@ -1624,6 +1707,16 @@ pub fn stack_slots(f: &Function, cfg: &Cfg, lifted: &mut Lifted) {
     for (b, block) in lifted.blocks.iter_mut().enumerate() {
         let mut out: Vec<Line> = Vec::with_capacity(block.lines.len());
         for (i, line) in block.lines.drain(..).enumerate() {
+            if let Some(stmts) = rewritten.remove(&(b, i)) {
+                for stmt in stmts {
+                    out.push(Line {
+                        stmt,
+                        step: line.step,
+                        merged: line.merged.clone(),
+                    });
+                }
+                continue;
+            }
             let Some(&(t, w)) = renamed.get(&(b, i)) else {
                 out.push(line);
                 continue;
@@ -1666,6 +1759,132 @@ pub fn stack_slots(f: &Function, cfg: &Cfg, lifted: &mut Lifted) {
         }
         block.lines = out;
     }
+    Ok(())
+}
+
+/// `k` when `addr` is `S + k`: the byte `k` above the stack pointer. A
+/// stack-relative operand is one byte; a larger constant plus S is an
+/// address that happens to add the stack pointer (`TSX` then
+/// `DEC $B200,X`), not the stack.
+pub(crate) fn stack_offset(addr: &Expr) -> Option<u32> {
+    match addr {
+        Expr::Bin(BinOp::Add, a, b) => match (&**a, &**b) {
+            (Expr::Reg(Reg::S, _), Expr::Const(k)) | (Expr::Const(k), Expr::Reg(Reg::S, _)) if *k <= 0xFF => {
+                Some(*k)
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn expr_addresses_stack(e: &Expr) -> bool {
+    let mut hit = false;
+    e.walk(&mut |x| {
+        if let Expr::Mem { addr, .. } = x
+            && stack_offset(addr).is_some()
+        {
+            hit = true;
+        }
+    });
+    hit
+}
+
+fn stmt_addresses_stack(s: &Stmt) -> bool {
+    let mut hit = matches!(s, Stmt::Assign { dst: Place::Mem { addr, .. }, .. } if stack_offset(addr).is_some());
+    let mut probe = s.clone();
+    for_each_expr_mut(&mut probe, &mut |e| hit |= expr_addresses_stack(e));
+    hit
+}
+
+/// `e` with every read of the stack by offset replaced by the temporaries
+/// holding those bytes. `byte_at(m)` names the byte at `S + m`: its
+/// temporary, the temporary's width in bytes and which byte of it.
+fn stack_read(e: &Expr, byte_at: &mut dyn FnMut(u32) -> Option<(u32, u32, u32)>) -> Option<Expr> {
+    let rec = |x: &Expr, f: &mut dyn FnMut(u32) -> Option<(u32, u32, u32)>| stack_read(x, f);
+    Some(match e {
+        Expr::Mem { addr, width } if stack_offset(addr).is_some() => {
+            let k = stack_offset(addr).unwrap();
+            let n = width.bytes();
+            let bytes: Vec<(u32, u32, u32)> = (0..n).map(|i| byte_at(k + i)).collect::<Option<_>>()?;
+            // The whole of one temporary, in order.
+            let (t, wt, _) = bytes[0];
+            if wt == n && bytes.iter().enumerate().all(|(i, b)| *b == (t, wt, i as u32)) {
+                return Some(Expr::Temp(t));
+            }
+            let mut out: Option<Expr> = None;
+            for (i, (t, wt, sig)) in bytes.into_iter().enumerate() {
+                let byte = if wt == 1 {
+                    Expr::Temp(t)
+                } else {
+                    Expr::cast(Width::W8, Expr::bin(BinOp::Shr, Expr::Temp(t), Expr::Const(8 * sig)))
+                };
+                let placed = Expr::bin(BinOp::Shl, byte, Expr::Const(8 * i as u32));
+                out = Some(match out {
+                    None => placed,
+                    Some(o) => Expr::bin(BinOp::Or, o, placed),
+                });
+            }
+            out?
+        }
+        Expr::Mem { addr, width } => Expr::mem(rec(addr, byte_at)?, *width),
+        Expr::Un(op, x) => Expr::un(*op, rec(x, byte_at)?),
+        Expr::Bin(op, a, b) => Expr::bin(*op, rec(a, byte_at)?, rec(b, byte_at)?),
+        Expr::Cast(w, x) => Expr::cast(*w, rec(x, byte_at)?),
+        Expr::Signed(w, x) => Expr::Signed(*w, Box::new(rec(x, byte_at)?)),
+        Expr::Call(n, args) => Expr::Call(n, args.iter().map(|a| rec(a, byte_at)).collect::<Option<_>>()?),
+        _ => e.clone(),
+    })
+}
+
+/// A statement that addresses the stack by offset, rewritten over the
+/// temporaries (`stack_read`): a write to part of a temporary sets just
+/// those bits of it.
+fn stack_rewrite(s: &Stmt, byte_at: &mut dyn FnMut(u32) -> Option<(u32, u32, u32)>) -> Option<Vec<Stmt>> {
+    if let Stmt::Assign {
+        dst: Place::Mem { addr, width },
+        value,
+    } = s
+        && let Some(k) = stack_offset(addr)
+    {
+        let value = stack_read(value, byte_at)?;
+        let n = width.bytes();
+        let bytes: Vec<(u32, u32, u32)> = (0..n).map(|i| byte_at(k + i)).collect::<Option<_>>()?;
+        let (t, wt, _) = bytes[0];
+        if wt == n && bytes.iter().enumerate().all(|(i, b)| *b == (t, wt, i as u32)) {
+            return Some(vec![Stmt::Assign {
+                dst: Place::Temp(t),
+                value: Expr::cast(if n == 1 { Width::W8 } else { Width::W16 }, value),
+            }]);
+        }
+        // Byte by byte; a value read more than once must not have effects.
+        if n > 1 && value.has_effects() {
+            return None;
+        }
+        let mut out = Vec::new();
+        for (i, (t, wt, sig)) in bytes.into_iter().enumerate() {
+            let byte = Expr::cast(Width::W8, Expr::bin(BinOp::Shr, value.clone(), Expr::Const(8 * i as u32)));
+            let v = if wt == 1 {
+                byte
+            } else {
+                let keep = 0xFFFF & !(0xFF << (8 * sig));
+                Expr::bin(
+                    BinOp::Or,
+                    Expr::bin(BinOp::And, Expr::Temp(t), Expr::Const(keep)),
+                    Expr::bin(BinOp::Shl, byte, Expr::Const(8 * sig)),
+                )
+            };
+            out.push(Stmt::Assign { dst: Place::Temp(t), value: v });
+        }
+        return Some(out);
+    }
+    let mut out = s.clone();
+    let mut ok = true;
+    for_each_expr_mut(&mut out, &mut |e| match stack_read(e, byte_at) {
+        Some(n) => *e = n,
+        None => ok = false,
+    });
+    ok.then_some(vec![out])
 }
 
 fn simplify_stmt(s: &mut Stmt) {

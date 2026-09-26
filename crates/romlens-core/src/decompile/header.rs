@@ -8,7 +8,7 @@
 use crate::model::hardware::all_hardware_registers;
 
 /// The helpers `snes.h` declares, which a label must not shadow.
-pub const HELPERS: [&str; 28] = [
+pub const HELPERS: [&str; 30] = [
     "SET24",
     "SEI",
     "CLI",
@@ -36,6 +36,8 @@ pub const HELPERS: [&str; 28] = [
     "MEM8",
     "MEM16",
     "MEM24",
+    "STACK8",
+    "STACK16",
     "LONG",
 ];
 
@@ -101,6 +103,14 @@ pub fn snes_h() -> String {
          #define MEM16(a) (*(volatile u16 *)(uintptr_t)(a))\n\
          #endif\n\
          #define MEM24(a) ((u32)MEM16(a) | (u32)MEM8((a) + 2) << 16)\n\
+         /* The stack by offset from S (`LDA $03,S`), in bank 0. Define STACK8\n\
+         * and STACK16 before including this to keep the stack apart. */\n\
+         #ifndef STACK8\n\
+         #define STACK8(a) MEM8((u16)(a))\n\
+         #endif\n\
+         #ifndef STACK16\n\
+         #define STACK16(a) MEM16((u16)(a))\n\
+         #endif\n\
          /* Store a 24-bit value: C has no 24-bit type. */\n\
          #define SET24(a, v) (MEM16((uintptr_t)(a)) = (u16)(v), MEM8((uintptr_t)(a) + 2) = (u8)((u32)(v) >> 16))\n\
          /* A 24-bit value held in a three-byte array. */\n\
