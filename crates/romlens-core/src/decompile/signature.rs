@@ -61,6 +61,9 @@ pub struct Program {
     pub memory: MemoryArgs,
     /// Per routine, the bytes of its caller's stack it reads as arguments.
     pub stack_args: BTreeMap<SnesAddress, u32>,
+    /// Per routine taking them as parameters at the `full` level: each
+    /// piece's offset above the caller's S at the call, and its bytes.
+    pub stack_params: BTreeMap<SnesAddress, Vec<(u32, u32)>>,
 }
 
 /// Values passed in memory: RAM a caller stores just before a call, which
@@ -84,6 +87,9 @@ pub struct MemoryArgs {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Abi {
     pub params: Vec<(Slot, CType)>,
+    /// Arguments its caller pushed: where each is at entry (`arg3`), its
+    /// offset above the caller's S at the call, and its type.
+    pub stack: Vec<(u32, u32, CType)>,
     pub ret: Option<(Slot, CType)>,
     pub outs: Vec<(Slot, CType)>,
 }
@@ -119,6 +125,7 @@ impl Abi {
         let ret = (!results.is_empty()).then(|| results.remove(0));
         Abi {
             params,
+            stack: Vec::new(),
             ret,
             outs: results,
         }
@@ -142,6 +149,11 @@ impl Abi {
             s.push_str(&format!("    {} o_{};\n", t.name(), k.name()));
         }
         let mut args: Vec<String> = self.params.iter().map(|(k, t)| global_as(*k, *t)).collect();
+        // What the caller pushed, just above S.
+        args.extend(self.stack.iter().map(|(_, m, t)| match t {
+            CType::U8 => format!("STACK8(S + {m})"),
+            _ => format!("STACK16(S + {m})"),
+        }));
         args.extend(self.outs.iter().map(|(k, _)| format!("&o_{}", k.name())));
         let call = format!("{name}({})", args.join(", "));
         match self.ret {
@@ -168,6 +180,11 @@ impl Abi {
             .iter()
             .map(|(k, t)| format!("{} {}", t.name(), k.name()))
             .collect();
+        args.extend(
+            self.stack
+                .iter()
+                .map(|(e, _, t)| format!("{} arg{e}", t.name())),
+        );
         args.extend(
             self.outs
                 .iter()
@@ -485,8 +502,19 @@ impl Program {
             .map(|(a, u)| (*a, dataflow::stack_args(&u.f, &u.cfg, &u.lifted)))
             .filter(|(_, n)| *n > 0)
             .collect();
+        // Which of them take those as parameters at the `full` level: every
+        // routine whose arguments can be named, and that nothing reaches in
+        // a way the analysis does not see.
+        let unseen = open_routines(snap, &units);
+        let stack_params: BTreeMap<SnesAddress, Vec<(u32, u32)>> = units
+            .iter()
+            .filter(|(a, _)| !unseen.contains(a))
+            .map(|(a, u)| (*a, dataflow::stack_param_ranges(&u.f, &u.cfg, &u.lifted)))
+            .filter(|(_, r)| !r.is_empty())
+            .collect();
+        let none = BTreeMap::new();
         for u in units.values_mut() {
-            dataflow::stack_slots(&u.f, &u.cfg, &mut u.lifted, &stack_args);
+            dataflow::stack_slots(&u.f, &u.cfg, &mut u.lifted, &stack_args, &none);
         }
         // Where nothing gave the direct page and the program only ever
         // sets it to one value, that is the direct page.
@@ -500,7 +528,7 @@ impl Program {
             };
             for u in units.values_mut() {
                 let mut lifted = lift::lift(&u.f, &u.cfg, opts);
-                dataflow::stack_slots(&u.f, &u.cfg, &mut lifted, &stack_args);
+                dataflow::stack_slots(&u.f, &u.cfg, &mut lifted, &stack_args, &none);
                 u.lifted = lifted;
             }
         }
@@ -591,6 +619,7 @@ impl Program {
                     default_call: base.default_call.clone(),
                     call_defs: writes.clone(),
                     stack_args: stack_args.clone(),
+                    stack_params: BTreeMap::new(),
                 };
                 let flow = Flow::new(rom, &conv);
                 let live_out = dataflow::liveness(&flow, &u.cfg, &u.lifted);
@@ -717,7 +746,24 @@ impl Program {
                 let entry_x8 = entry_x8 && !wide_calls.contains(a);
                 let exit_x8 =
                     exit_x8 || (called.contains(a) && !wide_after.contains(a) && !open.contains(a));
-                (*a, Abi::of(&summaries[a], entry_x8, exit_x8))
+                let mut abi = Abi::of(&summaries[a], entry_x8, exit_x8);
+                if let Some(pieces) = stack_params.get(a) {
+                    let ret = if units[a]
+                        .f
+                        .steps
+                        .iter()
+                        .any(|s| s.insn.mnemonic == crate::cpu65816::Mnemonic::RTL)
+                    {
+                        3
+                    } else {
+                        2
+                    };
+                    abi.stack = pieces
+                        .iter()
+                        .map(|&(m, w)| (m + ret, m, if w == 1 { CType::U8 } else { CType::U16 }))
+                        .collect();
+                }
+                (*a, abi)
             })
             .collect();
         let memory = memory_args(rom, &units);
@@ -729,6 +775,7 @@ impl Program {
             lift: opts,
             memory,
             stack_args,
+            stack_params,
         }
     }
 
@@ -738,6 +785,7 @@ impl Program {
     /// what the routine leaves in them is always seen after it.
     pub fn canonical_conventions(&self, at: SnesAddress) -> Conventions {
         let mut c = self.conventions(at);
+        c.stack_params = self.stack_params.clone();
         if let Some(s) = self.summaries.get(&at) {
             c.exit = s.returns.clone();
             c.exit.extend(GLOBALS);
@@ -775,6 +823,7 @@ impl Program {
             default_call: base.default_call,
             call_defs,
             stack_args: self.stack_args.clone(),
+            stack_params: BTreeMap::new(),
         }
     }
 }

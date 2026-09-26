@@ -319,18 +319,25 @@ pub fn render_with(
             declared = true;
         }
     }
-    if !used.is_empty() {
+    // Not the arguments the signature takes.
+    let params: Vec<String> = lifted
+        .abi
+        .iter()
+        .flat_map(|a| a.stack.iter().map(|(e, _, _)| format!("arg{e}")))
+        .collect();
+    let temps: Vec<String> = used
+        .iter()
+        .map(|t| {
+            lifted
+                .temp_names
+                .get(t)
+                .cloned()
+                .unwrap_or_else(|| format!("t{t}"))
+        })
+        .filter(|n| !params.contains(n))
+        .collect();
+    if !temps.is_empty() {
         body.w.tok("u32", CTokenKind::Type, None);
-        let temps: Vec<String> = used
-            .iter()
-            .map(|t| {
-                lifted
-                    .temp_names
-                    .get(t)
-                    .cloned()
-                    .unwrap_or_else(|| format!("t{t}"))
-            })
-            .collect();
         body.w.w(" ");
         body.w.w(&temps.join(", "));
         body.w.w(";");
@@ -435,6 +442,15 @@ pub fn render_with(
                     .map(|v| v.name.clone())
                     .unwrap_or_else(|| k.name().to_owned());
                 w.tok(&v, CTokenKind::Local, None);
+            }
+            for (e, _, t) in &abi.stack {
+                if !first {
+                    w.w(", ");
+                }
+                first = false;
+                w.tok(t.name(), CTokenKind::Type, None);
+                w.w(" ");
+                w.tok(&format!("arg{e}"), CTokenKind::Local, None);
             }
             for (k, t) in &abi.outs {
                 if !first {

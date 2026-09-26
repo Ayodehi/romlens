@@ -62,8 +62,26 @@ fn invoke(
     program: &Program,
     high_read_after: bool,
     temps: &mut u32,
+    stack: Option<Vec<Expr>>,
 ) -> Vec<Stmt> {
     let abi = &program.abis[&t];
+    // The arguments its caller pushed: the temporaries that hold them, or
+    // where they are on the stack when the pushes stayed pushes.
+    let stack = stack.unwrap_or_else(|| {
+        abi.stack
+            .iter()
+            .map(|&(_, m, ty)| {
+                Expr::mem(
+                    Expr::sum(Expr::Reg(Reg::S, Width::W16), Expr::Const(m)),
+                    if ty == CType::U8 {
+                        Width::W8
+                    } else {
+                        Width::W16
+                    },
+                )
+            })
+            .collect()
+    });
     let keeps_high = abi.ret == Some((Slot::A, CType::U8))
         && high_read_after
         && program
@@ -82,7 +100,12 @@ fn invoke(
     }
     let mut out = vec![Stmt::Invoke {
         target: t,
-        args: abi.params.iter().map(|(k, _)| k.expr()).collect(),
+        args: abi
+            .params
+            .iter()
+            .map(|(k, _)| k.expr())
+            .chain(stack)
+            .collect(),
         ret,
         outs: abi.outs.iter().map(|(k, _)| k.place()).collect(),
     }];
@@ -421,8 +444,14 @@ pub fn canonicalize(
         let after = dataflow::live_after_lines(&flow, cfg, lifted, &live_out, b);
         let old = std::mem::take(&mut lifted.blocks[b].lines);
         let mut out: Vec<Line> = Vec::with_capacity(old.len());
+        // A call's pushed arguments, from the line before it.
+        let mut stack_args: Option<Vec<Expr>> = None;
         for (i, line) in old.into_iter().enumerate() {
             let step = line.step;
+            if let Stmt::Effect("stack_args", args) = &line.stmt {
+                stack_args = Some(args.clone());
+                continue;
+            }
             let put = |out: &mut Vec<Line>, stmt| {
                 out.push(Line {
                     stmt,
@@ -432,7 +461,13 @@ pub fn canonicalize(
             };
             match &line.stmt {
                 Stmt::Call(CallTarget::Direct(t)) if program.abis.contains_key(t) => {
-                    let stmts = invoke(*t, program, after[i].contains(&Loc::Ah), &mut lifted.temps);
+                    let stmts = invoke(
+                        *t,
+                        program,
+                        after[i].contains(&Loc::Ah),
+                        &mut lifted.temps,
+                        stack_args.take(),
+                    );
                     for (k, stmt) in stmts.into_iter().enumerate() {
                         out.push(Line {
                             stmt,
@@ -483,7 +518,7 @@ pub fn canonicalize(
                     Some(_) => {
                         let high = own.ret == Some((Slot::A, CType::U16));
                         x.before
-                            .extend(invoke(*t, program, high, &mut lifted.temps));
+                            .extend(invoke(*t, program, high, &mut lifted.temps, None));
                         x.call_done = true;
                     }
                     None => {

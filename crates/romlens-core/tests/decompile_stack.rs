@@ -6,56 +6,10 @@ use romlens_core::analysis::{AnalysisControl, analyze};
 use romlens_core::decompile::{self, DecompileOptions, Level};
 use romlens_core::fixtures;
 use romlens_core::model::Project;
-use romlens_core::{MappingMode, RomImage, SnesAddress};
+use romlens_core::{RomImage, SnesAddress};
 
-/// ```text
-/// $8000  SEI; CLC; XCE; REP #$30
-/// $8005  JSR $8020; JSR $8040
-/// $800B  PEA $1234; JSR $8060; PLA ; an argument on the stack
-/// $8012  BRA $8012
-///
-/// $8020  LDA #$1234; PHA          ; a word on the stack
-/// $8024  SEP #$20
-/// $8026  LDA #$01; CLC
-/// $8029  ADC $02,S; STA $02,S     ; its high byte, plus one
-/// $802D  REP #$20; PLA; STA $10   ; $10 = $1334
-/// $8032  RTS
-///
-/// $8040  PEA $8070                ; a pointer on the stack
-/// $8043  LDY #$0002
-/// $8046  LDA ($01,S),Y; STA $12   ; the word at $8072
-/// $804A  PLX; RTS
-///
-/// $8060  LDA $03,S; STA $14       ; the argument, above the return address
-/// $8064  RTS
-/// ```
 fn rom() -> RomImage {
-    let mut code = vec![0u8; 0x78];
-    let mut put = |at: usize, b: &[u8]| code[at..at + b.len()].copy_from_slice(b);
-    put(
-        0x00,
-        &[
-            0x78, 0x18, 0xFB, 0xC2, 0x30, 0x20, 0x20, 0x80, 0x20, 0x40, 0x80, 0xF4, 0x34, 0x12,
-            0x20, 0x60, 0x80, 0x68, 0x80, 0xFE,
-        ],
-    );
-    put(0x60, &[0xA3, 0x03, 0x85, 0x14, 0x60]);
-    put(
-        0x20,
-        &[
-            0xA9, 0x34, 0x12, 0x48, 0xE2, 0x20, 0xA9, 0x01, 0x18, 0x63, 0x02, 0x83, 0x02, 0xC2,
-            0x20, 0x68, 0x85, 0x10, 0x60,
-        ],
-    );
-    put(
-        0x40,
-        &[
-            0xF4, 0x70, 0x80, 0xA0, 0x02, 0x00, 0xB3, 0x01, 0x85, 0x12, 0xFA, 0x60,
-        ],
-    );
-    put(0x70, &[1, 2, 3, 4, 5, 6, 7, 8]);
-    let bytes = fixtures::build_with_code(MappingMode::LoRom, 0x8000, false, &code, "STACK");
-    RomImage::from_bytes(bytes, "s.sfc").unwrap()
+    RomImage::from_bytes(fixtures::stack_lorom(), "s.sfc").unwrap()
 }
 
 fn c(level: Level, at: u16) -> String {
@@ -94,17 +48,26 @@ fn a_pushed_pointer_is_read_through() {
 
 #[test]
 fn an_argument_the_caller_pushed_is_named_and_read_at_entry() {
-    for level in [Level::Clean, Level::Full] {
-        let text = c(level, 0x8060);
-        // A call in C leaves no return address: the caller's word is just
-        // above S.
-        assert!(text.contains("arg3 = STACK16(S + 1);"), "{text}");
-        assert!(text.contains("ADDR_7E0014 = arg3"), "{text}");
-        assert!(!text.contains("note: the stack"), "{text}");
-        // The caller's push stays a push, for the callee to read.
-        let caller = c(level, 0x8000);
-        assert!(caller.contains("push16(0x1234)"), "{caller}");
-    }
+    // At clean the routine reads it as it starts: a call in C leaves no
+    // return address, so the caller's word is just above S.
+    let text = c(Level::Clean, 0x8060);
+    assert!(text.contains("arg3 = STACK16(S + 1);"), "{text}");
+    assert!(text.contains("ADDR_7E0014 = arg3"), "{text}");
+    assert!(!text.contains("note: the stack"), "{text}");
+    // And the caller's push stays a push, for the callee to read.
+    let caller = c(Level::Clean, 0x8000);
+    assert!(caller.contains("push16(0x1234)"), "{caller}");
+}
+
+#[test]
+fn at_full_the_argument_is_passed_in_the_call() {
+    let text = c(Level::Full, 0x8060);
+    assert!(text.contains("void SUB_008060(u16 arg3)"), "{text}");
+    assert!(text.contains("ADDR_7E0014 = arg3"), "{text}");
+    assert!(!text.contains("STACK"), "{text}");
+    let caller = c(Level::Full, 0x8000);
+    assert!(caller.contains("SUB_008060(0x1234);"), "{caller}");
+    assert!(!caller.contains("push16"), "{caller}");
 }
 
 /// The fixture's C, for a look: `cargo test --test decompile_stack show -- --ignored --nocapture`.

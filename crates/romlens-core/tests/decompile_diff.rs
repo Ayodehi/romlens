@@ -180,6 +180,28 @@ fn build(
                 src.push_str(&abi.global_shim(&format!("wrap_{i}"), &format!("entry_{i}")));
                 format!("wrap_{i}")
             }
+            // At lift a routine reading its arguments reads them as the CPU
+            // does, past the return address its call left; in C a call
+            // leaves none, so the other levels read them just above S.
+            None if level == Level::Lift && {
+                let raw = decompile::lift::lift(f, &u.cfg, program.lift);
+                decompile::dataflow::stack_args(f, &u.cfg, &raw) > 0
+            } =>
+            {
+                let ret = if f
+                    .steps
+                    .iter()
+                    .any(|st| st.insn.mnemonic == romlens_core::cpu65816::Mnemonic::RTL)
+                {
+                    3
+                } else {
+                    2
+                };
+                src.push_str(&format!(
+                    "static void lwrap_{i}(void) {{ S -= {ret}; entry_{i}(); S += {ret}; }}\n"
+                ));
+                format!("lwrap_{i}")
+            }
             None => format!("entry_{i}"),
         };
         table_rows.push(format!(
@@ -267,6 +289,11 @@ fn store_global(k: Slot, t: CType, v: &str) -> String {
 /// the mixing stub, its results out of them.
 fn abi_stub(name: &str, abi: &Abi, id: usize, r: u32, w: u32) -> String {
     let mut s = format!("{} {{\n", abi.c_signature(name));
+    // A stub stands for what the callee does to the registers; what its
+    // caller pushed for it does not change that.
+    for (e, _, _) in &abi.stack {
+        s.push_str(&format!("    (void)arg{e};\n"));
+    }
     for (k, t) in &abi.params {
         s.push_str(&format!("    {}\n", store_global(*k, *t, k.name())));
     }
@@ -397,6 +424,20 @@ fn compare(
     let rom_path = dir.join("rom.sfc");
     std::fs::write(&rom_path, rom.bytes()).unwrap();
     let program = decompile::program(rom, project, snap, &DecompileOptions::default());
+    // A routine that pulls more than it pushed, or reads its own return
+    // address, works on what the call left on the stack; a call in C leaves
+    // nothing there, so no C version of it can match, and its C says so.
+    let entries: Vec<SnesAddress> = entries
+        .iter()
+        .copied()
+        .filter(|e| {
+            program.units.get(e).is_none_or(|u| {
+                let raw = decompile::lift::lift(&u.f, &u.cfg, program.lift);
+                !decompile::dataflow::uses_call_frame(&u.f, &u.cfg, &raw)
+            })
+        })
+        .collect();
+    let entries = &entries[..];
     let lift = build(
         &cc,
         &dir,
@@ -552,6 +593,20 @@ fn every_level_does_what_lift_does_on_the_fixture() {
     assert!(bad.is_empty(), "{}", bad.join("\n"));
 }
 
+/// The stack fixture: locals by offset, a pushed pointer, an argument.
+#[test]
+fn every_level_does_what_lift_does_on_the_stack_fixture() {
+    let rom = RomImage::from_bytes(fixtures::stack_lorom(), "s.sfc").unwrap();
+    let (rom, project, snap) = setup(rom);
+    let entries: Vec<SnesAddress> = decompile::entries(&snap).into_iter().collect();
+    let Some((compared, bad)) = compare("stack", &rom, &project, &snap, &entries) else {
+        eprintln!("skipped: no C compiler or not POSIX");
+        return;
+    };
+    assert!(compared > 0);
+    assert!(bad.is_empty(), "{}", bad.join("\n"));
+}
+
 #[test]
 fn every_level_does_what_lift_does_on_the_development_rom() {
     let Some(rom) = common::dev_rom() else {
@@ -692,6 +747,8 @@ int main(int argc, char **argv) {
                 A = r; X = r >> 8; Y = r >> 12; D = hash(1) & 0xFF00; DBR = 0x7E;
                 if (entries[i].x8) { X &= 0xFF; Y &= 0xFF; }
                 S = 0x1FFF; C = r & 1; N = r >> 1 & 1; V = r >> 2 & 1; Z = r >> 3 & 1;
+                /* What a caller pushed, for a routine reading its arguments. */
+                for (int k = 1; k < 0x100; k++) stack[0x1FFF + k] = (u8)hash(0x57AC00 + k);
                 if (variant) {
                     /* Change what the summary says is not read. */
                     unsigned k = ~entries[i].reads;
