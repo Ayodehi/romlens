@@ -945,7 +945,8 @@ impl ApuPlayer {
         settle_seconds: f64,
     ) -> Result<Arc<Self>, RomlensError> {
         let (rom, snap) = workbench.rom_and_snapshot();
-        let (_, uploads) = upload::trace_uploads(&rom.image, &snap);
+        // The full trace, so every list `sound_upload` names is here.
+        let uploads = upload::trace(&rom.image, &snap).uploads;
         let d = upload::driver(&uploads).ok_or_else(|| RomlensError::Project {
             msg: "no upload of a sound driver was traced in this ROM".to_owned(),
         })?;

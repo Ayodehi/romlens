@@ -22,11 +22,11 @@ struct DocumentView: View {
     @State private var compactToolbar = false
     static let compactWidth: CGFloat = 1180
 
-    /// No segment is selected while a graphics view has the editor, so the
+    /// No segment is selected while a graphics or sound view has the editor, so the
     /// control never claims a tab that is not showing.
     private var editorTab: Binding<RomViewModel.EditorTab?> {
         Binding(
-            get: { model.graphicsTab == nil ? model.editorTab : nil },
+            get: { model.showsTextEditor ? model.editorTab : nil },
             set: { if let tab = $0 { model.editorTab = tab } }
         )
     }
@@ -105,7 +105,7 @@ struct DocumentView: View {
                         .pickerStyle(.inline)
                         .labelsHidden()
                     } label: {
-                        Text(model.graphicsTab == nil ? model.editorTab.title : "Editor")
+                        Text(model.showsTextEditor ? model.editorTab.title : "Editor")
                             .padding(.horizontal, 8)
                     }
                     .menuStyle(.button)
@@ -125,6 +125,9 @@ struct DocumentView: View {
             }
             ToolbarItem(placement: .principal) {
                 GraphicsMenu(model: model)
+            }
+            ToolbarItem(placement: .principal) {
+                AudioMenu(model: model)
             }
             // Trailing: two bordered control groups, nothing else. Where
             // you are, then what you are looking at.

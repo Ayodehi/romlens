@@ -2,13 +2,15 @@ import RomlensKit
 import SwiftUI
 
 /// The centre of the window: Hex, Disassembly, Both, C, Graph or Atlas, or one of
-/// the graphics views.
+/// the graphics or sound views.
 struct EditorView: View {
     @Bindable var model: RomViewModel
 
     var body: some View {
         if model.graphicsTab != nil {
             GraphicsEditorView(model: model)
+        } else if model.audioTab != nil {
+            AudioEditorView(model: model)
         } else {
             textEditor
         }

@@ -117,6 +117,9 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
     @objc func showPalette(_ sender: Any?) { model.openGraphics(.palette) }
     @objc func showOam(_ sender: Any?) { model.openGraphics(.oam) }
     @objc func showTilemap(_ sender: Any?) { model.openGraphics(.tilemap) }
+    @objc func showVoices(_ sender: Any?) { model.openAudio(.voices) }
+    @objc func showSamples(_ sender: Any?) { model.openAudio(.samples) }
+    @objc func showAudioRam(_ sender: Any?) { model.openAudio(.aram) }
 
     @objc func openRecording(_ sender: Any?) {
         RecordingController.open(model: model, window: window)
@@ -206,30 +209,30 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
         case #selector(showFileOffsets(_:)):
             item.state = model.addressStyle == .file ? .on : .off
         case #selector(showHex(_:)):
-            item.state = model.graphicsTab == nil && model.editorTab == .hex ? .on : .off
+            item.state = model.showsTextEditor && model.editorTab == .hex ? .on : .off
         case #selector(showDisassembly(_:)):
-            item.state = model.graphicsTab == nil && model.editorTab == .disassembly ? .on : .off
+            item.state = model.showsTextEditor && model.editorTab == .disassembly ? .on : .off
         case #selector(showBoth(_:)):
-            item.state = model.graphicsTab == nil && model.editorTab == .both ? .on : .off
+            item.state = model.showsTextEditor && model.editorTab == .both ? .on : .off
         case #selector(showC(_:)):
-            item.state = model.graphicsTab == nil && model.editorTab == .c ? .on : .off
+            item.state = model.showsTextEditor && model.editorTab == .c ? .on : .off
             return model.hasDisassembly
         case #selector(toggleExplanations(_:)):
             item.state = model.showExplanations ? .on : .off
             return true
         case #selector(showGraph(_:)):
-            item.state = model.graphicsTab == nil && model.editorTab == .graph ? .on : .off
+            item.state = model.showsTextEditor && model.editorTab == .graph ? .on : .off
             return model.hasDisassembly
         case #selector(showAtlas(_:)):
-            item.state = model.graphicsTab == nil && model.editorTab == .atlas ? .on : .off
+            item.state = model.showsTextEditor && model.editorTab == .atlas ? .on : .off
         case #selector(showCompare(_:)):
-            item.state = model.graphicsTab == nil && model.editorTab == .compare ? .on : .off
+            item.state = model.showsTextEditor && model.editorTab == .compare ? .on : .off
             return model.compare.isActive
         case #selector(showSource(_:)):
-            item.state = model.graphicsTab == nil && model.editorTab == .source ? .on : .off
+            item.state = model.showsTextEditor && model.editorTab == .source ? .on : .off
             return model.source.hasFiles
         case #selector(zoomGraphIn(_:)), #selector(zoomGraphOut(_:)), #selector(zoomGraphToFit(_:)):
-            return model.graphicsTab == nil && (model.editorTab == .graph || model.editorTab == .atlas)
+            return model.showsTextEditor && (model.editorTab == .graph || model.editorTab == .atlas)
         case #selector(decompileRoutine(_:)):
             return model.hasDisassembly && model.instruction != nil
         case #selector(exportC(_:)):
@@ -246,6 +249,12 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
             item.state = model.graphicsTab == .oam ? .on : .off
         case #selector(showTilemap(_:)):
             item.state = model.graphicsTab == .tilemap ? .on : .off
+        case #selector(showVoices(_:)):
+            item.state = model.audioTab == .voices ? .on : .off
+        case #selector(showSamples(_:)):
+            item.state = model.audioTab == .samples ? .on : .off
+        case #selector(showAudioRam(_:)):
+            item.state = model.audioTab == .aram ? .on : .off
         case #selector(closeRecording(_:)), #selector(exportFrameRegion(_:)):
             return model.graphics.hasRecording
         case #selector(toggleLiveSession(_:)):

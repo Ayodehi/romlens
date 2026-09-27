@@ -147,6 +147,11 @@ enum MainMenu {
                 item("OAM", #selector(RomWindowController.showOam(_:)), "6", modifiers: [.command, .option]),
                 item("Tilemap", #selector(RomWindowController.showTilemap(_:)), "7", modifiers: [.command, .option]),
             ]),
+            submenu("Audio", [
+                item("Voices", #selector(RomWindowController.showVoices(_:)), ""),
+                item("Samples", #selector(RomWindowController.showSamples(_:)), ""),
+                item("Audio RAM", #selector(RomWindowController.showAudioRam(_:)), ""),
+            ]),
             .separator(),
             item("File Offset and SNES Address", #selector(RomWindowController.showBothAddresses(_:)), "1"),
             item("SNES Address Only", #selector(RomWindowController.showSnesAddresses(_:)), "2"),

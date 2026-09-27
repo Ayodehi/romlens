@@ -127,12 +127,22 @@ final class RomViewModel {
     var editorTab: EditorTab = .hex {
         didSet {
             graphicsTab = nil
+            audioTab = nil
             refreshDecompile()
         }
     }
     /// The graphics view in the editor area, if one is open.
-    var graphicsTab: GraphicsModel.Tab?
+    var graphicsTab: GraphicsModel.Tab? {
+        didSet { if graphicsTab != nil { audioTab = nil } }
+    }
     let graphics: GraphicsModel
+    /// The sound view in the editor area, if one is open (docs/23).
+    var audioTab: AudioModel.Tab? {
+        didSet { if audioTab != nil { graphicsTab = nil } }
+    }
+    let audio: AudioModel
+    /// A text tab has the editor: no graphics or sound view is open.
+    var showsTextEditor: Bool { graphicsTab == nil && audioTab == nil }
     var activeSheet: Sheet?
     var rightPane: RightPane = .inspector
     var isNavigatorVisible = true
@@ -189,9 +199,11 @@ final class RomViewModel {
         asmLayout = AsmLineLayout(style: .both, metrics: metrics)
         asmLineCount = workbench.lineCount()
         graphics = GraphicsModel(rom: rom)
+        audio = AudioModel(rom: rom, workbench: workbench, graphics: graphics)
         session.onChange = { [weak self] kind in self?.handleChange(kind) }
         graphics.selectBytes = { [weak self] range in self?.selectRange(range) }
         graphics.revealTile = { [weak self] in self?.graphicsTab = .tiles }
+        audio.showInRom = { [weak self] offset in self?.showInRom(offset) }
         // The workbench shows them unless told otherwise.
         if !explanationsShown {
             workbench.setShowExplanations(show: false)
@@ -400,6 +412,19 @@ final class RomViewModel {
             graphics.romOffset = range.lowerBound
         }
         graphicsTab = tab
+    }
+
+    /// Open a sound view, on the recording's sound if it has any, else on
+    /// the ROM's upload.
+    func openAudio(_ tab: AudioModel.Tab) {
+        audio.opened()
+        audioTab = tab
+    }
+
+    /// Leave the sound view for the listing at a ROM offset.
+    func showInRom(_ offset: UInt32) {
+        editorTab = hasDisassembly ? .disassembly : .hex
+        jump(to: offset)
     }
 
     /// The inspector's "Open in …": the preview's view on the range it
