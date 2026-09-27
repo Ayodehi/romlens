@@ -15,6 +15,8 @@ final class TutorModel {
         var name: String
         var input: String
         var summary: String?
+        /// Pictures its result holds.
+        var images: [String] = []
         var isError = false
         var done = false
     }
@@ -186,6 +188,7 @@ final class TutorModel {
         }
         guard startIfNeeded(), let s = session else { return }
         s.setRecording(recording: rom.graphics.recording)
+        s.setImageProvider(endpoint: settings.imageEndpoint?.info, model: settings.imageModel)
         let files = attachments.map { AttachmentInfo(bytes: $0.data, mediaType: $0.mediaType) }
         do {
             try s.send(text: text, attachments: files, selection: includeSelection ? selectionText() : nil)

@@ -184,6 +184,7 @@ struct DocumentView: View {
             case .find: FindSheet(model: model)
             case .dataType: DataTypeSheet(model: model)
             case .variable: VariableSheet(model: model)
+            case .cEdit: CEditSheet(model: model)
             }
         }
     }

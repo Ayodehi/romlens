@@ -102,6 +102,25 @@ final class TutorSettings {
         var mode = TutorModePreference.askBeforeEdits
         var costCap: Double? = 5
         var showThinking = true
+        /// Where `generate_image` draws: an endpoint that speaks OpenAI's
+        /// Images API, or none.
+        var imageEndpoint: String?
+        var imageModel = "gpt-image-1"
+
+        init() {}
+
+        init(from d: Decoder) throws {
+            let c = try d.container(keyedBy: CodingKeys.self)
+            custom = try c.decodeIfPresent([TutorEndpoint].self, forKey: .custom) ?? []
+            endpoint = try c.decodeIfPresent(String.self, forKey: .endpoint) ?? "anthropic"
+            models = try c.decodeIfPresent([String: String].self, forKey: .models) ?? [:]
+            efforts = try c.decodeIfPresent([String: String].self, forKey: .efforts) ?? [:]
+            mode = try c.decodeIfPresent(TutorModePreference.self, forKey: .mode) ?? .askBeforeEdits
+            costCap = try c.decodeIfPresent(Double.self, forKey: .costCap)
+            showThinking = try c.decodeIfPresent(Bool.self, forKey: .showThinking) ?? true
+            imageEndpoint = try c.decodeIfPresent(String.self, forKey: .imageEndpoint)
+            imageModel = try c.decodeIfPresent(String.self, forKey: .imageModel) ?? "gpt-image-1"
+        }
     }
 
     static let defaultsKey = "Tutor.settings"
@@ -167,6 +186,21 @@ final class TutorSettings {
         get { stored.showThinking }
         set { stored.showThinking = newValue; save() }
     }
+
+    /// The endpoint pictures are drawn at, if one is chosen and still there.
+    var imageEndpoint: TutorEndpoint? {
+        get { stored.imageEndpoint.flatMap(endpoint) }
+        set { stored.imageEndpoint = newValue?.id; save() }
+    }
+
+    var imageModel: String {
+        get { stored.imageModel }
+        set { stored.imageModel = newValue; save() }
+    }
+
+    /// Endpoints that can draw: OpenAI's, and the student's own that speak
+    /// OpenAI's protocols (Anthropic's API makes no pictures).
+    var imageEndpoints: [TutorEndpoint] { endpoints.filter { $0.kind != .anthropic } }
 
     func add(_ e: TutorEndpoint) {
         stored.custom.append(e)

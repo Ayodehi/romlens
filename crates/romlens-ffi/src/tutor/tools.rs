@@ -23,10 +23,18 @@ pub fn addr(a: u32) -> String {
     format!("${:02X}:{:04X}", (a >> 16) & 0xFF, a & 0xFFFF)
 }
 
+/// Where `generate_image` sends its prompt, and how it gets the key.
+pub struct ImageSetup {
+    pub endpoint: romlens_tutor::provider::Endpoint,
+    pub model: String,
+    pub key: Arc<dyn Fn(&str) -> Option<String> + Send + Sync>,
+}
+
 pub struct RomTools {
     wb: Arc<Workbench>,
     /// The recording open in the main window, which the recording tools read.
     recording: std::sync::Mutex<Option<Arc<RecordingSession>>>,
+    images: std::sync::Mutex<Option<ImageSetup>>,
 }
 
 impl RomTools {
@@ -34,6 +42,59 @@ impl RomTools {
         RomTools {
             wb,
             recording: std::sync::Mutex::new(None),
+            images: std::sync::Mutex::new(None),
+        }
+    }
+
+    pub fn set_images(&self, setup: Option<ImageSetup>) {
+        *self.images.lock().unwrap_or_else(|e| e.into_inner()) = setup;
+    }
+
+    fn generate_image(&self, v: &Value, cx: &ToolContext) -> ToolOutput {
+        let guard = self.images.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(setup) = guard.as_ref() else {
+            return ToolOutput::error(
+                "No image model is set up: the student can choose one in Settings › Images. Describe the picture in words instead.",
+            );
+        };
+        let prompt = v["prompt"].as_str().unwrap_or_default().trim().to_owned();
+        if prompt.is_empty() {
+            return ToolOutput::error("describe the picture in the prompt");
+        }
+        let size = v["size"].as_str().unwrap_or("1024x1024");
+        let key = (setup.key)(&setup.endpoint.id);
+        let transport = romlens_tutor::http::UreqTransport::new();
+        match romlens_tutor::images::generate(
+            &transport,
+            &setup.endpoint,
+            &setup.model,
+            &prompt,
+            size,
+            key.as_deref(),
+            cx.cancel,
+        ) {
+            Ok(g) => {
+                let image = romlens_tutor::transcript::ImageRef {
+                    id: super::png::id(&g.png).replace("tool-", "gen-"),
+                    media_type: "image/png".into(),
+                };
+                let about = match &g.revised_prompt {
+                    Some(r) => format!("Drew it with {} (from: {r})", setup.model),
+                    None => format!("Drew it with {}", setup.model),
+                };
+                ToolOutput {
+                    summary: about.clone(),
+                    parts: vec![
+                        romlens_tutor::transcript::Part::Text { text: about },
+                        romlens_tutor::transcript::Part::Image {
+                            image: image.clone(),
+                        },
+                    ],
+                    is_error: false,
+                    pictures: vec![(image, g.png)],
+                }
+            }
+            Err(e) => ToolOutput::error(format!("The image model failed: {e}")),
         }
     }
 
@@ -123,6 +184,14 @@ pub fn specs() -> Vec<ToolSpec> {
     let mut v = code_specs();
     v.extend(super::media::specs());
     v.extend(super::edits::specs());
+    v.push(spec(
+        "generate_image",
+        "Draw a picture with an image model, when the student asks for one: a diagram, an illustration of an idea, a teaching visual. It is sent only your words, never a picture from the game, so describe everything it must show. Say in your answer that the picture is generated, not from the ROM.",
+        &[
+            ("prompt", string("The full description of the picture")),
+            ("size", choice(romlens_tutor::images::SIZES, "Square, landscape or portrait")),
+        ],
+    ));
     v
 }
 
@@ -309,12 +378,17 @@ impl Tools for RomTools {
     fn kind(&self, name: &str) -> ToolKind {
         if super::edits::NAMES.contains(&name) {
             ToolKind::Edit
+        } else if name == "generate_image" {
+            ToolKind::Visual
         } else {
             ToolKind::Read
         }
     }
 
     fn run(&self, id: &str, name: &str, input: &Value, cx: &ToolContext) -> ToolOutput {
+        if name == "generate_image" {
+            return self.generate_image(input, cx);
+        }
         let place = |t: &str| self.rom_place(t);
         if super::edits::NAMES.contains(&name) {
             let edits = super::edits::Edits {

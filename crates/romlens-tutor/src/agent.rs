@@ -281,6 +281,9 @@ pub struct Session {
     pub keyless: bool,
     /// The step retries wait in when the server names no time.
     pub retry_unit: Duration,
+    /// A digest of the tools the conversation was last sent (kept in its
+    /// meta), to notice a Romlens that declares others.
+    pub tools_seen: Option<String>,
 }
 
 pub const MAX_ROUNDS: u32 = 60;
@@ -308,6 +311,7 @@ impl Session {
             cost_cap: None,
             keyless,
             retry_unit: Duration::from_secs(1),
+            tools_seen: None,
         }
     }
 
@@ -331,6 +335,7 @@ impl Session {
         }
         self.turns.push(question);
         let tools = d.tools.specs();
+        self.check_tools(&tools);
         for round in 0..MAX_ROUNDS {
             if let Some(cap) = self.cost_cap
                 && self.cost() >= cap
@@ -486,6 +491,27 @@ impl Session {
             summary: summary.clone(),
         });
         Ok(summary)
+    }
+
+    /// A conversation resumed under a Romlens with other tools has a new
+    /// prefix, and Anthropic refuses the thinking blocks made under the old
+    /// one. They are dropped once (their summaries stay shown); the model
+    /// goes on without that reasoning.
+    fn check_tools(&mut self, tools: &[ToolSpec]) {
+        let digest = tools_digest(tools);
+        if self.tools_seen.as_ref().is_some_and(|d| *d != digest) {
+            for t in &mut self.turns {
+                if let Some(n) = &mut t.native
+                    && n.protocol == provider::Protocol::Anthropic
+                    && let serde_json::Value::Array(blocks) = &mut n.content
+                {
+                    blocks.retain(|b| {
+                        !matches!(b["type"].as_str(), Some("thinking" | "redacted_thinking"))
+                    });
+                }
+            }
+        }
+        self.tools_seen = Some(digest);
     }
 
     /// Answers every call of the last turn left without a result.
@@ -680,6 +706,17 @@ impl Session {
         }
         blocks
     }
+}
+
+/// A short digest of a tool list.
+pub fn tools_digest(tools: &[ToolSpec]) -> String {
+    let bytes = serde_json::to_vec(tools).expect("tools serialise");
+    let mut h = 0xcbf2_9ce4_8422_2325u64;
+    for b in bytes {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x100_0000_01b3);
+    }
+    format!("{h:016x}")
 }
 
 /// Sleeps in short steps; true when cancelled meanwhile.

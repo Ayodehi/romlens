@@ -872,6 +872,18 @@ impl TutorSession {
         self.tools.set_recording(recording);
     }
 
+    /// Where `generate_image` draws (an OpenAI Images endpoint or one that
+    /// speaks it), or `None` for no pictures.
+    pub fn set_image_provider(&self, endpoint: Option<TutorEndpointInfo>, model: String) {
+        let keys = Arc::clone(&self.keys);
+        self.tools
+            .set_images(endpoint.map(|e| super::tools::ImageSetup {
+                endpoint: e.into(),
+                model,
+                key: Arc::new(move |id: &str| keys.key(id.to_owned()).filter(|k| !k.is_empty())),
+            }));
+    }
+
     /// Back to before the question at turn `index`: the conversation, the
     /// tutor's edits since, or both (`/rewind`).
     pub fn rewind(&self, index: u32, what: RewindWhat) -> Result<RewindResultInfo, RomlensError> {

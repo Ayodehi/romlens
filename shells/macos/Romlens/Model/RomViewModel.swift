@@ -34,8 +34,25 @@ final class RomViewModel {
     }
 
     enum Sheet: Identifiable {
-        case jump, renameLabel, comment, flags, find, dataType, variable
+        case jump, renameLabel, comment, flags, find, dataType, variable, cEdit
         var id: Self { self }
+    }
+
+    /// What the C sheet edits (docs/24, U10): a local's name, a routine's
+    /// note, a C comment, or a C version.
+    enum CEdit: Equatable {
+        case local(routine: UInt32, local: String)
+        case note(routine: UInt32)
+        case comment(address: UInt32)
+        case version(routine: UInt32, name: String?)
+    }
+
+    /// The C sheet's subject while it is open.
+    var cEdit: CEdit?
+
+    func beginCEdit(_ e: CEdit) {
+        cEdit = e
+        activeSheet = .cEdit
     }
 
     /// The one-case right pane keeps room for the tutor later.

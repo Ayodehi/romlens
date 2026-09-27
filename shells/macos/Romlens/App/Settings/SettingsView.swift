@@ -13,6 +13,8 @@ struct SettingsView: View {
                 .tabItem { Label("Providers", systemImage: "network") }
             TutorPane(settings: settings)
                 .tabItem { Label("Tutor", systemImage: "graduationcap") }
+            ImagesPane(settings: settings)
+                .tabItem { Label("Images", systemImage: "photo") }
             PrivacyPane()
                 .tabItem { Label("Privacy", systemImage: "hand.raised") }
         }
@@ -237,6 +239,27 @@ struct TutorPane: View {
     }
 
     private func price(_ p: Double) -> String { p < 1 ? String(format: "%.2f", p) : String(format: "%g", p) }
+}
+
+/// Where the tutor draws pictures, when asked for one.
+struct ImagesPane: View {
+    @Bindable var settings: TutorSettings
+
+    var body: some View {
+        Form {
+            Picker("Draw with", selection: Binding(get: { settings.imageEndpoint?.id ?? "" }, set: { id in
+                settings.imageEndpoint = id.isEmpty ? nil : settings.endpoint(id)
+            })) {
+                Text("No pictures").tag("")
+                ForEach(settings.imageEndpoints) { Text($0.name).tag($0.id) }
+            }
+            TextField("Model", text: $settings.imageModel, prompt: Text("gpt-image-1"))
+                .disabled(settings.imageEndpoint == nil)
+            Text("The tutor sends the image model a description in words only, never a picture from the game, and says its pictures are generated. OpenAI's Images API, or an endpoint that speaks it (LiteLLM, a local server).")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .formStyle(.grouped)
+    }
 }
 
 /// What leaves the machine (`12-content-policy.md` rule 8).

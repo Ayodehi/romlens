@@ -479,3 +479,40 @@ fn compaction_starts_again_from_a_summary() {
     );
     assert!(s.cost() > 0.0, "the summary's cost is counted");
 }
+
+#[test]
+fn other_tools_drop_the_old_thinking_once() {
+    let t = FakeTransport::new(vec![
+        Ok(stream("anthropic_tool_round.sse")),
+        Ok(stream("anthropic_text.sse")),
+        Ok(stream("anthropic_text.sse")),
+    ]);
+    let on = |_: Event| {};
+    let cancel = Cancel::new();
+    let tools = Fake::default();
+    let deps = Deps {
+        transport: &t,
+        credentials: &Key,
+        tools: &tools,
+        events: &on,
+        approver: &AcceptAll,
+        cancel: &cancel,
+    };
+    let mut s = session();
+    s.ask(Turn::user_text("first"), &deps).unwrap();
+    let sig = "EqQBCgIYAhIM1gbcDa9GJwZA";
+    assert!(String::from_utf8_lossy(&t.sent()[1].body).contains(sig));
+    // As if resumed under a Romlens whose tools differ.
+    s.tools_seen = Some("an older list".into());
+    s.ask(Turn::user_text("again"), &deps).unwrap();
+    let body = String::from_utf8_lossy(&t.sent()[2].body).into_owned();
+    assert!(!body.contains(sig), "the thinking is dropped");
+    assert!(body.contains("toolu_01A"), "the calls stay");
+    assert!(
+        s.turns[1]
+            .blocks
+            .iter()
+            .any(|b| matches!(b, Block::Reasoning { .. })),
+        "the summary stays shown"
+    );
+}

@@ -6,6 +6,7 @@
 
 pub mod agent;
 pub mod http;
+pub mod images;
 pub mod models;
 pub mod prompt;
 pub mod provider;

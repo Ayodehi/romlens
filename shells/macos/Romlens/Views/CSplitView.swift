@@ -103,6 +103,11 @@ final class CPaneController: NSObject, NSTextViewDelegate {
     private var replacingText = false
     /// The routine whose C is shown.
     private var shownEntry: UInt32?
+    /// A C version shown instead of the generated C, by name (docs/24).
+    private(set) var shownVersion: String?
+    private var shownVersionText: String?
+    private let versions = NSPopUpButton(frame: .zero, pullsDown: false)
+    private var versionsKey = ""
 
     init(model: RomViewModel) {
         self.model = model
@@ -157,7 +162,16 @@ final class CPaneController: NSObject, NSTextViewDelegate {
         export.controlSize = .small
         export.bezelStyle = .rounded
 
-        let header = NSStackView(views: [title, status, NSView(), numbers, levels, export])
+        versions.controlSize = .small
+        versions.target = self
+        versions.action = #selector(versionChosen(_:))
+        versions.toolTip = "The C Romlens generates, or a C version written by you or the tutor"
+        versions.setAccessibilityIdentifier("c-version")
+        let menu = NSMenu()
+        menu.delegate = self
+        textView.menu = menu
+
+        let header = NSStackView(views: [title, status, NSView(), versions, numbers, levels, export])
         header.orientation = .horizontal
         header.spacing = 8
         header.edgeInsets = NSEdgeInsets(top: 4, left: 8, bottom: 4, right: 8)
@@ -213,8 +227,24 @@ final class CPaneController: NSObject, NSTextViewDelegate {
         case .failed(let message):
             status.stringValue = message
         }
-        if shownGeneration != d.resultGeneration {
+        refreshVersions()
+        if let v = shownVersion, let entry = d.result?.entry {
+            let version = model.session.workbench.cVersions(routine: entry).first { $0.name == v }?.version
+            if let version {
+                if shownVersionText != version.text || shownGeneration != d.resultGeneration {
+                    shownGeneration = d.resultGeneration
+                    setVersionText(version)
+                }
+                highlightVersion(version)
+                selectingFromText = false
+                return
+            }
+            shownVersion = nil
+            shownGeneration = -1
+        }
+        if shownGeneration != d.resultGeneration || shownVersionText != nil {
             shownGeneration = d.resultGeneration
+            shownVersionText = nil
             setText(d.result)
         }
         let start = model.instruction?.fileOffset ?? model.selectedOffset
@@ -357,6 +387,10 @@ final class CPaneController: NSObject, NSTextViewDelegate {
     // A click in the C selects the instructions its line came from.
     func textViewDidChangeSelection(_ notification: Notification) {
         guard !replacingText, !lineStarts.isEmpty else { return }
+        if shownVersion != nil {
+            followVersionLine(line(at: textView.selectedRange().location))
+            return
+        }
         let at = textView.selectedRange().location
         let offsets = model.decompiler.offsets(forLine: line(at: at))
         guard let first = offsets.min() else { return }
@@ -378,6 +412,148 @@ final class CPaneController: NSObject, NSTextViewDelegate {
             break
         }
     }
+}
+
+// MARK: C versions and the C's annotations (docs/24, U10)
+
+extension CPaneController: NSMenuDelegate {
+    private var entry: UInt32? { model.decompiler.result?.entry }
+
+    /// The picker: Generated, each version, then what can be done.
+    func refreshVersions() {
+        let names = entry.map { model.session.workbench.cVersions(routine: $0).map(\.name) } ?? []
+        let key = "\(entry ?? 0)|\(names.joined(separator: "|"))|\(shownVersion ?? "")"
+        guard key != versionsKey else { return }
+        versionsKey = key
+        versions.removeAllItems()
+        versions.addItem(withTitle: "Generated")
+        for n in names { versions.addItem(withTitle: n) }
+        versions.menu?.addItem(.separator())
+        versions.addItem(withTitle: "New Version…")
+        if shownVersion != nil {
+            versions.addItem(withTitle: "Edit Version…")
+            versions.addItem(withTitle: "Delete Version")
+        }
+        versions.selectItem(withTitle: shownVersion ?? "Generated")
+        versions.isEnabled = entry != nil
+    }
+
+    @objc func versionChosen(_ sender: NSPopUpButton) {
+        guard let title = sender.titleOfSelectedItem, let entry else { return }
+        switch title {
+        case "Generated":
+            shownVersion = nil
+        case "New Version…":
+            model.beginCEdit(.version(routine: entry, name: nil))
+        case "Edit Version…":
+            model.beginCEdit(.version(routine: entry, name: shownVersion))
+        case "Delete Version":
+            if let v = shownVersion {
+                try? model.session.execute(.setCVersion(routine: entry, name: v, version: nil))
+                shownVersion = nil
+            }
+        default:
+            shownVersion = title
+        }
+        versionsKey = ""
+        update()
+    }
+
+    func showVersion(_ name: String?) {
+        shownVersion = name
+        versionsKey = ""
+        update()
+    }
+
+    private func setVersionText(_ v: CVersionInfo) {
+        shownVersionText = v.text
+        let s = NSMutableAttributedString(
+            string: v.text, attributes: [.font: model.metrics.font, .foregroundColor: NSColor.labelColor])
+        for t in model.session.workbench.lexC(text: v.text) {
+            let r = NSRange(location: Int(t.start), length: Int(t.len))
+            guard NSMaxRange(r) <= s.length else { continue }
+            s.addAttribute(.foregroundColor, value: CTokenPalette.color(for: t.kind), range: r)
+        }
+        replacingText = true
+        textView.textStorage?.setAttributedString(s)
+        textView.setSelectedRange(NSRange(location: 0, length: 0))
+        replacingText = false
+        let ns = v.text as NSString
+        var starts = [0]
+        var at = 0
+        while at < ns.length {
+            let r = ns.range(of: "\n", range: NSRange(location: at, length: ns.length - at))
+            if r.location == NSNotFound { break }
+            at = r.location + 1
+            starts.append(at)
+        }
+        if starts.last != ns.length { starts.append(ns.length) }
+        lineStarts = starts
+        highlighted = []
+        title.stringValue = "\(title.stringValue.split(separator: " ").first ?? "")  version “\(shownVersion ?? "")”"
+        status.stringValue = v.author == .tutor ? "Written by the tutor; not checked against the code" : "Written by you; not checked against the code"
+    }
+
+    /// The version's lines anchored to the selected instruction.
+    private func highlightVersion(_ v: CVersionInfo) {
+        guard let a = model.selectedAddress else { return }
+        let lines = v.anchors.filter { $0.start <= a && a <= $0.end }
+            .flatMap { Int($0.first) - 1...Int($0.last) - 1 }
+        if lines != highlighted {
+            setHighlight(lines)
+            if !selectingFromText, let first = lines.first { scrollToLine(first) }
+        }
+    }
+
+    private func followVersionLine(_ line: Int) {
+        guard let entry, let v = shownVersion,
+              let version = model.session.workbench.cVersions(routine: entry).first(where: { $0.name == v })?.version,
+              let a = version.anchors.first(where: { Int($0.first) - 1 <= line && line <= Int($0.last) - 1 }) else { return }
+        guard a.start != model.selectedAddress else { return }
+        selectingFromText = true
+        model.jump(toSnesAddress: a.start)
+    }
+
+    /// Right-click in the C: name a local, comment the line, note the
+    /// routine, or write a version.
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        guard let entry else { return }
+        let point = textView.convert(textView.window?.mouseLocationOutsideOfEventStream ?? .zero, from: nil)
+        let index = textView.characterIndexForInsertion(at: point)
+        if shownVersion == nil, let r = model.decompiler.result {
+            if let t = r.tokens.first(where: { Int($0.start) <= index && index < Int($0.start + $0.len) }), t.kind == .local {
+                let word = (textView.string as NSString).substring(with: NSRange(location: Int(t.start), length: Int(t.len)))
+                let original = model.session.workbench.localNames(routine: entry).first { $0.name == word }?.local ?? word
+                menu.addItem(item("Name “\(word)”…") { [weak self] in self?.model.beginCEdit(.local(routine: entry, local: original)) })
+            }
+            let offsets = model.decompiler.offsets(forLine: line(at: index))
+            if let first = offsets.min(), let address = model.rom.snesAddressFor(fileOffset: first) {
+                menu.addItem(item("C Comment Here…") { [weak self] in self?.model.beginCEdit(.comment(address: address)) })
+            }
+            menu.addItem(item("Routine Note…") { [weak self] in self?.model.beginCEdit(.note(routine: entry)) })
+            menu.addItem(.separator())
+        }
+        menu.addItem(item("New C Version…") { [weak self] in self?.model.beginCEdit(.version(routine: entry, name: nil)) })
+        if let v = shownVersion {
+            menu.addItem(item("Edit C Version…") { [weak self] in self?.model.beginCEdit(.version(routine: entry, name: v)) })
+        }
+        menu.addItem(.separator())
+        menu.addItem(NSMenuItem(title: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: ""))
+    }
+
+    private func item(_ title: String, _ action: @escaping () -> Void) -> NSMenuItem {
+        let i = ClosureMenuItem(title: title, action: #selector(ClosureMenuItem.fire), keyEquivalent: "")
+        i.target = i
+        i.handler = action
+        return i
+    }
+}
+
+/// A menu item that runs a closure.
+final class ClosureMenuItem: NSMenuItem {
+    var handler: (() -> Void)?
+    @objc func fire() { handler?() }
 }
 
 /// The C's text view: reports double-clicks by character index.

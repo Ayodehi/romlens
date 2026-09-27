@@ -39,6 +39,9 @@ pub struct Meta {
     /// Fixed for the conversation, so a resumed one sends what it sent.
     pub system: String,
     pub digest: String,
+    /// The tools last sent (`agent::tools_digest`).
+    #[serde(default)]
+    pub tools: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -140,6 +143,7 @@ impl Store {
             turns: s.turns.len(),
             system: s.system.clone(),
             digest: s.digest.clone(),
+            tools: s.tools_seen.clone(),
         };
         for (id, bytes) in &s.pictures {
             let p = dir.join("pictures").join(id);
@@ -175,6 +179,7 @@ impl Store {
         s.cost_cap = meta.cost_cap;
         s.system = meta.system.clone();
         s.digest = meta.digest.clone();
+        s.tools_seen = meta.tools.clone();
         for t in &turns {
             for image in pictures_of(t) {
                 if let Ok(bytes) = std::fs::read(dir.join("pictures").join(&image)) {
