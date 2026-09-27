@@ -753,13 +753,16 @@ pub mod encode {
         b
     }
 
-    /// The emulated fixture's driver: as [`FIXTURE_DRIVER`], and on a new
+    /// The emulated fixture's driver: as [`FIXTURE_DRIVER`], pointing the
+    /// DSP at the sample directory as it starts, and on a new
     /// command `$01` it sets up voice 0 (sample 0, pitch `$1000`, a fast
     /// attack, full volume) and keys it on.
     pub const FIXTURE_PLAYER: &str = "
         .org $0200
         start:  MOV X,#$EF
                 MOV SP,X
+                MOV DSPADDR,#$5D    ; the sample directory at $3C00
+                MOV DSPDATA,#$3C
                 MOV T0DIV,#$50
                 MOV CONTROL,#$01
         main:   MOV A,CPUIO0

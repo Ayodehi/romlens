@@ -38,6 +38,7 @@ const KINDS: &[&str] = &[
     "shared-entry",
     "shadow-register",
     "data-bank",
+    "apu-upload",
 ];
 
 pub fn run(args: ExplainArgs) -> Result<()> {

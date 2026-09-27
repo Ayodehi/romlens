@@ -593,7 +593,7 @@ pub fn analyze_cached(
         })
         .collect();
     tables.sort_by_key(|t| (t.base, t.site));
-    Ok(AnalysisSnapshot {
+    let mut snap = AnalysisSnapshot {
         instructions,
         heuristic_hits,
         jump_tables: tables,
@@ -604,7 +604,116 @@ pub fn analyze_cached(
         xrefs_by_source,
         warnings,
         stats,
-    })
+    };
+    uploaded(rom, &mut snap);
+    Ok(snap)
+}
+
+/// The ROM a traced sound upload sends (docs/23, A9): samples where the
+/// driver's directory names them, the rest the driver and its data. The
+/// upload is found in the finished analysis (its routines and cross
+/// references), so this runs last. It is a fact about the bytes, so it
+/// replaces the sweep's, the trace's and the heuristics' data, but never
+/// code, what an execution log saw, an import or the user's word.
+fn uploaded(rom: &RomImage, snap: &mut AnalysisSnapshot) {
+    let (_, uploads) = crate::audio::upload::trace_uploads(rom, snap);
+    if uploads.is_empty() {
+        return;
+    }
+    let spans = crate::audio::upload::uploaded_spans(rom, &uploads);
+    for s in spans {
+        let kind = RegionKind::Data(if s.sample {
+            DataKind::Sample
+        } else {
+            DataKind::Byte
+        });
+        repaint(
+            &mut snap.regions,
+            s.start.0,
+            s.start.0 + s.len,
+            kind,
+            0.95,
+            Evidence::Uploaded(s.what),
+        );
+    }
+    // Pieces of one span cut by the regions it crossed are one region.
+    let mut merged: Vec<Region> = Vec::with_capacity(snap.regions.len());
+    for r in snap.regions.drain(..) {
+        match merged.last_mut() {
+            Some(m)
+                if m.end() == r.start.0
+                    && m.kind == r.kind
+                    && m.evidence == r.evidence
+                    && matches!(r.evidence.first(), Some(Evidence::Uploaded(_))) =>
+            {
+                m.len += r.len;
+            }
+            _ => merged.push(r),
+        }
+    }
+    snap.regions = merged;
+    let st = &mut snap.stats;
+    (st.code_bytes, st.data_bytes, st.unknown_bytes) = (0, 0, 0);
+    for r in &snap.regions {
+        match r.kind {
+            RegionKind::Code => st.code_bytes += r.len as u64,
+            RegionKind::Data(_) => st.data_bytes += r.len as u64,
+            RegionKind::Unknown => st.unknown_bytes += r.len as u64,
+        }
+    }
+    st.regions = snap.regions.len() as u64;
+}
+
+/// Give `start..end` the kind, where the regions there may take it.
+fn repaint(
+    regions: &mut Vec<Region>,
+    start: u32,
+    end: u32,
+    kind: RegionKind,
+    confidence: f32,
+    evidence: Evidence,
+) {
+    let firm = |r: &Region| {
+        r.kind == RegionKind::Code
+            || r.evidence.iter().any(|e| {
+                matches!(
+                    e,
+                    Evidence::User
+                        | Evidence::Imported(_)
+                        | Evidence::Observed(_)
+                        | Evidence::Uploaded(_)
+                )
+            })
+    };
+    let mut out: Vec<Region> = Vec::with_capacity(regions.len() + 2);
+    for r in regions.drain(..) {
+        let (a, b) = (r.start.0.max(start), r.end().min(end));
+        if a >= b || firm(&r) {
+            out.push(r);
+            continue;
+        }
+        if r.start.0 < a {
+            out.push(Region {
+                len: a - r.start.0,
+                ..r.clone()
+            });
+        }
+        out.push(Region {
+            start: FileOffset(a),
+            len: b - a,
+            kind,
+            confidence,
+            evidence: vec![evidence.clone()],
+        });
+        if b < r.end() {
+            out.push(Region {
+                start: FileOffset(b),
+                len: r.end() - b,
+                ..r
+            });
+        }
+    }
+    *regions = out;
 }
 
 fn kind_from_code(code: u8) -> RegionKind {

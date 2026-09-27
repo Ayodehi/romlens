@@ -1196,6 +1196,40 @@ fn brr() {
 }
 
 #[test]
+fn apu_upload_commands() {
+    let dir = temp_dir("apu-upload");
+    let path = dir.join("sound.sfc");
+    std::fs::write(&path, fixtures::sound_upload_lorom()).unwrap();
+    let rom = path.to_str().unwrap();
+    let mut log = run(&["apu", "upload", rom]);
+    log += &run(&[
+        "apu",
+        "render",
+        "--rom",
+        rom,
+        "--port",
+        "0=$01",
+        "--seconds",
+        "0.2",
+    ]);
+    log += &run(&["apu", "render", "--rom", rom, "--seconds", "0.2"]);
+    log += &run(&[
+        "apu",
+        "render",
+        "--rom",
+        rom,
+        "--with",
+        "$00:9000",
+        "--seconds",
+        "0.1",
+    ]);
+    log += &run(&["explain", rom, "--idioms", "apu-upload"]);
+    log += &run(&["inspect", rom, "0x5060"]);
+    check("apu-upload", &log);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn apu_commands() {
     use romlens_core::recording::mesen::stream::encode;
     let dir = temp_dir("apu");

@@ -623,9 +623,20 @@ enum ApuCommand {
     /// Play the machine from a frame and describe the sound: its digest,
     /// levels and voices. No audio is written (content policy rule 11).
     Render {
-        /// The recording.
+        /// The recording, to play from one of its frames.
+        #[arg(long, conflicts_with = "rom")]
+        rec: Option<PathBuf>,
+        /// Or the ROM: its driver booted from the upload traced in it.
         #[arg(long)]
-        rec: PathBuf,
+        rom: Option<PathBuf>,
+        #[arg(long, requires = "rom")]
+        project: Option<PathBuf>,
+        /// More traced uploads (their list's address) laid over the driver.
+        #[arg(long, requires = "rom")]
+        with: Vec<String>,
+        /// A byte for the driver on a port, such as `2=$05`; repeatable.
+        #[arg(long, requires = "rom")]
+        port: Vec<String>,
         /// The frame to start from (default 0).
         #[arg(long, default_value_t = 0)]
         frame: u64,
@@ -634,6 +645,16 @@ enum ApuCommand {
         /// Leave out the recording's port writes: the driver plays on alone.
         #[arg(long)]
         alone: bool,
+    },
+    /// The sound driver, songs and samples the ROM uploads, traced from its
+    /// code, and the commands it sends; with `--rec`, the uploads a
+    /// recording saw, and where their bytes are in the ROM.
+    Upload {
+        rom: PathBuf,
+        #[arg(long)]
+        project: Option<PathBuf>,
+        #[arg(long)]
+        rec: Option<PathBuf>,
     },
     /// Run Romlens's SPC700 beside the recording, frame by frame, and say
     /// where it differs from what Mesen recorded.
@@ -1075,6 +1096,8 @@ enum FixtureArg {
     Routines,
     /// 32 KB LoROM whose reset does one of each common setup step.
     Explain,
+    /// 32 KB LoROM that uploads a sound driver, directory and sample.
+    Sound,
 }
 
 impl From<FixtureArg> for commands::rom::Fixture {
@@ -1087,6 +1110,7 @@ impl From<FixtureArg> for commands::rom::Fixture {
             FixtureArg::Graphics => commands::rom::Fixture::Graphics,
             FixtureArg::Routines => commands::rom::Fixture::Routines,
             FixtureArg::Explain => commands::rom::Fixture::Explain,
+            FixtureArg::Sound => commands::rom::Fixture::Sound,
         }
     }
 }
@@ -1527,11 +1551,28 @@ fn run() -> Result<()> {
                 ApuCommand::Ports(r) => (What::Ports, r.rec, None, r.frames, r.limit, None),
                 ApuCommand::Render {
                     rec,
+                    rom,
+                    project,
+                    with,
+                    port,
                     frame,
                     seconds,
                     alone,
                 } => {
-                    return commands::apu::render(&rec, frame, seconds, !alone);
+                    return match (rec, rom) {
+                        (Some(rec), _) => commands::apu::render(&rec, frame, seconds, !alone),
+                        (None, Some(rom)) => commands::apu_upload::render_rom(
+                            &rom,
+                            project.as_deref(),
+                            &with,
+                            &port,
+                            seconds,
+                        ),
+                        (None, None) => Err(anyhow::anyhow!("apu render needs --rec or --rom")),
+                    };
+                }
+                ApuCommand::Upload { rom, project, rec } => {
+                    return commands::apu_upload::upload(&rom, project.as_deref(), rec.as_deref());
                 }
                 ApuCommand::Replay { range: r, free: f } => {
                     free = f;

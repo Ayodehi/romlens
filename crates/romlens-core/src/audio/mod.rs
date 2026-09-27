@@ -7,6 +7,7 @@
 pub mod aram_map;
 pub mod notes;
 pub mod ports;
+pub mod upload;
 pub mod voices;
 
 pub use aram_map::{AramPart, DirEntry, PartKind, aram_map, directory};

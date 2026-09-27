@@ -26,7 +26,7 @@ pub mod graphics;
 pub mod sound;
 
 pub use graphics::{GRAPHICS_TITLE, graphics_lorom, truth_for_graphics};
-pub use sound::{SOUND_TITLE, sound_lorom};
+pub use sound::{SOUND_TITLE, sound_lorom, sound_upload_lorom};
 
 pub const FIXTURE_TITLE: &str = "ROMLENS TEST";
 

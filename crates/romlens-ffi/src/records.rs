@@ -353,6 +353,8 @@ pub enum EvidenceKind {
     User,
     Imported,
     Trace,
+    /// Sent to the sound CPU by an upload traced in the code.
+    Uploaded,
 }
 
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
@@ -392,6 +394,11 @@ impl From<&model::Evidence> for EvidenceInfo {
             },
             model::Evidence::Observed(what) => EvidenceInfo {
                 kind: EvidenceKind::Trace,
+                detail: what.clone(),
+                score: 1.0,
+            },
+            model::Evidence::Uploaded(what) => EvidenceInfo {
+                kind: EvidenceKind::Uploaded,
                 detail: what.clone(),
                 score: 1.0,
             },

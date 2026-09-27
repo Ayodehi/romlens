@@ -39,6 +39,8 @@ pub enum IdiomKind {
     /// `PHK; PLB`, or a word pushed and pulled a byte at a time by two
     /// `PLB`s: the data bank set through the stack.
     DataBank,
+    /// The routine that sends a block list to the sound CPU (docs/23, A9).
+    ApuUpload,
 }
 
 impl IdiomKind {
@@ -56,6 +58,7 @@ impl IdiomKind {
             IdiomKind::SharedEntry => "shared-entry",
             IdiomKind::ShadowRegister => "shadow-register",
             IdiomKind::DataBank => "data-bank",
+            IdiomKind::ApuUpload => "apu-upload",
         }
     }
 }
@@ -158,12 +161,31 @@ pub fn find(
     out.extend(r.data_bank());
     out.extend(shared_entry(rom, f, entries, name));
     out.extend(r.shadows());
+    out.extend(apu_upload(f));
     for i in &mut out {
         i.offsets.sort_by_key(|o| o.0);
         i.offsets.dedup();
         i.summary = capitalise(&i.summary);
     }
     out
+}
+
+/// The routine that runs the upload protocol, named where it starts.
+fn apu_upload(f: &Function) -> Option<Idiom> {
+    let u = crate::audio::upload::upload_routine(f)?;
+    Some(Idiom {
+        kind: IdiomKind::ApuUpload,
+        title: "Upload to the sound CPU".to_owned(),
+        summary: format!(
+            "sends the block list its pointer at ${:02X} names: waits for the boot program's $BBAA, starts with $CC, then each byte on port 1 with its index on port 0, waiting for the echo (romlens apu upload lists what it sends)",
+            u.pointer
+        ),
+        why: WHY_APU_UPLOAD,
+        offsets: std::iter::once(f.entry_offset).chain(u.evidence).collect(),
+        note_at: Some(f.entry_offset),
+        transfers: Vec::new(),
+        table: None,
+    })
 }
 
 fn capitalise(s: &str) -> String {
@@ -1517,6 +1539,7 @@ const WHY_CLEAR: &str = "Memory holds leftovers at power-on, so games clear thei
 const WHY_BLOCK_MOVE: &str = "MVN and MVP copy a block of memory in one instruction, with A holding the count minus one and X and Y the source and destination. They are simpler than a loop, but slower than DMA.";
 const WHY_APU: &str = "The sound CPU (an SPC700 with its own 64 KB of RAM) runs on its own, and the four APUIO ports are the only link. A game writes a command and waits for the sound driver to echo it, so both sides stay in step.";
 const WHY_APU_BOOT: &str = "At power-on the sound CPU's boot ROM puts $AA and $BB in ports 0 and 1 to say it is ready. A game waits for them before uploading its sound driver a byte at a time through the same ports.";
+const WHY_APU_UPLOAD: &str = "The sound CPU starts with nothing but a 64-byte boot program, so a game sends it the whole sound driver, then its songs and samples, through the four ports. The routine walks a list of blocks, each a length, an address in audio RAM and the bytes, and sends every byte with its index on port 0, waiting for the sound CPU to echo the index before the next. A block of length zero ends the list, and its address is where the sound CPU starts running.";
 const WHY_DECIMAL: &str = "In decimal mode each byte holds two decimal digits, one per nibble. Games keep scores, timers and lives this way so each digit can be drawn straight from its nibble, without dividing by ten.";
 const WHY_SHADOW: &str = "Most PPU registers are write-only: reading them back gives nothing useful. So games keep a copy of each setting in RAM, a \"shadow\" of the register, and write both. Later code reads the copy to see the current setting, or changes one bit of it and writes the whole value back.";
 const WHY_DATA_BANK: &str = "The data bank register (DBR) is the bank that absolute addresses like LDA $1234 read from. No instruction loads it directly: the only way in is PLB, which pulls a byte off the stack. So code pushes the bank it wants and pulls it. PHK; PLB uses the bank the code runs in. PEA, or PEI from memory, pushes two bytes, and two PLBs pull both, leaving the second in DBR; that keeps the stack balanced and leaves A alone.";

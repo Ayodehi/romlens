@@ -53,6 +53,10 @@ On the development ROM: 21 such groups, among them the routine at `$82:81DD`, wh
 
 A tenth idiom. `PHK; PLB`, `PEA $xxyy; PLB; PLB` and `PEI ($dp); PLB; PLB` are named "Set the data bank", with the bank that stays: "DBR = $12: PEA pushes $1234, and the two PLBs pull its bytes one at a time, $34 then $12." The C says the same thing in one line (docs/18, T11).
 
+## Uploading to the sound CPU (26 September 2026)
+
+An eleventh idiom, `apu-upload` (docs/23, A9): the routine that sends the sound CPU its driver, songs and samples, named "Upload to the sound CPU" above its first instruction. It is the routine that reads APUIO0, holds `$BBAA` or `$CC` as an immediate, and reads a block list through a long pointer (`LDA [dp],Y`); the note gives the pointer, and `romlens apu upload` lists what each call sends. In Super Mario World it is `$00:8079`, reading through `[$00]`.
+
 ## The audit of the register tables (24 September 2026)
 
 After E8, every field in `explain::fields` was checked, bit by bit, against two sources:

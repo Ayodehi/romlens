@@ -3,6 +3,7 @@
 pub mod accuracy;
 pub mod analyze;
 pub mod apu;
+pub mod apu_upload;
 pub mod brr;
 pub mod decompile;
 pub mod diff;

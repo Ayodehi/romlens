@@ -297,6 +297,9 @@ pub enum Evidence {
     },
     /// What an execution log saw the bytes used for.
     Observed(String),
+    /// Sent to the sound CPU by an upload traced in the code (docs/23, A9):
+    /// where they go in audio RAM and what they are there.
+    Uploaded(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]

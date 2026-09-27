@@ -116,9 +116,10 @@ struct RegionChip: View {
         switch kind {
         case .user: 0
         case .trace: 1
-        case .imported: 2
-        case .vectorReach: 3
-        case .heuristic: 4
+        case .uploaded: 2
+        case .imported: 3
+        case .vectorReach: 4
+        case .heuristic: 5
         }
     }
 
@@ -189,6 +190,7 @@ struct RegionChip: View {
         case .user: "person"
         case .imported: "square.and.arrow.down"
         case .trace: "waveform.path"
+        case .uploaded: "speaker.wave.2"
         }
     }
 }

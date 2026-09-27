@@ -1,0 +1,62 @@
+upload routine $00:8020: reads its block list through [$00], 9 instructions show it
+
+upload 0: the list at $00:D000 (set at $00:8008 in $00:8000), 3 blocks, 120 bytes, then $0200: the driver
+  ROM 0x005004-0x005053 ($00:D004)  →  audio RAM $0200-$024F      80 bytes
+  ROM 0x005058-0x00505B ($00:D058)  →  audio RAM $3C00-$3C03       4 bytes
+  ROM 0x005060-0x005083 ($00:D060)  →  audio RAM $4000-$4023      36 bytes
+
+what the bytes are, once the driver has run a second (booted straight into it by Romlens's SPC700):
+  upload at $00:D000:
+    ROM 0x005004-0x00503B      56 bytes  driver code
+    ROM 0x00503C-0x005053      24 bytes  data
+    ROM 0x005058-0x00505B       4 bytes  sample directory
+    ROM 0x005060-0x005083      36 bytes  samples
+
+sound commands: 0 constants the code sends the driver
+the driver from $00:D000 booted by Romlens, 0=$01 sent, 0.20 s: 6400 samples
+  digest 4cb16907524ed3ea808ae12bac90f4c303431e046505f4ca4ebb108558bf2b0f
+  left peak 20162, RMS 18476; right peak 20162, RMS 18476 (of 32767)
+  voice 0  peak 10240, sounding 100% of the time
+  voice 1  silent
+  voice 2  silent
+  voice 3  silent
+  voice 4  silent
+  voice 5  silent
+  voice 6  silent
+  voice 7  silent
+the driver from $00:D000 booted by Romlens, nothing sent, 0.20 s: 6400 samples
+  digest c65206769723a13afe80c0d925531639ceef9c2eb97eee3b1b542739ec40597f
+  left peak 0, RMS 0; right peak 0, RMS 0 (of 32767)
+  voice 0  silent
+  voice 1  silent
+  voice 2  silent
+  voice 3  silent
+  voice 4  silent
+  voice 5  silent
+  voice 6  silent
+  voice 7  silent
+[exit code 1]
+Error: $00:9000 is not a traced upload (see romlens apu upload)
+
+▸ Upload to the sound CPU  ($00:8020–$00:8081, 10 instructions)
+  Sends the block list its pointer at $00 names: waits for the boot
+  program's $BBAA, starts with $CC, then each byte on port 1 with its
+  index on port 0, waiting for the echo (romlens apu upload lists what it
+  sends)
+
+  The sound CPU starts with nothing but a 64-byte boot program, so a game
+  sends it the whole sound driver, then its songs and samples, through the
+  four ports. The routine walks a list of blocks, each a length, an
+  address in audio RAM and the bytes, and sends every byte with its index
+  on port 0, waiting for the sound CPU to echo the index before the next.
+  A block of length zero ends the list, and its address is where the sound
+  CPU starts running.
+Address:       $00:D060
+File offset:   0x005060
+Memory:        ROM
+Mirrors:       $00:D060, $80:D060
+Bytes:         u8 176 ($B0), i8 -80
+               u16 LE 35248 ($89B0), i16 -30288
+               u24 LE 11241904 ($AB89B0)
+               as SNES address $AB:89B0
+Region:        sample 0x005060..0x005084 (36 bytes), confidence 95%: BRR samples, uploaded to audio RAM $4000-$4023 (the sound driver's upload, the list at $00:D000)

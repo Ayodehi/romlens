@@ -63,6 +63,7 @@ pub enum Fixture {
     Graphics,
     Routines,
     Explain,
+    Sound,
 }
 
 impl Fixture {
@@ -75,6 +76,7 @@ impl Fixture {
             Fixture::Graphics => fixtures::graphics_lorom(),
             Fixture::Routines => fixtures::routines_lorom(),
             Fixture::Explain => fixtures::explain_lorom(),
+            Fixture::Sound => fixtures::sound_upload_lorom(),
         }
     }
 
@@ -87,6 +89,7 @@ impl Fixture {
             Fixture::Graphics => "graphics LoROM".to_owned(),
             Fixture::Routines => "routines LoROM".to_owned(),
             Fixture::Explain => "explain LoROM".to_owned(),
+            Fixture::Sound => "sound-upload LoROM".to_owned(),
         }
     }
 }

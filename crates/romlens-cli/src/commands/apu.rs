@@ -440,7 +440,7 @@ fn print_replay(rec: &RomrecSource, from: u64, to: u64, free: bool, limit: usize
 
 /// `apu render`: the sound from a frame, described but never written out.
 pub fn render(path: &Path, frame: u64, seconds: f64, follow: bool) -> Result<()> {
-    use romlens_core::apu::render::{SAMPLE_RATE, digest, render};
+    use romlens_core::apu::render::{SAMPLE_RATE, render};
     let rec = open(path)?;
     let count = rec.frame_count().unwrap_or(0);
     if frame >= count {
@@ -463,7 +463,14 @@ pub fn render(path: &Path, frame: u64, seconds: f64, follow: bool) -> Result<()>
             "the driver on its own"
         }
     );
-    println!("  digest {}", digest(&out));
+    describe(&out);
+    Ok(())
+}
+
+/// The digest, the levels and each voice of rendered samples.
+pub fn describe(out: &[romlens_core::dsp::Frame]) {
+    use romlens_core::apu::render::digest;
+    println!("  digest {}", digest(out));
     let peak = |v: &mut dyn Iterator<Item = i16>| v.map(|x| (x as i32).abs()).max().unwrap_or(0);
     let rms = |v: &mut dyn Iterator<Item = i16>| {
         let (s, k) = v.fold((0f64, 0usize), |(s, k), x| (s + (x as f64).powi(2), k + 1));
@@ -488,5 +495,4 @@ pub fn render(path: &Path, frame: u64, seconds: f64, follow: bool) -> Result<()>
             );
         }
     }
-    Ok(())
 }

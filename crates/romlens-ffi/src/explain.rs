@@ -66,6 +66,7 @@ pub enum IdiomKindInfo {
     SharedEntry,
     ShadowRegister,
     DataBank,
+    ApuUpload,
 }
 
 impl From<IdiomKind> for IdiomKindInfo {
@@ -83,6 +84,7 @@ impl From<IdiomKind> for IdiomKindInfo {
             IdiomKind::SharedEntry => Self::SharedEntry,
             IdiomKind::ShadowRegister => Self::ShadowRegister,
             IdiomKind::DataBank => Self::DataBank,
+            IdiomKind::ApuUpload => Self::ApuUpload,
         }
     }
 }
