@@ -1,0 +1,13 @@
+data: {"id":"c2","model":"claude-opus-5","choices":[{"index":0,"delta":{"role":"assistant","reasoning_content":"Two calls at once.","thinking_blocks":[{"type":"thinking","thinking":"Two calls at once.","signature":"sig123"}]},"finish_reason":null}]}
+
+data: {"id":"c2","model":"claude-opus-5","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"toolu_X","type":"function","function":{"name":"rom_info","arguments":""}}]},"finish_reason":null}]}
+
+data: {"id":"c2","model":"claude-opus-5","choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"id":"toolu_Y","type":"function","function":{"name":"labels","arguments":"{\"from\":"}}]},"finish_reason":null}]}
+
+data: {"id":"c2","model":"claude-opus-5","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{}"}}]},"finish_reason":null}]}
+
+data: {"id":"c2","model":"claude-opus-5","choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"function":{"arguments":"\"$00:8000\"}"}}]},"finish_reason":"tool_calls"}]}
+
+data: {"id":"c2","model":"claude-opus-5","choices":[],"usage":{"prompt_tokens":12000,"completion_tokens":50,"prompt_tokens_details":{"cached_tokens":11000},"cache_read_input_tokens":11000,"cache_creation_input_tokens":0}}
+
+data: [DONE]

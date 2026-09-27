@@ -8,7 +8,7 @@ that tracks progress against it.
 | Task | State |
 |---|---|
 | U0 this document, content-policy rule 8, the pointers from `06` and `22`, the checklist rows | done, 27 September 2026 |
-| U1 `romlens-tutor`: the transcript, the three wire protocols, SSE, the model table, recorded-stream tests | to do |
+| U1 `romlens-tutor`: the transcript, the three wire protocols, SSE, the model table, recorded-stream tests | done, 27 September 2026: `transcript` (turns of blocks, each assistant turn keeping what its provider sent as `Native`), `sse::Reader` (bytes in any chunks; a line cut off drops its event, so a short stream reads as short), `models::MODELS` (Claude Opus 5 by default, Opus 5.5, Fable 5.1, Sonnet 5, Haiku 4.5; GPT-6 Astra, Sol, Luna; a model not in the table is local, with nothing to pay), and `provider::{anthropic, responses, chat}`, each a request builder and a stream parser. Anthropic: adaptive thinking summarised, the effort, strict tools streamed eagerly, breakpoints after the last tool, the system prompt, the digest and the newest block, `fallbacks: "default"` where the model has it, its own turns sent back verbatim. Responses: `store: false` with the encrypted reasoning sent back, `prompt_cache_key`, pictures in call outputs. Chat: calls gathered by index, reasoning from `reasoning` or `reasoning_content`, LiteLLM's `thinking_blocks` back only to the endpoint that made them, pictures from tool results in a user message after them, no `tool_choice` for servers that refuse it. Tests: 10 unit and 9 on recorded streams, one conversation carried from Claude to GPT-6, back to Claude, and to a local model |
 | U2 the HTTP transport, retries, cancelling, model lists, the loop, cost; `romlens tutor ask` and `models` | to do |
 | U3 the system prompt, the primer, the reference pages, the ROM digest, the cache layout; the read-only tools | to do |
 | U4 signatures, local names, structs, C comments and C versions in the project; the decompiler reads them | to do |
@@ -112,7 +112,7 @@ edit-policy sections and T1–T4 in `22`.
    - Romlens ships no key and runs no proxy.
 5. **Edits follow a permission mode, as in Claude Code.** Shift-Tab cycles
    through three:
-   - **Read-only**: no edit tools.
+   - **Read-only**: the edit tools refuse.
    - **Ask before edits** (the default): each edit is a card with Accept
      and Reject.
    - **Accept edits**: each edit is applied as it is made, and still shown
@@ -296,10 +296,27 @@ The tools, grouped:
 
 **Compaction** (`compact.rs`):
 - A meter shows how full the context is.
-- `/compact`, and compaction near the limit: a summary the model writes
-  replaces older turns in what is sent.
-- Old tool results are cut to a stub ("call the tool again") only at those
-  points, so the cache is not broken on every turn.
+- `/compact`, and compaction near the limit, never in the middle of a tool
+  round: the model writes a summary, and the next request starts from that
+  summary and the new question, replaying nothing older.
+
+**Everything sent is append-only.** Anthropic ties each thinking block to
+the conversation before it, and any provider's cache is a prefix, so no
+request rewrites what an earlier one sent:
+- The system prompt, the digest and the full tool list are fixed for a
+  conversation. In Read-only mode the edit tools are still declared and
+  answer that the mode forbids them; `generate_image` answers that no image
+  provider is set.
+- A change of mode, selection or recording is said in the next user turn,
+  not by editing the prompt.
+- Each assistant turn keeps what its provider returned, byte for byte
+  (thinking with its signature, OpenAI's encrypted reasoning items), and is
+  replayed from that to the protocol that made it. Anthropic's turns go back
+  to Anthropic unchanged even after a change of Claude model: the API drops
+  what the new model cannot read.
+- Images are sent as base64 of the same bytes every time.
+- A turn cut off mid-round (Esc) gets an error result for each call left
+  unanswered.
 
 ### The core
 

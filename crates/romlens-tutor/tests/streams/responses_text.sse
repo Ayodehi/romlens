@@ -1,0 +1,15 @@
+event: response.output_item.added
+data: {"type":"response.output_item.added","sequence_number":1,"output_index":0,"item":{"id":"msg_1","type":"message","role":"assistant","content":[]}}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","sequence_number":2,"item_id":"msg_1","output_index":0,"content_index":0,"delta":"RESET sets native mode "}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","sequence_number":3,"item_id":"msg_1","output_index":0,"content_index":0,"delta":"at `$00:8003`."}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","sequence_number":4,"output_index":0,"item":{"id":"msg_1","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"RESET sets native mode at `$00:8003`.","annotations":[]}]}}
+
+event: response.incomplete
+data: {"type":"response.incomplete","sequence_number":5,"response":{"id":"resp_2","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"model":"gpt-6-astra","output":[],"usage":{"input_tokens":100,"input_tokens_details":{"cached_tokens":0},"output_tokens":7}}}
+
