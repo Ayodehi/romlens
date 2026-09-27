@@ -413,10 +413,42 @@ final class TutorModel {
         if let line = wb.lineForOffset(fileOffset: off) {
             s += "\n" + wb.asmLinesText(startLine: line > 4 ? line - 4 : 0, count: 16, style: .snes)
         }
+        if let c = cText(at: rom.instruction?.fileOffset ?? off) {
+            s += "\n" + c
+        }
         if rom.graphics.hasRecording {
             s += "\nA recording is open in Romlens, at frame \(rom.graphics.frame)."
         }
         return s
+    }
+
+    /// The C the student is reading when the C tab has the editor: the
+    /// version picked there, or the generated C around the selection.
+    func cText(at offset: UInt32) -> String? {
+        let d = rom.decompiler
+        guard rom.editorTab == .c, rom.showsTextEditor, d.state == .ready, let r = d.result else { return nil }
+        if let v = d.shownVersion,
+           let version = rom.session.workbench.cVersions(routine: r.entry).first(where: { $0.name == v })?.version {
+            return "[The student is reading the C tab: the C version “\(v)” of \(r.name), not the generated C.]\n```c\n"
+                + Self.clip(version.text, around: nil) + "\n```"
+        }
+        let at = d.lines(forInstructionAt: offset).first
+        return "[The student is reading the C tab: \(r.name) as Romlens generates it, at level \(d.level).]\n```c\n"
+            + Self.clip(r.text, around: at) + "\n```"
+    }
+
+    /// At most `limit` lines of `text`, centred on line `around`.
+    static func clip(_ text: String, around: Int?, limit: Int = 160) -> String {
+        let lines = text.components(separatedBy: "\n")
+        guard lines.count > limit else { return text }
+        let centre = around ?? 0
+        let start = max(0, min(centre - limit / 2, lines.count - limit))
+        let end = start + limit
+        var out: [String] = []
+        if start > 0 { out.append("/* … \(start) lines above left out */") }
+        out += lines[start..<end]
+        if end < lines.count { out.append("/* … \(lines.count - end) lines below left out */") }
+        return out.joined(separator: "\n")
     }
 
     // MARK: Citations

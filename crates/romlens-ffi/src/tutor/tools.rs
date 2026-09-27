@@ -23,6 +23,17 @@ pub fn addr(a: u32) -> String {
     format!("${:02X}:{:04X}", (a >> 16) & 0xFF, a & 0xFFFF)
 }
 
+/// The address in a name Romlens makes up from one: the C's `ADDR_7F8000`
+/// and `L_008034`, the listing's `SUB_0080E8` and `LOOP_008034`.
+pub fn generated_name(t: &str) -> Option<u32> {
+    let (prefix, hex) = t.rsplit_once('_')?;
+    let prefix_ok = !prefix.is_empty() && prefix.bytes().all(|b| b.is_ascii_uppercase());
+    if !prefix_ok || hex.len() != 6 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    u32::from_str_radix(hex, 16).ok()
+}
+
 /// Finds an endpoint's key when a picture is asked for.
 pub type KeyLookup = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
@@ -113,7 +124,16 @@ impl RomTools {
             return Ok(r);
         }
         let labels = self.wb.labels();
-        match labels.iter().find(|l| l.name.eq_ignore_ascii_case(t)) {
+        let named = labels.iter().find(|l| l.name.eq_ignore_ascii_case(t));
+        if named.is_none()
+            && let Some(a) = generated_name(t)
+        {
+            return self
+                .wb
+                .resolve_any(format!("${a:06X}"))
+                .map_err(|e| e.to_string());
+        }
+        match named {
             Some(l) => self
                 .wb
                 .resolve_any(format!("${:06X}", l.address))
@@ -302,7 +322,7 @@ fn code_specs() -> Vec<ToolSpec> {
         ),
         spec(
             "decompile",
-            "The routine at an address as C, as Romlens rebuilds it. lift stays close to the instructions; clean folds them into statements; full adds loops, parameters and typed variables.",
+            "The routine at an address as C, as Romlens rebuilds it: at full, the C the student sees in the C tab, where names like ADDR_7E0200 are made up from addresses. lift stays close to the instructions; clean folds them into statements; full adds loops, parameters and typed variables.",
             &[
                 (
                     "address",
@@ -662,7 +682,14 @@ impl RomTools {
             .map(|l| format!("{}  {}  ({:?})", addr(l.address), l.name, l.source))
             .collect();
         if ls.is_empty() {
-            format!("no label contains `{name}`")
+            match generated_name(name.trim().trim_matches('`')) {
+                Some(a) => format!(
+                    "no label contains `{name}`, but it is a name Romlens makes up from an address: it stands for {}{} (in the C, `ADDR_` is RAM no variable names yet, `L_` a goto label, `SUB_` a routine nothing names). Call decompile on the routine the student means to see it in the C.",
+                    addr(a),
+                    self.label(a)
+                ),
+                None => format!("no label contains `{name}`"),
+            }
         } else {
             ls.join("\n")
         }
@@ -1136,6 +1163,29 @@ mod tests {
         let bad = call(&t, "listing", json!({"address": "nowhere", "lines": 3}));
         assert!(bad.is_error);
         assert!(call(&t, "no_such_tool", json!({})).is_error);
+    }
+
+    /// A name from the C is read as the address it spells, since no label
+    /// holds it.
+    #[test]
+    fn the_cs_made_up_names_are_addresses() {
+        assert_eq!(generated_name("ADDR_7F8000"), Some(0x7F_8000));
+        assert_eq!(generated_name("L_008034"), Some(0x00_8034));
+        assert_eq!(generated_name("SUB_0080E8"), Some(0x00_80E8));
+        assert_eq!(generated_name("Reset_Loop"), None);
+        assert_eq!(generated_name("ADDR_7F80"), None);
+        let t = fixture();
+        let text = |o: ToolOutput| match &o.parts[0] {
+            romlens_tutor::transcript::Part::Text { text } => (o.is_error, text.clone()),
+            _ => (true, String::new()),
+        };
+        let (bad, s) = text(call(&t, "find_label", json!({"name": "ADDR_7E0200"})));
+        assert!(
+            !bad && s.contains("$7E:0200") && s.contains("decompile"),
+            "{s}"
+        );
+        let (bad, s) = text(call(&t, "resolve", json!({"address": "ADDR_7E0200"})));
+        assert!(!bad && s.starts_with("$7E:0200"), "{s}");
     }
 
     #[test]

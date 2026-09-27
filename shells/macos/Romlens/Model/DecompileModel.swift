@@ -30,6 +30,9 @@ final class DecompileModel {
     private(set) var resultGeneration = 0
     /// The routine shown (or being decompiled), by entry address.
     private(set) var entry: UInt32?
+    /// The C version the tab shows instead of the generated C, by name;
+    /// what the tutor is told the student is reading.
+    @ObservationIgnored var shownVersion: String?
     /// For each file offset an instruction starts at, the C lines it made.
     @ObservationIgnored private var linesByOffset: [UInt32: [Int]] = [:]
     @ObservationIgnored private var key: Key?

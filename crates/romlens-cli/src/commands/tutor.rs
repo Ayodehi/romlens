@@ -261,3 +261,36 @@ pub fn ask(w: &Where, a: &Ask) -> Result<()> {
     }
     Ok(())
 }
+
+fn root(dir: Option<&Path>) -> Result<std::path::PathBuf> {
+    dir.map(Path::to_path_buf)
+        .or_else(romlens_tutor::review::default_root)
+        .ok_or_else(|| anyhow!("no folder of conversations; name one with --dir"))
+}
+
+/// `romlens tutor sessions`.
+pub fn sessions(dir: Option<&Path>) -> Result<()> {
+    let root = root(dir)?;
+    let all = romlens_tutor::review::all(&root);
+    if all.is_empty() {
+        println!("no conversations under {}", root.display());
+    }
+    for s in &all {
+        println!("{}", romlens_tutor::review::line(s));
+    }
+    Ok(())
+}
+
+/// `romlens tutor show`.
+pub fn show(which: &str, dir: Option<&Path>, full: bool, system: bool) -> Result<()> {
+    use romlens_tutor::review;
+    let root = root(dir)?;
+    let s = review::find(&root, which).map_err(|e| anyhow!(e))?;
+    let turns = review::load(&root, &s)?;
+    let show = review::Show {
+        result_lines: (!full).then_some(40),
+        system,
+    };
+    print!("{}", review::render(&s, &turns, show));
+    Ok(())
+}

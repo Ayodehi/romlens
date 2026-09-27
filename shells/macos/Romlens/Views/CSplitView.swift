@@ -104,7 +104,10 @@ final class CPaneController: NSObject, NSTextViewDelegate {
     /// The routine whose C is shown.
     private var shownEntry: UInt32?
     /// A C version shown instead of the generated C, by name (docs/24).
-    private(set) var shownVersion: String?
+    private(set) var shownVersion: String? {
+        get { model.decompiler.shownVersion }
+        set { model.decompiler.shownVersion = newValue }
+    }
     private var shownVersionText: String?
     private let versions = NSPopUpButton(frame: .zero, pullsDown: false)
     private var versionsKey = ""

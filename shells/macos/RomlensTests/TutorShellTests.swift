@@ -155,6 +155,28 @@ import Testing
         }
     }
 
+    @Test func onTheCTabTheQuestionCarriesTheC() async throws {
+        let r = try await rig([])
+        defer { try? FileManager.default.removeItem(at: r.root) }
+        r.rom.select(offset: 0)
+        #expect(r.tutor.selectionText()?.contains("C tab") == false)
+        r.rom.editorTab = .c
+        try await Fixture.settle(timeout: 20) { r.rom.decompiler.state == .ready }
+        let s = try #require(r.tutor.selectionText())
+        #expect(s.contains("[The student is reading the C tab:") && s.contains("```c\n"))
+        #expect(s.contains(try #require(r.rom.decompiler.result?.name)))
+    }
+
+    @Test func longCIsClippedAroundTheSelection() {
+        let text = (0..<400).map { "line \($0)" }.joined(separator: "\n")
+        let c = TutorModel.clip(text, around: 300)
+        let lines = c.components(separatedBy: "\n")
+        #expect(lines.count == 162)
+        #expect(lines.first == "/* … 220 lines above left out */" && lines.last == "/* … 20 lines below left out */")
+        #expect(lines.contains("line 300"))
+        #expect(TutorModel.clip("a\nb", around: nil) == "a\nb")
+    }
+
     @Test func theDocumentOpensOneTutorWindow() throws {
         let doc = ProjectDocument()
         try doc.read(from: makeTestRom(mapping: .loRom), ofType: Fixture.romType)

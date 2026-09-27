@@ -764,6 +764,28 @@ enum TutorCommand {
         #[command(flatten)]
         at: TutorWhere,
     },
+    /// The app's saved conversations, the latest first.
+    Sessions {
+        /// Where they are (default: `ROMLENS_TUTOR_DIR`, else the app's
+        /// Application Support folder).
+        #[arg(long)]
+        dir: Option<PathBuf>,
+    },
+    /// A saved conversation turn by turn: questions, what went with them,
+    /// thinking, tool calls and results, answers and cost.
+    Show {
+        /// `latest`, an id, or the start of one.
+        #[arg(default_value = "latest")]
+        which: String,
+        #[arg(long)]
+        dir: Option<PathBuf>,
+        /// Tool results whole (default: their first 40 lines).
+        #[arg(long)]
+        full: bool,
+        /// The fixed system prompt and ROM digest too.
+        #[arg(long)]
+        system: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1807,6 +1829,13 @@ fn run() -> Result<()> {
                 base_url: at.base_url.as_deref(),
                 responses: at.responses,
             }),
+            TutorCommand::Sessions { dir } => commands::tutor::sessions(dir.as_deref()),
+            TutorCommand::Show {
+                which,
+                dir,
+                full,
+                system,
+            } => commands::tutor::show(&which, dir.as_deref(), full, system),
         },
         Command::Brr {
             rom,

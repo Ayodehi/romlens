@@ -10,6 +10,7 @@ pub mod images;
 pub mod models;
 pub mod prompt;
 pub mod provider;
+pub mod review;
 pub mod sse;
 pub mod store;
 pub mod transcript;
