@@ -425,3 +425,38 @@ Sound additions (docs/23, still to run):
     played (the `.spclog` beside the stream came with it), and the Voices
     view's envelopes match Mesen's from the first frame, not only once
     each voice is keyed again.
+52. The tutor's keys (6.1): Settings… (⌘,) › Providers, paste an Anthropic
+    key and Save Key, then Test: it lists Claude's models. Add an endpoint
+    for Ollama (`http://localhost:11434/v1`, Chat Completions) with
+    `ollama serve` running, and Test lists its models. Keychain Access
+    shows one item per key under `io.github.ayodehi.Romlens.tutor`, and
+    nothing of the key is in `defaults read io.github.ayodehi.Romlens`.
+53. Ask (6.2): in the Super Mario World project, select RESET and View ›
+    Show Tutor (⌥⌘T). Ask "What does this do?": the answer streams with
+    the thinking and "N tool calls" collapsed, every address is a link, and
+    clicking one selects it in the main window and brings it forward. The
+    status line shows the model, the mode and the cost.
+54. Pictures (6.3): paste a screenshot of the title screen (⌘V) and ask
+    which layer draws the logo; with a recording open, the Frame chip
+    attaches the frame. With an image model set in Settings › Images, ask
+    for a diagram of the SNES memory map: it shows large, marked as
+    generated.
+55. Edits (6.4, 6.5): in Ask before edits, ask the tutor to name the
+    routine RESET calls first: a card waits; Decline with a reason, then
+    ask again and Accept. ⇧⇥ to Accept edits and ask for a routine note and
+    a C version: the C tab shows the note, and its version picker the
+    version, whose lines select their instructions. Edit › Undo says
+    "Tutor: …".
+56. A conversation kept (6.6): ↑ in the composer brings back the questions;
+    Esc Esc opens Rewind: go back before the edits with "The conversation
+    and the tutor's edits", and the names and the note are gone and the
+    question is back in the composer. Quit, reopen the project, ⌥⌘T and
+    `/resume`: the conversation is there.
+57. Another provider (6.7): `/model`, choose OpenAI or the Ollama endpoint,
+    and ask a follow-up: the answer knows the conversation; the transcript
+    notes the change.
+58. The live check: `ROMLENS_TUTOR_LIVE=1 ANTHROPIC_API_KEY=… cargo test
+    -p romlens-ffi --test tutor_live -- --nocapture` (and the same with
+    `ROMLENS_TUTOR_PROVIDER=openai` or an Ollama URL and
+    `ROMLENS_TUTOR_MODEL`) answers most questions with the ROM's facts;
+    record its table in `24-tutor.md`.
