@@ -47,7 +47,7 @@ pub fn build(r: &Request) -> HttpRequest {
                     "name": t.name,
                     "description": t.description,
                     "parameters": t.schema,
-                    "strict": r.endpoint.strict,
+                    "strict": r.endpoint.strict && t.strict,
                 })
             })
             .collect();

@@ -42,7 +42,7 @@ pub fn build(r: &Request) -> HttpRequest {
             .map(|t| {
                 let mut f =
                     json!({"name": t.name, "description": t.description, "parameters": t.schema});
-                if r.endpoint.strict {
+                if r.endpoint.strict && t.strict {
                     f["strict"] = true.into();
                 }
                 json!({"type": "function", "function": f})

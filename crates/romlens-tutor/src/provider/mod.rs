@@ -81,7 +81,15 @@ pub struct ToolSpec {
     /// `additionalProperties: false`, so every protocol's strict mode takes
     /// it; optional values are nullable.
     pub schema: Value,
+    /// Ask the provider to hold the model to the schema exactly. Anthropic
+    /// takes at most `MAX_STRICT` such tools a request; the loop checks
+    /// every call's arguments either way.
+    #[serde(default)]
+    pub strict: bool,
 }
+
+/// The most tools Anthropic takes marked strict in one request.
+pub const MAX_STRICT: usize = 20;
 
 /// The bytes of a picture the transcript names.
 pub trait Attachments {

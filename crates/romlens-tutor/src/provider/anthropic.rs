@@ -48,6 +48,7 @@ pub fn build(r: &Request) -> HttpRequest {
 
     if !r.tools.is_empty() {
         let n = r.tools.len();
+        let mut strict = 0;
         let tools: Vec<Value> = r
             .tools
             .iter()
@@ -57,7 +58,8 @@ pub fn build(r: &Request) -> HttpRequest {
                 o.insert("name".into(), t.name.clone().into());
                 o.insert("description".into(), t.description.clone().into());
                 o.insert("input_schema".into(), t.schema.clone());
-                if r.endpoint.strict {
+                if r.endpoint.strict && t.strict && strict < super::MAX_STRICT {
+                    strict += 1;
                     o.insert("strict".into(), true.into());
                 }
                 o.insert("eager_input_streaming".into(), true.into());

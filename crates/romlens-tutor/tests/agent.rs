@@ -51,6 +51,7 @@ impl Tools for Fake {
                 name: (*n).into(),
                 description: String::new(),
                 schema: json!({"type": "object", "properties": {}, "required": [], "additionalProperties": false}),
+            strict: *n == "disassemble",
             })
             .collect()
     }

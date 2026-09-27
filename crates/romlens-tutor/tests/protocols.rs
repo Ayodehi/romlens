@@ -26,6 +26,7 @@ fn tools() -> Vec<ToolSpec> {
             name: (*n).into(),
             description: format!("{n} does its thing"),
             schema: json!({"type": "object", "properties": {}, "required": [], "additionalProperties": false}),
+            strict: *n == "disassemble",
         })
         .collect()
 }
@@ -244,7 +245,10 @@ fn anthropic_sends_back_what_it_sent_and_caches_the_prefix() {
     // Breakpoints: the last tool, both system blocks, the newest block.
     assert!(v["tools"][0].get("cache_control").is_none());
     assert_eq!(v["tools"][1]["cache_control"]["type"], "ephemeral");
+    // Only the tools asked to be strict are, and only on endpoints that
+    // take it.
     assert_eq!(v["tools"][1]["strict"], true);
+    assert!(v["tools"][0].get("strict").is_none());
     assert_eq!(v["tools"][1]["eager_input_streaming"], true);
     assert_eq!(v["system"].as_array().unwrap().len(), 2);
     assert!(
@@ -361,7 +365,8 @@ fn responses_is_stateless_and_replays_its_reasoning() {
         "You are the tutor.\n\nROM: SUPER MARIOWORLD"
     );
     assert_eq!(v["tools"][0]["type"], "function");
-    assert_eq!(v["tools"][0]["strict"], true);
+    assert_eq!(v["tools"][0]["strict"], false);
+    assert_eq!(v["tools"][1]["strict"], true);
     let input = v["input"].as_array().unwrap();
     assert_eq!(input[0]["role"], "user");
     assert_eq!(

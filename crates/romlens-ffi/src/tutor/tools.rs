@@ -180,6 +180,9 @@ pub(crate) fn spec(name: &str, description: &str, props: &[(&str, Value)]) -> To
         name: name.into(),
         description: description.into(),
         schema: object(props),
+        // Strict for the edits, where a wrong argument changes the
+        // project; Anthropic takes only 20 strict tools a request.
+        strict: super::edits::NAMES.contains(&name),
     }
 }
 
@@ -1029,6 +1032,12 @@ fn describe_register(reg: &str, value: Option<u64>) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn few_enough_tools_are_strict() {
+        let n = specs().iter().filter(|t| t.strict).count();
+        assert!(n > 0 && n <= romlens_tutor::provider::MAX_STRICT, "{n}");
+    }
 
     #[test]
     fn every_schema_is_strict() {

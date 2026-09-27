@@ -133,6 +133,15 @@ struct DocumentView: View {
             ToolbarItem(placement: .principal) {
                 AudioMenu(model: model)
             }
+            ToolbarItem(placement: .principal) {
+                // The tutor's own window (docs/24), beside Graphics and Audio.
+                Button {
+                    NSApp.sendAction(#selector(RomWindowController.showTutor(_:)), to: nil, from: nil)
+                } label: {
+                    Label("Tutor", systemImage: "graduationcap")
+                }
+                .help("Ask the tutor about this ROM (⌥⌘T)")
+            }
             // Trailing: two bordered control groups, nothing else. Where
             // you are, then what you are looking at.
             ToolbarItemGroup {
