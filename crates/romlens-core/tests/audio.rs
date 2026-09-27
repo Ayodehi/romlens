@@ -3,8 +3,8 @@
 //! note keyed on in frame 1 and off in frame 3.
 
 use romlens_core::audio::{
-    NoteKind, PartKind, aram_map, directory, note_name, port_messages, sample_tuning, timeline,
-    voices,
+    NoteKind, PartKind, aram_map, directory, entries_written, note_name, port_messages,
+    sample_tuning, timeline, voices,
 };
 use romlens_core::recording::mesen::stream::encode;
 use romlens_core::recording::mesen::{PackOptions, pack};
@@ -79,6 +79,50 @@ fn the_map_finds_the_driver_directory_and_sample() {
     assert_eq!(sample.label, "sample 0: 4 blocks, loops at $4012");
     // The parts cover audio RAM once.
     assert_eq!(map.iter().map(|p| p.len).sum::<u32>(), 0x10000);
+}
+
+/// Audio RAM with a directory at $3C00 like a Super Metroid song bank's:
+/// entry 0 a sample with a quiet block at shift 13, entry 1 a stale entry
+/// whose loop point is not one of its blocks, entry 2 a sample again.
+fn bank_like() -> Vec<u8> {
+    let mut aram = vec![0u8; 0x10000];
+    let block = |shift: u8, end: bool| {
+        romlens_core::dsp::brr::encode_block_plain(&[0; 16], shift, end, end)
+    };
+    let mut put = |at: usize, blocks: &[[u8; 9]]| {
+        for (i, b) in blocks.iter().enumerate() {
+            aram[at + i * 9..at + i * 9 + 9].copy_from_slice(b);
+        }
+    };
+    let sample: Vec<[u8; 9]> = (0..8)
+        .map(|i| block(if i == 3 { 13 } else { 4 }, i == 7))
+        .collect();
+    put(0x4000, &sample);
+    put(0x5000, &sample);
+    let entries: [(u16, u16); 3] = [(0x4000, 0x4000), (0x4000, 0x4005), (0x5000, 0x5009)];
+    for (n, (s, l)) in entries.iter().enumerate() {
+        aram[0x3C00 + n * 4..0x3C00 + n * 4 + 2].copy_from_slice(&s.to_le_bytes());
+        aram[0x3C02 + n * 4..0x3C04 + n * 4].copy_from_slice(&l.to_le_bytes());
+    }
+    aram
+}
+
+#[test]
+fn a_directory_takes_shift_13_and_the_entries_an_upload_writes() {
+    let aram = bank_like();
+    let d = directory(&aram, 0x3C, &[]);
+    assert_eq!(
+        d.iter().map(|e| e.index).collect::<Vec<_>>(),
+        vec![0],
+        "a block at shift 13 is still a sample; the stale entry ends the run"
+    );
+    // A block of whole entries names them; a block that only runs across
+    // the directory does not.
+    let written = entries_written(0x3C, [(0x3C08, 4), (0x3B00, 0x1000)]);
+    assert_eq!(written, vec![2]);
+    let d = directory(&aram, 0x3C, &written);
+    assert_eq!(d.iter().map(|e| e.index).collect::<Vec<_>>(), vec![0, 2]);
+    assert_eq!((d[1].start, d[1].blocks), (0x5000, 8));
 }
 
 #[test]

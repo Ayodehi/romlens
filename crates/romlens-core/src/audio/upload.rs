@@ -741,6 +741,16 @@ pub fn from_ports(events: &[ApuEvent]) -> Vec<SentUpload> {
     out
 }
 
+/// Audio RAM that the uploads in `events` wrote, as start and length: the
+/// evidence a recording has for which directory entries an upload meant
+/// ([`crate::audio::entries_written`]).
+pub fn sent_spans(events: &[ApuEvent]) -> Vec<(u16, u32)> {
+    from_ports(events)
+        .iter()
+        .flat_map(|u| u.blocks.iter().map(|(a, b)| (*a, b.len() as u32)))
+        .collect()
+}
+
 /// A stretch of the ROM an upload sends, and what it is in audio RAM.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UploadedSpan {
@@ -764,7 +774,8 @@ pub fn driver(uploads: &[Upload]) -> Option<&Upload> {
 /// Romlens's own SPC700 for a tenth of a second (booted straight into, not
 /// through the boot program), long enough to point the DSP at its sample
 /// directory; each other upload is then laid over that audio RAM and its
-/// bytes the directory names are samples.
+/// bytes the directory names are samples, the directory read from entry 0
+/// on and at each entry the uploads write.
 pub fn uploaded_spans(rom: &RomImage, uploads: &[Upload]) -> Vec<UploadedSpan> {
     let Some(d) = driver(uploads) else {
         return Vec::new();
@@ -786,7 +797,14 @@ pub fn uploaded_spans(rom: &RomImage, uploads: &[Upload]) -> Vec<UploadedSpan> {
         // directory.
         let mut what = vec![0u8; 0x10000];
         if dir != 0 {
-            let entries = crate::audio::directory(&aram, dir, &[]);
+            let written = crate::audio::entries_written(
+                dir,
+                d.blocks
+                    .iter()
+                    .chain(&u.blocks)
+                    .map(|b| (b.aram, b.len as u32)),
+            );
+            let entries = crate::audio::directory(&aram, dir, &written);
             for e in &entries {
                 let end = (e.start as usize + e.blocks as usize * 9).min(0x10000);
                 what[e.start as usize..end].fill(1);

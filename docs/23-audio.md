@@ -33,6 +33,25 @@ in Mesen's script data folder, and packs it into the app's own Recordings
 folder before opening it (`pack_recorder_stream`); the Samples keyboard is
 laid out as a piano's.
 
+A song bank's own samples, 27 September 2026: laid over the driver, a
+bank's samples were classified as the driver's data. Two causes, both in
+reading the directory. Samples use shift 13 in quiet blocks (Super
+Metroid's entry 4 has four such blocks in 142), and any such block
+refused the entry, ending the run at entry 4; now an entry is refused
+when more than one block in eight has a shift over 12, or a looping
+entry's loop point is not one of its blocks. And a bank writes its
+entries after one of the driver's that its own samples overwrite (Super
+Metroid's banks write entries 24 on; entry 23 then points into a bank's
+sample, looping to no block of it), so the run from entry 0 stops short;
+now the entries an upload's block of whole entries writes are read too
+(`audio::entries_written`), from the traced uploads when Romlens boots
+the ROM's driver and from the uploads a recording sent through the ports
+up to the frame (`upload::sent_spans`, the port writes kept per session
+so a live one reads only its new frames). A block that merely runs
+across the directory, like a driver's samples sent in one piece, says
+nothing of it. Super Metroid's 24 banks each read as a directory and
+10–19 KB of samples; Zelda's directory has 25 entries, not 3.
+
 ## Measured
 
 Five games, each recorded for 30 seconds (1,800 frames) from power-on by
@@ -49,7 +68,7 @@ buffer's bytes and the DSP's own registers (see A15).
 | Upload routine traced | `$00:8079` | `$80:8028` (the banked form) | `$C5:0000` | `$C7:0000` | `$00:8888` |
 | Lists traced / uploads the recording saw | 5 / 3, every block matched byte for byte | 25 (the driver and 24 song banks) / 2, all 11 blocks matched | 0 / 1 | 0 / 4 | 1 (the driver) / 1, all 9 blocks matched |
 | Sound command values traced | 112 | 11 | 49 | 38 | 6 |
-| Directory entries read at the end (from entry 0 to the first that is not a sample, and those the voices name) | 20 | 7 | 9 | 4 | 5 |
+| Directory entries read at the end (from entry 0 to the first that is not a sample, those the voices name, and those an upload's block of entries wrote) | 20 | 38 (7 before the fixes of 27 September) | 9 | 12 (4) | 23 (5) |
 | N-SPC read | song 1 of 9 playing | song 5 of 6 | not N-SPC | not N-SPC | song 6 of 15 |
 | Frames in the boot ROM | 18 | 254 | 21 | 22 | 80 |
 | Per frame: match (and match but at the frame's end) | 1,700 (+20) of 1,781 | 1,453 (+21) of 1,545 | 1,529 (+104) of 1,778 | 1,427 (+86) of 1,777 | 1,629 (+21) of 1,719 |
@@ -76,9 +95,6 @@ What stays open:
 - **Square's uploads are not traced.** Final Fantasy III's and Chrono
   Trigger's routines are found, but their block lists come through tables
   of another shape, so only a recording shows their uploads.
-- **A song bank's own samples.** Laid over the driver, a bank's samples
-  are classified as the driver's data: the directory the machine is
-  booted with names only the samples the driver's own upload brings.
 
 ## Context
 

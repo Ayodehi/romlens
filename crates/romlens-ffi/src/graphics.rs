@@ -545,6 +545,9 @@ pub struct RecordingSession {
     index: std::sync::Mutex<Option<romlens_core::recording::change_index::ChangeIndex>>,
     /// The last frame composed, so the pointer's pixel is a lookup.
     composed: std::sync::Mutex<Option<(u64, Arc<romlens_core::graphics::compose::Composed>)>>,
+    /// The S-CPU's port writes read so far, each with its frame, and the
+    /// frames read: the uploads a frame's directory may name (docs/23).
+    pub(crate) port_writes: std::sync::Mutex<crate::audio::PortWrites>,
 }
 
 /// A frame drawn from the PPU state (docs/22, P2).
@@ -746,6 +749,7 @@ impl RecordingSession {
             origin: Origin::Live,
             index: Default::default(),
             composed: Default::default(),
+            port_writes: Default::default(),
         })
     }
 }
@@ -795,6 +799,7 @@ impl RecordingSession {
             origin: Origin::Path(path),
             index: Default::default(),
             composed: Default::default(),
+            port_writes: Default::default(),
         }))
     }
 
@@ -805,6 +810,7 @@ impl RecordingSession {
             origin: Origin::Bytes(bytes),
             index: Default::default(),
             composed: Default::default(),
+            port_writes: Default::default(),
         }))
     }
 

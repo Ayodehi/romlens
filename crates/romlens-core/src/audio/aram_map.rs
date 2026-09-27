@@ -108,7 +108,12 @@ pub fn directory(aram: &[u8], dir: u8, used: &[u8]) -> Vec<DirEntry> {
             return None;
         }
         let s = decode_sample(aram, start as u32, Some(loop_at as u32), 4096);
-        if s.unterminated || s.blocks.iter().any(|b| b.header.shift > 12) {
+        // Shifts 13–15 are real in samples (Super Metroid's use 13 in a few
+        // quiet blocks), but common in bytes that are not a sample: about
+        // one block in five. A looping sample's loop point is one of its
+        // own blocks.
+        let odd = s.blocks.iter().filter(|b| b.header.shift > 12).count();
+        if s.unterminated || odd * 8 > s.blocks.len() || (s.loops && s.loop_block.is_none()) {
             return None;
         }
         Some(DirEntry {
@@ -134,6 +139,34 @@ pub fn directory(aram: &[u8], dir: u8, used: &[u8]) -> Vec<DirEntry> {
         }
     }
     out.sort_by_key(|e| e.index);
+    out
+}
+
+/// The directory entries at `dir << 8` that an upload's block of entries
+/// writes: a block that starts on an entry, holds whole entries and lies
+/// within the directory's 1 KB. Such a block says its entries are meant,
+/// even past one that no longer points at a sample: Super Metroid's song
+/// banks write entries 24 on, after an entry 23 of the driver's that their
+/// own samples overwrite. A block that only runs across the directory (a
+/// driver's samples sent in one piece) says nothing of it.
+pub fn entries_written(dir: u8, spans: impl IntoIterator<Item = (u16, u32)>) -> Vec<u8> {
+    let base = (dir as u32) << 8;
+    let mut out: Vec<u8> = Vec::new();
+    for (start, len) in spans {
+        let s = start as u32;
+        if s < base
+            || !(s - base).is_multiple_of(4)
+            || !len.is_multiple_of(4)
+            || s + len > base + 0x400
+        {
+            continue;
+        }
+        for n in (s - base) / 4..(s - base + len) / 4 {
+            out.push(n as u8);
+        }
+    }
+    out.sort_unstable();
+    out.dedup();
     out
 }
 

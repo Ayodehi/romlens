@@ -596,7 +596,18 @@ struct Machine<'a> {
     spc: SpcState,
     log: Option<&'a SpcLog>,
     origins: &'a [(u16, u16, u32)],
+    /// Audio RAM an upload sent through the ports wrote, before this
+    /// frame, for a recording (an upload Romlens booted is in `origins`).
+    sent: Vec<(u16, u32)>,
     entries: Vec<u16>,
+}
+
+/// A recording's S-CPU port writes, each with its frame, and how many
+/// frames have been read.
+#[derive(Default)]
+pub(crate) struct PortWrites {
+    frames: u64,
+    writes: Vec<(u64, romlens_core::recording::apu::ApuEvent)>,
 }
 
 type Tunings = HashMap<(u16, u16), Option<f64>>;
@@ -609,11 +620,20 @@ impl Machine<'_> {
         })
     }
 
+    /// The directory entries the voices name and those an upload wrote.
     fn used(&self) -> Vec<u8> {
-        core_audio::voices(self.dsp, None)
+        let mut out: Vec<u8> = core_audio::voices(self.dsp, None)
             .iter()
             .map(|v| v.source)
-            .collect()
+            .collect();
+        out.extend(core_audio::entries_written(
+            self.dsp[0x5D],
+            self.origins
+                .iter()
+                .map(|&(a, len, _)| (a, len as u32))
+                .chain(self.sent.iter().copied()),
+        ));
+        out
     }
 
     fn tuning(&self, cache: &mut Tunings, start: u16, loop_at: u16) -> Option<f64> {
@@ -952,8 +972,38 @@ impl RecordingSession {
             spc,
             log: log.as_ref(),
             origins: &[],
+            sent: self.sent_through(frame)?,
             entries: Vec::new(),
         }))
+    }
+
+    /// Audio RAM that uploads sent through the ports up to `frame`'s end
+    /// wrote. The S-CPU's port writes are read once and kept, so a live
+    /// session reads only its new frames.
+    fn sent_through(&self, frame: u64) -> Result<Vec<(u16, u32)>, RomlensError> {
+        use romlens_core::recording::apu::ApuEventKind;
+        let src = self.machine();
+        let mut cache = self.port_writes.lock().unwrap_or_else(|e| e.into_inner());
+        let last = frame.min(src.frame_count().unwrap_or(0).saturating_sub(1));
+        while cache.frames <= last {
+            let f = cache.frames;
+            if let Some(e) = src.apu_events(f)? {
+                cache.writes.extend(
+                    e.events
+                        .into_iter()
+                        .filter(|e| e.kind == ApuEventKind::CpuPort)
+                        .map(|e| (f, e)),
+                );
+            }
+            cache.frames += 1;
+        }
+        let events: Vec<_> = cache
+            .writes
+            .iter()
+            .take_while(|(f, _)| *f <= frame)
+            .map(|(_, e)| *e)
+            .collect();
+        Ok(upload::sent_spans(&events))
     }
 }
 
@@ -1192,6 +1242,7 @@ impl PlayerState {
             },
             log: self.log.as_ref(),
             origins: &self.origins,
+            sent: Vec::new(),
             entries: self.entries.clone(),
         }
     }

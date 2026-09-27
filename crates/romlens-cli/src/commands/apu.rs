@@ -7,11 +7,14 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use anyhow::{Context, Result, anyhow};
+use romlens_core::audio::upload::sent_spans;
 use romlens_core::audio::{
-    NoteKind, aram_map, directory, note_name, port_messages, sample_tuning, timeline, voices,
+    NoteKind, aram_map, directory, entries_written, note_name, port_messages, sample_tuning,
+    timeline, voices,
 };
 use romlens_core::explain::sound::{describe_dsp, dsp_layout};
 use romlens_core::model::spc_log::{SpcAccess, SpcLog};
+use romlens_core::recording::apu::ApuEventKind;
 use romlens_core::recording::{MachineStateSource, RomrecSource, SpcState, StateRegion};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -226,9 +229,27 @@ fn print_dsp(rec: &RomrecSource, frame: u64) -> Result<()> {
     Ok(())
 }
 
+/// The directory entries the voices name, and those written by the uploads
+/// the recording sent through the ports up to `frame`.
+fn used(rec: &RomrecSource, frame: u64, dsp: &[u8]) -> Result<Vec<u8>> {
+    let mut events = Vec::new();
+    for f in 0..=frame {
+        if let Some(e) = rec.apu_events(f)? {
+            events.extend(
+                e.events
+                    .into_iter()
+                    .filter(|e| e.kind == ApuEventKind::CpuPort),
+            );
+        }
+    }
+    let mut out: Vec<u8> = voices(dsp, None).iter().map(|v| v.source).collect();
+    out.extend(entries_written(dsp[0x5D], sent_spans(&events)));
+    Ok(out)
+}
+
 fn print_map(rec: &RomrecSource, frame: u64, log: Option<&SpcLog>) -> Result<()> {
     let f = frame_state(rec, frame)?;
-    let used: Vec<u8> = voices(&f.dsp, None).iter().map(|v| v.source).collect();
+    let used = used(rec, frame, &f.dsp)?;
     println!("frame {frame}: audio RAM, the SPC700 at ${:04X}", f.spc.pc);
     for p in aram_map(&f.aram, &f.dsp, &f.spc, &used, &[], log) {
         let end = p.start as u32 + p.len - 1;
@@ -244,7 +265,7 @@ fn print_samples(rec: &RomrecSource, frame: u64, log: Option<&SpcLog>) -> Result
     let played = log.map(|l| l.touched(SpcAccess::DspRead));
     let f = frame_state(rec, frame)?;
     let dir = f.dsp[0x5D];
-    let used: Vec<u8> = voices(&f.dsp, None).iter().map(|v| v.source).collect();
+    let used = used(rec, frame, &f.dsp)?;
     let d = directory(&f.aram, dir, &used);
     println!(
         "frame {frame}: the sample directory at ${:04X} (DIR = ${dir:02X}), {} sample{}",

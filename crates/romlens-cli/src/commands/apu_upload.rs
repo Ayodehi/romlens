@@ -8,7 +8,7 @@ use anyhow::{Result, anyhow};
 use romlens_core::apu::Apu;
 use romlens_core::apu::player::Player;
 use romlens_core::audio::upload::{SentUpload, Upload, UploadReport, from_ports, trace};
-use romlens_core::audio::{PartKind, aram_map, voices};
+use romlens_core::audio::{PartKind, aram_map, entries_written, voices};
 use romlens_core::recording::{MachineStateSource, RomrecSource, SpcState};
 use romlens_core::rom::image::RomImage;
 
@@ -25,16 +25,23 @@ fn booted(rom: &RomImage, driver: &Upload, more: &[&Upload], seconds: f64) -> Ap
 }
 
 /// What each block's bytes are once in audio RAM, as runs of the ROM.
-fn classify(rom: &RomImage, apu: &Apu, u: &Upload) -> Vec<(u32, u32, String)> {
+fn classify(rom: &RomImage, apu: &Apu, d: &Upload, u: &Upload) -> Vec<(u32, u32, String)> {
     let spc = SpcState {
         pc: apu.cpu.pc,
         rom_enabled: apu.bus.io.rom_enabled,
         ..SpcState::default()
     };
-    let used: Vec<u8> = voices(&apu.bus.dsp, None)
+    let mut used: Vec<u8> = voices(&apu.bus.dsp, None)
         .iter()
         .map(|v| v.source)
         .collect();
+    used.extend(entries_written(
+        apu.bus.dsp[0x5D],
+        d.blocks
+            .iter()
+            .chain(&u.blocks)
+            .map(|b| (b.aram, b.len as u32)),
+    ));
     let parts = aram_map(&apu.bus.aram, &apu.bus.dsp, &spc, &used, &[u.entry], None);
     let kind_at = |a: u16| {
         parts
@@ -122,7 +129,7 @@ pub fn upload(rom_path: &Path, project: Option<&Path>, rec: Option<&Path>) -> Re
                 booted(&s.rom, d, &[u], 1.0)
             };
             println!("  upload at {}:", u.list);
-            for (from, to, k) in classify(&s.rom, &apu, u) {
+            for (from, to, k) in classify(&s.rom, &apu, d, u) {
                 println!(
                     "    ROM 0x{from:06X}-0x{:06X}  {:>6} bytes  {k}",
                     to - 1,

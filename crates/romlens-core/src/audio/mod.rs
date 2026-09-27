@@ -11,7 +11,7 @@ pub mod ports;
 pub mod upload;
 pub mod voices;
 
-pub use aram_map::{AramPart, DirEntry, PartKind, aram_map, directory};
+pub use aram_map::{AramPart, DirEntry, PartKind, aram_map, directory, entries_written};
 pub use notes::{NoteEvent, NoteKind, NoteTracker, note_name, sample_tuning, timeline};
 pub use ports::{PortMessage, port_messages};
 pub use voices::{Voice, voices};
