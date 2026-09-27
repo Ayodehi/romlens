@@ -8,8 +8,12 @@
 //! with a zero length and the address to run. This finds that routine by
 //! what it does to the ports (waits for `$BBAA`, kicks with `$CC`, reads
 //! `[dp],Y`), finds the constant pointers other code stores into its
-//! pointer before calling it, and reads each block list there. Every block
-//! then says where in the ROM each byte of audio RAM came from.
+//! pointer before calling it, and reads each block list there. Two other
+//! forms are read too: Super Metroid's, the list's offset and bank taken
+//! into Y and the data bank; and Square's, no list at all but two tables
+//! the routine reads by index, of pointers to the blocks and of where each
+//! goes. Every block then says where in the ROM each byte of audio RAM
+//! came from.
 //!
 //! Constants stored to the ports anywhere else are the game's sound
 //! commands: the values its code sends the driver.
@@ -46,21 +50,49 @@ pub struct Block {
     pub from: SnesAddress,
 }
 
+/// How an upload's blocks are laid out in the ROM.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UploadForm {
+    /// A block list at `list`: length, address, bytes, again and again,
+    /// then a zero length and the entry.
+    BlockList,
+    /// Two tables the upload routine reads at the same index (Square's
+    /// form): at `list` two-byte pointers into one bank, each to a length
+    /// and its bytes, and at `aram_table` where each goes in audio RAM.
+    /// The count and the entry are constants in the routine.
+    PairedTables { aram_table: SnesAddress },
+}
+
 /// A block list some code points the upload routine at.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Upload {
+    /// The block list, or for [`UploadForm::PairedTables`] the table of
+    /// pointers to the blocks.
     pub list: SnesAddress,
+    pub form: UploadForm,
     /// The first of the stores that set the pointer, and their routine.
     pub set_at: FileOffset,
     pub set_in: SnesAddress,
     pub blocks: Vec<Block>,
     /// Where the SPC700 goes when the list ends.
     pub entry: u16,
-    /// The list's bytes in the ROM, headers included.
+    /// The list's bytes in the ROM, headers included (the pointer
+    /// table's, for paired tables).
     pub list_len: u32,
 }
 
 impl Upload {
+    /// Where its blocks are named, in words: "the list at $0E:8000", or
+    /// for Square's form "the tables at $C5:0010 and $C5:001C".
+    pub fn source(&self) -> String {
+        match self.form {
+            UploadForm::BlockList => format!("the list at {}", self.list),
+            UploadForm::PairedTables { aram_table } => {
+                format!("the tables at {} and {aram_table}", self.list)
+            }
+        }
+    }
+
     pub fn bytes(&self) -> u32 {
         self.blocks.iter().map(|b| b.len as u32).sum()
     }
@@ -346,6 +378,139 @@ fn pointer_tables(f: &Function, pointer: u16) -> Vec<(u32, FileOffset)> {
         .collect()
 }
 
+/// A table read by index into the pointer, or into the ports: `LDA t,X`
+/// stored to `target`, and with an 8-bit accumulator `LDA t+1,X` to the
+/// byte after. Each table's base and the load that reads it.
+fn indexed_loads(
+    f: &Function,
+    to: impl Fn(&crate::cpu65816::Instruction) -> Option<u16>,
+    target: u16,
+) -> Vec<(u32, FileOffset)> {
+    use Mnemonic::*;
+    let loads = |target: u16, wide: bool| -> Vec<(u32, FileOffset, bool)> {
+        f.steps
+            .windows(2)
+            .filter_map(|w| {
+                let (l, st) = (&w[0].insn, &w[1].insn);
+                let base = match l.mode {
+                    AddressingMode::AbsoluteLongX => l.operand.value(),
+                    AddressingMode::AbsoluteX => {
+                        (l.address.bank() as u32) << 16 | l.operand.value() & 0xFFFF
+                    }
+                    _ => return None,
+                };
+                (l.mnemonic == LDA
+                    && (wide || l.flags_before.m)
+                    && st.mnemonic == STA
+                    && to(st) == Some(target))
+                .then_some((base, l.file_offset, !l.flags_before.m))
+            })
+            .collect()
+    };
+    let second = loads(target.wrapping_add(1), false);
+    loads(target, true)
+        .into_iter()
+        .filter(|(base, _, wide)| *wide || second.iter().any(|(b, _, _)| *b == base + 1))
+        .map(|(base, at, _)| (base, at))
+        .collect()
+}
+
+/// Square's form (Final Fantasy III's `$C5:0000`, Chrono Trigger's
+/// `$C7:0000`): the upload routine itself fills its pointer from a table
+/// of two-byte pointers by index, with a constant bank; each pointer is to
+/// a length and then the bytes; a second table at the same index gives
+/// each block's audio RAM address for ports 2 and 3; `CPX #n` ends the
+/// loop after `n / 2` blocks; and the entry is the constant on ports 2
+/// and 3 when port 1 is given 0.
+fn paired_tables(rom: &RomImage, f: &Function, v: &Values, pointer: u16) -> Option<Upload> {
+    use Mnemonic::*;
+    let (base, set_at) = *indexed_loads(f, low_ram, pointer).first()?;
+    let port = |i: &crate::cpu65816::Instruction| port_of(i).map(|p| 0x2140 + p as u16);
+    let (aram_table, _) = *indexed_loads(f, port, 0x2142).first()?;
+    // The bank, a constant stored to the pointer's third byte.
+    let mut bank = None;
+    // The count, the first `CPX #n` after the table is read.
+    let mut count = None;
+    // Ports 2 and 3 as the values know them, and the entry once port 1 is
+    // given 0.
+    let mut ports: [Option<u8>; 4] = [None; 4];
+    let mut entry = None;
+    for (i, s) in f.steps.iter().enumerate() {
+        let insn = &s.insn;
+        let state = v.before.get(i).and_then(|b| b.as_ref());
+        if insn.mnemonic == CPX
+            && insn.mode.is_immediate()
+            && insn.file_offset > set_at
+            && count.is_none()
+        {
+            count = Some(insn.operand.value());
+        }
+        let Some((value, width)) = state.and_then(|st| stored(insn, st)) else {
+            continue;
+        };
+        if let Some(at) = low_ram(insn) {
+            for (k, b) in value.iter().take(width).enumerate() {
+                if at.wrapping_add(k as u16) == pointer.wrapping_add(2) {
+                    bank = b.known().or(bank);
+                }
+            }
+        }
+        if let Some(p) = port_of(insn) {
+            for (k, b) in value.iter().take(width).enumerate() {
+                if let Some(slot) = ports.get_mut(p as usize + k) {
+                    *slot = b.known();
+                }
+            }
+            if p == 1 && ports[1] == Some(0) && entry.is_none() && insn.file_offset > set_at {
+                entry = ports[2]
+                    .zip(ports[3])
+                    .map(|(lo, hi)| u16::from_le_bytes([lo, hi]));
+            }
+        }
+    }
+    let (bank, count, entry) = (bank?, count?, entry?);
+    if count == 0 || count % 2 != 0 || count > 0x200 {
+        return None;
+    }
+    let bytes = rom.bytes();
+    let word_at = |a: u32| -> Option<u16> {
+        let o = rom.file_offset_for(SnesAddress::from_u24(a))?.as_usize();
+        Some(u16::from_le_bytes([*bytes.get(o)?, *bytes.get(o + 1)?]))
+    };
+    let mut blocks = Vec::new();
+    for k in 0..count / 2 {
+        let src = (bank as u32) << 16 | word_at(base + k * 2)? as u32;
+        let aram = word_at(aram_table + k * 2)?;
+        let len = word_at(src)?;
+        // Read on through the file, as a list is.
+        let at = FileOffset(rom.file_offset_for(SnesAddress::from_u24(src))?.0 + 2);
+        let from = rom.snes_address_for(at)?;
+        if len == 0
+            || aram as u32 + len as u32 > 0x10000
+            || at.0 as usize + len as usize > bytes.len()
+        {
+            return None;
+        }
+        blocks.push(Block {
+            aram,
+            len,
+            rom: at,
+            from,
+        });
+    }
+    Some(Upload {
+        list: SnesAddress::from_u24(base),
+        form: UploadForm::PairedTables {
+            aram_table: SnesAddress::from_u24(aram_table),
+        },
+        set_at,
+        set_in: f.entry,
+        blocks,
+        entry,
+        list_len: count,
+    })
+}
+
 /// The lists a pointer table holds: entries three bytes apart from its
 /// base, read until two in a row are not lists.
 fn table_lists(rom: &RomImage, base: u32) -> Vec<SnesAddress> {
@@ -537,6 +702,11 @@ fn collect_uploads(
     uploads: &mut Vec<Upload>,
 ) {
     for &p in pointers {
+        if let Some(u) = paired_tables(rom, f, v, p)
+            && !uploads.iter().any(|x| x.list == u.list)
+        {
+            uploads.push(u);
+        }
         let tables = pointer_tables(f, p).into_iter().flat_map(|(base, set_at)| {
             table_lists(rom, base)
                 .into_iter()
@@ -550,6 +720,7 @@ fn collect_uploads(
             if let Some((blocks, entry, list_len)) = parse_list(rom, list) {
                 uploads.push(Upload {
                     list,
+                    form: UploadForm::BlockList,
                     set_at,
                     set_in: f.entry,
                     blocks,
@@ -797,13 +968,13 @@ pub fn uploaded_spans(rom: &RomImage, uploads: &[Upload]) -> Vec<UploadedSpan> {
         // directory.
         let mut what = vec![0u8; 0x10000];
         if dir != 0 {
-            let written = crate::audio::entries_written(
-                dir,
-                d.blocks
-                    .iter()
-                    .chain(&u.blocks)
-                    .map(|b| (b.aram, b.len as u32)),
-            );
+            let spans: Vec<(u16, u32)> = d
+                .blocks
+                .iter()
+                .chain(&u.blocks)
+                .map(|b| (b.aram, b.len as u32))
+                .collect();
+            let written = crate::audio::entries_written(&aram, dir, &spans);
             let entries = crate::audio::directory(&aram, dir, &written);
             for e in &entries {
                 let end = (e.start as usize + e.blocks as usize * 9).min(0x10000);
@@ -845,9 +1016,9 @@ pub fn uploaded_spans(rom: &RomImage, uploads: &[Upload]) -> Vec<UploadedSpan> {
                     len: j - i,
                     sample: is == 1,
                     what: format!(
-                        "{lead} to audio RAM ${at:04X}-${:04X} ({role}, the list at {}){tail}",
+                        "{lead} to audio RAM ${at:04X}-${:04X} ({role}, {}){tail}",
                         at + (j - i) - 1,
-                        u.list,
+                        u.source(),
                     ),
                 });
                 i = j;

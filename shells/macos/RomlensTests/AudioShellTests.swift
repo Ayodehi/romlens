@@ -87,7 +87,7 @@ import Testing
     @Test func theUploadsLaidOverTheDriverSkipOnesThatReplaceOthers() {
         func upload(_ list: UInt32, driver: Bool, _ aram: UInt16, _ len: UInt16) -> UploadInfo {
             UploadInfo(
-                list: list, setAt: 0, setIn: 0,
+                list: list, aramTable: nil, source: "the list at \(list)", setAt: 0, setIn: 0,
                 blocks: [UploadBlockInfo(aram: aram, len: len, romOffset: 0, snes: list)],
                 entry: 0x0500, bytes: UInt32(len), driver: driver
             )

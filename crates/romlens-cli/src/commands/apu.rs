@@ -231,7 +231,7 @@ fn print_dsp(rec: &RomrecSource, frame: u64) -> Result<()> {
 
 /// The directory entries the voices name, and those written by the uploads
 /// the recording sent through the ports up to `frame`.
-fn used(rec: &RomrecSource, frame: u64, dsp: &[u8]) -> Result<Vec<u8>> {
+fn used(rec: &RomrecSource, frame: u64, aram: &[u8], dsp: &[u8]) -> Result<Vec<u8>> {
     let mut events = Vec::new();
     for f in 0..=frame {
         if let Some(e) = rec.apu_events(f)? {
@@ -243,13 +243,13 @@ fn used(rec: &RomrecSource, frame: u64, dsp: &[u8]) -> Result<Vec<u8>> {
         }
     }
     let mut out: Vec<u8> = voices(dsp, None).iter().map(|v| v.source).collect();
-    out.extend(entries_written(dsp[0x5D], sent_spans(&events)));
+    out.extend(entries_written(aram, dsp[0x5D], &sent_spans(&events)));
     Ok(out)
 }
 
 fn print_map(rec: &RomrecSource, frame: u64, log: Option<&SpcLog>) -> Result<()> {
     let f = frame_state(rec, frame)?;
-    let used = used(rec, frame, &f.dsp)?;
+    let used = used(rec, frame, &f.aram, &f.dsp)?;
     println!("frame {frame}: audio RAM, the SPC700 at ${:04X}", f.spc.pc);
     for p in aram_map(&f.aram, &f.dsp, &f.spc, &used, &[], log) {
         let end = p.start as u32 + p.len - 1;
@@ -265,7 +265,7 @@ fn print_samples(rec: &RomrecSource, frame: u64, log: Option<&SpcLog>) -> Result
     let played = log.map(|l| l.touched(SpcAccess::DspRead));
     let f = frame_state(rec, frame)?;
     let dir = f.dsp[0x5D];
-    let used = used(rec, frame, &f.dsp)?;
+    let used = used(rec, frame, &f.aram, &f.dsp)?;
     let d = directory(&f.aram, dir, &used);
     println!(
         "frame {frame}: the sample directory at ${:04X} (DIR = ${dir:02X}), {} sample{}",

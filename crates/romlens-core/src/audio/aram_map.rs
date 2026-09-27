@@ -143,16 +143,24 @@ pub fn directory(aram: &[u8], dir: u8, used: &[u8]) -> Vec<DirEntry> {
 }
 
 /// The directory entries at `dir << 8` that an upload's block of entries
-/// writes: a block that starts on an entry, holds whole entries and lies
-/// within the directory's 1 KB. Such a block says its entries are meant,
-/// even past one that no longer points at a sample: Super Metroid's song
-/// banks write entries 24 on, after an entry 23 of the driver's that their
-/// own samples overwrite. A block that only runs across the directory (a
-/// driver's samples sent in one piece) says nothing of it.
-pub fn entries_written(dir: u8, spans: impl IntoIterator<Item = (u16, u32)>) -> Vec<u8> {
+/// writes and whose sample an upload wrote too. A block of entries starts
+/// on an entry, holds whole entries and lies within the directory's 1 KB;
+/// it says its entries are meant, even past one that no longer points at a
+/// sample: Super Metroid's song banks write entries 24 on, after an entry
+/// 23 of the driver's that their own samples overwrite. A block that only
+/// runs across the directory (a driver's samples sent in one piece) says
+/// nothing of it, and nor does an entry pointing where nothing was sent
+/// (Chrono Trigger sends a table of `$E0FF`s to `$1F80`, inside its
+/// directory's 1 KB, and the RAM there happens to read as a sample).
+pub fn entries_written(aram: &[u8], dir: u8, spans: &[(u16, u32)]) -> Vec<u8> {
     let base = (dir as u32) << 8;
+    let sent = |a: u32| {
+        spans
+            .iter()
+            .any(|&(s, l)| (s as u32..s as u32 + l).contains(&a))
+    };
     let mut out: Vec<u8> = Vec::new();
-    for (start, len) in spans {
+    for &(start, len) in spans {
         let s = start as u32;
         if s < base
             || !(s - base).is_multiple_of(4)
@@ -162,7 +170,11 @@ pub fn entries_written(dir: u8, spans: impl IntoIterator<Item = (u16, u32)>) -> 
             continue;
         }
         for n in (s - base) / 4..(s - base + len) / 4 {
-            out.push(n as u8);
+            let at = (base + n * 4) as usize;
+            let sample = u16::from_le_bytes([aram[at & 0xFFFF], aram[(at + 1) & 0xFFFF]]);
+            if sent(sample as u32) {
+                out.push(n as u8);
+            }
         }
     }
     out.sort_unstable();

@@ -35,13 +35,13 @@ fn classify(rom: &RomImage, apu: &Apu, d: &Upload, u: &Upload) -> Vec<(u32, u32,
         .iter()
         .map(|v| v.source)
         .collect();
-    used.extend(entries_written(
-        apu.bus.dsp[0x5D],
-        d.blocks
-            .iter()
-            .chain(&u.blocks)
-            .map(|b| (b.aram, b.len as u32)),
-    ));
+    let spans: Vec<(u16, u32)> = d
+        .blocks
+        .iter()
+        .chain(&u.blocks)
+        .map(|b| (b.aram, b.len as u32))
+        .collect();
+    used.extend(entries_written(&apu.bus.aram, apu.bus.dsp[0x5D], &spans));
     let parts = aram_map(&apu.bus.aram, &apu.bus.dsp, &spc, &used, &[u.entry], None);
     let kind_at = |a: u16| {
         parts
@@ -94,8 +94,8 @@ pub fn upload(rom_path: &Path, project: Option<&Path>, rec: Option<&Path>) -> Re
             "more for a running driver"
         };
         println!(
-            "\nupload {n}: the list at {} (set at {} in {}), {} blocks, {} bytes, then ${:04X}: {what}",
-            u.list,
+            "\nupload {n}: {} (set at {} in {}), {} blocks, {} bytes, then ${:04X}: {what}",
+            u.source(),
             s.rom
                 .snes_address_for(u.set_at)
                 .map(|a| a.to_string())
@@ -223,10 +223,10 @@ fn compare_recording(rom: &RomImage, r: &UploadReport, path: &Path) -> Result<()
                             && rom.bytes()[b.rom.as_usize()..b.rom.as_usize() + bytes.len()]
                                 == bytes[..]
                     })
-                    .map(|b| (t.list, b.rom))
+                    .map(|b| (t.source(), b.rom))
             });
             let origin = match traced {
-                Some((list, off)) => format!("the traced list at {list}, ROM 0x{:06X}", off.0),
+                Some((source, off)) => format!("traced, {source}, ROM 0x{:06X}", off.0),
                 None => match find(rom.bytes(), bytes) {
                     Some(off) => format!("not traced; the bytes are at ROM 0x{off:06X}"),
                     None => {

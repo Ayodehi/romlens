@@ -287,3 +287,99 @@ pub fn sound_upload_banked_lorom() -> Vec<u8> {
     list(&mut rom, 0x3000, 0x0500, &[9, 9], 0x0300);
     rom
 }
+
+/// Where [`sound_upload_paired_lorom`] keeps its two tables: the blocks'
+/// pointers at `$00:9000`, their audio RAM addresses at `$00:9010`.
+pub const PAIRED_TABLES: (usize, usize) = (0x1000, 0x1010);
+
+/// A LoROM image whose upload is shaped as Square's (docs/23; Final
+/// Fantasy III's `$C5:0000`, Chrono Trigger's `$C7:0000`): the routine at
+/// `$8040` waits for `$BBAA`, sends the first block's address from
+/// `$00:9010` and kicks with `$CC`; then for each block it fills its
+/// pointer `$10–$12` from the table at `$00:9000` by index (the bank a
+/// constant 0), reads the block's length there and sends the bytes after
+/// it; the next address comes from `$00:9010,X`, `CPX #$0006` ends it
+/// after three blocks, and `LDY #$0300`, `STY $2142` with port 1 given 0
+/// sends the entry. The blocks, at `$00:A000`, `$A100` and `$A200`, go to
+/// `$0300`, `$0400` and `$0500`.
+pub fn sound_upload_paired_lorom() -> Vec<u8> {
+    #[rustfmt::skip]
+    let code: Vec<u8> = [
+        &[0x78, 0x18, 0xFB][..],              // SEI; CLC; XCE
+        &[0x20, 0x40, 0x80],                  // JSR $8040
+        &[0x80, 0xFE],                        // BRA *
+    ]
+    .concat();
+    #[rustfmt::skip]
+    let routine: Vec<u8> = [
+        &[0xE2, 0x20, 0xC2, 0x10][..],        // $8040 SEP #$20; REP #$10
+        &[0xA2, 0xAA, 0xBB],                  // LDX #$BBAA
+        &[0xEC, 0x40, 0x21, 0xD0, 0xFB],      // $8047 CPX $2140; BNE $8047
+        &[0xA2, 0x00, 0x00],                  // LDX #$0000
+        &[0xAF, 0x10, 0x90, 0x00],            // LDA $00:9010
+        &[0x8D, 0x42, 0x21],                  // STA $2142
+        &[0xAF, 0x11, 0x90, 0x00],            // LDA $00:9011
+        &[0x8D, 0x43, 0x21],                  // STA $2143
+        &[0xA9, 0xCC],                        // LDA #$CC
+        &[0x8D, 0x41, 0x21, 0x8D, 0x40, 0x21],// STA $2141; STA $2140
+        &[0xCD, 0x40, 0x21, 0xD0, 0xFB],      // $8065 CMP $2140; BNE $8065
+        &[0xA9, 0x00, 0xEB],                  // $806A LDA #$00; XBA
+        &[0xBF, 0x00, 0x90, 0x00],            // LDA $00:9000,X
+        &[0x85, 0x10],                        // STA $10
+        &[0xBF, 0x01, 0x90, 0x00],            // LDA $00:9001,X
+        &[0x85, 0x11],                        // STA $11
+        &[0xA9, 0x00, 0x85, 0x12],            // LDA #$00; STA $12
+        &[0xA0, 0x00, 0x00],                  // LDY #$0000
+        &[0xB7, 0x10, 0x18, 0x69, 0x02],      // LDA [$10],Y; CLC; ADC #$02
+        &[0x85, 0x1C, 0xC8],                  // STA $1C; INY
+        &[0xB7, 0x10, 0x69, 0x00],            // LDA [$10],Y; ADC #$00
+        &[0x85, 0x1D, 0xC8],                  // STA $1D; INY
+        &[0xB7, 0x10],                        // $808F LDA [$10],Y
+        &[0x8D, 0x41, 0x21, 0xEB],            // STA $2141; XBA
+        &[0x8D, 0x40, 0x21],                  // STA $2140
+        &[0xCD, 0x40, 0x21, 0xD0, 0xFB],      // $8098 CMP $2140; BNE $8098
+        &[0x1A, 0xEB, 0xC8],                  // INC; XBA; INY
+        &[0xC4, 0x1C, 0xD0, 0xEB],            // CPY $1C; BNE $808F
+        &[0xEB, 0x1A, 0x1A, 0x1A],            // XBA; INC; INC; INC
+        &[0xD0, 0x01, 0x1A],                  // BNE $80AB; INC
+        &[0xE8, 0xE8],                        // $80AB INX; INX
+        &[0xE0, 0x06, 0x00],                  // CPX #$0006
+        &[0xF0, 0x1D],                        // BEQ $80CF
+        &[0xEB],                              // XBA
+        &[0xBF, 0x10, 0x90, 0x00],            // LDA $00:9010,X
+        &[0x8D, 0x42, 0x21],                  // STA $2142
+        &[0xBF, 0x11, 0x90, 0x00],            // LDA $00:9011,X
+        &[0x8D, 0x43, 0x21],                  // STA $2143
+        &[0xEB],                              // XBA
+        &[0x8D, 0x41, 0x21, 0x8D, 0x40, 0x21],// STA $2141; STA $2140
+        &[0xCD, 0x40, 0x21, 0xD0, 0xFB],      // $80C8 CMP $2140; BNE $80C8
+        &[0x80, 0x9B],                        // BRA $806A
+        &[0xA0, 0x00, 0x03],                  // $80CF LDY #$0300
+        &[0x8C, 0x42, 0x21],                  // STY $2142
+        &[0xEB, 0xA9, 0x00],                  // XBA; LDA #$00
+        &[0x8D, 0x41, 0x21],                  // STA $2141
+        &[0xEB, 0x8D, 0x40, 0x21],            // XBA; STA $2140
+        &[0x60],                              // RTS
+    ]
+    .concat();
+    assert_eq!(routine.len(), 0xE0 - 0x40);
+    let mut rom = super::build_with_code(MappingMode::LoRom, 0x20000, false, &code, SOUND_TITLE);
+    rom[0x0040..0x0040 + routine.len()].copy_from_slice(&routine);
+    let (pointers, aram) = PAIRED_TABLES;
+    for (k, (src, dest)) in [(0xA000u16, 0x0300u16), (0xA100, 0x0400), (0xA200, 0x0500)]
+        .into_iter()
+        .enumerate()
+    {
+        rom[pointers + k * 2..pointers + k * 2 + 2].copy_from_slice(&src.to_le_bytes());
+        rom[aram + k * 2..aram + k * 2 + 2].copy_from_slice(&dest.to_le_bytes());
+    }
+    for (at, bytes) in [
+        (0x2000, &[1u8, 2, 3, 4][..]),
+        (0x2100, &[5, 6]),
+        (0x2200, &[7, 8, 9]),
+    ] {
+        rom[at..at + 2].copy_from_slice(&(bytes.len() as u16).to_le_bytes());
+        rom[at + 2..at + 2 + bytes.len()].copy_from_slice(bytes);
+    }
+    rom
+}

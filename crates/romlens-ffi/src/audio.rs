@@ -326,8 +326,13 @@ pub struct UploadBlockInfo {
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct UploadInfo {
-    /// The block list, SNES address.
+    /// The block list, or for Square's form the table of pointers to the
+    /// blocks, SNES address.
     pub list: u32,
+    /// For Square's form, the table of the blocks' audio RAM addresses.
+    pub aram_table: Option<u32>,
+    /// Where the blocks are named, in words: "the list at $0E:8000".
+    pub source: String,
     /// The instruction that sets the pointer, file offset, and its routine.
     pub set_at: u32,
     pub set_in: u32,
@@ -376,6 +381,13 @@ impl From<&UploadReport> for UploadReportInfo {
                 .iter()
                 .map(|u| UploadInfo {
                     list: u.list.as_u24(),
+                    aram_table: match u.form {
+                        upload::UploadForm::BlockList => None,
+                        upload::UploadForm::PairedTables { aram_table } => {
+                            Some(aram_table.as_u24())
+                        }
+                    },
+                    source: u.source(),
                     set_at: u.set_at.0,
                     set_in: u.set_in.as_u24(),
                     blocks: u
@@ -626,12 +638,16 @@ impl Machine<'_> {
             .iter()
             .map(|v| v.source)
             .collect();
+        let spans: Vec<(u16, u32)> = self
+            .origins
+            .iter()
+            .map(|&(a, len, _)| (a, len as u32))
+            .chain(self.sent.iter().copied())
+            .collect();
         out.extend(core_audio::entries_written(
+            self.aram,
             self.dsp[0x5D],
-            self.origins
-                .iter()
-                .map(|&(a, len, _)| (a, len as u32))
-                .chain(self.sent.iter().copied()),
+            &spans,
         ));
         out
     }

@@ -188,7 +188,7 @@ struct AramPartDetail: View {
                 if !blocks.isEmpty {
                     ForEach(Array(blocks.enumerated()), id: \.offset) { _, b in
                         HStack(spacing: 6) {
-                            Text("sent by the upload at \(formatSnesAddress(address: b.upload.list)): ROM \(formatFileOffset(offset: b.block.romOffset)), \(b.block.len) bytes to \(AudioStyle.hex(b.block.aram, 4))")
+                            Text("sent by the upload from \(b.upload.source): ROM \(formatFileOffset(offset: b.block.romOffset)), \(b.block.len) bytes to \(AudioStyle.hex(b.block.aram, 4))")
                                 .font(.caption)
                             Button("Show in ROM") {
                                 let into = UInt32(max(Int(part.start) - Int(b.block.aram), 0))

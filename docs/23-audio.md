@@ -50,7 +50,27 @@ up to the frame (`upload::sent_spans`, the port writes kept per session
 so a live one reads only its new frames). A block that merely runs
 across the directory, like a driver's samples sent in one piece, says
 nothing of it. Super Metroid's 24 banks each read as a directory and
-10–19 KB of samples; Zelda's directory has 25 entries, not 3.
+10–19 KB of samples; Zelda's directory has 25 entries, not 3. An
+uploaded entry counts only where its sample was uploaded too: Chrono
+Trigger sends a table of `$E0FF`s to `$1F80`, inside its directory's
+1 KB, and the RAM at `$E0FF` happens to read as a sample.
+
+Square's uploads, 27 September 2026: Final Fantasy III's routine
+(`$C5:0000`) and Chrono Trigger's (`$C7:0000`) send no block list. Each
+fills its pointer from a table of two-byte pointers by index, the bank a
+constant (`LDA $C5:0010,X` into `$10`, `LDA $C5:0011,X` into `$11`,
+`LDA #$C5` into `$12`); each pointer is to a length and then the bytes;
+a second table at the same index gives ports 2 and 3 each block's audio
+RAM address; `CPX #$000C` ends the loop after six blocks; and the entry
+is the constant on ports 2 and 3 when port 1 is given 0 (`LDY #$0200`,
+`STY $2142`). `upload::paired_tables` reads that form
+(`UploadForm::PairedTables`, "the tables at $C5:0010 and $C5:001C"), in
+the analysis's fast path too, so the driver, its samples and its
+directory are classified in the ROM and Romlens boots the driver from
+the ROM alone. Both games' six blocks match what their recordings sent,
+byte for byte. The table's earlier "0 / 4" for Chrono Trigger came from
+reading the recording before `rec pack` learnt the SPC700's rate (A15),
+which split the one upload into four.
 
 ## Measured
 
@@ -66,7 +86,7 @@ buffer's bytes and the DSP's own registers (see A15).
 |---|---|---|---|---|---|
 | Driver | N-SPC, older | N-SPC | Square's | Square's | N-SPC |
 | Upload routine traced | `$00:8079` | `$80:8028` (the banked form) | `$C5:0000` | `$C7:0000` | `$00:8888` |
-| Lists traced / uploads the recording saw | 5 / 3, every block matched byte for byte | 25 (the driver and 24 song banks) / 2, all 11 blocks matched | 0 / 1 | 0 / 4 | 1 (the driver) / 1, all 9 blocks matched |
+| Lists traced / uploads the recording saw | 5 / 3, every block matched byte for byte | 25 (the driver and 24 song banks) / 2, all 11 blocks matched | 1 (the driver, Square's paired tables) / 1, all 6 blocks matched | 1 (the same form) / 1, all 6 blocks matched |
 | Sound command values traced | 112 | 11 | 49 | 38 | 6 |
 | Directory entries read at the end (from entry 0 to the first that is not a sample, those the voices name, and those an upload's block of entries wrote) | 20 | 38 (7 before the fixes of 27 September) | 9 | 12 (4) | 23 (5) |
 | N-SPC read | song 1 of 9 playing | song 5 of 6 | not N-SPC | not N-SPC | song 6 of 15 |
@@ -92,9 +112,6 @@ What stays open:
   rarely exact; its per-frame replay is exact in 95% of frames, so the
   offset comes from the run's start inside an instruction, not from its
   driver.
-- **Square's uploads are not traced.** Final Fantasy III's and Chrono
-  Trigger's routines are found, but their block lists come through tables
-  of another shape, so only a recording shows their uploads.
 
 ## Context
 

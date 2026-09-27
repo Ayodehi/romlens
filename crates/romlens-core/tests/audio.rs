@@ -118,8 +118,10 @@ fn a_directory_takes_shift_13_and_the_entries_an_upload_writes() {
     );
     // A block of whole entries names them; a block that only runs across
     // the directory does not.
-    let written = entries_written(0x3C, [(0x3C08, 4), (0x3B00, 0x1000)]);
+    let written = entries_written(&aram, 0x3C, &[(0x3C08, 4), (0x3B00, 0x1000), (0x5000, 72)]);
     assert_eq!(written, vec![2]);
+    // An entry whose sample nothing sent says nothing.
+    assert!(entries_written(&aram, 0x3C, &[(0x3C08, 4)]).is_empty());
     let d = directory(&aram, 0x3C, &written);
     assert_eq!(d.iter().map(|e| e.index).collect::<Vec<_>>(), vec![0, 2]);
     assert_eq!((d[1].start, d[1].blocks), (0x5000, 8));

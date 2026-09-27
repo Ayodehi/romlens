@@ -165,3 +165,37 @@ fn a_banked_upload_from_a_pointer_table_is_traced_across_banks() {
     assert_eq!(routines.len(), 1);
     assert_eq!(uploads.len(), 2);
 }
+
+#[test]
+fn squares_upload_from_two_tables_is_traced() {
+    use romlens_core::audio::upload::UploadForm;
+    use romlens_core::fixtures::sound::sound_upload_paired_lorom;
+    let rom = RomImage::from_bytes(sound_upload_paired_lorom(), "paired.sfc").unwrap();
+    let snap = analyze(&rom, &Project::new(&rom), &AnalysisControl::silent()).unwrap();
+    let r = trace(&rom, &snap);
+    assert_eq!(r.routines.len(), 1);
+    assert_eq!(r.routines[0].entry, SnesAddress::new(0, 0x8040));
+    assert_eq!(r.routines[0].pointer, 0x10);
+    assert_eq!(r.uploads.len(), 1);
+    let u = &r.uploads[0];
+    assert_eq!(u.list, SnesAddress::new(0, 0x9000));
+    assert_eq!(
+        u.form,
+        UploadForm::PairedTables {
+            aram_table: SnesAddress::new(0, 0x9010)
+        }
+    );
+    assert_eq!(u.source(), "the tables at $00:9000 and $00:9010");
+    let blocks: Vec<(u16, u16, u32)> = u.blocks.iter().map(|b| (b.aram, b.len, b.rom.0)).collect();
+    assert_eq!(
+        blocks,
+        [
+            (0x0300, 4, 0x2002),
+            (0x0400, 2, 0x2102),
+            (0x0500, 3, 0x2202)
+        ]
+    );
+    assert_eq!(u.entry, 0x0300);
+    let (_, fast) = trace_uploads(&rom, &snap);
+    assert_eq!(fast, r.uploads);
+}
