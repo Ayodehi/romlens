@@ -99,6 +99,7 @@ frames 1 to 4, run on from frame 0's snapshot: 4 frames
   0 differ
   31 I/O writes by Mesen; where ours agree, at most 0 cycles apart
   the DSP, started from rest: ENVX 32 of 32 match, OUTX 32 of 32, ENDX 4 of 4
+  notes: 1 of the recording's 1 key-ons played by Romlens too (same voice, pitch and sample within a frame), of 1 it made
 frames 1 to 1: 3 port writes, 1 from the S-CPU and 2 from the SPC700
   frame     1  cycle      20088  S-CPU  → port 0  $01
   frame     1  cycle      20497  SPC700 → port 0  $01

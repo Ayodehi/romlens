@@ -658,25 +658,29 @@ impl StreamDecoder {
     /// the SPC700 up at every frame's end) and snapped to the rates Mesen
     /// can use: 32,000 or 32,040 Hz samples, an NTSC or PAL console.
     fn spc_ratio(&mut self) -> Option<f64> {
-        if self.spc_ratio.is_none() {
-            let master = self.fields.n("masterClock");
-            if master > 0 && self.spc_halves > 0 {
-                let seen = self.spc_halves as f64 / master as f64;
-                let rates = [32000.0, 32040.0];
-                let masters = [21_477_270.0, 21_281_370.0];
-                let near = rates
-                    .iter()
-                    .flat_map(|r| masters.iter().map(move |m| r * 64.0 / m))
-                    .min_by(|a, b| (a - seen).abs().total_cmp(&(b - seen).abs()))
-                    .unwrap();
-                self.spc_ratio = Some(if (near - seen).abs() / near < 1e-3 {
-                    near
-                } else {
-                    seen
-                });
-            }
+        if let Some(r) = self.spc_ratio {
+            return Some(r);
         }
-        self.spc_ratio
+        let master = self.fields.n("masterClock");
+        if master == 0 || self.spc_halves == 0 {
+            return None;
+        }
+        let seen = self.spc_halves as f64 / master as f64;
+        let rates = [32000.0, 32040.0];
+        let masters = [21_477_270.0, 21_281_370.0];
+        let near = rates
+            .iter()
+            .flat_map(|r| masters.iter().map(move |m| r * 64.0 / m))
+            .min_by(|a, b| (a - seen).abs().total_cmp(&(b - seen).abs()))
+            .unwrap();
+        // Early on the SPC700 may not have run as long as the S-CPU
+        // (Super Metroid's first frames): until a frame confirms a rate,
+        // Mesen's usual one, 32,040 Hz samples on an NTSC console.
+        if (near - seen).abs() / near < 1e-3 {
+            self.spc_ratio = Some(near);
+            return Some(near);
+        }
+        Some(32040.0 * 64.0 / 21_477_270.0)
     }
 
     /// A frame's sound events, numbered `number`, with `DSPADDR` carried
@@ -1038,6 +1042,32 @@ mod tests {
         let plain = RomrecSource::from_bytes(plain.into_inner(), false).unwrap();
         assert!(!plain.regions().contains(&StateRegion::Aram));
         assert_eq!(plain.apu_events(0).unwrap(), None);
+    }
+
+    #[test]
+    fn the_spc_clock_ratio_snaps_to_a_real_rate_and_waits_to_be_sure() {
+        // Super Metroid's first frames: the SPC700 had run 3,128 halves
+        // while the master clock was at 60 million, far from any rate.
+        let header = StreamHeader {
+            version: STREAM_VERSION,
+            producer: String::new(),
+            rom_sha1: String::new(),
+            created: 0,
+            rom_size: 0,
+            samples: Vec::new(),
+            fields: vec!["masterClock".to_owned()],
+            flags: 0,
+        };
+        let mut d = StreamDecoder::new(&header);
+        let ntsc = 32040.0 * 64.0 / 21_477_270.0;
+        d.fields.apply(&[(0, 60_003_756)]);
+        d.spc_halves = 3128;
+        assert_eq!(d.spc_ratio(), Some(ntsc), "Mesen's usual rate");
+        assert_eq!(d.spc_ratio, None, "not kept");
+        // A frame that agrees keeps it.
+        d.spc_halves = (60_003_756.0 * ntsc) as u64;
+        assert_eq!(d.spc_ratio(), Some(ntsc));
+        assert_eq!(d.spc_ratio, Some(ntsc));
     }
 
     #[test]

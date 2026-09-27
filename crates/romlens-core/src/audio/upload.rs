@@ -160,6 +160,83 @@ pub(crate) fn upload_routine(f: &Function) -> Option<UploadRoutine> {
     })
 }
 
+/// The other form (Super Metroid's): a routine that takes the list's
+/// offset into Y from a direct-page pointer and its bank into the data
+/// bank from the byte two past it (`LDY $00`, `LDA $02`, `PHA`, `PLB`),
+/// then calls a routine that waits for `$BBAA`, kicks with `$CC` and reads
+/// the list as `LDA $0000,Y`. The pointer is the same three bytes as a
+/// long pointer's, so the lists are found the same way.
+pub(crate) fn banked_upload_routine(
+    f: &Function,
+    callee: &dyn Fn(SnesAddress) -> Option<Function>,
+) -> Option<UploadRoutine> {
+    use crate::decompile::function::{Callee, Transfer};
+    use Mnemonic::*;
+    let steps = &f.steps;
+    let mut offset_from = None;
+    let mut bank_from = None;
+    for (k, s) in steps.iter().enumerate() {
+        let i = &s.insn;
+        if i.mnemonic == LDY && i.mode == AddressingMode::Direct {
+            offset_from = Some((i.operand.value() as u16, i.file_offset));
+        }
+        if i.mnemonic == LDA
+            && i.mode == AddressingMode::Direct
+            && steps.get(k + 1).is_some_and(|n| n.insn.mnemonic == PHA)
+            && steps.get(k + 2).is_some_and(|n| n.insn.mnemonic == PLB)
+        {
+            bank_from = Some((i.operand.value() as u16, i.file_offset));
+        }
+    }
+    let ((dp, at_y), (bank, at_bank)) = (offset_from?, bank_from?);
+    if bank != dp.wrapping_add(2) {
+        return None;
+    }
+    for s in steps {
+        let Transfer::Call {
+            callee: Callee::Direct(t),
+            ..
+        } = &s.transfer
+        else {
+            continue;
+        };
+        let Some(g) = callee(*t) else { continue };
+        let mut reads_port = Vec::new();
+        let mut kick = Vec::new();
+        let mut reads = Vec::new();
+        for gs in &g.steps {
+            let i = &gs.insn;
+            if matches!(i.mnemonic, CMP | LDA) && port_of(i) == Some(0) {
+                reads_port.push(i.file_offset);
+            }
+            if i.mode.is_immediate() && matches!(i.operand.value(), 0xBBAA | 0xCC) {
+                kick.push(i.file_offset);
+            }
+            if i.mnemonic == LDA && i.mode == AddressingMode::AbsoluteY && i.operand.value() < 0x100
+            {
+                reads.push(i.file_offset);
+            }
+        }
+        if reads_port.is_empty() || kick.is_empty() || reads.is_empty() {
+            continue;
+        }
+        let mut evidence: Vec<FileOffset> = [at_y, at_bank]
+            .into_iter()
+            .chain(reads_port)
+            .chain(kick)
+            .chain(reads)
+            .collect();
+        evidence.sort();
+        evidence.dedup();
+        return Some(UploadRoutine {
+            entry: f.entry,
+            pointer: dp,
+            evidence,
+        });
+    }
+    None
+}
+
 /// The low-RAM address a store writes, when it is one: the direct page
 /// (taken as page 0, where games keep such pointers), `$0000-$1FFF` in a
 /// bank that mirrors it, or bank `$7E`.
@@ -235,15 +312,108 @@ fn pointers_set(f: &Function, v: &Values, pointer: u16) -> Vec<(u32, FileOffset)
     out
 }
 
+/// Tables of three-byte pointers a routine copies into the pointer by
+/// index: `LDA table,X` stored to it and `LDA table+1,X` to the byte after
+/// (Super Metroid's song banks, `$8F:E7E1`). The table's base, and the
+/// instruction that reads it.
+fn pointer_tables(f: &Function, pointer: u16) -> Vec<(u32, FileOffset)> {
+    use Mnemonic::*;
+    let steps = &f.steps;
+    let loads = |target: u16| -> Vec<(u32, FileOffset)> {
+        steps
+            .windows(2)
+            .filter_map(|w| {
+                let (l, st) = (&w[0].insn, &w[1].insn);
+                let base = match l.mode {
+                    AddressingMode::AbsoluteLongX => l.operand.value(),
+                    AddressingMode::AbsoluteX => {
+                        (l.address.bank() as u32) << 16 | l.operand.value() & 0xFFFF
+                    }
+                    _ => return None,
+                };
+                (l.mnemonic == LDA
+                    && !l.flags_before.m
+                    && st.mnemonic == STA
+                    && low_ram(st) == Some(target))
+                .then_some((base, l.file_offset))
+            })
+            .collect()
+    };
+    let second = loads(pointer.wrapping_add(1));
+    loads(pointer)
+        .into_iter()
+        .filter(|(base, _)| second.iter().any(|(b, _)| *b == base + 1))
+        .collect()
+}
+
+/// The lists a pointer table holds: entries three bytes apart from its
+/// base, read until two in a row are not lists.
+fn table_lists(rom: &RomImage, base: u32) -> Vec<SnesAddress> {
+    let mut out = Vec::new();
+    let mut misses = 0;
+    for k in 0..256u32 {
+        let at = base + k * 3;
+        let byte = |p: u32| {
+            rom.file_offset_for(SnesAddress::from_u24(p))
+                .and_then(|o| rom.bytes().get(o.as_usize()).copied())
+        };
+        let (Some(lo), Some(hi), Some(bank)) = (byte(at), byte(at + 1), byte(at + 2)) else {
+            break;
+        };
+        let list = SnesAddress::from_u24(lo as u32 | (hi as u32) << 8 | (bank as u32) << 16);
+        if parse_list(rom, list).is_some() {
+            out.push(list);
+            misses = 0;
+        } else {
+            misses += 1;
+            if misses == 2 {
+                break;
+            }
+        }
+    }
+    out
+}
+
+/// The routines that may set an upload's pointer: the upload routines,
+/// those that call one, and those that call those. A pointer set anywhere
+/// else is for something else (Super Metroid fills `$00–$02` for its
+/// decompressor too).
+fn senders<'a>(
+    routines: &[UploadRoutine],
+    functions: impl Iterator<Item = &'a Function> + Clone,
+) -> BTreeSet<SnesAddress> {
+    use crate::decompile::function::{Callee, Transfer};
+    let mut out: BTreeSet<SnesAddress> = routines.iter().map(|r| r.entry).collect();
+    for _ in 0..2 {
+        let callers: Vec<SnesAddress> = functions
+            .clone()
+            .filter(|f| {
+                f.steps.iter().any(|s| {
+                    matches!(&s.transfer, Transfer::Call { callee: Callee::Direct(t), .. } if out.contains(t))
+                })
+            })
+            .map(|f| f.entry)
+            .collect();
+        out.extend(callers);
+    }
+    out
+}
+
 /// Read the block list at `at`: `(blocks, entry, bytes read)`, or `None`
 /// when what is there is not a list.
 pub fn parse_list(rom: &RomImage, at: SnesAddress) -> Option<(Vec<Block>, u16, u32)> {
-    let mut pos = at.as_u24();
-    let byte = |p: u32| -> Option<(u8, FileOffset)> {
-        let off = rom.file_offset_for(SnesAddress::from_u24(p))?;
-        rom.bytes().get(off.as_usize()).map(|b| (*b, off))
+    // Read on through the file: a loader that steps its bank when the
+    // offset wraps (Super Metroid's, `$CF:FFFF` then `$D0:8000`) reads
+    // the file in order, as one that stays in a bank does.
+    let start = rom.file_offset_for(at)?.0;
+    let bytes = rom.bytes();
+    let word = |p: u32| -> Option<u16> {
+        Some(u16::from_le_bytes([
+            *bytes.get(p as usize)?,
+            *bytes.get(p as usize + 1)?,
+        ]))
     };
-    let word = |p: u32| -> Option<u16> { Some(u16::from_le_bytes([byte(p)?.0, byte(p + 1)?.0])) };
+    let mut pos = start;
     let mut blocks = Vec::new();
     let mut total = 0u32;
     loop {
@@ -254,23 +424,20 @@ pub fn parse_list(rom: &RomImage, at: SnesAddress) -> Option<(Vec<Block>, u16, u
             if blocks.is_empty() {
                 return None;
             }
-            return Some((blocks, aram, pos - at.as_u24()));
+            return Some((blocks, aram, pos - start));
         }
         total += len as u32;
         if aram as u32 + len as u32 > 0x10000 || total > 0x10000 || blocks.len() >= 64 {
             return None;
         }
-        // The bytes must be ROM, all of them, and run on in the file.
-        let (_, first) = byte(pos)?;
-        let (_, last) = byte(pos + len as u32 - 1)?;
-        if last.0 - first.0 != len as u32 - 1 {
+        if (pos + len as u32) as usize > bytes.len() {
             return None;
         }
         blocks.push(Block {
             aram,
             len,
-            rom: first,
-            from: SnesAddress::from_u24(pos),
+            rom: FileOffset(pos),
+            from: rom.snes_address_for(FileOffset(pos))?,
         });
         pos += len as u32;
     }
@@ -342,13 +509,19 @@ const WINDOW: u32 = 0x400;
 /// The uploads alone, quickly: for the analysis, which runs on every edit.
 pub fn trace_uploads(rom: &RomImage, snap: &AnalysisSnapshot) -> (Vec<UploadRoutine>, Vec<Upload>) {
     let near = near_the_ports(rom, snap);
-    let routines: Vec<UploadRoutine> = near.iter().filter_map(upload_routine).collect();
+    let entries = function::entries(snap);
+    let callee = |t: SnesAddress| function::discover(rom, snap, &entries, t).ok();
+    let routines: Vec<UploadRoutine> = near
+        .iter()
+        .filter_map(|f| upload_routine(f).or_else(|| banked_upload_routine(f, &callee)))
+        .collect();
     if routines.is_empty() {
         return (routines, Vec::new());
     }
     let pointers: BTreeSet<u16> = routines.iter().map(|r| r.pointer).collect();
+    let senders = senders(&routines, near.iter());
     let mut uploads: Vec<Upload> = Vec::new();
-    for f in &near {
+    for f in near.iter().filter(|f| senders.contains(&f.entry)) {
         let v = values::values(rom, f, &Cfg::build(f));
         collect_uploads(rom, f, &v, &pointers, &mut uploads);
     }
@@ -364,7 +537,12 @@ fn collect_uploads(
     uploads: &mut Vec<Upload>,
 ) {
     for &p in pointers {
-        for (value, set_at) in pointers_set(f, v, p) {
+        let tables = pointer_tables(f, p).into_iter().flat_map(|(base, set_at)| {
+            table_lists(rom, base)
+                .into_iter()
+                .map(move |l| (l.as_u24(), set_at))
+        });
+        for (value, set_at) in pointers_set(f, v, p).into_iter().chain(tables) {
             if uploads.iter().any(|u| u.list.as_u24() == value) {
                 continue;
             }
@@ -386,6 +564,7 @@ fn collect_uploads(
 /// Everything about sound uploads the ROM's analysed code shows.
 pub fn trace(rom: &RomImage, snap: &AnalysisSnapshot) -> UploadReport {
     let entries = function::entries(snap);
+    let callee = |t: SnesAddress| function::discover(rom, snap, &entries, t).ok();
     let mut routines = Vec::new();
     let mut analysed: Vec<(Function, Values)> = Vec::new();
     for &e in &entries {
@@ -394,7 +573,7 @@ pub fn trace(rom: &RomImage, snap: &AnalysisSnapshot) -> UploadReport {
         };
         let cfg = Cfg::build(&f);
         let v = values::values(rom, &f, &cfg);
-        if let Some(r) = upload_routine(&f) {
+        if let Some(r) = upload_routine(&f).or_else(|| banked_upload_routine(&f, &callee)) {
             routines.push(r);
         }
         analysed.push((f, v));
@@ -405,8 +584,11 @@ pub fn trace(rom: &RomImage, snap: &AnalysisSnapshot) -> UploadReport {
     let mut commands = Vec::new();
     // RAM bytes the code copies to a port, and the port.
     let mut mirrors: BTreeSet<(Option<u16>, u8)> = BTreeSet::new();
+    let senders = senders(&routines, analysed.iter().map(|(f, _)| f));
     for (f, v) in &analysed {
-        collect_uploads(rom, f, v, &pointers, &mut uploads);
+        if senders.contains(&f.entry) {
+            collect_uploads(rom, f, v, &pointers, &mut uploads);
+        }
         if upload_entries.contains(&f.entry) {
             continue;
         }

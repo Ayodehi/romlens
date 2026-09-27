@@ -49,11 +49,20 @@ pub struct FrameCheck {
     pub started_inside: Option<u16>,
     /// Mesen stopped partway through our last instruction.
     pub ended_inside: bool,
+    /// Audio RAM bytes in the echo buffer that differ: the DSP writes
+    /// them itself, and where it is in the buffer is not in a snapshot, so
+    /// they are compared apart, as ENVX and OUTX are.
+    pub echo_bytes: usize,
+    /// The SPC700 was in the boot ROM at either end of the frame: not
+    /// compared, since Romlens's boot program is its own and the
+    /// instructions at `$FFC0–$FFFF` are not Nintendo's.
+    pub boot: bool,
 }
 
 impl FrameCheck {
     pub fn matches(&self) -> bool {
-        self.io_skew == 0
+        !self.boot
+            && self.io_skew == 0
             && self.registers.is_empty()
             && self.aram.is_empty()
             && self.dsp.is_empty()
@@ -66,7 +75,8 @@ impl FrameCheck {
     /// the registers (or a byte) at the very end, where Mesen stopped
     /// inside an instruction in a way the comparison cannot line up.
     pub fn differs_only_at_the_end(&self) -> bool {
-        !self.matches()
+        !self.boot
+            && !self.matches()
             && self.io_skew == 0
             && self.io_mismatch.is_none()
             && self.io_writes.0 == self.io_writes.1
@@ -93,6 +103,19 @@ struct Snapshot {
     aram: Vec<u8>,
     dsp: Vec<u8>,
     spc: SpcState,
+}
+
+/// In the boot ROM: its page mapped and the SPC700 in it.
+fn in_boot(s: &Snapshot) -> bool {
+    s.spc.rom_enabled && s.spc.pc >= crate::spc700::aram::IPL_START
+}
+
+fn boot_check(frame: u64) -> FrameCheck {
+    FrameCheck {
+        frame,
+        boot: true,
+        ..FrameCheck::default()
+    }
 }
 
 fn snapshot(src: &dyn MachineStateSource, frame: u64) -> Result<Snapshot, RecordingError> {
@@ -207,11 +230,27 @@ fn run_frame(
             })
             .unwrap_or(now)
     };
-    c.aram = (0..0x10000usize)
+    let echo = |d: &[u8]| {
+        let start = (d[0x6D] as usize) << 8;
+        let edl = d[0x7D] as usize & 0xF;
+        start..start + if edl == 0 { 4 } else { edl * 2048 }
+    };
+    let (echo_a, echo_b) = (echo(&want.dsp), echo(&apu.bus.dsp));
+    let in_echo = |a: usize| {
+        [&echo_a, &echo_b]
+            .iter()
+            .any(|r| r.contains(&a) || r.contains(&(a + 0x10000)))
+    };
+    let differ: Vec<usize> = (0..0x10000usize)
         .filter(|&a| {
             let now = apu.bus.aram[a];
             now != want.aram[a] && pre(a, now) != want.aram[a]
         })
+        .collect();
+    c.echo_bytes = differ.iter().filter(|a| in_echo(**a)).count();
+    c.aram = differ
+        .into_iter()
+        .filter(|a| !in_echo(*a))
         .map(|a| a as u16)
         .collect();
     let pre_dsp = |r: u8, now: u8| {
@@ -335,6 +374,10 @@ pub fn check_frames(
     let mut out = Vec::new();
     for frame in from.max(1)..=to {
         let (prev, want) = (snapshot(src, frame - 1)?, snapshot(src, frame)?);
+        if in_boot(&prev) || in_boot(&want) {
+            out.push(boot_check(frame));
+            continue;
+        }
         let carried = after_snapshot(src, frame - 1, prev.spc.cycle)?;
         let mut best: Option<FrameCheck> = None;
         for at in start_candidates(&prev) {
@@ -367,28 +410,41 @@ pub fn run_free(
     from: u64,
     to: u64,
 ) -> Result<Vec<FrameCheck>, RecordingError> {
-    let first = snapshot(src, from)?;
-    let mut carried = after_snapshot(src, from, first.spc.cycle)?;
-    let mut apu: Option<Apu> = None;
-    let mut best = usize::MAX;
-    if from < to {
-        let want = snapshot(src, from + 1)?;
-        for at in start_candidates(&first) {
-            let a = start(&first, at);
-            let mut probe = a.clone();
-            let d =
-                run_frame(&mut probe, src, from + 1, &want, &mut carried.clone())?.differences();
-            if d < best {
-                best = d;
-                apu = Some(a);
-            }
-        }
-    }
-    let mut apu = apu.unwrap_or_else(|| start(&first, (first.spc.pc, 0)));
     let mut out = Vec::new();
+    // Started (again) from `seed`'s snapshot: at `from`, and after any
+    // stretch in the boot ROM, where Romlens's boot program cannot follow
+    // Nintendo's instruction by instruction.
+    let mut apu: Option<Apu> = None;
+    let mut carried = Vec::new();
     for frame in from + 1..=to {
+        let prev = snapshot(src, frame - 1)?;
         let want = snapshot(src, frame)?;
-        out.push(run_frame(&mut apu, src, frame, &want, &mut carried)?);
+        if in_boot(&want) || (apu.is_none() && in_boot(&prev)) {
+            out.push(boot_check(frame));
+            apu = None;
+            continue;
+        }
+        let a = match apu.as_mut() {
+            Some(a) => a,
+            None => {
+                carried = after_snapshot(src, frame - 1, prev.spc.cycle)?;
+                let mut best: Option<(usize, Apu)> = None;
+                for at in start_candidates(&prev) {
+                    let a = start(&prev, at);
+                    let mut probe = a.clone();
+                    let d = run_frame(&mut probe, src, frame, &want, &mut carried.clone())?
+                        .differences();
+                    if best.as_ref().is_none_or(|(b, _)| d < *b) {
+                        best = Some((d, a));
+                    }
+                }
+                apu.insert(
+                    best.map(|b| b.1)
+                        .unwrap_or_else(|| start(&prev, (prev.spc.pc, 0))),
+                )
+            }
+        };
+        out.push(run_frame(a, src, frame, &want, &mut carried)?);
     }
     Ok(out)
 }
@@ -445,4 +501,73 @@ pub fn frame_writers(
         }
     }
     Ok(best.map(|(_, w)| w))
+}
+
+/// How well the notes Romlens's machine plays agree with the recording's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct NoteAgreement {
+    /// Key-ons the recording has in the frames.
+    pub recorded: usize,
+    /// Key-ons Romlens's machine made, run from the first frame's snapshot
+    /// with the recording's port writes.
+    pub ours: usize,
+    /// Of the recorded, those ours matched: the same voice, pitch and
+    /// sample within a frame's time.
+    pub matched: usize,
+    /// The first recorded key-on ours did not match, by frame.
+    pub first_miss: Option<u64>,
+}
+
+/// Run Romlens's machine from `from`'s snapshot, following the recording's
+/// port writes, to the end of `to`, and match its key-ons to the
+/// recording's in order.
+pub fn note_agreement(
+    src: &dyn MachineStateSource,
+    from: u64,
+    to: u64,
+) -> Result<NoteAgreement, RecordingError> {
+    use super::player::{CYCLES_PER_FRAME, Player};
+    use crate::audio::{NoteKind, timeline};
+    let recorded: Vec<_> = timeline(src, from + 1, to)?
+        .into_iter()
+        .filter(|n| n.kind == NoteKind::On)
+        .collect();
+    let end = snapshot(src, to)?.spc.cycle;
+    let mut p = Player::from_recording(src, from, true)?;
+    p.log_notes();
+    while p.apu.bus.cycle < end {
+        p.render(1024);
+    }
+    let ours: Vec<_> = p
+        .notes()
+        .iter()
+        .map(|(n, _)| *n)
+        .filter(|n| n.kind == NoteKind::On && n.spc_cycle <= end)
+        .collect();
+    let window = CYCLES_PER_FRAME as u64;
+    let mut used = vec![false; ours.len()];
+    let mut out = NoteAgreement {
+        recorded: recorded.len(),
+        ours: ours.len(),
+        ..NoteAgreement::default()
+    };
+    for r in &recorded {
+        let hit = ours.iter().enumerate().position(|(i, o)| {
+            !used[i]
+                && o.voice == r.voice
+                && o.pitch == r.pitch
+                && o.source == r.source
+                && o.spc_cycle.abs_diff(r.spc_cycle) <= window
+        });
+        match hit {
+            Some(i) => {
+                used[i] = true;
+                out.matched += 1;
+            }
+            None => {
+                out.first_miss.get_or_insert(r.frame);
+            }
+        }
+    }
+    Ok(out)
 }

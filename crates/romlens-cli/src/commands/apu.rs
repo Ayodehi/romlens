@@ -354,6 +354,7 @@ fn print_replay(rec: &RomrecSource, from: u64, to: u64, free: bool, limit: usize
     } else {
         check_frames(rec, from, to)?
     };
+    let boot = checks.iter().filter(|c| c.boot).count();
     let good = checks.iter().filter(|c| c.matches()).count();
     let at_end = checks
         .iter()
@@ -375,12 +376,24 @@ fn print_replay(rec: &RomrecSource, from: u64, to: u64, free: bool, limit: usize
     println!(
         "  {at_end} match but for the registers or a byte at the frame's end, where Mesen stopped inside an instruction"
     );
-    println!("  {} differ", checks.len() - good - at_end);
+    if boot > 0 {
+        let last = checks
+            .iter()
+            .filter(|c| c.boot)
+            .map(|c| c.frame)
+            .max()
+            .unwrap_or(0);
+        println!(
+            "  {boot} in the boot ROM (the last at frame {last}), not compared: Romlens's boot program is its own, so its instructions are not Nintendo's"
+        );
+    }
+    println!("  {} differ", checks.len() - good - at_end - boot);
     println!("  {writes} I/O writes by Mesen; where ours agree, at most {skew} cycles apart");
-    let n = checks.len();
+    let n = checks.len() - boot;
     let of = |pick: &dyn Fn(u8) -> bool| {
         checks
             .iter()
+            .filter(|c| !c.boot)
             .map(|c| c.dsp_own.iter().filter(|r| pick(r.0)).count())
             .sum::<usize>()
     };
@@ -397,9 +410,28 @@ fn print_replay(rec: &RomrecSource, from: u64, to: u64, free: bool, limit: usize
         8 * n,
         n - endx
     );
+    let echo: usize = checks.iter().map(|c| c.echo_bytes).sum();
+    if echo > 0 {
+        println!(
+            "  {} frames with echo buffer bytes that differ ({echo} bytes in all), compared apart: the DSP writes them, from a place in the buffer a snapshot does not hold",
+            checks.iter().filter(|c| c.echo_bytes > 0).count()
+        );
+    }
+    if free {
+        let a = romlens_core::apu::replay::note_agreement(rec, from, to)?;
+        println!(
+            "  notes: {} of the recording's {} key-ons played by Romlens too (same voice, pitch and sample within a frame), of {} it made{}",
+            a.matched,
+            a.recorded,
+            a.ours,
+            a.first_miss.map_or(String::new(), |f| format!(
+                "; the first missed at frame {f}"
+            ))
+        );
+    }
     let differ: Vec<_> = checks
         .iter()
-        .filter(|c| !c.matches() && !c.differs_only_at_the_end())
+        .filter(|c| !c.boot && !c.matches() && !c.differs_only_at_the_end())
         .collect();
     for c in differ.iter().take(limit) {
         let mut parts = c.registers.clone();

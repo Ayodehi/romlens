@@ -207,3 +207,83 @@ pub fn nspc_aram() -> Vec<u8> {
     put(&mut a, 0x30, &[0x2201]);
     a
 }
+
+/// Where [`sound_upload_banked_lorom`] keeps its pointer table: `$00:9000`.
+pub const BANKED_TABLE: usize = 0x1000;
+
+/// A LoROM image whose upload is shaped as Super Metroid's (docs/23, A15):
+/// the list chosen from a table of three-byte pointers by index
+/// (`LDA $00:9000,X` into `$00`, `LDA $00:9001,X` into `$01`), a routine
+/// at `$8030` that takes the offset into Y and the bank into the data bank
+/// (`LDY $00`, `LDA $02`, `PHA`, `PLB`) and calls one at `$8050` that
+/// waits for `$BBAA`, kicks with `$CC` and reads `LDA $0000,Y`. The
+/// table's first list, at `$01:FFF0`, runs across into bank `$02`; its
+/// second is at `$00:A000`. A decoy at `$8070` points `$00–$02` at a
+/// third list and calls nothing: it is not an upload. Written for static
+/// tracing, not to run.
+pub fn sound_upload_banked_lorom() -> Vec<u8> {
+    #[rustfmt::skip]
+    let code: Vec<u8> = [
+        // $8000 reset
+        &[0x78, 0x18, 0xFB, 0xC2, 0x30][..],  // SEI; CLC; XCE; REP #$30
+        &[0xA2, 0x00, 0x00],                  // LDX #$0000
+        &[0xBF, 0x00, 0x90, 0x00],            // LDA $00:9000,X
+        &[0x85, 0x00],                        // STA $00
+        &[0xBF, 0x01, 0x90, 0x00],            // LDA $00:9001,X
+        &[0x85, 0x01],                        // STA $01
+        &[0x20, 0x30, 0x80],                  // JSR $8030
+        &[0x20, 0x70, 0x80],                  // JSR $8070 (the decoy)
+        &[0x80, 0xFE],                        // BRA *
+    ]
+    .concat();
+    #[rustfmt::skip]
+    let routine: [u8; 11] = [
+        0xE2, 0x20,       // SEP #$20
+        0xA4, 0x00,       // LDY $00
+        0xA5, 0x02,       // LDA $02
+        0x48,             // PHA
+        0xAB,             // PLB
+        0x20, 0x50, 0x80, // JSR $8050
+    ];
+    #[rustfmt::skip]
+    let send: [u8; 20] = [
+        0xC2, 0x20,       // REP #$20
+        0xA9, 0xAA, 0xBB, // LDA #$BBAA
+        0xCD, 0x40, 0x21, // CMP $2140
+        0xD0, 0xFB,       // BNE -5
+        0xE2, 0x20,       // SEP #$20
+        0xA9, 0xCC,       // LDA #$CC
+        0x8D, 0x40, 0x21, // STA $2140
+        0xB9, 0x00, 0x00, // LDA $0000,Y
+    ];
+    #[rustfmt::skip]
+    let decoy: [u8; 12] = [
+        0xA9, 0x00, 0xB0, // LDA #$B000
+        0x85, 0x00,       // STA $00
+        0xA9, 0x00, 0x00, // LDA #$0000
+        0x85, 0x02,       // STA $02
+        0x60, 0x00,       // RTS
+    ];
+    let mut rom = super::build_with_code(MappingMode::LoRom, 0x20000, false, &code, SOUND_TITLE);
+    rom[0x0030..0x0030 + routine.len()].copy_from_slice(&routine);
+    rom[0x003B] = 0x60; // RTS
+    rom[0x0050..0x0050 + send.len()].copy_from_slice(&send);
+    rom[0x0064] = 0x60; // RTS
+    rom[0x0070..0x0070 + decoy.len()].copy_from_slice(&decoy);
+    // The table: $01:FFF0, $00:A000, then nothing.
+    rom[BANKED_TABLE..BANKED_TABLE + 6].copy_from_slice(&[0xF0, 0xFF, 0x01, 0x00, 0xA0, 0x00]);
+    let list = |rom: &mut Vec<u8>, at: usize, aram: u16, bytes: &[u8], entry: u16| {
+        let mut l = Vec::new();
+        l.extend((bytes.len() as u16).to_le_bytes());
+        l.extend(aram.to_le_bytes());
+        l.extend_from_slice(bytes);
+        l.extend([0, 0]);
+        l.extend(entry.to_le_bytes());
+        rom[at..at + l.len()].copy_from_slice(&l);
+    };
+    let across: Vec<u8> = (0..32u8).collect();
+    list(&mut rom, 0xFFF0, 0x0300, &across, 0x0300);
+    list(&mut rom, 0x2000, 0x0400, &[1, 2, 3, 4], 0x0300);
+    list(&mut rom, 0x3000, 0x0500, &[9, 9], 0x0300);
+    rom
+}

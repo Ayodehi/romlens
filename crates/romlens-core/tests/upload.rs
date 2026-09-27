@@ -139,3 +139,29 @@ fn an_upload_reads_back_from_the_port_writes() {
         assert_eq!(got[0].entry, Some(0x0400));
     }
 }
+
+#[test]
+fn a_banked_upload_from_a_pointer_table_is_traced_across_banks() {
+    use romlens_core::fixtures::sound::sound_upload_banked_lorom;
+    let rom = RomImage::from_bytes(sound_upload_banked_lorom(), "banked.sfc").unwrap();
+    let snap = analyze(&rom, &Project::new(&rom), &AnalysisControl::silent()).unwrap();
+    let r = trace(&rom, &snap);
+    assert_eq!(r.routines.len(), 1);
+    assert_eq!(r.routines[0].entry, SnesAddress::new(0, 0x8030));
+    assert_eq!(r.routines[0].pointer, 0x00);
+    let lists: Vec<SnesAddress> = r.uploads.iter().map(|u| u.list).collect();
+    // Both of the table's, and not the decoy's at $00:B000.
+    assert_eq!(
+        lists,
+        [SnesAddress::new(0x01, 0xFFF0), SnesAddress::new(0, 0xA000)]
+    );
+    let across = &r.uploads[0].blocks[0];
+    assert_eq!((across.aram, across.len), (0x0300, 32));
+    assert_eq!(across.rom, FileOffset(0xFFF4));
+    assert_eq!(across.from, SnesAddress::new(0x01, 0xFFF4));
+    assert_eq!(r.uploads[0].entry, 0x0300);
+    // The fast path the analysis uses finds the same.
+    let (routines, uploads) = trace_uploads(&rom, &snap);
+    assert_eq!(routines.len(), 1);
+    assert_eq!(uploads.len(), 2);
+}
