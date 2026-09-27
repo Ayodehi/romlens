@@ -1,5 +1,12 @@
 # The tutor: an AI component that works through the tools
 
+> **27 September 2026:** `24-tutor.md` builds this and changes it: any
+> provider (Anthropic, OpenAI, local endpoints), a window of its own,
+> conversations kept, permission modes for edits (proposals are the default
+> mode, not the only one), and C shaped by annotations and C versions. The
+> principles, tools and evaluation here still stand; where the two differ,
+> `24` wins.
+
 ## What it is for
 
 A student selects a routine, a byte range, a sprite on screen or a moment in a

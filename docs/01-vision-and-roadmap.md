@@ -75,8 +75,8 @@ Acceptance criteria (agreed 21 September 2026):
    on macOS, Windows and Ubuntu.
 
 Working agreements: direct commits to `main` for now; ROMs only in the
-git-ignored `roms/` folder; macOS 27 minimum; the Anthropic key for the
-tutor is always the user's own.
+git-ignored `roms/` folder; macOS 27 minimum; the tutor's provider key is
+always the user's own.
 
 - Detect and strip a 512-byte copier header.
 - Detect mapping mode (LoROM, HiROM, ExHiROM) by header scoring at `$7FC0`,
@@ -188,7 +188,9 @@ and its callers and callees, laid out by the core.
 What is left of the phase is planned in `22-phase3-finish.md` (25 September
 2026): the Frame, Layers and Provenance views, the Atlas, comparing two
 ROMs, stack-relative locals, ca65 `.dbg` import with a Source view, and the
-tutor, in that order.
+tutor, in that order. The tutor itself is planned in `24-tutor.md` (27
+September 2026): a chat window on any provider, with tools over everything
+Romlens computes, kept conversations, and edits under a permission mode.
 
 - Function boundaries from analysis and user marks; basic blocks; CFG view.
 - Call graph with drill-down; "who calls this" and "what does this call".

@@ -91,11 +91,15 @@ ask users where theirs came from.
 
 **The tutor**
 
-8. The Anthropic API key is always the user's own, entered in settings and
-   kept in the platform credential store; Romlens ships no key and runs no
-   proxy. Only the selection window and tool results leave the machine,
-   only on the student's request, and never a bulk upload of the ROM or a
-   recording. Settings say this plainly.
+8. The tutor (`24-tutor.md`) uses the user's own provider: an API key they
+   enter in settings, kept in the platform credential store, or an endpoint
+   on their own machine or network. Romlens ships no key and runs no proxy.
+   Only the selection, tool results and the user's own attachments are sent,
+   only when the user asks, and never a bulk upload of the ROM or a
+   recording; a local endpoint sends nothing off the machine. Image
+   generation is sent a text prompt only, never a game asset.
+   Conversations hold ROM bytes and screenshots, so they stay in the app's
+   own folder and never go in a project package. Settings say this plainly.
 
 **Published educational content**
 
