@@ -229,9 +229,14 @@ struct TutorPane: View {
             }
             Text("Shift-Tab in the Tutor window changes it for a conversation.").font(.caption).foregroundStyle(.secondary)
             LabeledContent("Stop a conversation at") {
-                TextField("dollars", value: $settings.costCap, format: .number.precision(.fractionLength(2)))
-                    .frame(width: 80)
-                    .multilineTextAlignment(.trailing)
+                HStack(spacing: 2) {
+                    Text("$")
+                    TextField("", value: $settings.costCap, format: .number.precision(.fractionLength(2)))
+                        .labelsHidden()
+                        .frame(width: 70)
+                        .multilineTextAlignment(.trailing)
+                }
+                .help("Dollars; empty for no limit")
             }
             Toggle("Show the model's thinking", isOn: $settings.showThinking)
         }
