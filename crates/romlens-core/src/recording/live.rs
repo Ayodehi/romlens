@@ -54,6 +54,8 @@ pub struct LiveSource {
     /// The stream carries the sound side (docs/23): its frames hold audio
     /// RAM, the DSP's registers and the SPC700, and each its sound events.
     audio: std::sync::atomic::AtomicBool,
+    /// And the DSP's inside ([`StateRegion::DspInside`]).
+    dsp_inside: std::sync::atomic::AtomicBool,
 }
 
 #[derive(Default)]
@@ -75,6 +77,7 @@ impl LiveSource {
             capacity: capacity.max(2),
             inner: RwLock::new(Window::default()),
             audio: std::sync::atomic::AtomicBool::new(false),
+            dsp_inside: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -83,8 +86,10 @@ impl LiveSource {
         self.audio.load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    fn set_audio(&self, on: bool) {
+    fn set_audio(&self, on: bool, dsp_inside: bool) {
         self.audio.store(on, std::sync::atomic::Ordering::Relaxed);
+        self.dsp_inside
+            .store(on && dsp_inside, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Add the next frame, numbered after the last, dropping the oldest when
@@ -171,6 +176,9 @@ impl MachineStateSource for LiveSource {
         let mut r = LIVE_REGIONS.to_vec();
         if self.has_audio() {
             r.extend(StateRegion::AUDIO);
+        }
+        if self.dsp_inside.load(std::sync::atomic::Ordering::Relaxed) {
+            r.push(StateRegion::DspInside);
         }
         r
     }
@@ -443,8 +451,9 @@ fn read_stream(
     });
     let mut decoder = StreamDecoder::new(&reader.header);
     let audio = reader.header.audio();
-    source.set_audio(audio);
-    let regions: Vec<StateRegion> = if audio {
+    let inside = reader.header.dsp_inside();
+    source.set_audio(audio, inside);
+    let mut regions: Vec<StateRegion> = if audio {
         LIVE_REGIONS
             .iter()
             .copied()
@@ -453,6 +462,9 @@ fn read_stream(
     } else {
         LIVE_REGIONS.to_vec()
     };
+    if inside {
+        regions.push(StateRegion::DspInside);
+    }
     let mut lines = None;
     let mut apu = None;
     loop {

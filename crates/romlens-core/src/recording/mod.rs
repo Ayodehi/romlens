@@ -15,6 +15,7 @@ pub mod apu;
 pub mod change_index;
 pub mod conformance;
 pub mod delta;
+pub mod dsp_inside;
 pub mod fixtures;
 pub mod format;
 pub mod import;
@@ -31,6 +32,7 @@ pub mod writer;
 use std::collections::BTreeMap;
 
 pub use delta::Run;
+pub use dsp_inside::DspInside;
 pub use memory::MemorySource;
 pub use reader::RomrecSource;
 pub use writer::RomrecWriter;
@@ -62,10 +64,13 @@ pub enum StateRegion {
     /// The SPC700's registers, ports, timers and clock ([`SpcState`]): 48 bytes
     /// (32 in format 1.2, without the timers' phases and counters).
     SpcState,
+    /// What the S-DSP keeps inside ([`DspInside`]): 384 bytes (1.4), when the
+    /// recorder could read it.
+    DspInside,
 }
 
 impl StateRegion {
-    pub const ALL: [StateRegion; 11] = [
+    pub const ALL: [StateRegion; 12] = [
         StateRegion::CpuRegisters,
         StateRegion::PpuState,
         StateRegion::IoState,
@@ -77,6 +82,7 @@ impl StateRegion {
         StateRegion::Aram,
         StateRegion::DspRegisters,
         StateRegion::SpcState,
+        StateRegion::DspInside,
     ];
 
     /// The main machine's regions, every recording's before the audio layer.
@@ -112,6 +118,7 @@ impl StateRegion {
             StateRegion::Aram => 8,
             StateRegion::DspRegisters => 9,
             StateRegion::SpcState => 10,
+            StateRegion::DspInside => 11,
         }
     }
 
@@ -132,6 +139,7 @@ impl StateRegion {
             StateRegion::Aram => "aram",
             StateRegion::DspRegisters => "dsp",
             StateRegion::SpcState => "spc",
+            StateRegion::DspInside => "dspin",
         }
     }
 
@@ -152,6 +160,7 @@ impl StateRegion {
             StateRegion::Aram => 0x10000,
             StateRegion::DspRegisters => 128,
             StateRegion::SpcState => 48,
+            StateRegion::DspInside => dsp_inside::SIZE,
         }
     }
 

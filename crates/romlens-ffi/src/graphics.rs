@@ -454,6 +454,9 @@ pub enum StateRegion {
     Dsp,
     /// The SPC700's registers, ports and timers.
     Spc,
+    /// What the S-DSP keeps inside: its voices' places in their samples,
+    /// their envelopes, and its counter, noise and echo.
+    DspInside,
 }
 
 impl From<StateRegion> for CoreRegion {
@@ -470,6 +473,7 @@ impl From<StateRegion> for CoreRegion {
             StateRegion::Aram => CoreRegion::Aram,
             StateRegion::Dsp => CoreRegion::DspRegisters,
             StateRegion::Spc => CoreRegion::SpcState,
+            StateRegion::DspInside => CoreRegion::DspInside,
         }
     }
 }
@@ -488,6 +492,7 @@ impl From<CoreRegion> for StateRegion {
             CoreRegion::Aram => StateRegion::Aram,
             CoreRegion::DspRegisters => StateRegion::Dsp,
             CoreRegion::SpcState => StateRegion::Spc,
+            CoreRegion::DspInside => StateRegion::DspInside,
         }
     }
 }

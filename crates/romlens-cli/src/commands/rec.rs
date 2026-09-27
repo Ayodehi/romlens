@@ -199,11 +199,17 @@ pub fn extract(path: &Path, frame: u64, region: &str, out: Option<&Path>, hex: b
         anyhow!("--region is one of cpu, ppu, io, wram, vram, cgram, oam, timing, dsp, spc")
     })?;
     // Audio RAM holds the game's samples and music, which nothing exports
-    // (12-content-policy.md, rule 11); the DSP's and SPC700's registers are
-    // settings, not content.
+    // (12-content-policy.md, rule 11), and the DSP's inside holds samples
+    // it decoded from them; the DSP's and SPC700's registers are settings,
+    // not content.
     if region == StateRegion::Aram {
         return Err(anyhow!(
             "audio RAM holds the game's samples and music, which Romlens does not export; `romlens apu map` shows what it holds"
+        ));
+    }
+    if region == StateRegion::DspInside {
+        return Err(anyhow!(
+            "the DSP's inside holds samples it decoded from the game's, which Romlens does not export; `romlens apu voices` shows each voice"
         ));
     }
     let rec = open(path, false)?;

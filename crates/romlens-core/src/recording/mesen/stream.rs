@@ -82,6 +82,19 @@ impl StreamHeader {
         self.flags & FLAG_AUDIO != 0
     }
 
+    /// Whether its fields include the DSP's inside (`spc.dsp.`, which the
+    /// recorder keeps since 27 September 2026), for the `dspin` region.
+    pub fn dsp_inside(&self) -> bool {
+        self.audio()
+            && [
+                "spc.dsp.step",
+                "spc.dsp.counter",
+                "spc.dsp.voices[7].interpolationPos",
+            ]
+            .iter()
+            .all(|k| self.fields.iter().any(|f| f == k))
+    }
+
     /// Where sample `i` was taken.
     pub fn sample_offset(&self, i: usize) -> usize {
         (self.rom_size as usize / SAMPLES) * i

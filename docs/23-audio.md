@@ -72,6 +72,51 @@ byte for byte. The table's earlier "0 / 4" for Chrono Trigger came from
 reading the recording before `rec pack` learnt the SPC700's rate (A15),
 which split the one upload into four.
 
+The DSP's inside, 27 September 2026: the recorder now keeps Mesen's
+`spc.dsp.` fields (about 220 numbers a frame, the stream 5–7% larger),
+and `rec pack` writes them as a new region, `dspin` (format 1.4, docs/13):
+each voice's BRR block and next data byte, its ring of twelve decoded
+samples and where the next four go, its pitch counter, key-on wait,
+envelope and phase, and the chip's step, counter, KON phase and latches,
+noise, echo offset and length and FIR inputs. A replay, a player and
+`apu render` start the DSP from it (`Dsp::resume`): the chip decodes
+four samples at a time into its ring and interpolates the four the pitch
+counter's bits 12–14 point to, so those are Romlens's window, the ones
+after them wait in a queue, and its decoder carries on where the chip's
+would. Romlens runs voice *n* at its step 3*n* + 2, where the chip does
+that voice's pitch counter at 3*n* − 1, so its step is the chip's plus
+three; a snapshot inside the chip's steps 22–30, where Romlens does all
+of a sample's poll, counter, noise and echo at its one step 31, is moved
+to match, and one between a voice's envelope and its pitch counter
+skips the envelope's step once. Mesen's `step` is the SPC700's cycle
+count modulo 32 in every frame. Romlens's KON poll falls on the chip's
+other samples: it keys voices on at the poll where the chip keys voices
+1–7 in the sample after, and the other phase makes up for it (resuming on
+the chip's own phase kept notes a sample early, and OUTX run on fell by
+9–31%). Mesen 2.2.1's `getState` leaves out every enum and so the
+phases; the fork exports them (MesenCE #10), and from a stock Mesen the
+replay works the phase out from the envelope and the value the chip last
+computed for it, agreeing with the recorded phase in 99.6–100% of
+voice-frames. The Player also starts from the instruction the SPC700 was
+inside at the snapshot, as the replay does, rather than from the
+snapshot's program counter; that alone moved Chrono Trigger's notes from
+none of 202 to all of them (Romlens's were six frames early). Measured on
+new 30-second recordings of the five games, by the fork's recorder, from
+rest against resumed:
+
+| | Super Mario World | Super Metroid | Final Fantasy III | Chrono Trigger | Zelda |
+|---|---|---|---|---|---|
+| Per frame: ENVX matches | 9,267 → 13,915 of 14,248 | 8,417 → 12,335 of 12,360 | 9,844 → 14,224 of 14,224 | 6,179 → 14,083 of 14,216 | 8,391 → 13,477 of 13,752 |
+| Per frame: OUTX matches | 9,332 → 13,285 | 8,572 → 11,764 | 9,882 → 13,462 | 6,559 → 12,926 | 8,433 → 12,705 |
+| Per frame: ENDX matches | 1,540 → 1,760 of 1,781 | 365 → 1,537 of 1,545 | 1,520 → 1,776 of 1,778 | 408 → 1,768 of 1,777 | 870 → 1,712 of 1,719 |
+| Run on: frames that match (and at the end) | 1,758 (+21) of 1,779, none differ | 1,522 (+21) of 1,543, none differ | 253 of 1,776; drifts at frame 277 | 67 (+1,670) of 1,775, 38 differ | 1,696 (+21) of 1,717, none differ |
+| Run on: notes | 545 of 545 | 74 of 74 | 9 of 9 | 202 of 202 | 463 of 463 |
+
+Run on, from rest and resumed agree to within 3% (a note keyed from rest
+soon matches anyway); the new recordings of Super Metroid and Chrono
+Trigger run on from rest as well as resumed, so their A15 figures above
+came from those recordings and where the runs started, not from the DSP.
+
 ## Measured
 
 Five games, each recorded for 30 seconds (1,800 frames) from power-on by
@@ -96,22 +141,14 @@ buffer's bytes and the DSP's own registers (see A15).
 | Notes, run on | 545 of 545 | 74 of 74 | 9 of 9 | 0 of 202 | 463 of 463 |
 
 What stays open:
-- **The DSP's inside is not in a snapshot.** A replay starts it from rest:
-  the envelopes until each voice is keyed again (ENVX matches Mesen's in
-  43–69% of voice-frames per frame, 92–100% run on but for Chrono
-  Trigger's 42%), and
-  the echo buffer's position and length. The DSP takes a new EDL only when
-  its echo index wraps, so a game that shortens the buffer (Chrono Trigger
-  sets EDL 5 at `$C900` as its driver starts) goes on writing the longer
-  one until then, over whatever is past its end: in Mesen that clears
-  Chrono Trigger's command table at `$F172`, which Romlens's machine, its
-  echo started from rest, leaves as it was. The driver then takes a
-  different path at once. Recording Mesen's DSP state (its `spc.dsp.*`
-  fields, left out since A4) and starting the DSP from it would close this.
-- **Super Metroid run on** keeps every write within 5 cycles of Mesen's but
-  rarely exact; its per-frame replay is exact in 95% of frames, so the
-  offset comes from the run's start inside an instruction, not from its
-  driver.
+- **Final Fantasy III's frame 277.** Per frame and run on, the SPC700
+  differs there (its registers and 44 audio RAM bytes) and a run on
+  never recovers; the DSP's inside does not change it.
+- **Chrono Trigger run on** has 38 frames that differ, from rest and
+  resumed alike, though every one of its notes plays.
+- **The mix mid-sample.** A snapshot inside the chip's steps 26–31 loses
+  the sample it was mixing (one sample, 31 µs), and a KON the chip had
+  taken but not yet applied to voices 1–7 waits for Romlens's next poll.
 
 ## Context
 

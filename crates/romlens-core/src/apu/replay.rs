@@ -103,6 +103,7 @@ struct Snapshot {
     aram: Vec<u8>,
     dsp: Vec<u8>,
     spc: SpcState,
+    inside: Option<crate::recording::DspInside>,
 }
 
 /// In the boot ROM: its page mapped and the SPC700 in it.
@@ -129,6 +130,9 @@ fn snapshot(src: &dyn MachineStateSource, frame: u64) -> Result<Snapshot, Record
         spc: SpcState::decode(&get(StateRegion::SpcState)?),
         aram: get(StateRegion::Aram)?,
         dsp: get(StateRegion::DspRegisters)?,
+        inside: s
+            .region(StateRegion::DspInside)
+            .map(crate::recording::DspInside::decode),
     })
 }
 
@@ -350,6 +354,10 @@ fn start_candidates(s: &Snapshot) -> Vec<(u16, u8)> {
 /// cycles earlier, the timers' phases with it.
 fn start(s: &Snapshot, (pc, back): (u16, u8)) -> Apu {
     let mut apu = Apu::from_snapshot(&s.aram, &s.dsp, &s.spc);
+    if let Some(inside) = &s.inside {
+        apu.bus.resume_dsp(inside);
+        apu.bus.dsp_hold = back;
+    }
     apu.cpu.pc = pc;
     apu.bus.cycle -= back as u64;
     for (t, period) in apu.bus.io.timers.iter_mut().zip(super::TIMER_PERIODS) {
@@ -428,25 +436,50 @@ pub fn run_free(
             Some(a) => a,
             None => {
                 carried = after_snapshot(src, frame - 1, prev.spc.cycle)?;
-                let mut best: Option<(usize, Apu)> = None;
-                for at in start_candidates(&prev) {
-                    let a = start(&prev, at);
-                    let mut probe = a.clone();
-                    let d = run_frame(&mut probe, src, frame, &want, &mut carried.clone())?
-                        .differences();
-                    if best.as_ref().is_none_or(|(b, _)| d < *b) {
-                        best = Some((d, a));
-                    }
-                }
-                apu.insert(
-                    best.map(|b| b.1)
-                        .unwrap_or_else(|| start(&prev, (prev.spc.pc, 0))),
-                )
+                apu.insert(best_of(src, frame, &prev, &want, &carried)?)
             }
         };
         out.push(run_frame(a, src, frame, &want, &mut carried)?);
     }
     Ok(out)
+}
+
+/// The machine at `prev`'s snapshot, started from whichever instruction it
+/// could be inside that runs frame `frame` closest to the recording.
+fn best_of(
+    src: &dyn MachineStateSource,
+    frame: u64,
+    prev: &Snapshot,
+    want: &Snapshot,
+    carried: &[ApuEvent],
+) -> Result<Apu, RecordingError> {
+    let mut best: Option<(usize, Apu)> = None;
+    for at in start_candidates(prev) {
+        let a = start(prev, at);
+        let mut probe = a.clone();
+        let d = run_frame(&mut probe, src, frame, want, &mut carried.to_vec())?.differences();
+        if best.as_ref().is_none_or(|(b, _)| d < *b) {
+            best = Some((d, a));
+        }
+    }
+    Ok(best
+        .map(|b| b.1)
+        .unwrap_or_else(|| start(prev, (prev.spc.pc, 0))))
+}
+
+/// The machine at `frame`'s snapshot, ready to run on: Mesen stops the
+/// SPC700 inside an instruction at a frame's end, so it starts from the
+/// instruction that runs the next frame as the recording did, when there
+/// is a next frame, and from the snapshot's program counter when not.
+pub fn start_at(src: &dyn MachineStateSource, frame: u64) -> Result<Apu, RecordingError> {
+    let prev = snapshot(src, frame)?;
+    let last = src.frame_count().unwrap_or(0);
+    if frame + 1 >= last || in_boot(&prev) {
+        return Ok(start(&prev, (prev.spc.pc, 0)));
+    }
+    let want = snapshot(src, frame + 1)?;
+    let carried = after_snapshot(src, frame, prev.spc.cycle)?;
+    best_of(src, frame + 1, &prev, &want, &carried)
 }
 
 /// Frame `frame`'s I/O writes by the SPC700, each with the address of the

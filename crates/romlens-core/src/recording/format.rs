@@ -20,7 +20,7 @@ use crate::recording::{Layers, RecordingError, StateRegion};
 
 pub const MAGIC: &[u8; 8] = b"ROMREC\0\0";
 pub const VERSION_MAJOR: u16 = 1;
-pub const VERSION_MINOR: u16 = 3;
+pub const VERSION_MINOR: u16 = 4;
 pub const HEADER_FIXED_LEN: usize = 128;
 pub const REGION_ENTRY_LEN: usize = 16;
 pub const FRAME_MAGIC: &[u8; 4] = b"FRM\0";

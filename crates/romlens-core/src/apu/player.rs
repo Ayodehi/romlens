@@ -91,11 +91,7 @@ impl Player {
         let s = src.state_at(frame)?;
         let get = |r: StateRegion| s.region(r).ok_or(RecordingError::MissingRegion(r.name()));
         let spc = SpcState::decode(get(StateRegion::SpcState)?);
-        let mut apu = Apu::from_snapshot(
-            get(StateRegion::Aram)?,
-            get(StateRegion::DspRegisters)?,
-            &spc,
-        );
+        let mut apu = super::replay::start_at(src, frame)?;
         if follow {
             let last = src.frame_count().unwrap_or(0).min(frame + FOLLOW_FRAMES);
             for f in frame..last {

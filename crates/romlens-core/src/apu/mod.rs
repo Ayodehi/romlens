@@ -36,6 +36,10 @@ pub struct ApuBus {
     pub chip: crate::dsp::Dsp,
     /// Cycles into the DSP's current sample, 0-31.
     pub dsp_clock: u8,
+    /// Cycles the DSP waits before it runs again: a replay that starts the
+    /// SPC700 inside an instruction, before a recording's snapshot, holds a
+    /// DSP resumed at the snapshot until the clock gets back there.
+    pub dsp_hold: u8,
     /// The samples made, when kept.
     pub output: Option<Vec<crate::dsp::Frame>>,
     pub io: Io,
@@ -78,6 +82,10 @@ impl ApuBus {
         }
         self.cycle += 1;
         self.io.cycle();
+        if self.dsp_hold > 0 {
+            self.dsp_hold -= 1;
+            return;
+        }
         if let Some(f) = self
             .chip
             .step(self.dsp_clock, &mut self.dsp, &mut self.aram)
@@ -86,6 +94,14 @@ impl ApuBus {
             out.push(f);
         }
         self.dsp_clock = (self.dsp_clock + 1) & 31;
+    }
+
+    /// Start the DSP from what a recording saw inside it (docs/23), rather
+    /// than from rest.
+    pub fn resume_dsp(&mut self, inside: &crate::recording::DspInside) {
+        let (chip, clock) = crate::dsp::Dsp::resume(inside, &self.dsp, &self.aram);
+        self.chip = chip;
+        self.dsp_clock = clock;
     }
 
     /// Put the DSP where it is `cycle` SPC700 cycles after power on.
@@ -204,6 +220,7 @@ impl Apu {
                 dsp: [0; 128],
                 chip: crate::dsp::Dsp::default(),
                 dsp_clock: 0,
+                dsp_hold: 0,
                 output: None,
                 io: Io::default(),
                 cycle: 0,

@@ -153,10 +153,12 @@ end
 -- prefixes. Romlens picks the ones it knows by name, so a Mesen version that
 -- exports more needs no change here.
 local prefixes = { "cpu.", "ppu.", "internalRegisters.", "dmaController.", "memoryManager.hClock", "frameCount", "masterClock", "spc." }
+-- Under "spc." this takes the DSP's inside too ("spc.dsp.", about 220
+-- numbers: each voice's place in its sample, its decoded samples and its
+-- envelope, the global counter, the noise and the echo), so a replay can
+-- start the DSP where Mesen had it; its registers come whole in the 'S'
+-- record.
 local function wanted(key)
-  -- The DSP's internal state is large and changes every sample; its
-  -- registers come whole in the 'S' record instead.
-  if key:sub(1, 8) == "spc.dsp." then return false end
   for _, p in ipairs(prefixes) do
     if key:sub(1, #p) == p then return true end
   end

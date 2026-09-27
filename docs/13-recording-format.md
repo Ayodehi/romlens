@@ -131,8 +131,12 @@ Sizes are fixed by the id; a mismatch is an error, not a variant.
 | 8 | `aram` | 65536 | the sound CPU's RAM (1.2, `23-audio.md`) |
 | 9 | `dsp` | 128 | the S-DSP's registers, as the SPC700 reads them |
 | 10 | `spc` | 48 | the SPC700: A, X, Y, SP, PSW, PC (u16), the ports as it reads them (4) and as the S-CPU reads them (4), AUXIO4/5, DSPADDR, flags (bit 0 boot ROM mapped, bits 2–4 timers on), the three timer dividers, their 4-bit counts (0 and 1 in a byte, then 2), and its cycle count (u64, 1.024 MHz) at offset 24; from 1.3, at offset 32, each timer's phase (cycles since its clock ticked) and at 35 its internal count, so a replay starts in step (1.2 wrote 32 bytes; readers still take them and read the rest as zero) |
+| 11 | `dspin` | 384 | what the S-DSP keeps inside (1.4, when the recorder could read it): for each voice (40 bytes) the BRR block and next data byte, the ring of twelve decoded samples and where its next four go, the pitch counter, the key-on wait, the envelope, its phase and its last value before clamping; then the step the chip does next, the global counter, the KON phase and latches, KOFF, the noise, the echo buffer's offset and length, the FIR's eight inputs and newest entry, and the sample's mix so far (layout in `recording/dsp_inside.rs`). `rec extract` refuses it, as it does `aram` (content policy, rule 11): the ring holds samples decoded from the game's |
 
-The three sound regions come together or not at all. Mesen runs the
+The three sound regions come together or not at all; `dspin` comes with
+them from a recorder stream whose fields include the DSP's (27 September
+2026), and a replay then starts the DSP where the recording had it
+rather than from rest (`23-audio.md`). Mesen runs the
 SPC700 behind the main CPU and catches it up when the game touches a port
 and after the frame's end, so the `spc` block's cycle count says how far
 it had run when the recorder read it. It runs it a cycle at a time, so the
@@ -370,9 +374,14 @@ Little-endian; `s1`/`s2` are strings with a u8/u16 length.
   size (u32), 64 samples of 16 bytes taken at `size / 64 × i`, and the
   field names (u16 count, `s1` each): every numeric or boolean
   `emu.getState()` key under `cpu.`, `ppu.`, `internalRegisters.` and
-  `dmaController.` and (version 3) `spc.` but not `spc.dsp.`, plus
+  `dmaController.` and (version 3) `spc.`, plus
   `frameCount`, `masterClock` and `memoryManager.hClock`. From version 3,
-  a flags byte: bit 0, the stream carries the sound side.
+  a flags byte: bit 0, the stream carries the sound side. Recorders
+  before 27 September 2026 left out `spc.dsp.`; the stream's version is
+  the same, and `rec pack` writes the `dspin` region when the fields are
+  there. Mesen 2.2.1's `getState` has every field of the DSP's inside but
+  the envelopes' phases (it leaves out every enum; the MesenCE fork's
+  #10 fixes that), which the replay then infers.
 - **`F`, a frame end:** frame (u32); the fields that changed (u16 count,
   then u16 index and i64 value each); 52 bytes, the last byte written to
   each of `$2100`–`$2133`; 52 bytes, whether each has been written; the 128

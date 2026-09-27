@@ -24,7 +24,8 @@ use crate::recording::mesen::stream::{
 };
 use crate::recording::writer::{RomrecWriter, WriterOptions};
 use crate::recording::{
-    CpuRegisters, Layers, MachineState, RecordingError, RecordingIdentity, SpcState, StateRegion,
+    CpuRegisters, DspInside, Layers, MachineState, RecordingError, RecordingIdentity, SpcState,
+    StateRegion,
 };
 use crate::rom::image::RomImage;
 
@@ -299,6 +300,58 @@ fn spc_state(f: &Fields, cycle: u64) -> SpcState {
             (b(&format!("spc.timer{i}.stage1")) & 1) * half + b(&format!("spc.timer{i}.stage0")) / 2
         }),
         timer_counter: std::array::from_fn(|i| b(&format!("spc.timer{i}.stage2"))),
+    }
+}
+
+/// The DSP's inside from Mesen's `spc.dsp.` fields. Mesen names its
+/// fields for its own variables; each is the chip's state the region
+/// describes (the ring as Mesen keeps it, doubled). A Mesen whose
+/// `getState` leaves out enums (2.2.1) has no `envMode`: the phases are
+/// then marked unknown, for the replay to infer.
+fn dsp_inside(f: &Fields) -> DspInside {
+    use crate::recording::dsp_inside::{PHASE_UNKNOWN, VoiceInside};
+    let n = |k: &str| f.n(&format!("spc.dsp.{k}"));
+    let phases = f.has("spc.dsp.voices[0].envMode");
+    DspInside {
+        voices: std::array::from_fn(|v| {
+            let vn = |k: &str| n(&format!("voices[{v}].{k}"));
+            VoiceInside {
+                block: vn("brrAddress") as u16,
+                data_byte: vn("brrOffset") as u8,
+                ring_at: vn("bufferPos") as u8,
+                pitch_counter: vn("interpolationPos") as u16,
+                key_on_wait: vn("keyOnDelay") as u8,
+                phase: if phases {
+                    vn("envMode") as u8
+                } else {
+                    PHASE_UNKNOWN
+                },
+                envelope: vn("envVolume") as u16,
+                unclamped: vn("prevCalculatedEnv") as i16,
+                envx: vn("envOut") as u8,
+                ring: std::array::from_fn(|k| vn(&format!("sampleBuffer{k}")) as i16),
+            }
+        }),
+        step: n("step") as u8,
+        counter: n("counter") as u16,
+        polls: n("everyOtherSample") != 0,
+        kon_written: n("newKeyOn") as u8,
+        kon_taken: n("keyOn") as u8,
+        koff_taken: n("keyOff") as u8,
+        noise: n("noiseLfsr") as u16,
+        echo_offset: n("echoOffset") as u16,
+        echo_length: n("echoLength") as u16,
+        fir_at: n("echoHistoryPos") as u8,
+        fir: std::array::from_fn(|k| {
+            [
+                n(&format!("echoHistory{}", k * 2)) as i16,
+                n(&format!("echoHistory{}", k * 2 + 1)) as i16,
+            ]
+        }),
+        mix: [n("outSamples0") as i16, n("outSamples1") as i16],
+        echo_in: [n("echoOut0") as i16, n("echoOut1") as i16],
+        voice_output: n("voiceOutput") as i16,
+        phases_recorded: phases,
     }
 }
 
@@ -760,6 +813,12 @@ impl StreamDecoder {
                     .to_vec(),
             );
         }
+        if regions.contains(&StateRegion::DspInside) {
+            state.regions.insert(
+                StateRegion::DspInside,
+                dsp_inside(&self.fields).encode().to_vec(),
+            );
+        }
         state
     }
 }
@@ -791,6 +850,9 @@ pub fn pack<R: Read, W: Write + Seek>(
     }
     if header.audio() {
         regions.extend(StateRegion::AUDIO);
+    }
+    if header.dsp_inside() {
+        regions.push(StateRegion::DspInside);
     }
     let identity = RecordingIdentity {
         rom_sha256: *rom.sha256(),
@@ -1086,5 +1148,58 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(err, PackError::RomMismatch(_)), "{err}");
+    }
+
+    #[test]
+    fn the_dsps_inside_comes_from_mesens_fields() {
+        let mut pairs: Vec<(String, i64)> = vec![
+            ("spc.dsp.step".into(), 13),
+            ("spc.dsp.counter".into(), 28793),
+            ("spc.dsp.everyOtherSample".into(), 1),
+            ("spc.dsp.newKeyOn".into(), 0x81),
+            ("spc.dsp.keyOn".into(), 0x01),
+            ("spc.dsp.noiseLfsr".into(), 12288),
+            ("spc.dsp.echoOffset".into(), 1624),
+            ("spc.dsp.echoLength".into(), 4096),
+            ("spc.dsp.echoHistoryPos".into(), 7),
+            ("spc.dsp.echoHistory5".into(), -40),
+            ("spc.dsp.voiceOutput".into(), -1234),
+            ("spc.dsp.voices[7].interpolationPos".into(), 0),
+            ("spc.dsp.voices[2].brrAddress".into(), 0x8124),
+            ("spc.dsp.voices[2].brrOffset".into(), 5),
+            ("spc.dsp.voices[2].bufferPos".into(), 8),
+            ("spc.dsp.voices[2].interpolationPos".into(), 0x2345),
+            ("spc.dsp.voices[2].envVolume".into(), 0x7FF),
+            ("spc.dsp.voices[0].envMode".into(), 0),
+            ("spc.dsp.voices[2].envMode".into(), 2),
+            ("spc.dsp.voices[2].sampleBuffer11".into(), -600),
+        ];
+        let named: Vec<(&str, i64)> = pairs.iter_mut().map(|(k, v)| (k.as_str(), *v)).collect();
+        let f = fields_from(&named);
+        let d = dsp_inside(&f);
+        assert_eq!((d.step, d.counter, d.polls), (13, 28793, true));
+        assert_eq!((d.kon_written, d.kon_taken), (0x81, 0x01));
+        assert_eq!(
+            (d.noise, d.echo_offset, d.echo_length, d.fir_at),
+            (12288, 1624, 4096, 7)
+        );
+        // echoHistory is eight entries of left and right.
+        assert_eq!(d.fir[2], [0, -40]);
+        assert_eq!(d.voice_output, -1234);
+        let v = d.voices[2];
+        assert_eq!(
+            (v.block, v.data_byte, v.ring_at, v.pitch_counter),
+            (0x8124, 5, 8, 0x2345)
+        );
+        assert_eq!((v.envelope, v.phase, v.ring[11]), (0x7FF, 2, -600));
+        assert!(d.phases_recorded);
+        // A Mesen without enums in getState: the phases are not known.
+        let f = fields_from(&[("spc.dsp.step", 1)]);
+        let d = dsp_inside(&f);
+        assert!(!d.phases_recorded);
+        assert_eq!(
+            d.voices[0].phase,
+            crate::recording::dsp_inside::PHASE_UNKNOWN
+        );
     }
 }

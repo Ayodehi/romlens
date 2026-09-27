@@ -77,6 +77,14 @@ pub struct Voice {
     /// The sample after the envelope, 15 bits: what OUTX shows the top of
     /// and what the next voice's pitch modulation reads.
     pub output: i32,
+    /// Samples decoded ahead of the window, oldest first, which the window
+    /// takes before the decoder decodes more. The chip decodes four at a
+    /// time; this one decodes one when it needs it, so only a DSP resumed
+    /// from a recording (see [`Dsp::resume`]) has any.
+    pub queue: [i32; 8],
+    pub queued: u8,
+    /// The envelope has stepped for this sample already (a resumed DSP).
+    pub stepped: bool,
 }
 
 /// What a sample produced, for listening and for scopes.
@@ -331,7 +339,11 @@ impl Dsp {
         voice.output = output;
         regs[v << 4 | 8] = (voice.envelope >> 4) as u8;
         regs[v << 4 | 9] = (output >> 7) as u8;
-        self.envelope(v, regs);
+        if std::mem::take(&mut voice.stepped) {
+            // Resumed between the chip's envelope step and its pitch step.
+        } else {
+            self.envelope(v, regs);
+        }
         let voice = &mut self.voices[v];
 
         // The pitch counter, and the samples it passes.
@@ -352,6 +364,13 @@ impl Dsp {
     /// blocks and to the loop point.
     fn decode_next(&mut self, v: usize, regs: &mut [u8; 128], aram: &[u8]) {
         let voice = &mut self.voices[v];
+        if voice.queued > 0 {
+            let s = voice.queue[0];
+            voice.queue.copy_within(1.., 0);
+            voice.queued -= 1;
+            voice.window = [voice.window[1], voice.window[2], voice.window[3], s];
+            return;
+        }
         if voice.nibble == 0 {
             voice.header = aram[voice.block as usize];
             let h = Header::from_byte(voice.header);
@@ -519,4 +538,343 @@ pub fn envelope_curve(
         dsp.sample(&mut regs, &mut aram);
     }
     out
+}
+
+/// The chip's step that Romlens's voice *n* runs at (3*n* + 2) is where the
+/// chip does that voice's pitch counter and decoding (fullsnes's chart:
+/// voice *n*'s BRR bytes at step 3*n* − 1, voice 0's at 31), three steps
+/// on: a recording's step plus this is Romlens's.
+pub const STEP_OFFSET: u8 = 3;
+
+impl Dsp {
+    /// The DSP as a recording had it inside (docs/23): each voice's place in
+    /// its sample, its decoded samples, envelope and key-on wait, and the
+    /// chip's counter, noise, KON latches and echo. Returns the step for
+    /// the bus's DSP clock.
+    ///
+    /// The chip keeps twelve decoded samples and interpolates the four at
+    /// the pitch counter's bits 12-14 past the next group's place; Romlens
+    /// keeps those four as its window, the ones after them in the queue,
+    /// and decodes on from where the chip would. Romlens does a sample's
+    /// mixing, KON poll, counter, noise and echo at once at its step 31
+    /// (the chip's 28), where the chip spreads them over steps 22-30; a
+    /// recording taken in between is moved to match. Romlens polls KON on the chip's
+    /// other samples (see `even` below).
+    pub fn resume(
+        inside: &crate::recording::DspInside,
+        regs: &[u8; 128],
+        aram: &[u8],
+    ) -> (Dsp, u8) {
+        let s = inside.step & 31;
+        let mut d = Dsp {
+            counter: inside.counter,
+            // Romlens keys a voice on at the poll, where the chip keys
+            // voices 1-7 on in the sample after; polling on the chip's other
+            // samples makes up for it (the phase A8 measured from rest).
+            even: !inside.polls,
+            kon_latch: inside.kon_written & !inside.kon_taken,
+            noise: inside.noise & 0x7FFF,
+            echo_offset: inside.echo_offset,
+            echo_length: if inside.echo_length == 0 {
+                4
+            } else {
+                inside.echo_length
+            },
+            fir_at: inside.fir_at as usize & 7,
+            ..Dsp::default()
+        };
+        for (e, pair) in inside.fir.iter().enumerate() {
+            d.fir[0][e] = pair[0] as i32;
+            d.fir[1][e] = pair[1] as i32;
+        }
+        // The chip mixes a sample from its step 31 to 21 and gives it out
+        // at 26 and 27; Romlens gives its out at 28.
+        if s <= 25 {
+            d.main = [inside.mix[0] as i32, inside.mix[1] as i32];
+            d.echo_in = [inside.echo_in[0] as i32, inside.echo_in[1] as i32];
+        }
+        // The FIR's input for this sample is in (steps 22 and 23) but
+        // Romlens's step 31 has not run: it reads the same entry again.
+        if (23..=28).contains(&s) {
+            d.fir_at = (d.fir_at + 7) & 7;
+        }
+        // Romlens's step 31 has run but the chip's 29 and 30 have not: the
+        // KON phase has flipped, the counter and noise moved and the echo
+        // offset stepped.
+        if (29..=30).contains(&s) {
+            d.counter = if d.counter == 0 {
+                COUNTER_WRAP - 1
+            } else {
+                d.counter - 1
+            };
+            if d.fires(regs[0x6C] & 0x1F) {
+                let feedback = (d.noise ^ (d.noise >> 1)) & 1;
+                d.noise = (d.noise >> 1) & 0x3FFF | feedback << 14;
+            }
+            if s == 29 {
+                d.even = !d.even;
+                if d.echo_offset == 0 {
+                    let edl = regs[0x7D] & 0xF;
+                    d.echo_length = if edl == 0 { 4 } else { edl as u16 * 2048 };
+                }
+                d.echo_offset += 4;
+                if d.echo_offset >= d.echo_length {
+                    d.echo_offset = 0;
+                }
+            }
+        }
+        for (n, v) in inside.voices.iter().enumerate() {
+            d.voices[n] = resume_voice(n, v, regs, aram);
+        }
+        // The chip does a voice's output and envelope a step before its
+        // pitch counter (voice n at 3n - 2, voice 0 at 30); Romlens does
+        // all three at once. Taken between the two, the envelope has
+        // stepped already.
+        let between = match s {
+            31 => Some(0),
+            s if s >= 2 && (s + 1) % 3 == 0 && s <= 20 => Some((s as usize + 1) / 3),
+            _ => None,
+        };
+        if let Some(n) = between {
+            d.voices[n].stepped = true;
+        }
+        // Pitch modulation reads the voice before's output: OUTX's top
+        // bits, or all of it for the voice the chip did last.
+        let last = match s {
+            0 | 1 | 31 => 0,
+            _ => ((s as usize + 1) / 3).clamp(1, 7),
+        };
+        for n in 0..8 {
+            d.voices[n].output = (regs[n << 4 | 9] as i8 as i32) << 7;
+        }
+        d.voices[last].output = inside.voice_output as i32 >> 1;
+        (d, (s + STEP_OFFSET) & 31)
+    }
+}
+
+fn resume_voice(
+    n: usize,
+    v: &crate::recording::dsp_inside::VoiceInside,
+    regs: &[u8; 128],
+    aram: &[u8],
+) -> Voice {
+    let mode = phase(n, v, regs);
+    if v.key_on_wait > 0 {
+        // Keyed on and waiting: Romlens starts the sample at the end of the
+        // wait, from the directory.
+        return Voice {
+            block: dir_entry(regs, aram, n).0,
+            delay: v.key_on_wait,
+            mode: EnvelopeMode::Attack,
+            ..Voice::default()
+        };
+    }
+    // The ring, oldest group first from `ring_at`; the window starts the
+    // pitch counter's bits 12-14 in.
+    let at = v.ring_at as usize % 12;
+    let skip = (v.pitch_counter >> 12) as usize & 7;
+    let ring = |k: usize| v.ring[(at + k) % 12] as i32 >> 1;
+    let mut queue = [0i32; 8];
+    let queued = 8 - skip;
+    for (k, q) in queue.iter_mut().enumerate().take(queued) {
+        *q = ring(skip + 4 + k);
+    }
+    let block = v.block;
+    Voice {
+        block,
+        header: aram[block as usize],
+        nibble: (v.data_byte.saturating_sub(1) * 2) & 15,
+        p1: ring(11),
+        p2: ring(10),
+        window: [ring(skip), ring(skip + 1), ring(skip + 2), ring(skip + 3)],
+        fraction: v.pitch_counter & 0xFFF,
+        delay: 0,
+        mode,
+        envelope: v.envelope & 0x7FF,
+        output: 0,
+        queue,
+        queued: queued as u8,
+        stepped: false,
+    }
+}
+
+/// A voice's envelope phase: as recorded, or, from a Mesen that does not
+/// export it, worked out from the envelope and the value the chip last
+/// computed for it before clamping. That value is the level's next step by
+/// the phase's own rule (attack adds 32 or 1024, decay and sustain take
+/// 1/256), or the level itself when the step was just taken (a level on
+/// attack's steps of 32 then taken for attack); release computes none, so
+/// a level no rule explains is releasing. Under a gain mode only release
+/// matters, and a voice keyed on is otherwise in attack. On the five games
+/// of docs/23's *Measured* this agrees with the phase recorded in 99.6% of
+/// the voice-frames with a level or more.
+fn phase(
+    n: usize,
+    v: &crate::recording::dsp_inside::VoiceInside,
+    regs: &[u8; 128],
+) -> EnvelopeMode {
+    use crate::recording::dsp_inside::PHASE_UNKNOWN;
+    if v.phase != PHASE_UNKNOWN {
+        return match v.phase {
+            1 => EnvelopeMode::Attack,
+            2 => EnvelopeMode::Decay,
+            3 => EnvelopeMode::Sustain,
+            _ => EnvelopeMode::Release,
+        };
+    }
+    if v.key_on_wait > 0 {
+        return EnvelopeMode::Attack;
+    }
+    let (e, u) = (v.envelope as i32, v.unclamped as i32);
+    let adsr1 = vreg(regs, n, 5);
+    let adsr2 = vreg(regs, n, 6);
+    let gain = vreg(regs, n, 7);
+    let exp = |x: i32| x - (((x - 1) >> 8) + 1);
+    if adsr1 & 0x80 == 0 {
+        // Gain modes ignore the phase but for release.
+        let explained = if gain & 0x80 == 0 {
+            u == (gain as i32 & 0x7F) << 4
+        } else {
+            let step = match (gain >> 5) & 3 {
+                0 => e - 32,
+                1 => exp(e),
+                2 => e + 32,
+                _ => e + if u < 0x600 { 32 } else { 8 },
+            };
+            u == step || u == e
+        };
+        // A voice keyed on stays in attack under a gain mode until its
+        // level clips.
+        return if explained {
+            EnvelopeMode::Attack
+        } else {
+            EnvelopeMode::Release
+        };
+    }
+    let sustain = (adsr2 >> 5) as i32;
+    let by_level = || {
+        if u >> 8 <= sustain {
+            EnvelopeMode::Sustain
+        } else {
+            EnvelopeMode::Decay
+        }
+    };
+    if u == e + 32 || u == e + 1024 || (e == 0x7FF && u > 0x7FF) {
+        if e == 0x7FF {
+            EnvelopeMode::Decay
+        } else {
+            EnvelopeMode::Attack
+        }
+    } else if u == exp(e) {
+        by_level()
+    } else if u == e {
+        if e < 0x7FF && e & 31 == 0 {
+            EnvelopeMode::Attack
+        } else {
+            by_level()
+        }
+    } else {
+        EnvelopeMode::Release
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::recording::DspInside;
+    use crate::recording::dsp_inside::{PHASE_UNKNOWN, VoiceInside};
+
+    fn inside_with(v: VoiceInside, step: u8) -> DspInside {
+        let mut d = DspInside {
+            step,
+            counter: 0x1234,
+            noise: 0x4000,
+            echo_offset: 0x100,
+            echo_length: 0x800,
+            fir_at: 5,
+            phases_recorded: true,
+            ..DspInside::default()
+        };
+        d.voices[1] = v;
+        d
+    }
+
+    #[test]
+    fn a_resumed_voice_takes_the_chips_window_and_decodes_on_from_it() {
+        // The ring's next group goes at 8, so 8-11 are the oldest; the
+        // pitch counter's bits 12-14 put the window two further on.
+        let ring: [i16; 12] = std::array::from_fn(|k| (k as i16 + 1) * 100);
+        let v = VoiceInside {
+            block: 0x4009,
+            data_byte: 5,
+            ring_at: 8,
+            pitch_counter: 0x2345,
+            phase: 3,
+            envelope: 0x400,
+            ring,
+            ..VoiceInside::default()
+        };
+        let aram = vec![0u8; 0x10000];
+        let (d, clock) = Dsp::resume(&inside_with(v, 10), &[0; 128], &aram);
+        assert_eq!(clock, 13, "the chip's step plus three");
+        let r = &d.voices[1];
+        // Ring slots 10, 11, 0, 1, halved to 15 bits.
+        assert_eq!(r.window, [550, 600, 50, 100]);
+        // Then 2-7: six decoded ahead of the window.
+        assert_eq!(r.queued, 6);
+        assert_eq!(r.queue[..6], [150, 200, 250, 300, 350, 400]);
+        // The decoder carries on after the newest (slot 7), from nibble 8.
+        assert_eq!((r.p1, r.p2), (400, 350));
+        assert_eq!((r.block, r.nibble, r.fraction), (0x4009, 8, 0x345));
+        assert_eq!((r.mode, r.envelope), (EnvelopeMode::Sustain, 0x400));
+        assert_eq!(
+            (d.counter, d.noise, d.echo_offset, d.fir_at),
+            (0x1234, 0x4000, 0x100, 5)
+        );
+    }
+
+    #[test]
+    fn a_resume_between_the_chips_steps_moves_to_romlenss() {
+        let aram = vec![0u8; 0x10000];
+        let regs = [0u8; 128];
+        let v = VoiceInside::default();
+        // After the chip's FIR input (22) and before Romlens's step 31 (28):
+        // Romlens reads the same entry again.
+        let (d, _) = Dsp::resume(&inside_with(v, 25), &regs, &aram);
+        assert_eq!(d.fir_at, 4);
+        // After Romlens's step 31 (28) but before the chip's 29: the
+        // counter, the KON phase and the echo offset have moved on.
+        let (d, clock) = Dsp::resume(&inside_with(v, 29), &regs, &aram);
+        assert_eq!((clock, d.counter, d.echo_offset), (0, 0x1233, 0x104));
+        assert!(!d.even, "the poll phase moved on");
+        // Between voice 1's envelope (step 1) and its pitch counter (2).
+        let (d, _) = Dsp::resume(&inside_with(v, 2), &regs, &aram);
+        assert!(d.voices[1].stepped && !d.voices[2].stepped);
+    }
+
+    #[test]
+    fn a_phase_not_recorded_is_worked_out_from_the_envelope() {
+        let mut regs = [0u8; 128];
+        // Voice 1 by ADSR, sustain level 4.
+        regs[0x15] = 0x8F;
+        regs[0x16] = 0x80;
+        let aram = vec![0u8; 0x10000];
+        let at = |envelope: u16, unclamped: i16| {
+            let v = VoiceInside {
+                phase: PHASE_UNKNOWN,
+                envelope,
+                unclamped,
+                ..VoiceInside::default()
+            };
+            let (d, _) = Dsp::resume(&inside_with(v, 10), &regs, &aram);
+            d.voices[1].mode
+        };
+        assert_eq!(at(0x200, 0x220), EnvelopeMode::Attack);
+        assert_eq!(at(0x7FF, 0x7FF + 1024), EnvelopeMode::Decay);
+        // 1/256 down: decay above the sustain level, sustain at it.
+        assert_eq!(at(0x600, 0x600 - 6), EnvelopeMode::Decay);
+        assert_eq!(at(0x480, 0x480 - 4 - 1), EnvelopeMode::Sustain);
+        // Neither rule: releasing.
+        assert_eq!(at(0x300, 0x5A0), EnvelopeMode::Release);
+    }
 }
