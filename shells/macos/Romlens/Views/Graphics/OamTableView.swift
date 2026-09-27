@@ -72,6 +72,7 @@ struct OamTableView: View {
         .controlSize(.small)
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
+        .barRow()
     }
 
     private func flip(_ e: OamEntryInfo) -> String {

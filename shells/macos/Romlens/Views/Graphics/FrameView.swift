@@ -83,6 +83,7 @@ struct FrameView: View {
         .controlSize(.small)
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
+        .barRow()
     }
 
     private var status: some View {
@@ -99,6 +100,7 @@ struct FrameView: View {
         .truncationMode(.tail)
         .padding(.horizontal, 12)
         .padding(.vertical, 5)
+        .barRow()
     }
 }
 

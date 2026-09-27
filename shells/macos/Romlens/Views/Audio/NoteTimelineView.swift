@@ -35,6 +35,7 @@ struct NoteTimelineView: View {
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
+                .barRow()
                 PianoRoll(audio: audio)
                     .frame(minHeight: 8 * 20, idealHeight: 8 * 44)
             }

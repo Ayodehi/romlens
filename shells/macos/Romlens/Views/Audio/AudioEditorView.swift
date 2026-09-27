@@ -110,6 +110,7 @@ struct AudioSourceBar: View {
         .controlSize(.small)
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
+        .barRow()
     }
 
     private func included(_ list: UInt32) -> Binding<Bool> {

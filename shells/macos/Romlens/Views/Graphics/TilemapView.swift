@@ -102,6 +102,7 @@ struct TilemapView: View {
         .controlSize(.small)
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
+        .barRow()
     }
 
     private func numbers(_ cells: [TilemapCellInfo], size: (columns: Int, rows: Int), cell: CGFloat) -> some View {

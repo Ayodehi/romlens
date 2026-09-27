@@ -88,6 +88,7 @@ struct GraphicsSourceBar: View {
         .controlSize(.small)
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
+        .barRow()
     }
 
     private enum SourceTag: Hashable { case rom, recording, bytes }
@@ -193,6 +194,15 @@ struct ChangeHistoryRow: View {
                 .font(.caption)
             }
         }
+    }
+}
+
+extension View {
+    /// A row of controls above a view: one line whatever the width, its
+    /// labels truncated rather than wrapped, and only as tall as that
+    /// line, so a narrow window never stretches it.
+    func barRow() -> some View {
+        lineLimit(1).fixedSize(horizontal: false, vertical: true)
     }
 }
 
