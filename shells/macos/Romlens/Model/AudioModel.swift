@@ -61,6 +61,8 @@ final class AudioModel {
         var map: [AramRegionInfo]
         var samples: [SampleInfo]
         var pc: UInt16
+        /// Nintendo's N-SPC driver, when audio RAM holds it (A14).
+        var nspc: NspcDriverInfo?
     }
 
     let rom: Rom
@@ -276,6 +278,17 @@ final class AudioModel {
             romPlayer = nil
             romProblem = "\(error)"
         }
+        machineGeneration += 1
+    }
+
+    /// Show `player`'s machine in place of the ROM's upload: a machine
+    /// built another way, such as a fixture's.
+    func load(machine player: ApuPlayer) {
+        sourcePicked = true
+        source = .rom
+        romPlayer = player
+        romProblem = nil
+        notes = []
         machineGeneration += 1
     }
 
@@ -531,6 +544,27 @@ final class AudioModel {
         listingTarget = address
     }
 
+    /// Song `number`'s list, N-SPC's.
+    func nspcSong(_ number: UInt8) -> [NspcEntryInfo] {
+        switch source {
+        case .recording: (try? recording?.nspcSong(frame: frame, number: number)) ?? []
+        case .rom: romPlayer?.nspcSong(number: number) ?? []
+        }
+    }
+
+    /// The N-SPC track at `at`, decoded.
+    func nspcTrack(_ at: UInt16) -> [NspcEventInfo] {
+        switch source {
+        case .recording: (try? recording?.nspcTrack(frame: frame, at: at)) ?? []
+        case .rom: romPlayer?.nspcTrack(at: at) ?? []
+        }
+    }
+
+    /// The song the Song pane shows; the one playing when nil.
+    var chosenSong: UInt8?
+    /// The voice whose track the Song pane shows.
+    var songVoice = 0
+
     /// The uploads the recording saw, up to the frame.
     func sentUploads() -> [SentUploadInfo] {
         guard source == .recording, let r = recording else { return [] }
@@ -563,11 +597,12 @@ final class AudioModel {
                 registers: r.dspRegisters(frame: frame),
                 map: r.aramMap(frame: frame),
                 samples: r.samples(frame: frame),
-                pc: r.spcPc(frame: frame)
+                pc: r.spcPc(frame: frame),
+                nspc: r.nspc(frame: frame)
             )
         case .rom:
             guard let p = romPlayer else { return nil }
-            s = State(voices: p.voices(), registers: p.dspRegisters(), map: p.aramMap(), samples: p.samples(), pc: p.spcPc())
+            s = State(voices: p.voices(), registers: p.dspRegisters(), map: p.aramMap(), samples: p.samples(), pc: p.spcPc(), nspc: p.nspc())
         }
         if let s { cache = (key, s) }
         return s

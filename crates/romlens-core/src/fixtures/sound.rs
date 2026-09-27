@@ -160,3 +160,50 @@ pub fn sound_upload_lorom() -> Vec<u8> {
     rom[SAMPLE_OFFSET..SAMPLE_OFFSET + s.len()].copy_from_slice(&s);
     rom
 }
+
+/// Audio RAM laid out as Nintendo's N-SPC driver keeps it, written by
+/// hand from the format's description (`audio::nspc`): the older
+/// version's length table at `$0FC2` (plus one, as Super Mario World keeps
+/// it), a song table at `$1360` of two songs, and song 1 playing its
+/// second block.
+pub fn nspc_aram() -> Vec<u8> {
+    use crate::audio::nspc::OLD_COMMANDS;
+    let mut a = vec![0u8; 0x10000];
+    let lengths: Vec<u8> = OLD_COMMANDS.iter().map(|c| c.params + 1).collect();
+    a[0x0FC2..0x0FC2 + lengths.len()].copy_from_slice(&lengths);
+    let put = |a: &mut Vec<u8>, at: usize, words: &[u16]| {
+        for (i, w) in words.iter().enumerate() {
+            a[at + i * 2..at + i * 2 + 2].copy_from_slice(&w.to_le_bytes());
+        }
+    };
+    put(&mut a, 0x1360, &[0x1400, 0x1420]);
+    // Song 1: block A, block B twice more, then back to the start for ever.
+    put(
+        &mut a,
+        0x1400,
+        &[0x1500, 0x1510, 0x0002, 0x1402, 0x00FF, 0x1400],
+    );
+    // Song 2: block A, then the end.
+    put(&mut a, 0x1420, &[0x1500, 0x0000]);
+    put(&mut a, 0x1500, &[0x2000, 0, 0, 0, 0, 0, 0, 0x2100]);
+    put(&mut a, 0x1510, &[0x2200, 0, 0, 0, 0, 0, 0, 0]);
+    let t1 = [
+        0xDA, 0x04, // instrument 4
+        0x18, 0x7F, // an eighth, quantize 7, velocity 15
+        0xA4, // C3 ($80 + 36: C0 is $80)
+        0xC6, // tie
+        0x30, // a quarter
+        0xC7, // rest
+        0xE9, 0x00, 0x23, 0x02, // call $2300 twice
+        0xD2, // percussion 2
+        0x00,
+    ];
+    a[0x2000..0x2000 + t1.len()].copy_from_slice(&t1);
+    a[0x2100..0x2103].copy_from_slice(&[0x0C, 0x80, 0x00]);
+    a[0x2200..0x2203].copy_from_slice(&[0x30, 0xB9, 0x00]);
+    a[0x2300..0x2302].copy_from_slice(&[0x80, 0x00]);
+    // The driver in block B: the list pointer past it, voice 0 part way.
+    put(&mut a, 0x40, &[0x1404]);
+    put(&mut a, 0x30, &[0x2201]);
+    a
+}

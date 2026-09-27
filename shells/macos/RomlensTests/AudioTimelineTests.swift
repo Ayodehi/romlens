@@ -59,6 +59,28 @@ import Testing
         a.pause()
     }
 
+    @Test func anNspcSongIsReadBesideTheTimeline() async throws {
+        let m = try await model()
+        m.audio.load(machine: makeNspcTestPlayer())
+        let d = try #require(m.audio.state?.nspc)
+        #expect(d.old && d.songs.count == 2)
+        #expect(d.playing?.song == 1 && d.playing?.block == 0x1510)
+        let list = m.audio.nspcSong(1)
+        #expect(list.map(\.kind) == [.block, .block, .repeat, .jump])
+        let track = m.audio.nspcTrack(0x2000)
+        #expect(track.first?.text.hasPrefix("instrument $04") == true)
+        // Drawn in a window.
+        let controller = RomWindowController(model: m)
+        controller.window?.orderFront(nil)
+        defer { controller.window?.close() }
+        let content = try #require(controller.window?.contentView)
+        m.openAudio(.timeline)
+        content.layoutSubtreeIfNeeded()
+        Fixture.spin(0.05)
+        content.display()
+        #expect(m.audioTab == .timeline)
+    }
+
     @Test func theFirResponseOfOneTapIsFlat() {
         let flat = FirResponse.response([0, 0, 0, 0, 0, 0, 0, 64], count: 16)
         #expect(flat.allSatisfy { abs($0 - -6.02) < 0.05 }, "half, at every frequency")

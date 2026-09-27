@@ -158,6 +158,19 @@ impl Player {
         p
     }
 
+    /// A 64 KB audio RAM image as it stands, the SPC700 idling in a loop
+    /// at `idle` (two bytes there are overwritten), the DSP silent. For
+    /// fixtures of a driver's data.
+    pub fn image(aram: &[u8], idle: u16) -> Player {
+        let mut apu = Apu::new();
+        apu.bus.aram.copy_from_slice(&aram[..0x10000]);
+        apu.bus.aram[idle as usize] = 0x2F;
+        apu.bus.aram[idle as usize + 1] = 0xFE;
+        apu.cpu.pc = idle;
+        apu.bus.io.rom_enabled = false;
+        Player::new(apu, Start::Sample)
+    }
+
     /// Key voices on, as a write of `mask` to KON.
     pub fn key_on(&mut self, mask: u8) {
         let dsp = &mut self.apu.bus.dsp;

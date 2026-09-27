@@ -6,6 +6,7 @@
 
 pub mod aram_map;
 pub mod notes;
+pub mod nspc;
 pub mod ports;
 pub mod upload;
 pub mod voices;

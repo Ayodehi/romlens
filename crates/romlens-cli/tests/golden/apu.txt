@@ -126,6 +126,8 @@ voice 5  silent, not set up
 voice 6  silent, not set up
 
 voice 7  silent, not set up
+the recording at frame 3
+no N-SPC driver: its table of command lengths is not in audio RAM (the other views read any driver)
 from frame 0, 0.10 s: 3200 samples at 32 kHz, the S-CPU's port writes following the recording
   digest 2b731c5b576cfa77243e5502319855d88f71eed21019b7b83643319a08282f39
   left peak 20162, RMS 18110; right peak 20162, RMS 18110 (of 32767)

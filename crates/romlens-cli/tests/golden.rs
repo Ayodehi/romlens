@@ -1270,6 +1270,8 @@ fn apu_commands() {
     ]);
     log += &run(&["apu", "ports", "--rec", by_apu_rec, "--frames", "1..1"]);
     log += &run(&["apu", "voices", "--rec", by_apu_rec, "--frame", "3"]);
+    // Romlens's own driver is not N-SPC.
+    log += &run(&["apu", "song", "--rec", by_apu_rec, "--frame", "3"]);
     log += &run(&["apu", "render", "--rec", by_apu_rec, "--seconds", "0.1"]);
     log += &run(&[
         "apu",

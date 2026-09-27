@@ -656,6 +656,36 @@ enum ApuCommand {
         #[arg(long)]
         rec: Option<PathBuf>,
     },
+    /// Nintendo's N-SPC driver's songs as notes and commands: the song
+    /// table, a song's blocks, and each voice's track, from a recording's
+    /// frame or from the ROM's driver run by Romlens.
+    Song {
+        #[arg(long, conflicts_with = "rom")]
+        rec: Option<PathBuf>,
+        #[arg(long)]
+        rom: Option<PathBuf>,
+        #[arg(long, requires = "rom")]
+        project: Option<PathBuf>,
+        #[arg(long, requires = "rom")]
+        with: Vec<String>,
+        /// A byte for the driver on a port, such as `2=$01`; repeatable.
+        #[arg(long, requires = "rom")]
+        port: Vec<String>,
+        /// From the ROM: how long the driver runs after the ports are
+        /// written.
+        #[arg(long, default_value_t = 1.0, requires = "rom")]
+        seconds: f64,
+        /// From a recording: the frame (default the last).
+        #[arg(long)]
+        frame: Option<u64>,
+        /// The song to list (its number, as a game sends it); default the
+        /// one playing.
+        #[arg(long)]
+        song: Option<u8>,
+        /// Events listed per track.
+        #[arg(long, default_value_t = 24)]
+        limit: usize,
+    },
     /// Run Romlens's SPC700 beside the recording, frame by frame, and say
     /// where it differs from what Mesen recorded.
     Replay {
@@ -1570,6 +1600,29 @@ fn run() -> Result<()> {
                         ),
                         (None, None) => Err(anyhow::anyhow!("apu render needs --rec or --rom")),
                     };
+                }
+                ApuCommand::Song {
+                    rec,
+                    rom,
+                    project,
+                    with,
+                    port,
+                    seconds,
+                    frame,
+                    song,
+                    limit,
+                } => {
+                    return commands::apu_song::run(commands::apu_song::SongArgs {
+                        rec: rec.as_deref(),
+                        rom: rom.as_deref(),
+                        project: project.as_deref(),
+                        with: &with,
+                        ports: &port,
+                        seconds,
+                        frame,
+                        song,
+                        limit,
+                    });
                 }
                 ApuCommand::Upload { rom, project, rec } => {
                     return commands::apu_upload::upload(&rom, project.as_deref(), rec.as_deref());

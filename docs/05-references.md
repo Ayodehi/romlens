@@ -43,6 +43,21 @@ several are community sites that move.
 - **Super Metroid compression** — Metroid Construction documents the LZ
   variant; several open decompressors exist to validate ours against.
 
+## SNES sound specifically
+
+- **fullsnes APU chapters** — the SPC700, its I/O, the S-DSP's registers,
+  BRR and the Gaussian table; the source for `spc700/`, `apu/` and `dsp/`
+  (docs/23).
+- **anomie's S-DSP and SPC700 documents**, and the **SNESdev wiki**'s
+  envelope page (rate periods and offsets).
+- **Tom Harte's SPC700 single-step tests** (MIT), run from
+  `ROMLENS_SPC_TESTS`, never committed.
+- **"Nintendo Music Format (N-SPC)"** and **"Super Mario World Music
+  Format"**, Super Famicom Development Wiki
+  (https://wiki.superfamicom.org/nintendo-music-format-(n-spc),
+  https://wiki.superfamicom.org/super-mario-world-music-format) — the
+  standard and older N-SPC song formats `audio::nspc` reads (docs/23, A14).
+
 ## Existing tools (to import from, export to, and learn from)
 
 - **DiztinGUIsh (Diz)** — SNES-specific interactive disassembler; its project

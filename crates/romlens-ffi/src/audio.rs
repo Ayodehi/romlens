@@ -409,6 +409,183 @@ impl From<&UploadReport> for UploadReportInfo {
     }
 }
 
+/// Nintendo's N-SPC driver, recognised in audio RAM (docs/23, A14).
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct NspcDriverInfo {
+    /// The format's version in words.
+    pub dialect: String,
+    /// The older version (Super Mario World, Pilotwings).
+    pub old: bool,
+    /// Where its table of command lengths is.
+    pub lengths_at: u16,
+    pub song_table: Option<u16>,
+    /// Each song's list: song number n is entry n - 1.
+    pub songs: Vec<u16>,
+    pub playing: Option<NspcPlayingInfo>,
+}
+
+/// What the driver is playing, from its direct page.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct NspcPlayingInfo {
+    pub song: Option<u8>,
+    pub list: u16,
+    pub block: u16,
+    pub entry: u16,
+    /// Each voice's track in the block, 0 for none.
+    pub tracks: Vec<u16>,
+    /// The next byte each voice reads.
+    pub positions: Vec<Option<u16>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum NspcEntryKind {
+    Block,
+    Repeat,
+    Jump,
+    End,
+}
+
+/// One entry of a song's list.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct NspcEntryInfo {
+    pub at: u16,
+    pub kind: NspcEntryKind,
+    /// A block's address and its eight tracks.
+    pub block: u16,
+    pub tracks: Vec<u16>,
+    /// A repeat's count, and where a repeat or jump goes.
+    pub count: u8,
+    pub to: u16,
+}
+
+/// One event of a track.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct NspcEventInfo {
+    pub at: u16,
+    pub bytes: Vec<u8>,
+    /// `length`, `note`, `tie`, `rest`, `percussion`, `command`, `end` or
+    /// `invalid`.
+    pub kind: String,
+    pub text: String,
+    /// A call's target.
+    pub calls: Option<u16>,
+}
+
+/// The driver found last, so the next frame's is read without a search.
+static NSPC_KNOWN: Mutex<Option<romlens_core::audio::nspc::Driver>> = Mutex::new(None);
+
+fn nspc_driver(aram: &[u8]) -> Option<romlens_core::audio::nspc::Driver> {
+    use romlens_core::audio::nspc::{recognise, refresh};
+    let mut known = NSPC_KNOWN.lock().unwrap_or_else(|e| e.into_inner());
+    let d = match known.as_ref() {
+        Some(k) => refresh(aram, k),
+        None => recognise(aram),
+    };
+    if d.is_some() {
+        *known = d.clone();
+    }
+    d
+}
+
+fn nspc_info(aram: &[u8]) -> Option<NspcDriverInfo> {
+    use romlens_core::audio::nspc::{Dialect, playing};
+    let d = nspc_driver(aram)?;
+    let p = playing(aram, &d);
+    Some(NspcDriverInfo {
+        dialect: d.dialect.name().to_owned(),
+        old: d.dialect == Dialect::Old,
+        lengths_at: d.lengths_at,
+        song_table: d.song_table,
+        songs: d.songs.clone(),
+        playing: p.map(|p| NspcPlayingInfo {
+            song: p.song,
+            list: p.list,
+            block: p.block,
+            entry: p.entry,
+            tracks: p.tracks.to_vec(),
+            positions: p.positions.to_vec(),
+        }),
+    })
+}
+
+fn nspc_song(aram: &[u8], number: u8) -> Vec<NspcEntryInfo> {
+    use romlens_core::audio::nspc::{ListEntry, block_tracks, song_list};
+    let Some(d) = nspc_driver(aram) else {
+        return Vec::new();
+    };
+    let Some(&at) = d.songs.get((number as usize).wrapping_sub(1)) else {
+        return Vec::new();
+    };
+    song_list(aram, d.dialect, at)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|e| {
+            let base = NspcEntryInfo {
+                at: e.at(),
+                kind: NspcEntryKind::End,
+                block: 0,
+                tracks: Vec::new(),
+                count: 0,
+                to: 0,
+            };
+            match e {
+                ListEntry::Block { block, .. } => NspcEntryInfo {
+                    kind: NspcEntryKind::Block,
+                    block,
+                    tracks: block_tracks(aram, block).to_vec(),
+                    ..base
+                },
+                ListEntry::Repeat { count, to, .. } => NspcEntryInfo {
+                    kind: NspcEntryKind::Repeat,
+                    count,
+                    to,
+                    ..base
+                },
+                ListEntry::Jump { to, .. } => NspcEntryInfo {
+                    kind: NspcEntryKind::Jump,
+                    to,
+                    ..base
+                },
+                ListEntry::End { .. } => base,
+            }
+        })
+        .collect()
+}
+
+fn nspc_track(aram: &[u8], at: u16) -> Vec<NspcEventInfo> {
+    use romlens_core::audio::nspc::{EventKind, track};
+    let Some(d) = nspc_driver(aram) else {
+        return Vec::new();
+    };
+    track(aram, d.dialect, at)
+        .events
+        .iter()
+        .map(|e| {
+            let (kind, calls) = match &e.kind {
+                EventKind::Length { .. } => ("length", None),
+                EventKind::Note { .. } => ("note", None),
+                EventKind::Tie => ("tie", None),
+                EventKind::Rest => ("rest", None),
+                EventKind::Percussion(_) => ("percussion", None),
+                EventKind::Command { command, params } => (
+                    "command",
+                    (command.name == "call" && params.len() >= 2)
+                        .then(|| u16::from_le_bytes([params[0], params[1]])),
+                ),
+                EventKind::End => ("end", None),
+                EventKind::Invalid => ("invalid", None),
+            };
+            NspcEventInfo {
+                at: e.at,
+                bytes: e.bytes.clone(),
+                kind: kind.to_owned(),
+                text: e.text(),
+                calls,
+            }
+        })
+        .collect()
+}
+
 // ----------------------------------------------------- shared over a state
 
 /// Audio RAM, the DSP's registers and the SPC700 at one moment, and where
@@ -694,6 +871,15 @@ pub fn make_sound_test_rom() -> Vec<u8> {
     romlens_core::fixtures::sound::sound_upload_lorom()
 }
 
+/// A player over [`romlens_core::fixtures::sound::nspc_aram`]: audio RAM
+/// laid out as the N-SPC driver keeps it, song 1 playing, for shell
+/// tests of the song views.
+#[uniffi::export]
+pub fn make_nspc_test_player() -> Arc<ApuPlayer> {
+    let aram = romlens_core::fixtures::sound::nspc_aram();
+    ApuPlayer::wrap(Player::image(&aram, 0x0300), Vec::new(), None)
+}
+
 /// A recording of [`make_sound_test_rom`]'s driver run by Romlens's own
 /// SPC700 and DSP: in frame 1 the S-CPU sends `$01` and the driver plays
 /// a note on voice 0.
@@ -901,6 +1087,21 @@ impl RecordingSession {
                 entry: u.entry,
             })
             .collect())
+    }
+
+    /// The N-SPC driver at `frame`'s end, if audio RAM holds one.
+    pub fn nspc(&self, frame: u64) -> Result<Option<NspcDriverInfo>, RomlensError> {
+        Ok(nspc_info(&self.sound_frame(frame)?.0))
+    }
+
+    /// Song `number`'s list at `frame`'s end.
+    pub fn nspc_song(&self, frame: u64, number: u8) -> Result<Vec<NspcEntryInfo>, RomlensError> {
+        Ok(nspc_song(&self.sound_frame(frame)?.0, number))
+    }
+
+    /// The track at `at` at `frame`'s end, decoded.
+    pub fn nspc_track(&self, frame: u64, at: u16) -> Result<Vec<NspcEventInfo>, RomlensError> {
+        Ok(nspc_track(&self.sound_frame(frame)?.0, at))
     }
 
     /// The ports both ways in frames `from..=to`.
@@ -1225,6 +1426,19 @@ impl ApuPlayer {
         self.lock().player.apu.cpu.pc
     }
 
+    /// The N-SPC driver now, if audio RAM holds one.
+    pub fn nspc(&self) -> Option<NspcDriverInfo> {
+        nspc_info(&self.lock().player.apu.bus.aram)
+    }
+
+    pub fn nspc_song(&self, number: u8) -> Vec<NspcEntryInfo> {
+        nspc_song(&self.lock().player.apu.bus.aram, number)
+    }
+
+    pub fn nspc_track(&self, at: u16) -> Vec<NspcEventInfo> {
+        nspc_track(&self.lock().player.apu.bus.aram, at)
+    }
+
     /// Log the notes the driver plays from now, each with the instruction
     /// behind it.
     pub fn log_notes(&self) {
@@ -1413,6 +1627,24 @@ mod tests {
             (0, 0x1000, Some(setup + 9))
         );
         assert_eq!(p.note_count() as usize, notes.len());
+    }
+
+    #[test]
+    fn a_driver_that_is_not_n_spc_has_no_songs() {
+        // The fixture's driver is Romlens's own.
+        let rec = recording();
+        assert_eq!(rec.nspc(3).unwrap(), None);
+        assert!(rec.nspc_song(3, 1).unwrap().is_empty());
+        // One that is.
+        let p = make_nspc_test_player();
+        let d = p.nspc().unwrap();
+        assert!(d.old && d.songs == [0x1400, 0x1420]);
+        assert_eq!(d.playing.as_ref().unwrap().song, Some(1));
+        let list = p.nspc_song(1);
+        assert_eq!(list[2].kind, NspcEntryKind::Repeat);
+        let t = p.nspc_track(0x2000);
+        assert_eq!(t[6].calls, Some(0x2300));
+        assert_eq!(t[2].text, "note C3");
     }
 
     #[test]

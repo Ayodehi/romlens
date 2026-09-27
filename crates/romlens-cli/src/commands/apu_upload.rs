@@ -243,16 +243,28 @@ fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
     hay.windows(needle.len()).position(|w| w == needle)
 }
 
-/// `apu render --rom`: the driver booted from the ROM, with more uploads
-/// laid over it, a command sent, and the sound described.
-pub fn render_rom(
+/// `--port 2=$05`.
+pub fn port_value(p: &str) -> Result<(u8, u8)> {
+    let (port, value) = p
+        .split_once('=')
+        .ok_or_else(|| anyhow!("--port is PORT=VALUE, such as 2=$05"))?;
+    let port: u8 = port.trim().parse()?;
+    let v = value.trim().trim_start_matches('$');
+    let value = u8::from_str_radix(v, 16).map_err(|_| anyhow!("{value}: a byte in hex"))?;
+    if port > 3 {
+        return Err(anyhow!("ports are 0 to 3"));
+    }
+    Ok((port, value))
+}
+
+/// The driver booted from the ROM with the uploads at `with` laid over
+/// it, run a quarter second so it starts: the player, the driver's list and
+/// the others'.
+pub fn booted_player(
     rom_path: &Path,
     project: Option<&Path>,
     with: &[String],
-    ports: &[String],
-    seconds: f64,
-) -> Result<()> {
-    use romlens_core::apu::render::SAMPLE_RATE;
+) -> Result<(Player, String, Vec<String>)> {
     let s = session::open(rom_path, project, false)?;
     let r = trace(&s.rom, &s.snap);
     let d = driver(&r).ok_or_else(|| {
@@ -268,35 +280,39 @@ pub fn render_rom(
             .ok_or_else(|| anyhow!("{w} is not a traced upload (see romlens apu upload)"))?;
         more.push(u);
     }
-    // Let the driver start before the command.
-    let mut player = Player::from_upload(&s.rom, d, &more, 0.25);
+    let player = Player::from_upload(&s.rom, d, &more, 0.25);
+    Ok((
+        player,
+        d.list.to_string(),
+        more.iter().map(|u| u.list.to_string()).collect(),
+    ))
+}
+
+/// `apu render --rom`: the driver booted from the ROM, with more uploads
+/// laid over it, a command sent, and the sound described.
+pub fn render_rom(
+    rom_path: &Path,
+    project: Option<&Path>,
+    with: &[String],
+    ports: &[String],
+    seconds: f64,
+) -> Result<()> {
+    use romlens_core::apu::render::SAMPLE_RATE;
+    // The driver starts before the command.
+    let (mut player, driver_list, more) = booted_player(rom_path, project, with)?;
     for p in ports {
-        let (port, value) = p
-            .split_once('=')
-            .ok_or_else(|| anyhow!("--port is PORT=VALUE, such as 2=$05"))?;
-        let port: usize = port.trim().parse()?;
-        let v = value.trim().trim_start_matches('$');
-        let value = u8::from_str_radix(v, 16).map_err(|_| anyhow!("{value}: a byte in hex"))?;
-        if port > 3 {
-            return Err(anyhow!("ports are 0 to 3"));
-        }
-        player.send_port(port as u8, value);
+        let (port, value) = port_value(p)?;
+        player.send_port(port, value);
     }
     let n = (seconds * SAMPLE_RATE as f64) as usize;
     let out = player.render(n);
     println!(
         "the driver from {} booted by Romlens{}, {} sent, {:.2} s: {} samples",
-        d.list,
+        driver_list,
         if more.is_empty() {
             String::new()
         } else {
-            format!(
-                " with {}",
-                more.iter()
-                    .map(|u| u.list.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
+            format!(" with {}", more.join(", "))
         },
         if ports.is_empty() {
             "nothing".to_owned()

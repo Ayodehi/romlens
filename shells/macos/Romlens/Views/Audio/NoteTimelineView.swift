@@ -10,6 +10,17 @@ struct NoteTimelineView: View {
     @Bindable var audio: AudioModel
 
     var body: some View {
+        HSplitView {
+            roll
+                .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
+            SongPane(audio: audio)
+                .frame(minWidth: 280, idealWidth: 360, maxWidth: 520, maxHeight: .infinity)
+        }
+        .onAppear { audio.loadNotes() }
+        .onChange(of: audio.source) { _, _ in audio.loadNotes() }
+    }
+
+    private var roll: some View {
         VSplitView {
             VStack(spacing: 0) {
                 HStack {
@@ -30,8 +41,6 @@ struct NoteTimelineView: View {
             NoteDetail(audio: audio)
                 .frame(minHeight: 120, idealHeight: 180)
         }
-        .onAppear { audio.loadNotes() }
-        .onChange(of: audio.source) { _, _ in audio.loadNotes() }
     }
 
     private var summary: String {
