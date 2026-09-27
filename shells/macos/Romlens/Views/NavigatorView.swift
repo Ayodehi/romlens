@@ -8,13 +8,40 @@ struct NavigatorView: View {
     var body: some View {
         @Bindable var nav = model.navigator
         VStack(spacing: 0) {
-            Picker("Navigator", selection: $nav.tab) {
-                ForEach(NavigatorModel.Tab.allCases) { tab in
-                    Text(tab.title).tag(tab)
+            // The words while they fit the navigator's width, then smaller
+            // words, then icons, then a pop-up menu.
+            ViewThatFits(in: .horizontal) {
+                Picker("Navigator", selection: $nav.tab) {
+                    ForEach(NavigatorModel.Tab.allCases) { tab in
+                        Text(tab.title).tag(tab)
+                    }
                 }
+                .pickerStyle(.segmented)
+                .fixedSize()
+                Picker("Navigator", selection: $nav.tab) {
+                    ForEach(NavigatorModel.Tab.allCases) { tab in
+                        Text(tab.title).tag(tab)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .controlSize(.small)
+                .fixedSize()
+                Picker("Navigator", selection: $nav.tab) {
+                    ForEach(NavigatorModel.Tab.allCases) { tab in
+                        Image(systemName: tab.systemImage).help(tab.title).tag(tab)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .fixedSize()
+                Picker("Navigator", selection: $nav.tab) {
+                    ForEach(NavigatorModel.Tab.allCases) { tab in
+                        Label(tab.title, systemImage: tab.systemImage).tag(tab)
+                    }
+                }
+                .pickerStyle(.menu)
             }
-            .pickerStyle(.segmented)
             .labelsHidden()
+            .frame(maxWidth: .infinity)
             .padding(8)
             Group {
                 switch nav.tab {

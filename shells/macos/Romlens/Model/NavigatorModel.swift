@@ -18,6 +18,14 @@ final class NavigatorModel {
             case .banks: "Banks"
             }
         }
+        var systemImage: String {
+            switch self {
+            case .labels: "tag"
+            case .variables: "character.textbox"
+            case .regions: "square.stack.3d.up"
+            case .banks: "square.grid.2x2"
+            }
+        }
     }
 
     struct Bank: Identifiable, Hashable, Sendable {
