@@ -3,6 +3,7 @@
 //! core never depends on `uniffi`. Hot paths (`hex_rows`) return flat buffers
 //! (docs/10); everything else returns typed records.
 
+pub mod audio;
 pub mod compare;
 pub mod explain;
 mod future;
@@ -20,6 +21,7 @@ use romlens_core::{
     SpanIndex, encode_rows, fixtures, header_spans, interpret,
 };
 
+pub use audio::*;
 pub use explain::*;
 pub use graphics::*;
 pub use graphs::*;

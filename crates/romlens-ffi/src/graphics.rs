@@ -1384,6 +1384,14 @@ impl RecordingSession {
     pub(crate) fn machine(&self) -> &dyn MachineStateSource {
         self.source.dynamic()
     }
+
+    /// The file it was opened from.
+    pub(crate) fn path(&self) -> Option<&str> {
+        match &self.origin {
+            Origin::Path(p) => Some(p),
+            _ => None,
+        }
+    }
 }
 
 /// The synthetic recording `romlens testrec` writes, for shell tests.

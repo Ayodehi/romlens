@@ -469,3 +469,54 @@ fn dir_entry(regs: &[u8; 128], aram: &[u8], v: usize) -> (u16, u16) {
     let w = |i: usize| u16::from_le_bytes([aram[(at + i) & 0xFFFF], aram[(at + i + 1) & 0xFFFF]]);
     (w(0), w(2))
 }
+
+/// The envelope a voice with these settings goes through, run on the DSP
+/// itself: keyed on, held `hold` samples, then keyed off for `release`
+/// samples, the level (0–`$7FF`) taken every `stride` samples. What the
+/// Voices view draws.
+pub fn envelope_curve(
+    adsr1: u8,
+    adsr2: u8,
+    gain: u8,
+    hold: usize,
+    release: usize,
+    stride: usize,
+) -> Vec<u16> {
+    let stride = stride.max(1);
+    // A looping block of silence at $1000; the envelope does not care
+    // what the sample holds.
+    let mut aram = vec![0u8; 0x10000];
+    aram[0x0200..0x0204].copy_from_slice(&[0x00, 0x10, 0x00, 0x10]);
+    aram[0x1000] = 0x03;
+    let mut regs = [0u8; 128];
+    regs[0x5D] = 0x02;
+    regs[0x6C] = 0x20;
+    regs[0x03] = 0x10;
+    regs[0x05] = adsr1;
+    regs[0x06] = adsr2;
+    regs[0x07] = gain;
+    let mut dsp = Dsp::default();
+    dsp.write_kon(0x01);
+    // Through the poll and the key-on wait, so the curve starts at the
+    // note's first sample.
+    for _ in 0..2 {
+        if dsp.voices[0].delay > 0 {
+            break;
+        }
+        dsp.sample(&mut regs, &mut aram);
+    }
+    while dsp.voices[0].delay > 0 {
+        dsp.sample(&mut regs, &mut aram);
+    }
+    let mut out = Vec::with_capacity((hold + release) / stride + 1);
+    for i in 0..hold + release {
+        if i == hold {
+            regs[0x5C] = 0x01;
+        }
+        if i % stride == 0 {
+            out.push(dsp.voices[0].envelope);
+        }
+        dsp.sample(&mut regs, &mut aram);
+    }
+    out
+}

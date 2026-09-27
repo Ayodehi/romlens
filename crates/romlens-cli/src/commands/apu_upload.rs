@@ -5,7 +5,8 @@
 use std::path::Path;
 
 use anyhow::{Result, anyhow};
-use romlens_core::apu::{Apu, boot_upload};
+use romlens_core::apu::Apu;
+use romlens_core::apu::player::Player;
 use romlens_core::audio::upload::{SentUpload, Upload, UploadReport, from_ports, trace};
 use romlens_core::audio::{PartKind, aram_map, voices};
 use romlens_core::recording::{MachineStateSource, RomrecSource, SpcState};
@@ -20,15 +21,7 @@ fn driver(r: &UploadReport) -> Option<&Upload> {
 /// The machine booted straight into the driver, with `more` uploads laid
 /// over it, run for `seconds` so it sets the DSP up.
 fn booted(rom: &RomImage, driver: &Upload, more: &[&Upload], seconds: f64) -> Apu {
-    let mut apu = Apu::new();
-    let mut blocks = driver.apu_blocks(rom);
-    for u in more {
-        blocks.extend(u.apu_blocks(rom));
-    }
-    boot_upload(&mut apu, &blocks, driver.entry);
-    let until = apu.bus.cycle + (seconds * 1_024_000.0) as u64;
-    apu.run_until(until);
-    apu
+    Player::from_upload(rom, driver, more, seconds).apu
 }
 
 /// What each block's bytes are once in audio RAM, as runs of the ROM.
@@ -259,7 +252,7 @@ pub fn render_rom(
     ports: &[String],
     seconds: f64,
 ) -> Result<()> {
-    use romlens_core::apu::render::{SAMPLE_RATE, digest};
+    use romlens_core::apu::render::SAMPLE_RATE;
     let s = session::open(rom_path, project, false)?;
     let r = trace(&s.rom, &s.snap);
     let d = driver(&r).ok_or_else(|| {
@@ -276,7 +269,7 @@ pub fn render_rom(
         more.push(u);
     }
     // Let the driver start before the command.
-    let mut apu = booted(&s.rom, d, &more, 0.25);
+    let mut player = Player::from_upload(&s.rom, d, &more, 0.25);
     for p in ports {
         let (port, value) = p
             .split_once('=')
@@ -287,14 +280,10 @@ pub fn render_rom(
         if port > 3 {
             return Err(anyhow!("ports are 0 to 3"));
         }
-        apu.write_port(port, value);
+        player.send_port(port as u8, value);
     }
     let n = (seconds * SAMPLE_RATE as f64) as usize;
-    apu.bus.output = Some(Vec::with_capacity(n));
-    while apu.bus.output.as_ref().is_some_and(|o| o.len() < n) {
-        apu.cpu.step(&mut apu.bus);
-    }
-    let out = apu.bus.output.take().unwrap_or_default();
+    let out = player.render(n);
     println!(
         "the driver from {} booted by Romlens{}, {} sent, {:.2} s: {} samples",
         d.list,
@@ -318,6 +307,5 @@ pub fn render_rom(
         out.len()
     );
     crate::commands::apu::describe(&out);
-    let _ = digest;
     Ok(())
 }

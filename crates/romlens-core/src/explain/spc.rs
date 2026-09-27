@@ -337,3 +337,60 @@ fn waits(image: &[u8], walk: &Walk, dividers: &[Option<u8>; 3]) -> Vec<SpcIdiom>
     }
     out
 }
+
+/// One line of an audio RAM listing, explained.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpcLine {
+    pub address: u16,
+    pub bytes: Vec<u8>,
+    pub text: String,
+    /// `SUB_xxxx` where the walk found a routine start.
+    pub label: Option<String>,
+    /// Reached by the walk from the entry points.
+    pub code: bool,
+    /// The write this instruction makes, decoded.
+    pub write: Option<SpcWrite>,
+    /// The I/O register it names, when there is no write to decode.
+    pub register: Option<&'static str>,
+    /// The idiom starting here.
+    pub idiom: Option<SpcIdiom>,
+}
+
+struct Routines<'a>(&'a BTreeSet<u16>);
+
+impl crate::spc700::AramSymbols for Routines<'_> {
+    fn name_for(&self, address: u16) -> Option<crate::cpu65816::format::Symbol> {
+        self.0
+            .contains(&address)
+            .then(|| crate::cpu65816::format::Symbol {
+                name: format!("SUB_{address:04X}"),
+                user: false,
+            })
+    }
+}
+
+/// `count` instructions from `from`, with the code walked from `entries`
+/// named and explained: routines labelled, writes to the DSP and I/O
+/// decoded, waits named. Bytes the walk did not reach are listed as
+/// instructions too, marked as not reached.
+pub fn listing(image: &[u8], entries: &[u16], from: u16, count: usize) -> Vec<SpcLine> {
+    let walk = crate::spc700::aram::walk(image, entries);
+    let explained = explain_spc(image, &walk);
+    let names = Routines(&walk.routines);
+    crate::spc700::aram::disassemble(image, from, count, &names)
+        .into_iter()
+        .map(|(insn, f)| {
+            let at = insn.address;
+            SpcLine {
+                address: at,
+                bytes: insn.raw().to_vec(),
+                text: f.text,
+                label: walk.routines.contains(&at).then(|| format!("SUB_{at:04X}")),
+                code: walk.starts.contains(&at),
+                write: explained.writes.get(&at).cloned(),
+                register: f.register.map(|r| r.description),
+                idiom: explained.idiom_at(at).cloned(),
+            }
+        })
+        .collect()
+}

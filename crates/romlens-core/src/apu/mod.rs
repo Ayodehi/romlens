@@ -7,6 +7,7 @@
 pub mod cpu;
 pub mod io;
 pub mod ipl;
+pub mod player;
 pub mod render;
 pub mod replay;
 

@@ -1812,6 +1812,11 @@ impl Workbench {
     /// Apply `commands` as one undo step of the user's.
     /// The ROM, project and snapshot as they are now, for work done off
     /// the lock (comparing two versions).
+    /// The ROM and the snapshot as it is now, without copying either.
+    pub(crate) fn rom_and_snapshot(&self) -> (Arc<Rom>, Arc<AnalysisSnapshot>) {
+        (Arc::clone(&self.rom), Arc::clone(&self.lock().snapshot))
+    }
+
     pub(crate) fn parts(&self) -> (romlens_core::RomImage, Project, Arc<AnalysisSnapshot>) {
         let inner = self.lock();
         (

@@ -151,7 +151,7 @@ pub struct ExplanationInfo {
     pub idioms: Vec<IdiomInfo>,
 }
 
-fn parts(w: &RegisterWrite) -> Vec<RegisterPartInfo> {
+pub(crate) fn parts(w: &RegisterWrite) -> Vec<RegisterPartInfo> {
     w.parts
         .iter()
         .map(|p| RegisterPartInfo {
