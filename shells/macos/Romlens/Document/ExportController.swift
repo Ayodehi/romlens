@@ -25,7 +25,7 @@ enum ExportController {
         }
     }
 
-    static let assemblyMessage = "An assembly listing contains the ROM's bytes by nature. Keep it for local use; share labels and comments instead."
+    static let assemblyMessage = "Holds ROM bytes: keep it local"
 
     static func run(_ kind: Kind, document: ProjectDocument, window: NSWindow?) {
         guard let workbench = document.workbench else { return }

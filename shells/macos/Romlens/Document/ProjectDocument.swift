@@ -216,7 +216,7 @@ final class ProjectDocument: NSDocument {
     override func prepareSavePanel(_ savePanel: NSSavePanel) -> Bool {
         savePanel.isExtensionHidden = false
         savePanel.canSelectHiddenExtension = false
-        savePanel.message = "Save a Romlens project: your labels, comments, marks and imported traces. The ROM file is never changed."
+        savePanel.message = "Save Project"
         return true
     }
 

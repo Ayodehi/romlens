@@ -19,7 +19,7 @@ enum RecordingController {
     static func open(model: RomViewModel, window: NSWindow?) {
         let panel = NSOpenPanel()
         panel.title = "Open Recording"
-        panel.message = "What the Mesen recorder wrote (a .rlstream, in Mesen's script data folder), or a .romrec recording of this ROM."
+        panel.message = "Open Recording"
         panel.allowsMultipleSelection = false
         panel.allowedContentTypes = [streamType, recordingType]
         panel.allowsOtherFileTypes = true
@@ -193,7 +193,7 @@ enum RecordingController {
     static func importSnapshot(model: RomViewModel, window: NSWindow?) {
         let panel = NSOpenPanel()
         panel.title = "Import Snapshot"
-        panel.message = "Choose the dumps: VRAM (64 KB), CGRAM (512 bytes), OAM (544, or 512 named “oam” or “sprite”), and optionally a 256-byte PPU register block."
+        panel.message = "VRAM, CGRAM and OAM dumps"
         panel.allowsMultipleSelection = true
         panel.allowsOtherFileTypes = true
         run(panel, on: window, urls: true) { urls in
@@ -248,7 +248,7 @@ enum RecordingController {
         popup.sizeToFit()
         let panel = NSSavePanel()
         panel.title = "Export Frame Region"
-        panel.message = "Frame \(graphics.frame): raw bytes from the recording, which are the game's own data. For your own tools; not for sharing."
+        panel.message = "Frame \(graphics.frame): game data, not for sharing"
         panel.accessoryView = popup
         panel.nameFieldStringValue = "frame\(graphics.frame).bin"
         run(panel, on: window) { url in

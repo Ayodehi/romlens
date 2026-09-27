@@ -25,11 +25,11 @@ enum ImportController {
             switch self {
             case .trace:
                 // Short: the panel grows as wide as its message is long.
-                return "A Mesen .cdl or execution log (.mxlog), or a bsnes-plus usage map."
+                return "A .cdl, .mxlog or usage map"
             case .symbols:
-                return "A WLA-DX or bsnes-plus .sym, a no$sns .sym, or a VICE .lbl. Your own names are never overwritten."
+                return "A .sym or .lbl file"
             case .dbg:
-                return "The .dbg ld65 writes with --dbgfile: its labels, and which source line made which bytes."
+                return "A ca65 .dbg file"
             }
         }
 
@@ -81,7 +81,7 @@ enum ImportController {
         }
         SourceFolders.ask(
             start: folder,
-            message: "Romlens shows the sources \(dbg.lastPathComponent) names. Choose the folder that holds them (usually this one) to let it read them.",
+            message: "The folder with its sources",
             window: window
         ) { _ in
             // The sheet must be gone before the report's alert appears.

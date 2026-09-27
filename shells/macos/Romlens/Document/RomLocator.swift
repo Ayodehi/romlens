@@ -86,8 +86,8 @@ final class DefaultRomLocator: RomLocator {
         while true {
             let panel = NSOpenPanel()
             panel.title = "Locate ROM for \(identity.title)"
-            panel.message = (mismatch.map { "\($0)\n\n" } ?? "")
-                + "Choose the ROM image this project belongs to (SHA-256 \(identity.sha256.prefix(12))…)."
+            panel.message = (mismatch.map { "\($0). " } ?? "")
+                + "Locate the ROM for \(identity.title)"
             panel.allowedContentTypes = [.data]
             panel.allowsMultipleSelection = false
             panel.canChooseDirectories = false
@@ -98,7 +98,7 @@ final class DefaultRomLocator: RomLocator {
                 remember(url: url, sha256: identity.sha256)
                 return located
             }
-            mismatch = "\(url.lastPathComponent) is not that ROM (different SHA-256)."
+            mismatch = "\(url.lastPathComponent) is a different ROM"
         }
     }
 }

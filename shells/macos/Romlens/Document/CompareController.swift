@@ -9,7 +9,7 @@ enum CompareController {
     static func open(model: RomViewModel, window: NSWindow?) {
         let panel = NSOpenPanel()
         panel.title = "Compare With"
-        panel.message = "Another version of this ROM: a ROM file, or a saved project to bring its names. What changed is shown from it to this one."
+        panel.message = "Another version of this ROM, or its project"
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         panel.treatsFilePackagesAsDirectories = false
