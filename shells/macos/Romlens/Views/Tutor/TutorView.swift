@@ -126,6 +126,23 @@ enum TranscriptRow: Identifiable {
 
 struct TranscriptView: View {
     let tutor: TutorModel
+    /// Whether new text scrolls the transcript to the end: until the
+    /// student scrolls up, and again once they scroll back to the end.
+    @State private var following = true
+
+    /// Where the transcript is scrolled, as far as following cares.
+    struct Place: Equatable {
+        var offset: CGFloat
+        var atEnd: Bool
+    }
+
+    /// A scroll up is the student's (text only ever grows below); one that
+    /// reaches the end again picks the stream back up.
+    static func following(_ was: Bool, from old: Place, to new: Place) -> Bool {
+        if new.offset < old.offset - 1 { return false }
+        if new.offset > old.offset + 1, new.atEnd { return true }
+        return was
+    }
 
     var body: some View {
         let rows = TranscriptRow.rows(tutor.turns)
@@ -152,10 +169,29 @@ struct TranscriptView: View {
                 }
                 .padding(14)
             }
-            .onChange(of: tutor.live?.text.count) { _, _ in proxy.scrollTo("end", anchor: .bottom) }
-            .onChange(of: tutor.turns.count) { _, _ in proxy.scrollTo("end", anchor: .bottom) }
-            .onChange(of: tutor.live?.cards.count) { _, _ in proxy.scrollTo("end", anchor: .bottom) }
+            .onScrollGeometryChange(for: Place.self) { g in
+                Place(offset: g.contentOffset.y,
+                      atEnd: g.contentOffset.y + g.containerSize.height >= g.contentSize.height - 40)
+            } action: { old, new in
+                following = Self.following(following, from: old, to: new)
+            }
+            .onChange(of: tutor.live?.text.count) { _, _ in follow(proxy) }
+            .onChange(of: tutor.live?.cards.count) { _, _ in follow(proxy) }
+            .onChange(of: tutor.turns.count) { _, _ in follow(proxy) }
+            .onChange(of: tutor.busy) { _, busy in
+                // A new question: back to the end, following again.
+                if busy {
+                    following = true
+                    proxy.scrollTo("end", anchor: .bottom)
+                }
+            }
         }
+    }
+}
+
+extension TranscriptView {
+    private func follow(_ proxy: ScrollViewProxy) {
+        if following { proxy.scrollTo("end", anchor: .bottom) }
     }
 }
 

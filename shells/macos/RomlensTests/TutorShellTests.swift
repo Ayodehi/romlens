@@ -131,6 +131,20 @@ import Testing
         #expect(p.runs.contains { $0.link == URL(string: "romlens://a/008000") })
     }
 
+    @Test func aScrollUpStopsFollowingTheStream() {
+        typealias P = TranscriptView.Place
+        let end = P(offset: 500, atEnd: true)
+        // Text grows below: the offset holds, the end moves away.
+        #expect(TranscriptView.following(true, from: end, to: P(offset: 500, atEnd: false)))
+        // The student scrolls up: stop.
+        #expect(!TranscriptView.following(true, from: end, to: P(offset: 300, atEnd: false)))
+        // Growth while stopped keeps it stopped.
+        #expect(!TranscriptView.following(false, from: P(offset: 300, atEnd: false), to: P(offset: 300, atEnd: false)))
+        // Back down to the end: follow again; part way down: not yet.
+        #expect(!TranscriptView.following(false, from: P(offset: 300, atEnd: false), to: P(offset: 400, atEnd: false)))
+        #expect(TranscriptView.following(false, from: P(offset: 400, atEnd: false), to: P(offset: 520, atEnd: true)))
+    }
+
     @Test func tablesAndRulesAreFoundInTheText() {
         let s = MessageText.segments("""
         How:
