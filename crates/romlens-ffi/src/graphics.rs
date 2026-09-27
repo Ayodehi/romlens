@@ -1723,6 +1723,7 @@ pub fn pack_recorder_stream(
     rom: Arc<Rom>,
     stream: String,
     out: String,
+    spc_log: Option<String>,
 ) -> Result<PackSummary, RomlensError> {
     use romlens_core::recording::mesen::pack::{PackOptions, pack};
     let io = |e: std::io::Error| RomlensError::Io { msg: e.to_string() };
@@ -1742,11 +1743,16 @@ pub fn pack_recorder_stream(
             return Err(e);
         }
     };
-    let beside = Path::new(&stream).with_extension("spc.mxlog");
-    let spc_log = std::fs::read(&beside)
-        .ok()
-        .filter(|b| romlens_core::io::import::spc_log::read(b, Some(rom.image.bytes())).is_ok())
-        .is_some_and(|b| std::fs::write(Path::new(&out).with_extension("spc.mxlog"), b).is_ok());
+    // The SPC700's log: the one the shell passes (a sandboxed app reads it
+    // as the stream's related item), or the one beside the stream.
+    use romlens_core::io::import::spc_log as log;
+    let from = spc_log
+        .map(std::path::PathBuf::from)
+        .or_else(|| log::beside(Path::new(&stream)));
+    let spc_log = from
+        .and_then(|p| std::fs::read(p).ok())
+        .filter(|b| log::read(b, Some(rom.image.bytes())).is_ok())
+        .is_some_and(|b| std::fs::write(Path::new(&out).with_extension(log::EXTENSION), b).is_ok());
     Ok(PackSummary {
         frames: report.frames,
         sound_events: report.apu_events,

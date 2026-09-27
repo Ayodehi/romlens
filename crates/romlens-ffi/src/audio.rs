@@ -907,6 +907,25 @@ pub fn make_sound_test_rom() -> Vec<u8> {
     romlens_core::fixtures::sound::sound_upload_lorom()
 }
 
+/// An SPC700 execution log recorded from [`make_sound_test_rom`] (one
+/// instruction), for shell tests of the log that comes with a stream.
+#[uniffi::export]
+pub fn make_sound_test_spc_log() -> Vec<u8> {
+    use romlens_core::model::spc_log::{SpcInsn, SpcLog};
+    let rom = make_sound_test_rom();
+    romlens_core::io::import::spc_log::write(&SpcLog {
+        rom_crc32: romlens_core::io::crc32::crc32(&rom),
+        rom_size: rom.len() as u32,
+        insns: vec![SpcInsn {
+            pc: 0x0200,
+            boot_rom: false,
+            count: 1,
+        }],
+        accesses: Vec::new(),
+        flows: Vec::new(),
+    })
+}
+
 /// The recorder stream [`make_sound_test_recording`] is packed from: what
 /// Mesen's recorder would write for [`make_sound_test_rom`], for shell
 /// tests of opening a stream.
@@ -969,7 +988,7 @@ impl RecordingSession {
 
     /// The SPC700's execution log beside the recording, when there is one.
     fn spc_log(&self) -> Option<SpcLog> {
-        let path = Path::new(self.path()?).with_extension("spc.mxlog");
+        let path = romlens_core::io::import::spc_log::beside(Path::new(self.path()?))?;
         let bytes = std::fs::read(path).ok()?;
         romlens_core::io::import::spc_log::read(&bytes, None).ok()
     }
@@ -1736,9 +1755,10 @@ mod tests {
         let out = dir.join("s.romrec");
         let rom = Rom::from_bytes(bytes, "sound.sfc".to_owned()).unwrap();
         let summary = crate::graphics::pack_recorder_stream(
-            rom,
+            rom.clone(),
             stream.to_string_lossy().into_owned(),
             out.to_string_lossy().into_owned(),
+            None,
         )
         .unwrap();
         assert_eq!(summary.frames, 5);
@@ -1746,6 +1766,33 @@ mod tests {
         let rec = RecordingSession::open(out.to_string_lossy().into_owned(), false).unwrap();
         assert!(rec.has_sound());
         assert!(!dir.join("s.romrec.part").exists());
+        // The SPC700's log, given by the shell from somewhere else (a
+        // sandboxed app's copy of the stream's related item), goes beside
+        // the recording as `.spclog`.
+        use romlens_core::model::spc_log::{SpcInsn, SpcLog};
+        let log = SpcLog {
+            rom_crc32: romlens_core::io::crc32::crc32(rom.image.bytes()),
+            rom_size: rom.image.bytes().len() as u32,
+            insns: vec![SpcInsn {
+                pc: 0x0200,
+                boot_rom: false,
+                count: 1,
+            }],
+            accesses: Vec::new(),
+            flows: Vec::new(),
+        };
+        let elsewhere = dir.join("copied.spclog");
+        std::fs::write(&elsewhere, romlens_core::io::import::spc_log::write(&log)).unwrap();
+        let out2 = dir.join("t.romrec");
+        let summary = crate::graphics::pack_recorder_stream(
+            rom,
+            stream.to_string_lossy().into_owned(),
+            out2.to_string_lossy().into_owned(),
+            Some(elsewhere.to_string_lossy().into_owned()),
+        )
+        .unwrap();
+        assert!(summary.spc_log);
+        assert!(dir.join("t.spclog").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -24,6 +24,24 @@ fn u32_at(b: &[u8], at: usize) -> u32 {
     u32::from_le_bytes([b[at], b[at + 1], b[at + 2], b[at + 3]])
 }
 
+/// The extension the SPC700's log has beside a recorder stream or a
+/// recording: `smw.rlstream` and `smw.spclog` (27 September 2026). The
+/// same base name lets a sandboxed app that was given the stream read the
+/// log too (a "related item").
+pub const EXTENSION: &str = "spclog";
+
+/// The extension it had before: `smw.spc.mxlog`, still read.
+pub const OLD_EXTENSION: &str = "spc.mxlog";
+
+/// The SPC700's log beside `path` (a stream or a recording), under either
+/// name, when there is one.
+pub fn beside(path: &std::path::Path) -> Option<std::path::PathBuf> {
+    [EXTENSION, OLD_EXTENSION]
+        .into_iter()
+        .map(|e| path.with_extension(e))
+        .find(|p| p.exists())
+}
+
 /// Whether `bytes` is an execution log of the SPC700.
 pub fn is_spc_log(bytes: &[u8]) -> bool {
     bytes.len() >= HEADER_LEN && bytes.starts_with(MAGIC) && bytes[6] == 1

@@ -588,7 +588,7 @@ struct ApuFrame {
     /// The frame (default the last).
     #[arg(long)]
     frame: Option<u64>,
-    /// The SPC700's execution log (default `<recording>.spc.mxlog` when
+    /// The SPC700's execution log (default `<recording>.spclog` when
     /// there is one), for `map` and `samples`.
     #[arg(long)]
     log: Option<PathBuf>,

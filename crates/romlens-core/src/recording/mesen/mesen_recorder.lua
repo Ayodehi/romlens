@@ -12,7 +12,7 @@
 -- fork), the script also records one and writes it beside the stream as
 -- <name>.mxlog: every minute, so a crash loses little, and at the end. Import
 -- it into Romlens as a trace (docs/17). Where the fork also logs the SPC700,
--- its log goes beside the stream as <name>.spc.mxlog, and `rec pack` puts it
+-- its log goes beside the stream as <name>.spclog, and `rec pack` puts it
 -- beside the recording (docs/23). Elsewhere the script records the stream
 -- alone, as before.
 --
@@ -98,7 +98,7 @@ end
 
 -- The SPC700's log too, where the fork has one (docs/23): its log calls
 -- take a CPU. Older builds refuse the argument, which says there is none.
-local spc_xlog_path = out_path:gsub("%.rlstream$", "") .. ".spc.mxlog"
+local spc_xlog_path = out_path:gsub("%.rlstream$", "") .. ".spclog"
 local spc_xlog = xlog and emu.cpuType.spc ~= nil
   and pcall(emu.startExecutionLog, emu.cpuType.spc)
 

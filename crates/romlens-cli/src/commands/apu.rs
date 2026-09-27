@@ -35,7 +35,7 @@ pub struct ApuArgs<'a> {
     /// `A..B`, inclusive.
     pub frames: Option<&'a str>,
     pub limit: usize,
-    /// The SPC700's execution log; `<recording>.spc.mxlog` when there is one.
+    /// The SPC700's execution log; `<recording>.spclog` when there is one.
     pub log: Option<&'a Path>,
     /// `replay`: run on from the first frame.
     pub free: bool,
@@ -70,11 +70,12 @@ fn range(text: Option<&str>, count: u64) -> Result<(u64, u64)> {
 
 /// The SPC700's log given, or the one beside the recording.
 fn spc_log(rec: &Path, given: Option<&Path>) -> Result<Option<SpcLog>> {
-    let beside = rec.with_extension("spc.mxlog");
     let path = match given {
         Some(p) => p.to_path_buf(),
-        None if beside.exists() => beside,
-        None => return Ok(None),
+        None => match romlens_core::io::import::spc_log::beside(rec) {
+            Some(p) => p,
+            None => return Ok(None),
+        },
     };
     let bytes = std::fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
     let log = romlens_core::io::import::spc_log::read(&bytes, None)

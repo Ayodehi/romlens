@@ -62,7 +62,12 @@ enum RecordingController {
             let result: Result<PackSummary, Error> = await Task.detached {
                 do {
                     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-                    return .success(try packRecorderStream(rom: rom, stream: stream.path, out: out.path))
+                    // The SPC700's log beside the stream: the sandbox gave
+                    // the app the stream alone, and lets it read the log
+                    // as the stream's related item.
+                    let log = RelatedFile.copy(extension: "spclog", beside: stream)
+                    defer { if let log { try? FileManager.default.removeItem(at: log) } }
+                    return .success(try packRecorderStream(rom: rom, stream: stream.path, out: out.path, spcLog: log?.path))
                 } catch {
                     return .failure(error)
                 }
@@ -307,5 +312,38 @@ enum RecordingController {
         case .Cancelled:
             return "cancelled"
         }
+    }
+}
+
+/// A file beside one the user chose, with the same name and another
+/// extension. A sandboxed app may read it when its Info.plist declares the
+/// extension a related item (`NSIsRelatedItemType`) and it reads through
+/// a file presenter whose primary item is the file chosen.
+final class RelatedFile: NSObject, NSFilePresenter {
+    let primaryPresentedItemURL: URL?
+    let presentedItemURL: URL?
+    let presentedItemOperationQueue = OperationQueue()
+
+    private init(_ url: URL, primary: URL) {
+        presentedItemURL = url
+        primaryPresentedItemURL = primary
+    }
+
+    /// Copy `primary`'s related file with `extension` into the app's
+    /// temporary folder: the copy, or nil when there is none or the system
+    /// would not let the app read it.
+    static func copy(extension ext: String, beside primary: URL) -> URL? {
+        let url = primary.deletingPathExtension().appendingPathExtension(ext)
+        let presenter = RelatedFile(url, primary: primary)
+        NSFileCoordinator.addFilePresenter(presenter)
+        defer { NSFileCoordinator.removeFilePresenter(presenter) }
+        let to = FileManager.default.temporaryDirectory
+            .appendingPathComponent("romlens-\(UUID().uuidString).\(ext)")
+        var copied = false
+        var error: NSError?
+        NSFileCoordinator(filePresenter: presenter).coordinate(readingItemAt: url, options: [], error: &error) { u in
+            copied = (try? FileManager.default.copyItem(at: u, to: to)) != nil
+        }
+        return copied ? to : nil
     }
 }

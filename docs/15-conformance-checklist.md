@@ -407,3 +407,9 @@ Sound additions (docs/23, still to run):
 50. Echo & Effects on the title: the FIR's eight taps and their response,
     the buffer's place and delay.
 
+51. Record a few seconds with the recorder script under the MesenCE fork,
+    then File › Open Recording… and choose the `.rlstream` in Mesen's script
+    data folder: the Audio RAM view's parts say whether each sample was
+    played (the `.spclog` beside the stream came with it), and the Voices
+    view's envelopes match Mesen's from the first frame, not only once
+    each voice is keyed again.

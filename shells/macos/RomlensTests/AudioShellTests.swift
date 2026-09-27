@@ -168,4 +168,29 @@ import Testing
             try? FileManager.default.removeItem(at: RecordingController.packedFolder.appendingPathComponent(path))
         }
     }
+
+    @Test func theSpcLogBesideAStreamGoesWithIt() async throws {
+        let rom = try Rom.fromBytes(bytes: makeSoundTestRom(), name: "sound.sfc")
+        let m = try await Fixture.analyzedModel(rom: rom)
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent("romlens-\(UUID().uuidString)")
+        let stream = base.appendingPathExtension("rlstream")
+        let log = base.appendingPathExtension("spclog")
+        try makeSoundTestStream(frames: 5).write(to: stream)
+        try makeSoundTestSpcLog().write(to: log)
+        defer {
+            try? FileManager.default.removeItem(at: stream)
+            try? FileManager.default.removeItem(at: log)
+        }
+        let copy = RelatedFile.copy(extension: "spclog", beside: stream)
+        #expect(copy != nil)
+        if let copy { try? FileManager.default.removeItem(at: copy) }
+        RecordingController.pack(stream: stream, model: m, window: nil)
+        try await Fixture.settle { m.graphics.hasRecording }
+        let name = try #require(m.graphics.recordingName)
+        let packed = RecordingController.packedFolder.appendingPathComponent(name)
+        let beside = packed.deletingPathExtension().appendingPathExtension("spclog")
+        #expect(FileManager.default.fileExists(atPath: beside.path))
+        try? FileManager.default.removeItem(at: packed)
+        try? FileManager.default.removeItem(at: beside)
+    }
 }

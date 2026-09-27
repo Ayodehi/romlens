@@ -93,9 +93,13 @@ Audio RAM is rewritten as the game runs (a new song, new samples), so this
 log belongs with the recording it was made beside, not with the ROM, and is
 not imported into a project: the main CPU's importer refuses it and says
 where it goes. The recorder writes it beside the stream as
-`<name>.spc.mxlog`; `romlens rec pack` checks it against the ROM and puts
-it beside the recording; `romlens apu map` and `apu samples` read it from
-there (or `--log FILE`).
+`<name>.spclog` (`<name>.spc.mxlog` before 27 September 2026, still read);
+`romlens rec pack` checks it against the ROM and puts it beside the
+recording; `romlens apu map` and `apu samples` read it from there (or
+`--log FILE`). The name shares the stream's base name so that the
+sandboxed app, given the stream by File › Open Recording…, may read the
+log too: the app declares `spclog` a related item (`NSIsRelatedItemType`)
+and reads it through a file presenter whose primary item is the stream.
 
 In the map, what the log saw run is code, what the driver's code read or
 wrote is the driver's data, and what the DSP read is sample data; each

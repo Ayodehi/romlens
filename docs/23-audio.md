@@ -72,6 +72,15 @@ byte for byte. The table's earlier "0 / 4" for Chrono Trigger came from
 reading the recording before `rec pack` learnt the SPC700's rate (A15),
 which split the one upload into four.
 
+The SPC700's log from the app, 27 September 2026: File › Open Recording…
+could not bring the log beside a `.rlstream`, since the sandbox gives the
+app the file chosen and nothing else. The recorder now names it
+`<name>.spclog` (every reader still takes `<name>.spc.mxlog`), the same
+base name as the stream, and the app declares `spclog` a related item and
+reads it through a file presenter whose primary item is the stream
+(`RelatedFile`), copying it for `pack_recorder_stream`, which takes the
+copy's path.
+
 The DSP's inside, 27 September 2026: the recorder now keeps Mesen's
 `spc.dsp.` fields (about 220 numbers a frame, the stream 5–7% larger),
 and `rec pack` writes them as a new region, `dspin` (format 1.4, docs/13):
@@ -355,7 +364,7 @@ Sound on the SNES is a second computer, and that is what this track teaches:
   fetches and echo writes. Those mark BRR and the echo buffer exactly.
   `SpcDebugger` tells the two apart already (`MemoryAccessFlags::DspAccess`).
 - `io/import/spc_log.rs` reads CPU 1 into `model::spc_log::SpcLog`, kept
-  per recording (`<recording>.spc.mxlog`), because audio RAM is not the ROM.
+  per recording (`<recording>.spclog`), because audio RAM is not the ROM.
   The format and how the map uses it are in docs/17.
 
 ### The machine (`apu/`, `dsp/`)

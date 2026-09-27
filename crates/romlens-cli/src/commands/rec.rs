@@ -436,12 +436,12 @@ pub fn pack(stream: &Path, rom: &Path, out: &Path, options: PackOptions) -> Resu
         report.dma_events
     );
     // The SPC700's execution log goes with the recording (docs/23, A6).
-    let spc_log = stream.with_extension("spc.mxlog");
-    if spc_log.exists() {
-        let bytes = std::fs::read(&spc_log)?;
-        let log = romlens_core::io::import::spc_log::read(&bytes, Some(rom.bytes()))
-            .with_context(|| format!("reading {}", spc_log.display()))?;
-        let to = out.with_extension("spc.mxlog");
+    use romlens_core::io::import::spc_log;
+    if let Some(from) = spc_log::beside(stream) {
+        let bytes = std::fs::read(&from)?;
+        let log = spc_log::read(&bytes, Some(rom.bytes()))
+            .with_context(|| format!("reading {}", from.display()))?;
+        let to = out.with_extension(spc_log::EXTENSION);
         std::fs::write(&to, &bytes).with_context(|| format!("writing {}", to.display()))?;
         println!(
             "and the SPC700's execution log, {} instructions, to {}",

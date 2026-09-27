@@ -1287,7 +1287,8 @@ fn apu_commands() {
     ]);
     log += &redact_tmp(&dir, &run(&["apu", "voices", "--rec", plain_rec]));
     // With the SPC700's execution log beside the stream, `rec pack` puts it
-    // beside the recording and the map and the samples read it.
+    // beside the recording and the map and the samples read it. The log is
+    // under its old name, `.spc.mxlog`, which is still read.
     {
         use romlens_core::model::spc_log::{SpcAccess, SpcAccessRun, SpcInsn, SpcLog};
         let run_of = |pc, addr, len, access| SpcAccessRun {

@@ -57,6 +57,19 @@ targets:
             LSHandlerRank: Alternate
             LSItemContentTypes: [io.github.ayodehi.romlens.sfc]
             NSDocumentClass: $(PRODUCT_MODULE_NAME).ProjectDocument
+          # The SPC700's execution log the recorder writes beside its
+          # stream (smw.rlstream, smw.spclog): a related item, so the
+          # sandbox lets the app read it once the stream was chosen.
+          - CFBundleTypeName: SPC700 execution log
+            CFBundleTypeRole: None
+            LSItemContentTypes: [io.github.ayodehi.romlens.spclog]
+            NSIsRelatedItemType: true
+        UTImportedTypeDeclarations:
+          - UTTypeIdentifier: io.github.ayodehi.romlens.spclog
+            UTTypeDescription: SPC700 execution log
+            UTTypeConformsTo: [public.data]
+            UTTypeTagSpecification:
+              public.filename-extension: [spclog]
         UTExportedTypeDeclarations:
           - UTTypeIdentifier: io.github.ayodehi.romlens.project
             UTTypeDescription: Romlens Project
