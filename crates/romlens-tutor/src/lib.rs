@@ -10,6 +10,7 @@ pub mod models;
 pub mod prompt;
 pub mod provider;
 pub mod sse;
+pub mod store;
 pub mod transcript;
 
 pub use models::{Capabilities, ModelInfo, Price, Thinking};

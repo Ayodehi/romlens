@@ -51,6 +51,8 @@ pub enum RomlensError {
     Recording { msg: String },
     #[error("analysis cancelled")]
     Cancelled,
+    #[error("{msg}")]
+    Tutor { msg: String },
 }
 
 impl From<ProjectError> for RomlensError {

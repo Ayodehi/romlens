@@ -7,4 +7,5 @@ pub mod edits;
 pub mod media;
 pub mod png;
 pub mod reference;
+pub mod session;
 pub mod tools;

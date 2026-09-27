@@ -216,11 +216,7 @@ impl Edits<'_> {
     }
 
     /// The commands, a line for the card, and what is there now and after.
-    fn plan(
-        &self,
-        name: &str,
-        v: &Value,
-    ) -> Result<Plan, String> {
+    fn plan(&self, name: &str, v: &Value) -> Result<Plan, String> {
         Ok(match name {
             "set_label" => {
                 let a = self.snes(text(v, "address")?)?;
