@@ -629,6 +629,7 @@ dependencies = [
  "anyhow",
  "clap",
  "romlens-core",
+ "romlens-ffi",
  "romlens-tutor",
 ]
 
@@ -648,6 +649,8 @@ name = "romlens-ffi"
 version = "0.1.0"
 dependencies = [
  "romlens-core",
+ "romlens-tutor",
+ "serde_json",
  "thiserror",
  "uniffi",
 ]

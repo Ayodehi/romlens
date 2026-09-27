@@ -12,6 +12,7 @@ pub mod graphs;
 pub mod live;
 pub mod records;
 pub mod source;
+pub mod tutor;
 pub mod workbench;
 
 use std::sync::Arc;

@@ -1523,6 +1523,32 @@ fn plus(a: SnesAddress, n: u16) -> SnesAddress {
 
 // ---- why games do it ----
 
+/// Each idiom's "why games do this", for reference: the tutor's
+/// `reference("idioms")` page.
+pub const WHYS: &[(&str, &str)] = &[
+    ("Waiting for vertical blank", WHY_VBLANK),
+    ("Waiting for vertical blank to end", WHY_VBLANK_END),
+    ("Waiting for horizontal blank", WHY_HBLANK),
+    ("Waiting for the joypad auto-read", WHY_JOYPAD),
+    ("Polling RDNMI", WHY_RDNMI),
+    ("Polling TIMEUP", WHY_TIMEUP),
+    ("WAI in the main loop", WHY_WAI),
+    ("DMA", WHY_DMA),
+    ("HDMA", WHY_HDMA),
+    ("The multiplier", WHY_MULTIPLY),
+    ("The divider", WHY_DIVIDE),
+    ("Multiplying with the mode 7 matrix", WHY_M7_MULTIPLY),
+    ("Clearing memory", WHY_CLEAR),
+    ("Block moves", WHY_BLOCK_MOVE),
+    ("Talking to the sound CPU", WHY_APU),
+    ("Waiting for the sound CPU to boot", WHY_APU_BOOT),
+    ("Uploading the sound driver", WHY_APU_UPLOAD),
+    ("Decimal mode", WHY_DECIMAL),
+    ("Shadow registers", WHY_SHADOW),
+    ("Setting the data bank", WHY_DATA_BANK),
+    ("Shared entry points", WHY_SHARED),
+];
+
 const WHY_VBLANK: &str = "The PPU draws the picture line by line, and while it does, VRAM, the palette and sprite memory cannot be changed safely. Vertical blank, the gap of about 37 lines between frames (NTSC), is the time to update them, so code that is about to change graphics first waits for it.";
 const WHY_VBLANK_END: &str = "Waiting for vertical blank to end makes sure the next wait catches the start of a new blanking period, not the tail of the current one, so the code runs once per frame.";
 const WHY_HBLANK: &str = "Horizontal blank is the short pause at the end of each line. A change made there takes effect from the next line down, which is how a game changes a setting partway down the screen without HDMA.";

@@ -21,5 +21,7 @@ path = "src/bin/uniffi-bindgen-swift.rs"
 
 [dependencies]
 romlens-core = { path = "../romlens-core" }
+romlens-tutor = { path = "../romlens-tutor" }
+serde_json.workspace = true
 uniffi.workspace = true
 thiserror.workspace = true

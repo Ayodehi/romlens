@@ -69,6 +69,12 @@ impl SpcExplanations {
     }
 }
 
+/// The SPC700 idioms' "why", for reference.
+pub const WHYS: &[(&str, &str)] = &[
+    ("Waiting on an SPC700 timer", WHY_TIMER),
+    ("Waiting on a port", WHY_PORT),
+];
+
 const WHY_TIMER: &str = "The SPC700 has no interrupts, so a driver keeps time by reading a timer's count. It sets a divider once, then loops until the count moves, and does one tick of the music: every note, envelope and pitch slide moves on tick by tick.";
 const WHY_PORT: &str = "The four ports are the only link between the two CPUs. The driver waits here until the S-CPU writes a new byte, which is how a game asks for a song or a sound effect, and how the upload of the driver itself is paced.";
 

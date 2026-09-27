@@ -6,13 +6,15 @@ use std::io::Write;
 use std::path::Path;
 
 use anyhow::{Result, anyhow};
-use romlens_tutor::agent::{Credentials, Deps, EnvCredentials, Event, NoTools, Session};
+use romlens_ffi::tutor::{digest::digest, tools::RomTools};
+use romlens_ffi::workbench::read_project_package;
+use romlens_ffi::{Rom, Workbench};
+use romlens_tutor::agent::{Credentials, Deps, EnvCredentials, Event, Mode, Session};
 use romlens_tutor::http::{Cancel, UreqTransport, list_models};
 use romlens_tutor::models;
+use romlens_tutor::prompt;
 use romlens_tutor::provider::{Delta, Endpoint, Protocol};
 use romlens_tutor::transcript::Turn;
-
-use super::session::load_rom;
 
 /// Which endpoint: `anthropic`, `openai`, or a name of your own with its
 /// base URL and protocol.
@@ -70,14 +72,46 @@ pub fn models_list(w: &Where) -> Result<()> {
 
 pub struct Ask<'a> {
     pub rom: &'a Path,
+    pub project: Option<&'a Path>,
+    /// What the question is about: an address, sent with a window of the
+    /// listing.
+    pub at: Option<&'a str>,
     pub question: &'a str,
     pub model: Option<&'a str>,
     pub effort: Option<&'a str>,
     pub cap: Option<f64>,
 }
 
+fn workbench(rom: &Path, project: Option<&Path>) -> Result<std::sync::Arc<Workbench>> {
+    let rom = Rom::open(rom.to_string_lossy().into_owned())?;
+    let wb = match project {
+        Some(p) => Workbench::with_project_files(
+            rom,
+            read_project_package(p.to_string_lossy().into_owned())?,
+        )?,
+        None => Workbench::new(rom),
+    };
+    wb.analyze_blocking()?;
+    Ok(wb)
+}
+
+/// The selection as the app sends it: where, and the listing there.
+fn selection(wb: &Workbench, at: &str) -> Result<String> {
+    let r = wb.resolve_any(at.to_owned())?;
+    let mut s = romlens_ffi::tutor::tools::addr(r.snes_address);
+    if let Some(l) = wb.label_at(r.snes_address) {
+        s.push_str(&format!(" ({})", l.name));
+    }
+    if let Some(line) = r.file_offset.and_then(|o| wb.line_for_offset(o)) {
+        let from = line.saturating_sub(4);
+        s.push('\n');
+        s.push_str(&wb.asm_lines_text(from, 16, romlens_ffi::records::AddressStyle::Snes));
+    }
+    Ok(s)
+}
+
 pub fn ask(w: &Where, a: &Ask) -> Result<()> {
-    let rom = load_rom(a.rom)?;
+    let wb = workbench(a.rom, a.project)?;
     let e = endpoint(w)?;
     let model = match a.model {
         Some(m) => m.to_owned(),
@@ -85,13 +119,19 @@ pub fn ask(w: &Where, a: &Ask) -> Result<()> {
             .ok_or_else(|| anyhow!("name the model with --model"))?
             .to_owned(),
     };
-    let mut s = Session::new(&format!("cli-{}", rom.sha256_hex()), e, &model);
+    let mut s = Session::new(&format!("cli-{}", wb.rom_identity().sha256), e, &model);
     s.effort = a.effort.map(str::to_owned);
     s.cost_cap = a.cap;
-    s.system =
-        "You are Romlens's tutor, teaching SNES development from a ROM the student has open."
-            .into();
-    s.digest = format!("The ROM: {}", rom.sha256_hex());
+    s.mode = Mode::ReadOnly;
+    s.system = prompt::system();
+    s.digest = digest(&wb);
+    let sel = a.at.map(|at| selection(&wb, at)).transpose()?;
+    let mut text = prompt::context(Some(s.mode), sel.as_deref()).unwrap_or_default();
+    if !text.is_empty() {
+        text.push_str("\n\n");
+    }
+    text.push_str(a.question);
+    let tools = RomTools::new(wb.clone());
     let on = |ev: Event| {
         let mut err = std::io::stderr();
         match ev {
@@ -124,11 +164,11 @@ pub fn ask(w: &Where, a: &Ask) -> Result<()> {
     };
     let cancel = Cancel::new();
     let stop = s.ask(
-        Turn::user_text(a.question),
+        Turn::user_text(&text),
         &Deps {
             transport: &UreqTransport::new(),
             credentials: &EnvCredentials,
-            tools: &NoTools,
+            tools: &tools,
             events: &on,
             cancel: &cancel,
         },

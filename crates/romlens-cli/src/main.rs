@@ -727,6 +727,12 @@ enum TutorCommand {
     Ask {
         rom: PathBuf,
         question: String,
+        /// A project package for the ROM, with its names and marks.
+        #[arg(long)]
+        project: Option<PathBuf>,
+        /// The address the question is about, sent with the listing there.
+        #[arg(long = "at")]
+        selection: Option<String>,
         #[command(flatten)]
         at: TutorWhere,
         /// The model (default: the provider's default in the model table).
@@ -1695,6 +1701,8 @@ fn run() -> Result<()> {
             TutorCommand::Ask {
                 rom,
                 question,
+                project,
+                selection,
                 at,
                 model,
                 effort,
@@ -1707,6 +1715,8 @@ fn run() -> Result<()> {
                 },
                 &commands::tutor::Ask {
                     rom: &rom,
+                    project: project.as_deref(),
+                    at: selection.as_deref(),
                     question: &question,
                     model: model.as_deref(),
                     effort: effort.as_deref(),

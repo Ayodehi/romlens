@@ -7,6 +7,7 @@
 pub mod agent;
 pub mod http;
 pub mod models;
+pub mod prompt;
 pub mod provider;
 pub mod sse;
 pub mod transcript;
