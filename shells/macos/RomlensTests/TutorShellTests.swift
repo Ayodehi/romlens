@@ -169,3 +169,29 @@ import Testing
         doc.close()
     }
 }
+
+/// Pictures sent to the model fit what Claude and OpenAI take.
+@MainActor
+@Suite struct AttachmentFitTests {
+    private func png(_ w: Int, _ h: Int) throws -> Data {
+        let rep = try #require(NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: w, pixelsHigh: h, bitsPerSample: 8, samplesPerPixel: 4,
+            hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+        return try #require(rep.representation(using: .png, properties: [:]))
+    }
+
+    @Test func aScreenshotGoesAsItIs() throws {
+        let small = try png(256, 224)
+        let (d, t) = TutorModel.fitForModel(data: small, mediaType: "image/png")
+        #expect(d == small && t == "image/png")
+    }
+
+    @Test func aBigPhotoIsScaledDown() throws {
+        let big = try png(4032, 3024)
+        let (d, t) = TutorModel.fitForModel(data: big, mediaType: "image/png")
+        #expect(t == "image/jpeg")
+        let rep = try #require(NSBitmapImageRep(data: d))
+        #expect(max(rep.pixelsWide, rep.pixelsHigh) == 2576)
+        #expect(d.count <= TutorModel.maxBytes)
+    }
+}

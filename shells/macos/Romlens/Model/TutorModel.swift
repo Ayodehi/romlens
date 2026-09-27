@@ -327,7 +327,40 @@ final class TutorModel {
     }
 
     func attach(data: Data, mediaType: String, name: String) {
-        attachments.append(Attachment(data: data, mediaType: mediaType, image: NSImage(data: data), name: name))
+        let (bytes, type) = Self.fitForModel(data: data, mediaType: mediaType)
+        attachments.append(Attachment(data: bytes, mediaType: type, image: NSImage(data: bytes), name: name))
+    }
+
+    /// The longest side a provider takes without shrinking it itself
+    /// (Claude's high-resolution limit), and the most bytes sent.
+    static let maxSide: CGFloat = 2576
+    static let maxBytes = 3_500_000
+
+    /// A picture as it can be sent: a photo too big in pixels or bytes for
+    /// Claude or OpenAI is scaled down and sent as JPEG; the rest as it is.
+    static func fitForModel(data: Data, mediaType: String) -> (Data, String) {
+        guard let rep = NSBitmapImageRep(data: data) else { return (data, mediaType) }
+        let (w, h) = (CGFloat(rep.pixelsWide), CGFloat(rep.pixelsHigh))
+        let long = max(w, h)
+        guard long > maxSide || data.count > maxBytes else { return (data, mediaType) }
+        let scale = min(1, maxSide / long)
+        let size = NSSize(width: (w * scale).rounded(), height: (h * scale).rounded())
+        guard let out = NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: Int(size.width), pixelsHigh: Int(size.height),
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) else { return (data, mediaType) }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: out)
+        NSGraphicsContext.current?.imageInterpolation = .high
+        rep.draw(in: NSRect(origin: .zero, size: size))
+        NSGraphicsContext.restoreGraphicsState()
+        for quality in [0.85, 0.7, 0.5] {
+            if let jpeg = out.representation(using: .jpeg, properties: [.compressionFactor: quality]),
+               jpeg.count <= maxBytes {
+                return (jpeg, "image/jpeg")
+            }
+        }
+        return (data, mediaType)
     }
 
     /// A picture from the pasteboard or a drop: PNG, JPEG, GIF, WebP; others
