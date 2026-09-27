@@ -12,6 +12,7 @@ struct AudioEditorView: View {
             Divider()
             if model.audio.state == nil {
                 AudioUnavailable(audio: model.audio)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 content
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)

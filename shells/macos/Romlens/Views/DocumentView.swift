@@ -43,7 +43,7 @@ struct DocumentView: View {
         HSplitView {
             if model.isNavigatorVisible {
                 NavigatorView(model: model)
-                    .frame(minWidth: 200, idealWidth: 240, maxWidth: 360)
+                    .frame(minWidth: 200, idealWidth: 240, maxWidth: 360, maxHeight: .infinity)
             }
             VStack(spacing: 0) {
                 RomHeaderBand(model: model)
@@ -57,12 +57,16 @@ struct DocumentView: View {
                     }
                 }
             }
-            .frame(minWidth: 420, maxWidth: .infinity)
+            .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
             if model.isInspectorVisible {
                 RightPaneView(model: model)
-                    .frame(minWidth: 280, idealWidth: 320, maxWidth: 420)
+                    .frame(minWidth: 280, idealWidth: 320, maxWidth: 420, maxHeight: .infinity)
             }
         }
+        // The window is sized by the person, not the content
+        // (`RomWindowController`), so the panes fill it whatever the
+        // editor shows.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background {
             GeometryReader { g in
                 Color.clear

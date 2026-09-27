@@ -13,6 +13,7 @@ struct GraphicsEditorView: View {
             switch model.graphicsTab {
             case .some(let tab) where tab.needsRecording && !model.graphics.hasRecording:
                 NeedsRecording(tab: tab)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             case .frame: FrameView(model: model, graphics: model.graphics)
             case .layers: LayersView(graphics: model.graphics)
             case .tiles: TileDecoderView(graphics: model.graphics)
