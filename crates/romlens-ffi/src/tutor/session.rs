@@ -523,6 +523,29 @@ fn err(msg: impl ToString) -> RomlensError {
     }
 }
 
+/// Passes the loop's events to the shell, holding back the end until the
+/// session is saved, and saves at each checkpoint.
+struct Relay<'a> {
+    me: &'a Arc<TutorSession>,
+    ended: &'a Mutex<Option<TutorEventInfo>>,
+}
+
+impl agent::Events for Relay<'_> {
+    fn event(&self, e: agent::Event) {
+        match event_info(e) {
+            end @ TutorEventInfo::Ended { .. } => {
+                *self.ended.lock().unwrap_or_else(|e| e.into_inner()) = Some(end)
+            }
+            other => self.me.listener.on_event(other),
+        }
+    }
+
+    fn checkpoint(&self, s: &Session) {
+        let mut st = self.me.lock();
+        self.me.save(s, &mut st);
+    }
+}
+
 impl TutorSession {
     fn lock(&self) -> std::sync::MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(|e| e.into_inner())
@@ -568,15 +591,12 @@ impl TutorSession {
         std::thread::spawn(move || {
             let mut s = session;
             let keys = Keys(Arc::clone(&me.keys));
-            let listener = Arc::clone(&me.listener);
             // The end is told once the session is back and saved, so a
             // shell that reads the transcript on it sees the finished one.
             let ended: Mutex<Option<TutorEventInfo>> = Mutex::new(None);
-            let on = |e: agent::Event| match event_info(e) {
-                end @ TutorEventInfo::Ended { .. } => {
-                    *ended.lock().unwrap_or_else(|e| e.into_inner()) = Some(end)
-                }
-                other => listener.on_event(other),
+            let on = Relay {
+                me: &me,
+                ended: &ended,
             };
             let r = job(&mut s, &me.deps(&keys, &on));
             {
@@ -1048,10 +1068,13 @@ pub fn tutor_test_text_reply(text: String) -> String {
 /// `arguments` (JSON).
 #[uniffi::export]
 pub fn tutor_test_call_reply(name: String, arguments: String) -> String {
-    test_chunk(
-        serde_json::json!({"tool_calls": [{"index": 0, "id": "call_9", "function": {"name": name, "arguments": arguments}}]}),
-        Some("tool_calls"),
-    ) + "data: [DONE]\n\n"
+    // A line to the student first, as an edit needs.
+    test_chunk(serde_json::json!({"content": "Let me look."}), None)
+        + &test_chunk(
+            serde_json::json!({"tool_calls": [{"index": 0, "id": "call_9", "function": {"name": name, "arguments": arguments}}]}),
+            Some("tool_calls"),
+        )
+        + "data: [DONE]\n\n"
 }
 
 #[cfg(test)]
@@ -1182,7 +1205,7 @@ mod tests {
                 stop: "EndTurn".into()
             }
         );
-        assert_eq!(text, "RESET at `$00:8000` masks interrupts.");
+        assert_eq!(text, "Let me look.RESET at `$00:8000` masks interrupts.");
         assert_eq!(tools, [("listing".to_owned(), false)]);
         let turns = t.transcript();
         assert_eq!(turns.len(), 4);
@@ -1243,6 +1266,41 @@ mod tests {
         );
     }
 
+    /// A card never comes before the explanation: an edit called before
+    /// the tutor has written anything is refused, and made once it has.
+    #[test]
+    fn an_edit_waits_for_the_explanation() {
+        let bare = test_chunk(
+            serde_json::json!({"tool_calls": [{"index": 0, "id": "call_1", "function": {"name": "set_label", "arguments": r#"{"address":"$00:8000","name":"Reset","reason":"the vector"}"#}}]}),
+            Some("tool_calls"),
+        ) + "data: [DONE]\n\n";
+        let (t, rx, local, root, wb) = setup(
+            "explain",
+            vec![
+                bare,
+                call_reply(
+                    "set_label",
+                    serde_json::json!({"address": "$00:8000", "name": "Reset", "reason": "the vector"}),
+                ),
+                text_reply("Named it."),
+            ],
+        );
+        t.new_conversation(local, "qwen3".into(), None, TutorMode::AcceptEdits, None)
+            .unwrap();
+        Arc::clone(&t)
+            .send("What is RESET?".into(), Vec::new(), None)
+            .unwrap();
+        let mut results = Vec::new();
+        until_done(&rx, |e| {
+            if let TutorEventInfo::ToolFinished { is_error, .. } = e {
+                results.push(*is_error);
+            }
+        });
+        assert_eq!(results, vec![true, false], "refused, then made");
+        assert_eq!(wb.label_at(0x8000).unwrap().name, "Reset");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     #[test]
     fn an_edit_waits_for_the_student() {
         let (t, rx, local, root, wb) = setup(
@@ -1263,6 +1321,8 @@ mod tests {
         let end = until_done(&rx, |e| {
             if let TutorEventInfo::EditProposed { proposal } = e {
                 assert_eq!(proposal.summary, "Name $00:8000 `Reset`");
+                // Saved while the card waits: the question and the call.
+                assert_eq!(t.conversations()[0].turns, 2);
                 t.answer(proposal.id.clone(), true, None);
             }
         });

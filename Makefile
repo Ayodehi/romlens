@@ -18,13 +18,14 @@ XCODE_PROJECT := shells/macos/Romlens.xcodeproj
 XCODE_DD := shells/macos/build/DerivedData
 XCODEBUILD := xcodebuild -project $(XCODE_PROJECT) -scheme Romlens -destination 'platform=macOS' -derivedDataPath $(XCODE_DD)
 
-.PHONY: help test test-rom swift app app-test ci-local cross docker-test clean
+.PHONY: help test test-rom xcframework swift app app-test ci-local cross docker-test clean
 
 help:
 	@echo "make test        cargo fmt --check, clippy -D warnings, cargo test --workspace"
 	@echo "make test-rom    the same plus the tests pinned to roms/SuperMetroid.F8DF.sfc"
 	@echo "make swift       build the XCFramework + RomlensKit package and run swift test"
-	@echo "make app         xcodegen generate + xcodebuild build (needs make swift first)"
+	@echo "make xcframework build the Rust library and Swift bindings the app links"
+	@echo "make app         the XCFramework, then xcodegen generate + xcodebuild build"
 	@echo "make app-test    xcodebuild test for the macOS shell"
 	@echo "make cross       cargo check for Linux and Windows targets (rustup targets)"
 	@echo "make docker-test cargo test --workspace inside rust:$(RUST_VERSION) (a real Linux run)"
@@ -38,11 +39,15 @@ test:
 test-rom:
 	ROMLENS_ROM_DIR=$(CURDIR)/roms $(MAKE) test
 
-swift:
+xcframework:
 	CARGO=$(CARGO) scripts/build-xcframework.sh
+
+swift: xcframework
 	cd bindings/swift/RomlensKit && swift test
 
-app:
+# The app links the Rust library, which holds the tutor's prompt and tools
+# among much else: building the app without it ships stale Rust.
+app: xcframework
 	cd shells/macos && xcodegen generate -q
 	$(XCODEBUILD) build -quiet
 

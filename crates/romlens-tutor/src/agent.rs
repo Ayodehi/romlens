@@ -231,6 +231,9 @@ pub enum Event {
 
 pub trait Events: Sync {
     fn event(&self, e: Event);
+    /// The conversation mid-turn, after each reply and each round of
+    /// results, for a shell to save: one waiting on a card is on disk.
+    fn checkpoint(&self, _s: &Session) {}
 }
 
 impl<F: Fn(Event) + Sync> Events for F {
@@ -330,6 +333,9 @@ impl Session {
         if key.is_none() && !self.keyless {
             return Err(AskError::NoKey(self.endpoint.id.clone()));
         }
+        // A turn saved while its calls ran, then cut off (a crash), gets
+        // their results before anything follows it.
+        self.close_round("not run: the conversation was interrupted");
         if self.context_used() > COMPACT_AT {
             self.compact(d)?;
         }
@@ -364,6 +370,7 @@ impl Session {
             });
             let has_calls = turn.tool_calls().next().is_some();
             self.turns.push(turn);
+            d.events.checkpoint(self);
             match stop {
                 Stop::Paused => continue,
                 Stop::ToolUse if has_calls => {}
@@ -384,6 +391,7 @@ impl Session {
             }
             let results = self.run_tools(d);
             self.turns.push(Turn::user(results));
+            d.events.checkpoint(self);
             if d.cancel.is_cancelled() {
                 return Err(AskError::Cancelled);
             }
@@ -512,6 +520,27 @@ impl Session {
             }
         }
         self.tools_seen = Some(digest);
+    }
+
+    /// Whether the tutor has written to the student since the question:
+    /// an edit waits for that, so the student reads the explanation before
+    /// a card asks them to change anything.
+    fn explained_this_reply(&self) -> bool {
+        self.turns
+            .iter()
+            .rev()
+            .take_while(|t| {
+                t.role == Role::Assistant
+                    || t.blocks
+                        .iter()
+                        .all(|b| matches!(b, Block::ToolResult { .. }))
+            })
+            .filter(|t| t.role == Role::Assistant)
+            .any(|t| {
+                t.blocks
+                    .iter()
+                    .any(|b| matches!(b, Block::Text { text } if !text.trim().is_empty()))
+            })
     }
 
     /// Answers every call of the last turn left without a result.
@@ -654,6 +683,7 @@ impl Session {
             approver: d.approver,
             cancel: d.cancel,
         };
+        let explained = self.explained_this_reply();
         let run = |(id, name, input): &(String, String, Value)| -> ToolOutput {
             d.events.event(Event::ToolStarted {
                 id: id.clone(),
@@ -666,6 +696,11 @@ impl Session {
                 ))
             } else if d.cancel.is_cancelled() {
                 ToolOutput::error("stopped by the user")
+            } else if d.tools.kind(name) == ToolKind::Edit
+                && self.mode != Mode::ReadOnly
+                && !explained
+            {
+                ToolOutput::error(EXPLAIN_FIRST)
             } else {
                 d.tools.run(id, name, input, &cx)
             };
@@ -707,6 +742,9 @@ impl Session {
         blocks
     }
 }
+
+/// Why an edit before any explanation is not made.
+pub const EXPLAIN_FIRST: &str = "Not made: answer the student's question first. Write your explanation to them, then propose the change, with its reason, at the end of your reply.";
 
 /// A short digest of a tool list.
 pub fn tools_digest(tools: &[ToolSpec]) -> String {
