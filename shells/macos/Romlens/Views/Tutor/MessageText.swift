@@ -19,6 +19,10 @@ struct MessageText: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 case .code(let lang, let body):
                     CodeBlock(tutor: tutor, language: lang, code: body)
+                case .table(let header, let rows):
+                    TableBlock(header: header, rows: rows)
+                case .rule:
+                    Divider()
                 }
             }
         }
@@ -27,25 +31,58 @@ struct MessageText: View {
     enum Segment: Equatable {
         case prose(String)
         case code(language: String, body: String)
+        /// A Markdown pipe table; each row has as many cells as the header.
+        case table(header: [String], rows: [[String]])
+        /// `---` on its own line.
+        case rule
     }
 
-    /// Prose and fenced code, apart. An unclosed fence (still streaming)
-    /// is code to the end.
+    /// Prose, fenced code, tables and rules, apart. An unclosed fence
+    /// (still streaming) is code to the end.
     static func segments(_ text: String) -> [Segment] {
         var out: [Segment] = []
         var prose: [Substring] = []
         var code: [Substring]?
         var lang = ""
-        for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        func flush() {
+            let p = prose.joined(separator: "\n").trimmingCharacters(in: .newlines)
+            if !p.isEmpty { out.append(.prose(p)) }
+            prose = []
+        }
+        var i = 0
+        while i < lines.count {
+            let line = lines[i]
             let t = line.trimmingCharacters(in: .whitespaces)
+            i += 1
+            if code == nil, t.hasPrefix("|"), i < lines.count, isTableRule(lines[i]) {
+                let header = cells(t)
+                var rows: [[String]] = []
+                i += 1
+                while i < lines.count {
+                    let r = lines[i].trimmingCharacters(in: .whitespaces)
+                    guard r.hasPrefix("|") else { break }
+                    var c = cells(r)
+                    if c.count < header.count { c += Array(repeating: "", count: header.count - c.count) }
+                    rows.append(Array(c.prefix(header.count)))
+                    i += 1
+                }
+                flush()
+                out.append(.table(header: header, rows: rows))
+                continue
+            }
+            if code == nil, t.range(of: #"^([-*_])( *\1){2,}$"#, options: .regularExpression) != nil {
+                flush()
+                out.append(.rule)
+                continue
+            }
             if t.hasPrefix("```") {
                 if var c = code {
                     if c.last?.isEmpty == true { c.removeLast() }
                     out.append(.code(language: lang, body: c.joined(separator: "\n")))
                     code = nil
                 } else {
-                    if !prose.isEmpty { out.append(.prose(prose.joined(separator: "\n"))) }
-                    prose = []
+                    flush()
                     lang = String(t.dropFirst(3)).lowercased()
                     code = []
                 }
@@ -59,6 +96,40 @@ struct MessageText: View {
         let rest = prose.joined(separator: "\n").trimmingCharacters(in: .newlines)
         if !rest.isEmpty { out.append(.prose(rest)) }
         return out.filter { if case .prose(let p) = $0 { return !p.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } else { return true } }
+    }
+
+    /// `|---|:--:|`: the line under a table's header.
+    static func isTableRule(_ line: Substring) -> Bool {
+        let t = line.trimmingCharacters(in: .whitespaces)
+        return t.contains("-") && t.contains("|")
+            && t.range(of: #"^\|?( *:?-+:? *\|)+ *(:?-+:? *)?$"#, options: .regularExpression) != nil
+    }
+
+    /// A table row's cells, without the outer pipes; `\|` is a pipe in a
+    /// cell, and so is one inside backticks.
+    static func cells(_ row: String) -> [String] {
+        var out: [String] = []
+        var cell = ""
+        var inCode = false
+        var escaped = false
+        for ch in row {
+            if escaped {
+                if ch != "|" { cell.append("\\") }
+                cell.append(ch)
+                escaped = false
+                continue
+            }
+            switch ch {
+            case "\\": escaped = true
+            case "`": inCode.toggle(); cell.append(ch)
+            case "|" where !inCode: out.append(cell); cell = ""
+            default: cell.append(ch)
+            }
+        }
+        out.append(cell)
+        if row.hasPrefix("|") { out.removeFirst() }
+        if row.hasSuffix("|"), !out.isEmpty { out.removeLast() }
+        return out.map { $0.trimmingCharacters(in: .whitespaces) }
     }
 
     /// Markdown for a run of prose, with citations made links. Headings
@@ -94,6 +165,36 @@ struct MessageText: View {
             of: #"(?<![\[\w])([Ff]rame) ([0-9]+)\b"#,
             with: "[$1 $2](romlens://f/$2)", options: .regularExpression)
         return s
+    }
+}
+
+/// A Markdown table in an answer: a bold header, rows between rules, each
+/// cell inline Markdown with its citations as links.
+struct TableBlock: View {
+    let header: [String]
+    let rows: [[String]]
+
+    var body: some View {
+        Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 6) {
+            GridRow {
+                ForEach(Array(header.enumerated()), id: \.offset) { _, h in
+                    Text(MessageText.prose(h)).bold()
+                }
+            }
+            Divider()
+            ForEach(Array(rows.enumerated()), id: \.offset) { n, row in
+                GridRow {
+                    ForEach(Array(row.enumerated()), id: \.offset) { _, c in
+                        Text(MessageText.prose(c)).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                if n < rows.count - 1 { Divider().opacity(0.5) }
+            }
+        }
+        .textSelection(.enabled)
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .textBackgroundColor)))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.2)))
     }
 }
 

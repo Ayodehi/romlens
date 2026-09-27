@@ -131,8 +131,31 @@ import Testing
         #expect(p.runs.contains { $0.link == URL(string: "romlens://a/008000") })
     }
 
+    @Test func tablesAndRulesAreFoundInTheText() {
+        let s = MessageText.segments("""
+        How:
+
+        | Where | Bytes |
+        |---|:--:|
+        | `$7F:8000` | `A9 F0` |
+        | `$7F:8003,X` | a \\| b | extra |
+        | short |
+        ---
+        After.
+        """)
+        #expect(s == [
+            .prose("How:"),
+            .table(header: ["Where", "Bytes"], rows: [["`$7F:8000`", "`A9 F0`"], ["`$7F:8003,X`", "a | b"], ["short", ""]]),
+            .rule,
+            .prose("After."),
+        ])
+        #expect(MessageText.cells("| `a|b` | c |") == ["`a|b`", "c"])
+        // A header still streaming, before its rule, stays prose.
+        #expect(MessageText.segments("| a | b |") == [.prose("| a | b |")])
+    }
+
     @Test func theWindowShowsAConversation() async throws {
-        let r = try await rig([tutorTestTextReply(text: "It is `$00:8000`.\n```c\nvoid Reset(void);\n```")])
+        let r = try await rig([tutorTestTextReply(text: "It is `$00:8000`.\n```c\nvoid Reset(void);\n```\n| Where | Bytes | As code |\n|---|---|---|\n| `$7F:8000` | `A9 F0` | `LDA #$F0` |\n| `$7F:8182` | `6B` | **RTL**, the routine's end |\n\nThen more.")])
         defer { try? FileManager.default.removeItem(at: r.root) }
         try await ask(r.tutor, "Where is RESET?")
         let c = TutorWindowController(tutor: r.tutor, title: "Test")
