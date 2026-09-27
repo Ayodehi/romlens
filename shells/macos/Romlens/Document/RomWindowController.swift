@@ -120,6 +120,10 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
     @objc func showVoices(_ sender: Any?) { model.openAudio(.voices) }
     @objc func showSamples(_ sender: Any?) { model.openAudio(.samples) }
     @objc func showAudioRam(_ sender: Any?) { model.openAudio(.aram) }
+    @objc func showTimeline(_ sender: Any?) { model.openAudio(.timeline) }
+    @objc func showPorts(_ sender: Any?) { model.openAudio(.ports) }
+    @objc func showEcho(_ sender: Any?) { model.openAudio(.echo) }
+    @objc func showScope(_ sender: Any?) { model.openAudio(.scope) }
 
     @objc func openRecording(_ sender: Any?) {
         RecordingController.open(model: model, window: window)
@@ -255,6 +259,14 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
             item.state = model.audioTab == .samples ? .on : .off
         case #selector(showAudioRam(_:)):
             item.state = model.audioTab == .aram ? .on : .off
+        case #selector(showTimeline(_:)):
+            item.state = model.audioTab == .timeline ? .on : .off
+        case #selector(showPorts(_:)):
+            item.state = model.audioTab == .ports ? .on : .off
+        case #selector(showEcho(_:)):
+            item.state = model.audioTab == .echo ? .on : .off
+        case #selector(showScope(_:)):
+            item.state = model.audioTab == .scope ? .on : .off
         case #selector(closeRecording(_:)), #selector(exportFrameRegion(_:)):
             return model.graphics.hasRecording
         case #selector(toggleLiveSession(_:)):

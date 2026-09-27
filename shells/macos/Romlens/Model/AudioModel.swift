@@ -13,21 +13,27 @@ import RomlensKit
 @Observable
 final class AudioModel {
     enum Tab: String, CaseIterable, Identifiable {
-        case voices, samples, aram, scope
+        case voices, timeline, samples, aram, ports, echo, scope
         var id: String { rawValue }
         var title: String {
             switch self {
             case .voices: "Voices"
+            case .timeline: "Timeline"
             case .samples: "Samples"
             case .aram: "Audio RAM"
+            case .ports: "Ports"
+            case .echo: "Echo & Effects"
             case .scope: "Scope"
             }
         }
         var systemImage: String {
             switch self {
             case .voices: "slider.vertical.3"
+            case .timeline: "pianokeys"
             case .samples: "waveform"
             case .aram: "memorychip"
+            case .ports: "arrow.left.arrow.right"
+            case .echo: "dot.radiowaves.right"
             case .scope: "waveform.path.ecg"
             }
         }
@@ -71,6 +77,8 @@ final class AudioModel {
 
     /// Where "Show in ROM" sends a file offset.
     @ObservationIgnored var showInRom: ((UInt32) -> Void)?
+    /// Switch the editor to another sound view.
+    @ObservationIgnored var openTab: ((Tab) -> Void)?
 
     // The ROM's upload
     /// What the analysis traced, once asked for.
@@ -116,6 +124,21 @@ final class AudioModel {
     @ObservationIgnored private var ticker: Task<Void, Never>?
     /// A recording frame lasts 1 / 60.0988 s (NTSC).
     static let framesPerSecond = 60.0988
+
+    // Timeline (A13)
+    /// The notes: the whole recording's, or those the ROM's machine has
+    /// played since it was built.
+    private(set) var notes: [NoteEventInfo] = []
+    private(set) var notesLoading = false
+    var selectedNote: NoteEventInfo?
+    /// Where the selected note came from, once worked out.
+    private(set) var noteSource: NoteSourceInfo?
+    /// Frames the timeline shows across.
+    var timelineSpan: UInt64 = 600
+    /// An address in audio RAM to show in its listing.
+    var listingTarget: UInt16?
+    @ObservationIgnored private var notesFor: ObjectIdentifier?
+    @ObservationIgnored private var notesTask: Task<Void, Never>?
 
     @ObservationIgnored private var cache: (key: Key, state: State)?
     private struct Key: Equatable {
@@ -166,6 +189,10 @@ final class AudioModel {
             playing = nil
             livePlayer = nil
             samplePlayer = nil
+            notes = []
+            notesFor = nil
+            selectedNote = nil
+            noteSource = nil
         }
         source = s
         opened()
@@ -230,6 +257,10 @@ final class AudioModel {
             livePlayer = nil
         }
         samplePlayer = nil
+        if source == .rom {
+            notes = []
+            selectedNote = nil
+        }
         guard driverUpload != nil else {
             romPlayer = nil
             romProblem = upload == nil ? nil : "no upload of a sound driver was traced in this ROM"
@@ -239,6 +270,7 @@ final class AudioModel {
         let lists = otherUploads.map(\.list).filter { includedLists.contains($0) }
         do {
             romPlayer = try ApuPlayer.fromUpload(workbench: workbench, with: lists, settleSeconds: 1.0)
+            romPlayer?.logNotes()
             romProblem = nil
         } catch {
             romPlayer = nil
@@ -311,9 +343,10 @@ final class AudioModel {
     /// The S-CPU writes a port, as the game would to ask for a sound:
     /// playing the ROM's machine (started if it was not), or the recording.
     func send(port: UInt8, value: UInt8) {
-        if source == .rom, !isPlaying { play() }
-        guard let p = livePlayer ?? romPlayer else { return }
+        guard let p = isPlaying ? livePlayer : (source == .rom ? romPlayer : livePlayer) else { return }
+        // Written before playing starts: starting renders ahead at once.
         p.sendPort(port: port & 3, value: value)
+        if source == .rom, !isPlaying { play() }
         sent.append((port & 3, value))
         if sent.count > 16 { sent.removeFirst() }
         machineChanged()
@@ -423,6 +456,7 @@ final class AudioModel {
             }
         } else {
             machineChanged()
+            refreshRomNotes()
         }
     }
 
@@ -430,6 +464,83 @@ final class AudioModel {
     /// right, from what is playing.
     func scope(_ which: UInt8, count: UInt32) -> [Int16] {
         livePlayer?.scope(which: which, count: count) ?? []
+    }
+
+    // MARK: Notes
+
+    /// The notes for the timeline: the recording's read once, off the main
+    /// thread; the ROM's machine's as it plays.
+    func loadNotes() {
+        switch source {
+        case .rom:
+            refreshRomNotes()
+        case .recording:
+            guard let r = recording else { return }
+            let id = ObjectIdentifier(r)
+            guard notesFor != id, !notesLoading else { return }
+            notesLoading = true
+            let last = max(graphics.frameCount, 1) - 1
+            notesTask = Task { [weak self] in
+                let notes = await Task.detached { (try? r.noteTimeline(from: 0, to: last)) ?? [] }.value
+                guard let self else { return }
+                self.notes = notes
+                self.notesFor = id
+                self.notesLoading = false
+            }
+        }
+    }
+
+    private func refreshRomNotes() {
+        guard source == .rom, let p = romPlayer else { return }
+        let have = notes.count
+        let count = Int(p.noteCount())
+        if count < have { notes = [] }
+        if count != notes.count { notes += p.notes(since: UInt32(notes.count)) }
+        notesFor = nil
+    }
+
+    /// The frame the timeline centres on: the recording's, or the ROM
+    /// machine's time in frames.
+    var timelineNow: UInt64 {
+        switch source {
+        case .recording: frame
+        case .rom: UInt64((romPlayer?.seconds() ?? 0) * Self.framesPerSecond)
+        }
+    }
+
+    /// Select a note and work out where it came from.
+    func select(note: NoteEventInfo?) {
+        selectedNote = note
+        noteSource = nil
+        guard let note else { return }
+        if let pc = note.spcPc {
+            noteSource = NoteSourceInfo(spcPc: pc, commands: [])
+        } else if source == .recording, let r = recording {
+            noteSource = try? r.noteSource(frame: note.frame, spcCycle: note.spcCycle)
+        }
+    }
+
+    /// The code the game sends a port value from, per the trace.
+    func commandSites(port: UInt8, value: UInt8) -> [SoundCommandInfo] {
+        upload?.commands.filter { $0.port == port && $0.value == UInt32(value) } ?? []
+    }
+
+    /// Show the listing at an SPC700 address.
+    func showSpc(_ address: UInt16) {
+        selectedPart = part(containing: address)?.start
+        listingTarget = address
+    }
+
+    /// The uploads the recording saw, up to the frame.
+    func sentUploads() -> [SentUploadInfo] {
+        guard source == .recording, let r = recording else { return [] }
+        return (try? r.sentUploads(from: 0, to: frame)) ?? []
+    }
+
+    /// The ports both ways around the frame.
+    func portEvents(around: UInt64, frames: UInt64 = 30) -> [PortEventInfo] {
+        guard source == .recording, let r = recording else { return [] }
+        return (try? r.portEvents(from: around > frames ? around - frames : 0, to: around + frames)) ?? []
     }
 
     // MARK: Reading

@@ -126,7 +126,8 @@ import Testing
                     m.audio.selectedSample = 0
                     m.audio.selectedBlock = 1
                 case .aram: m.audio.selectedPart = m.audio.state?.map.first { $0.kind == .code }?.start
-                case .scope: if !withRecording { m.audio.play() }
+                case .scope, .timeline: if !withRecording { m.audio.send(port: 0, value: 1) }
+                case .ports, .echo: break
                 }
                 content.layoutSubtreeIfNeeded()
                 Fixture.spin(0.05)

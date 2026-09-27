@@ -392,3 +392,57 @@ pub fn run_free(
     }
     Ok(out)
 }
+
+/// Frame `frame`'s I/O writes by the SPC700, each with the address of the
+/// instruction that made it: the frame run again from the snapshot before
+/// it, from each instruction the snapshot could be inside, keeping the run
+/// whose writes agree with the recording's the longest (Mesen stopping
+/// inside an instruction can leave the last write or two on either side
+/// of a frame's end). `None` for frame 0, which has no snapshot before
+/// it.
+pub fn frame_writers(
+    src: &dyn MachineStateSource,
+    frame: u64,
+) -> Result<Option<Vec<(IoWrite, u16)>>, RecordingError> {
+    if frame == 0 {
+        return Ok(None);
+    }
+    let prev = snapshot(src, frame - 1)?;
+    let want = snapshot(src, frame)?;
+    let target = want.spc.cycle;
+    let mut events = after_snapshot(src, frame - 1, prev.spc.cycle)?;
+    events.extend(src.apu_events(frame)?.map(|e| e.events).unwrap_or_default());
+    let events: Vec<ApuEvent> = events.into_iter().filter(|e| !carries(e, target)).collect();
+    let theirs: Vec<(u8, u8)> = events
+        .iter()
+        .filter(|e| e.kind == ApuEventKind::SpcIo)
+        .map(|e| (e.address, e.value))
+        .collect();
+    let mut best: Option<(usize, Vec<(IoWrite, u16)>)> = None;
+    for candidate in start_candidates(&prev) {
+        let mut apu = start(&prev, candidate);
+        for e in events.iter().filter(|e| e.kind == ApuEventKind::CpuPort) {
+            apu.queue_port(e.spc_cycle, e.address, e.value);
+        }
+        apu.bus.io_writes = Some(Vec::new());
+        let mut out = Vec::new();
+        while apu.bus.cycle < target {
+            let pc = apu.cpu.pc;
+            apu.cpu.step(&mut apu.bus);
+            let log = apu.bus.io_writes.as_mut().unwrap();
+            out.extend(log.drain(..).map(|w| (w, pc)));
+        }
+        let agree = out
+            .iter()
+            .zip(&theirs)
+            .take_while(|((w, _), t)| (w.register, w.value) == **t)
+            .count();
+        if agree == theirs.len() && agree == out.len() {
+            return Ok(Some(out));
+        }
+        if best.as_ref().is_none_or(|(n, _)| agree > *n) {
+            best = Some((agree, out));
+        }
+    }
+    Ok(best.map(|(_, w)| w))
+}

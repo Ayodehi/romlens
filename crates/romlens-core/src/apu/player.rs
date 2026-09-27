@@ -7,6 +7,7 @@
 use super::render::SAMPLE_RATE;
 use super::{Apu, UploadBlock, boot_upload};
 use crate::audio::upload::Upload;
+use crate::audio::{NoteEvent, NoteTracker};
 use crate::dsp::Frame;
 use crate::recording::apu::ApuEventKind;
 use crate::recording::{MachineStateSource, RecordingError, SpcState, StateRegion};
@@ -45,7 +46,26 @@ pub struct Player {
     /// oldest first from `scope_head`.
     scopes: Vec<[i16; SCOPE_LEN]>,
     scope_head: usize,
+    /// The notes the driver has played, each with the SPC700 instruction
+    /// whose DSP write made it, when logged.
+    notes: Option<NoteLog>,
 }
+
+/// The notes logged as a player runs.
+#[derive(Debug, Clone)]
+struct NoteLog {
+    tracker: NoteTracker,
+    /// Where `DSPADDR` points, followed through the writes.
+    dspaddr: u8,
+    start_cycle: u64,
+    events: Vec<(NoteEvent, u16)>,
+}
+
+/// Notes a player keeps at most: past this the oldest go.
+pub const NOTES_KEPT: usize = 100_000;
+
+/// SPC700 cycles in a frame of the S-CPU's (NTSC, 60.0988 a second).
+pub const CYCLES_PER_FRAME: f64 = 1_024_000.0 / 60.0988;
 
 impl Player {
     fn new(apu: Apu, start: Start) -> Player {
@@ -55,6 +75,7 @@ impl Player {
             made: 0,
             scopes: vec![[0; SCOPE_LEN]; 10],
             scope_head: 0,
+            notes: None,
         }
     }
 
@@ -179,7 +200,35 @@ impl Player {
         out.reserve(n);
         self.apu.bus.output = Some(out);
         while self.apu.bus.output.as_ref().is_some_and(|o| o.len() < n) {
+            let pc = self.apu.cpu.pc;
             self.apu.cpu.step(&mut self.apu.bus);
+            if let Some(log) = &mut self.notes {
+                for w in self
+                    .apu
+                    .bus
+                    .io_writes
+                    .as_mut()
+                    .map(|l| l.drain(..))
+                    .into_iter()
+                    .flatten()
+                {
+                    match w.register {
+                        2 => log.dspaddr = w.value,
+                        3 if log.dspaddr < 0x80 => {
+                            let frame =
+                                ((w.cycle - log.start_cycle) as f64 / CYCLES_PER_FRAME) as u64;
+                            let mut made = Vec::new();
+                            log.tracker
+                                .write(frame, w.cycle, log.dspaddr, w.value, &mut made);
+                            log.events.extend(made.into_iter().map(|e| (e, pc)));
+                        }
+                        _ => {}
+                    }
+                }
+                if log.events.len() > NOTES_KEPT {
+                    log.events.drain(..log.events.len() - NOTES_KEPT);
+                }
+            }
         }
         let mut out = self.apu.bus.output.take().unwrap_or_default();
         // An instruction can run past the last sample asked for: keep it
@@ -209,6 +258,25 @@ impl Player {
         (0..n)
             .map(|i| s[(self.scope_head + SCOPE_LEN - n + i) % SCOPE_LEN])
             .collect()
+    }
+
+    /// Log the notes from now: each key-on, bend and key-off the driver
+    /// makes, with the instruction that made it, its frame counted from
+    /// now in the S-CPU's frames.
+    pub fn log_notes(&mut self) {
+        let bus = &mut self.apu.bus;
+        bus.io_writes = Some(Vec::new());
+        self.notes = Some(NoteLog {
+            tracker: NoteTracker::new(&bus.dsp, true),
+            dspaddr: bus.io.dspaddr,
+            start_cycle: bus.cycle,
+            events: Vec::new(),
+        });
+    }
+
+    /// The notes logged, each with the SPC700 instruction behind it.
+    pub fn notes(&self) -> &[(NoteEvent, u16)] {
+        self.notes.as_ref().map_or(&[], |l| &l.events)
     }
 
     /// Seconds played.

@@ -149,8 +149,12 @@ enum MainMenu {
             ]),
             submenu("Audio", [
                 item("Voices", #selector(RomWindowController.showVoices(_:)), ""),
+                item("Timeline", #selector(RomWindowController.showTimeline(_:)), ""),
                 item("Samples", #selector(RomWindowController.showSamples(_:)), ""),
                 item("Audio RAM", #selector(RomWindowController.showAudioRam(_:)), ""),
+                item("Ports", #selector(RomWindowController.showPorts(_:)), ""),
+                item("Echo & Effects", #selector(RomWindowController.showEcho(_:)), ""),
+                item("Scope", #selector(RomWindowController.showScope(_:)), ""),
             ]),
             .separator(),
             item("File Offset and SNES Address", #selector(RomWindowController.showBothAddresses(_:)), "1"),

@@ -225,6 +225,47 @@ pub struct NoteEventInfo {
     pub kind: NoteKindInfo,
     pub pitch: u16,
     pub source: u8,
+    /// The SPC700 instruction whose DSP write made it, when known: a
+    /// player logs it as it runs; for a recording ask `note_source`.
+    pub spc_pc: Option<u16>,
+}
+
+fn note_info(e: &romlens_core::audio::NoteEvent, spc_pc: Option<u16>) -> NoteEventInfo {
+    NoteEventInfo {
+        voice: e.voice,
+        frame: e.frame,
+        spc_cycle: e.spc_cycle,
+        kind: e.kind.into(),
+        pitch: e.pitch,
+        source: e.source,
+        spc_pc,
+    }
+}
+
+/// Where a recorded note came from: the SPC700 instruction that wrote it,
+/// and what the S-CPU last asked on each port before it.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct NoteSourceInfo {
+    pub spc_pc: Option<u16>,
+    /// The last byte other than zero the S-CPU wrote to each port, within
+    /// ten seconds before the note, newest first.
+    pub commands: Vec<PortEventInfo>,
+}
+
+/// An upload a recording saw sent through the ports.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct SentUploadInfo {
+    /// Each block's audio RAM address and length.
+    pub blocks: Vec<SentBlockInfo>,
+    /// Where the SPC700 was sent when it ended; none if the frames end
+    /// first.
+    pub entry: Option<u16>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct SentBlockInfo {
+    pub aram: u16,
+    pub len: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
@@ -785,14 +826,79 @@ impl RecordingSession {
     pub fn note_timeline(&self, from: u64, to: u64) -> Result<Vec<NoteEventInfo>, RomlensError> {
         let to = to.min(self.machine().frame_count().unwrap_or(0).saturating_sub(1));
         Ok(timeline(self.machine(), from, to)?
+            .iter()
+            .map(|e| note_info(e, None))
+            .collect())
+    }
+
+    /// Where the note written at `spc_cycle` in `frame` came from: the
+    /// frame run again by Romlens's SPC700 to find the instruction, and the
+    /// S-CPU's last requests before it.
+    pub fn note_source(&self, frame: u64, spc_cycle: u64) -> Result<NoteSourceInfo, RomlensError> {
+        let src = self.machine();
+        // The replay's write on the note's cycle; within a cycle or two
+        // where Mesen's clock and ours place it apart.
+        let spc_pc = romlens_core::apu::replay::frame_writers(src, frame)?.and_then(|w| {
+            w.iter()
+                .filter(|(w, _)| w.register == 3)
+                .min_by_key(|(w, _)| w.cycle.abs_diff(spc_cycle))
+                .filter(|(w, _)| w.cycle.abs_diff(spc_cycle) <= 2)
+                .map(|(_, pc)| *pc)
+        });
+        // Each port's last request before the note, walking back: the last
+        // byte other than zero, since a driver's ports rest at zero between
+        // commands (a game writes 0 each frame it asks for nothing).
+        let mut commands: Vec<PortEventInfo> = Vec::new();
+        let mut seen = [false; 4];
+        let first = frame.saturating_sub(600);
+        let mut f = frame + 1;
+        while f > first && seen.iter().any(|s| !s) {
+            f -= 1;
+            let Some(e) = src.apu_events(f)? else {
+                continue;
+            };
+            for m in port_messages(&e).into_iter().rev() {
+                let p = m.port as usize & 3;
+                if !m.from_cpu || seen[p] || m.value == 0 || m.spc_cycle > spc_cycle {
+                    continue;
+                }
+                seen[p] = true;
+                commands.push(PortEventInfo {
+                    frame: m.frame,
+                    spc_cycle: m.spc_cycle,
+                    from_cpu: true,
+                    port: m.port,
+                    value: m.value,
+                });
+            }
+        }
+        commands.sort_by_key(|c| std::cmp::Reverse(c.spc_cycle));
+        Ok(NoteSourceInfo { spc_pc, commands })
+    }
+
+    /// The uploads the recording saw sent through the ports in frames
+    /// `from..=to`, block by block.
+    pub fn sent_uploads(&self, from: u64, to: u64) -> Result<Vec<SentUploadInfo>, RomlensError> {
+        let src = self.machine();
+        let to = to.min(src.frame_count().unwrap_or(0).saturating_sub(1));
+        let mut events = Vec::new();
+        for f in from..=to {
+            if let Some(e) = src.apu_events(f)? {
+                events.extend(e.events);
+            }
+        }
+        Ok(upload::from_ports(&events)
             .into_iter()
-            .map(|e| NoteEventInfo {
-                voice: e.voice,
-                frame: e.frame,
-                spc_cycle: e.spc_cycle,
-                kind: e.kind.into(),
-                pitch: e.pitch,
-                source: e.source,
+            .map(|u| SentUploadInfo {
+                blocks: u
+                    .blocks
+                    .iter()
+                    .map(|(aram, bytes)| SentBlockInfo {
+                        aram: *aram,
+                        len: bytes.len() as u32,
+                    })
+                    .collect(),
+                entry: u.entry,
             })
             .collect())
     }
@@ -1119,6 +1225,27 @@ impl ApuPlayer {
         self.lock().player.apu.cpu.pc
     }
 
+    /// Log the notes the driver plays from now, each with the instruction
+    /// behind it.
+    pub fn log_notes(&self) {
+        self.lock().player.log_notes();
+    }
+
+    /// The notes logged from index `since` on.
+    pub fn notes(&self, since: u32) -> Vec<NoteEventInfo> {
+        let s = self.lock();
+        let n = s.player.notes();
+        n.iter()
+            .skip(since as usize)
+            .map(|(e, pc)| note_info(e, Some(*pc)))
+            .collect()
+    }
+
+    /// How many notes are logged.
+    pub fn note_count(&self) -> u32 {
+        self.lock().player.notes().len() as u32
+    }
+
     /// Where audio RAM byte `address` came from in the ROM, when an upload
     /// put it there.
     pub fn rom_origin(&self, address: u16) -> Option<u32> {
@@ -1253,6 +1380,39 @@ mod tests {
         let p = ApuPlayer::from_recorded_sample(rec, 3, 0, 0x0800).unwrap();
         p.key_on(1);
         assert!(p.render(3200).iter().any(|v| *v != 0));
+    }
+
+    #[test]
+    fn a_note_leads_back_to_its_instruction_and_its_command() {
+        use romlens_core::recording::mesen::stream::encode::FIXTURE_PLAYER;
+        let program = romlens_core::spc700::assemble(FIXTURE_PLAYER).unwrap();
+        // The setup loop's DSPDATA write keys the voice on.
+        let setup = program.label("setup").unwrap();
+        let rec = recording();
+        let on = rec
+            .note_timeline(0, 4)
+            .unwrap()
+            .into_iter()
+            .find(|n| n.kind == NoteKindInfo::On)
+            .unwrap();
+        let src = rec.note_source(on.frame, on.spc_cycle).unwrap();
+        assert_eq!(src.spc_pc, Some(setup + 9), "MOV DSPDATA,A in the loop");
+        assert_eq!((src.commands[0].port, src.commands[0].value), (0, 1));
+        // The same from the ROM, logged as it plays.
+        let rom = Rom::from_bytes(make_sound_test_rom(), "sound.sfc".to_owned()).unwrap();
+        let wb = Workbench::new(rom);
+        wb.analyze_blocking().unwrap();
+        let p = ApuPlayer::from_upload(wb, Vec::new(), 0.05).unwrap();
+        p.log_notes();
+        p.send_port(0, 1);
+        p.render(3200);
+        let notes = p.notes(0);
+        let on = notes.iter().find(|n| n.kind == NoteKindInfo::On).unwrap();
+        assert_eq!(
+            (on.voice, on.pitch, on.spc_pc),
+            (0, 0x1000, Some(setup + 9))
+        );
+        assert_eq!(p.note_count() as usize, notes.len());
     }
 
     #[test]

@@ -204,6 +204,7 @@ final class RomViewModel {
         graphics.selectBytes = { [weak self] range in self?.selectRange(range) }
         graphics.revealTile = { [weak self] in self?.graphicsTab = .tiles }
         audio.showInRom = { [weak self] offset in self?.showInRom(offset) }
+        audio.openTab = { [weak self] tab in self?.audioTab = tab }
         // The workbench shows them unless told otherwise.
         if !explanationsShown {
             workbench.setShowExplanations(show: false)

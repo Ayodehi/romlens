@@ -18,6 +18,9 @@ struct AudioEditorView: View {
                 case .samples: SamplesView(audio: model.audio)
                 case .aram: AramView(audio: model.audio)
                 case .scope: ScopeView(audio: model.audio)
+                case .timeline: NoteTimelineView(audio: model.audio)
+                case .ports: PortsView(audio: model.audio)
+                case .echo: EchoView(audio: model.audio)
                 case nil: EmptyView()
                 }
             }

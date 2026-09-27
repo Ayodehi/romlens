@@ -41,6 +41,81 @@ pub struct NoteEvent {
     pub source: u8,
 }
 
+/// Follows the DSP writes that make notes: a voice's pitch and sample as
+/// they are set, which voices are keyed on, and KOFF, so each write that
+/// starts, bends or ends a note becomes an event. A recording's writes and
+/// the emulator's go through the same tracker.
+#[derive(Debug, Clone)]
+pub struct NoteTracker {
+    pitch: [u16; 8],
+    source: [u8; 8],
+    on: [bool; 8],
+    koff: u8,
+}
+
+impl NoteTracker {
+    /// Starting from the DSP's registers, with no voice counted as on.
+    pub fn new(dsp: &[u8], koff: bool) -> NoteTracker {
+        NoteTracker {
+            pitch: std::array::from_fn(|v| {
+                u16::from_le_bytes([dsp[v << 4 | 2], dsp[v << 4 | 3]]) & 0x3FFF
+            }),
+            source: std::array::from_fn(|v| dsp[v << 4 | 4]),
+            on: [false; 8],
+            koff: if koff { dsp[0x5C] } else { 0 },
+        }
+    }
+
+    /// One DSP write, and the notes it makes.
+    pub fn write(
+        &mut self,
+        frame: u64,
+        spc_cycle: u64,
+        register: u8,
+        value: u8,
+        out: &mut Vec<NoteEvent>,
+    ) {
+        let (hi, lo) = ((register >> 4) as usize, register & 0xF);
+        let event = |t: &NoteTracker, voice: usize, kind: NoteKind| NoteEvent {
+            voice: voice as u8,
+            frame,
+            spc_cycle,
+            kind,
+            pitch: t.pitch[voice],
+            source: t.source[voice],
+        };
+        match (hi, lo) {
+            (v, 2) if v < 8 => self.pitch[v] = (self.pitch[v] & 0x3F00) | value as u16,
+            (v, 3) if v < 8 => {
+                self.pitch[v] = (self.pitch[v] & 0xFF) | ((value as u16 & 0x3F) << 8);
+                if self.on[v] {
+                    out.push(event(self, v, NoteKind::Pitch));
+                }
+            }
+            (v, 4) if v < 8 => self.source[v] = value,
+            (4, 0xC) => {
+                for v in 0..8 {
+                    if value & (1 << v) != 0 {
+                        self.on[v] = true;
+                        out.push(event(self, v, NoteKind::On));
+                    }
+                }
+            }
+            (5, 0xC) => {
+                for v in 0..8 {
+                    let bit = 1 << v;
+                    if value & bit != 0 && self.koff & bit == 0 && self.on[v] {
+                        self.on[v] = false;
+                        out.push(event(self, v, NoteKind::Off));
+                    }
+                }
+                self.koff = value;
+            }
+            _ => {}
+        }
+    }
+}
+
 /// The note events of frames `from..=to`. A voice's pitch and sample start
 /// from the DSP's registers at the end of the frame before.
 pub fn timeline(
@@ -50,56 +125,14 @@ pub fn timeline(
 ) -> Result<Vec<NoteEvent>, RecordingError> {
     let start = if from > 0 { from - 1 } else { 0 };
     let dsp = src.region_at(start, StateRegion::DspRegisters)?;
-    let mut pitch: [u16; 8] =
-        std::array::from_fn(|v| u16::from_le_bytes([dsp[v << 4 | 2], dsp[v << 4 | 3]]) & 0x3FFF);
-    let mut source: [u8; 8] = std::array::from_fn(|v| dsp[v << 4 | 4]);
-    let mut on = [false; 8];
-    let mut koff = if from > 0 { dsp[0x5C] } else { 0 };
+    let mut tracker = NoteTracker::new(&dsp, from > 0);
     let mut out = Vec::new();
     for frame in from..=to {
         let Some(events) = src.apu_events(frame)? else {
             continue;
         };
         for w in events.dsp_writes() {
-            let (hi, lo) = ((w.register >> 4) as usize, w.register & 0xF);
-            let event =
-                |voice: usize, kind: NoteKind, pitch: &[u16; 8], source: &[u8; 8]| NoteEvent {
-                    voice: voice as u8,
-                    frame,
-                    spc_cycle: w.spc_cycle,
-                    kind,
-                    pitch: pitch[voice],
-                    source: source[voice],
-                };
-            match (hi, lo) {
-                (v, 2) => pitch[v] = (pitch[v] & 0x3F00) | w.value as u16,
-                (v, 3) => {
-                    pitch[v] = (pitch[v] & 0xFF) | ((w.value as u16 & 0x3F) << 8);
-                    if on[v] {
-                        out.push(event(v, NoteKind::Pitch, &pitch, &source));
-                    }
-                }
-                (v, 4) => source[v] = w.value,
-                (4, 0xC) => {
-                    for (v, playing) in on.iter_mut().enumerate() {
-                        if w.value & (1 << v) != 0 {
-                            *playing = true;
-                            out.push(event(v, NoteKind::On, &pitch, &source));
-                        }
-                    }
-                }
-                (5, 0xC) => {
-                    for (v, playing) in on.iter_mut().enumerate() {
-                        let bit = 1 << v;
-                        if w.value & bit != 0 && koff & bit == 0 && *playing {
-                            *playing = false;
-                            out.push(event(v, NoteKind::Off, &pitch, &source));
-                        }
-                    }
-                    koff = w.value;
-                }
-                _ => {}
-            }
+            tracker.write(frame, w.spc_cycle, w.register, w.value, &mut out);
         }
     }
     Ok(out)

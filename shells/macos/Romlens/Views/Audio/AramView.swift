@@ -220,14 +220,19 @@ struct AramPartDetail: View {
         let lines = audio.listing(from: part.start, count: min(max(part.len / 2, 16), 600))
             .filter { UInt32($0.address) < UInt32(part.start) + part.len }
         return HSplitView {
-            List(selection: $selectedLine) {
-                ForEach(lines, id: \.address) { l in
-                    SpcLineRow(line: l, pc: audio.state?.pc)
-                        .tag(l.address)
+            ScrollViewReader { reader in
+                List(selection: $selectedLine) {
+                    ForEach(lines, id: \.address) { l in
+                        SpcLineRow(line: l, pc: audio.state?.pc)
+                            .tag(l.address)
+                            .id(l.address)
+                    }
                 }
+                .listStyle(.plain)
+                .font(.caption.monospaced())
+                .onAppear { reveal(audio.listingTarget, reader) }
+                .onChange(of: audio.listingTarget) { _, t in reveal(t, reader) }
             }
-            .listStyle(.plain)
-            .font(.caption.monospaced())
             .frame(minWidth: 300)
             if let at = selectedLine, let l = lines.first(where: { $0.address == at }) {
                 ScrollView {
@@ -255,6 +260,13 @@ struct AramPartDetail: View {
                 .frame(minWidth: 200, idealWidth: 260)
             }
         }
+    }
+
+    /// Select and scroll to a line another view asked for.
+    private func reveal(_ target: UInt16?, _ reader: ScrollViewProxy) {
+        guard let target else { return }
+        selectedLine = target
+        reader.scrollTo(target, anchor: .center)
     }
 
     private func hex(_ part: AramRegionInfo) -> some View {
