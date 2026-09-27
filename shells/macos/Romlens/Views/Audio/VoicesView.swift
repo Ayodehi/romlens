@@ -13,7 +13,7 @@ struct VoicesView: View {
             ScrollView {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 12)], spacing: 12) {
                     ForEach(state?.voices ?? [], id: \.index) { v in
-                        VoiceStrip(voice: v, selected: audio.selectedVoice == Int(v.index))
+                        VoiceStrip(audio: audio, voice: v, selected: audio.selectedVoice == Int(v.index))
                             .contentShape(Rectangle())
                             .onTapGesture { audio.selectedVoice = Int(v.index) }
                     }
@@ -29,6 +29,7 @@ struct VoicesView: View {
 
 /// One voice.
 struct VoiceStrip: View {
+    let audio: AudioModel
     let voice: VoiceInfo
     let selected: Bool
 
@@ -44,6 +45,15 @@ struct VoiceStrip: View {
                 Text(voice.note.map { "≈ \($0)" } ?? "")
                     .font(.callout.monospaced())
                     .help("The note, estimated from the loop of its sample: a pitch is a rate, not a note")
+                let v = Int(voice.index)
+                Toggle("M", isOn: Binding(get: { audio.muted & (1 << UInt8(v)) != 0 }, set: { _ in audio.toggleMute(v) }))
+                    .toggleStyle(.button)
+                    .controlSize(.small)
+                    .help("Mute: leave this voice out of what you hear; it still runs")
+                Toggle("S", isOn: Binding(get: { audio.isSolo(v) }, set: { _ in audio.toggleSolo(v) }))
+                    .toggleStyle(.button)
+                    .controlSize(.small)
+                    .help("Solo: hear only this voice")
             }
             Text(sampleLine).font(.caption.monospaced()).foregroundStyle(.secondary)
             Text("pitch \(AudioStyle.hex(voice.pitch, 4)): \(voice.pitchWords)")

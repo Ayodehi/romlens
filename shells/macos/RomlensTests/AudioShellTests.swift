@@ -102,7 +102,9 @@ import Testing
     }
 
     @Test func everySoundViewLaysOutInAWindow() async throws {
+        ApuAudio.deviceEnabled = false
         let m = try await model()
+        defer { m.audio.pause() }
         let url = try recordingURL()
         defer { try? FileManager.default.removeItem(at: url) }
         let controller = RomWindowController(model: m)
@@ -124,6 +126,7 @@ import Testing
                     m.audio.selectedSample = 0
                     m.audio.selectedBlock = 1
                 case .aram: m.audio.selectedPart = m.audio.state?.map.first { $0.kind == .code }?.start
+                case .scope: if !withRecording { m.audio.play() }
                 }
                 content.layoutSubtreeIfNeeded()
                 Fixture.spin(0.05)

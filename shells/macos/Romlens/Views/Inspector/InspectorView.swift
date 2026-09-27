@@ -273,6 +273,14 @@ struct ExplanationSection: View {
             Text("Explanation").font(.headline)
             if let r = explanation.register {
                 RegisterAccessView(access: r)
+                if r.store, let port = r.parts.first.map(\.address), (0x2140...0x2143).contains(port),
+                   let value = r.value {
+                    Button("Play This Command") {
+                        model.openAudio(.voices)
+                        model.audio.playCommand(port: UInt8(port - 0x2140), value: UInt8(value & 0xFF))
+                    }
+                    .help("Boot the ROM's sound driver in Romlens and send it $\(GraphicsStyle.hex(value & 0xFF, 2)) on port \(port - 0x2140), as this store does")
+                }
             }
             ForEach(Array(explanation.idioms.enumerated()), id: \.offset) { _, idiom in
                 IdiomView(model: model, idiom: idiom)

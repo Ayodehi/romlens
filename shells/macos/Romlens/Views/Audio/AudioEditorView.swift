@@ -17,6 +17,7 @@ struct AudioEditorView: View {
                 case .voices: VoicesView(audio: model.audio)
                 case .samples: SamplesView(audio: model.audio)
                 case .aram: AramView(audio: model.audio)
+                case .scope: ScopeView(audio: model.audio)
                 case nil: EmptyView()
                 }
             }
@@ -78,6 +79,7 @@ struct AudioSourceBar: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer()
+            TransportControls(audio: audio)
             switch audio.source {
             case .recording:
                 FrameStepper(graphics: model.graphics)

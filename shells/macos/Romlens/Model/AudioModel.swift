@@ -13,13 +13,14 @@ import RomlensKit
 @Observable
 final class AudioModel {
     enum Tab: String, CaseIterable, Identifiable {
-        case voices, samples, aram
+        case voices, samples, aram, scope
         var id: String { rawValue }
         var title: String {
             switch self {
             case .voices: "Voices"
             case .samples: "Samples"
             case .aram: "Audio RAM"
+            case .scope: "Scope"
             }
         }
         var systemImage: String {
@@ -27,8 +28,17 @@ final class AudioModel {
             case .voices: "slider.vertical.3"
             case .samples: "waveform"
             case .aram: "memorychip"
+            case .scope: "waveform.path.ecg"
             }
         }
+    }
+
+    /// What is heard.
+    enum Playing: Equatable {
+        /// The machine: the ROM's driver, or the recording from a frame.
+        case machine
+        /// One sample alone on voice 0, played from the keyboard.
+        case sample(UInt8)
     }
 
     enum Source: Equatable {
@@ -80,6 +90,33 @@ final class AudioModel {
     @ObservationIgnored private var uploadFor: UInt64?
     @ObservationIgnored private var uploadTask: Task<Void, Never>?
 
+    // Playback (A12)
+    @ObservationIgnored let output = ApuAudio()
+    /// What is playing, if anything.
+    private(set) var playing: Playing?
+    var isPlaying: Bool { playing == .machine }
+    /// The player heard: the ROM's machine, a recording's from a frame, or
+    /// a sample's.
+    private(set) var livePlayer: ApuPlayer?
+    /// Voices left out of the mix, bit n for voice n.
+    var muted: UInt8 = 0 {
+        didSet { livePlayer?.setMuted(mask: muted) }
+    }
+    /// Playing a recording: its port writes arrive as they did, and the
+    /// frame moves with the sound.
+    var followRecording = true {
+        didSet { if followRecording != oldValue, isPlaying, source == .recording { restartRecording() } }
+    }
+    /// Seconds heard since play.
+    private(set) var playedSeconds = 0.0
+    /// The last port writes sent by hand, newest last.
+    private(set) var sent: [(port: UInt8, value: UInt8)] = []
+    @ObservationIgnored private var playFrom: UInt64 = 0
+    @ObservationIgnored private var frameSet: UInt64?
+    @ObservationIgnored private var ticker: Task<Void, Never>?
+    /// A recording frame lasts 1 / 60.0988 s (NTSC).
+    static let framesPerSecond = 60.0988
+
     @ObservationIgnored private var cache: (key: Key, state: State)?
     private struct Key: Equatable {
         let source: Source
@@ -124,6 +161,12 @@ final class AudioModel {
     /// The source bar's picker.
     func pick(_ s: Source) {
         sourcePicked = true
+        if s != source {
+            if playing != nil { output.play(nil) }
+            playing = nil
+            livePlayer = nil
+            samplePlayer = nil
+        }
         source = s
         opened()
     }
@@ -181,6 +224,12 @@ final class AudioModel {
     }
 
     func rebuildRomMachine() {
+        if source == .rom, playing != nil {
+            output.play(nil)
+            playing = nil
+            livePlayer = nil
+        }
+        samplePlayer = nil
         guard driverUpload != nil else {
             romPlayer = nil
             romProblem = upload == nil ? nil : "no upload of a sound driver was traced in this ROM"
@@ -202,6 +251,185 @@ final class AudioModel {
     /// written): read its state again.
     func machineChanged() {
         machineGeneration += 1
+    }
+
+    // MARK: Playing
+
+    func togglePlay() {
+        if isPlaying { pause() } else { play() }
+    }
+
+    /// Play the source from where it is: the ROM's machine carries on;
+    /// a recording starts from the frame.
+    func play() {
+        switch source {
+        case .rom:
+            guard let p = romPlayer else { return }
+            start(p)
+        case .recording:
+            restartRecording()
+        }
+    }
+
+    private func restartRecording() {
+        guard let r = recording, let p = try? ApuPlayer.fromRecording(recording: r, frame: frame, follow: followRecording) else { return }
+        playFrom = frame
+        frameSet = frame
+        start(p)
+    }
+
+    private func start(_ p: ApuPlayer) {
+        p.setMuted(mask: muted)
+        livePlayer = p
+        playing = .machine
+        playedSeconds = 0
+        output.play(p)
+        startTicking()
+    }
+
+    func pause() {
+        output.play(nil)
+        playing = nil
+        ticker?.cancel()
+        ticker = nil
+        machineChanged()
+    }
+
+    /// Mute voice `v`, or hear it again.
+    func toggleMute(_ v: Int) {
+        muted ^= 1 << UInt8(v)
+    }
+
+    /// Hear only voice `v`, or every voice if it already is.
+    func toggleSolo(_ v: Int) {
+        let only: UInt8 = ~(1 << UInt8(v))
+        muted = muted == only ? 0 : only
+    }
+
+    func isSolo(_ v: Int) -> Bool { muted == ~(1 << UInt8(v)) }
+
+    /// The S-CPU writes a port, as the game would to ask for a sound:
+    /// playing the ROM's machine (started if it was not), or the recording.
+    func send(port: UInt8, value: UInt8) {
+        if source == .rom, !isPlaying { play() }
+        guard let p = livePlayer ?? romPlayer else { return }
+        p.sendPort(port: port & 3, value: value)
+        sent.append((port & 3, value))
+        if sent.count > 16 { sent.removeFirst() }
+        machineChanged()
+    }
+
+    /// What the S-CPU would read back from a port now.
+    func readPort(_ port: UInt8) -> UInt8? {
+        (livePlayer ?? romPlayer)?.readPort(port: port)
+    }
+
+    /// The values the game's code sends on each port, from the trace.
+    func commandValues(port: UInt8) -> [UInt32] {
+        Array(Set(upload?.commands.filter { $0.port == port }.map(\.value) ?? [])).sorted()
+    }
+
+    /// Play This Command: the ROM's driver, sent `value` on `port`.
+    func playCommand(port: UInt8, value: UInt8) {
+        pick(.rom)
+        if romPlayer == nil { return }
+        send(port: port, value: value)
+    }
+
+    // MARK: A sample on the keyboard
+
+    @ObservationIgnored private var samplePlayer: (index: UInt8, player: ApuPlayer)?
+
+    /// Sound directory entry `index` at `pitch` until `release`.
+    func press(sample index: UInt8, pitch: UInt16) {
+        if samplePlayer?.index != index {
+            samplePlayer = makeSamplePlayer(index).map { (index, $0) }
+        }
+        guard let p = samplePlayer?.player else { return }
+        // Keyed first: starting the output renders ahead at once.
+        p.setPitch(voice: 0, pitch: pitch)
+        p.keyOn(mask: 1)
+        if playing != .sample(index) {
+            if isPlaying { pause() }
+            livePlayer = p
+            playing = .sample(index)
+            output.play(p)
+        }
+    }
+
+    func release() {
+        samplePlayer?.player.keyOff(mask: 1)
+    }
+
+    /// Stop the sample, leaving the machine paused.
+    func stopSample() {
+        guard case .sample = playing else { return }
+        output.play(nil)
+        playing = nil
+        livePlayer = nil
+    }
+
+    private func makeSamplePlayer(_ index: UInt8) -> ApuPlayer? {
+        switch source {
+        case .recording:
+            guard let r = recording else { return nil }
+            return try? ApuPlayer.fromRecordedSample(recording: r, frame: frame, index: index, pitch: 0x1000)
+        case .rom:
+            guard let entry = state?.samples.first(where: { $0.index == index }), let rom = entry.romOffset else { return nil }
+            return ApuPlayer.fromRomSample(rom: self.rom, offset: rom, loopOffset: UInt32(entry.loopAt &- entry.start), pitch: 0x1000)
+        }
+    }
+
+    /// The pitch that plays directory entry `index` at `semitones` from
+    /// A4, from its tuning; `$1000` shifted by semitones from its own rate
+    /// when it has none.
+    func pitch(sample index: UInt8, semitones: Int) -> UInt16 {
+        let hz = 440 * pow(2, Double(semitones) / 12)
+        let base = state?.samples.first(where: { $0.index == index })?.tuningHz ?? 440
+        return UInt16(min(max(4096 * hz / base, 1), 0x3FFF))
+    }
+
+    // MARK: The clock
+
+    /// While playing, a few times a second: read the machine again, and
+    /// move the frame along with a recording.
+    private func startTicking() {
+        ticker?.cancel()
+        ticker = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(66))
+                self?.tick()
+            }
+        }
+    }
+
+    func tick() {
+        guard isPlaying, let p = livePlayer else { return }
+        playedSeconds = p.seconds()
+        if source == .recording {
+            // Scrubbed by hand while playing: play from there.
+            if let set = frameSet, frame != set {
+                restartRecording()
+                return
+            }
+            let at = playFrom + UInt64(playedSeconds * Self.framesPerSecond)
+            if at >= graphics.frameCount {
+                pause()
+                return
+            }
+            if followRecording {
+                frameSet = at
+                frame = at
+            }
+        } else {
+            machineChanged()
+        }
+    }
+
+    /// The last `count` samples of voice 0–7, or 8 and 9 for left and
+    /// right, from what is playing.
+    func scope(_ which: UInt8, count: UInt32) -> [Int16] {
+        livePlayer?.scope(which: which, count: count) ?? []
     }
 
     // MARK: Reading

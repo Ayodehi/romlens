@@ -84,6 +84,7 @@ struct SampleDetail: View {
                 }
                 WaveformView(sample: sample, selectedBlock: $audio.selectedBlock)
                     .frame(height: 140)
+                SampleKeyboard(audio: audio, sample: entry.index)
                 BlockStrip(sample: sample, selectedBlock: $audio.selectedBlock)
                 if let b = audio.selectedBlock, sample.blocks.indices.contains(b) {
                     BlockSteps(block: sample.blocks[b], index: b)
