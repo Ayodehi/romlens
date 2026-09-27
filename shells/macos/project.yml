@@ -90,6 +90,9 @@ targets:
         # File › Start Live Session listens on 127.0.0.1 for the recorder
         # script's stream (romlens_core::recording::live).
         com.apple.security.network.server: true
+        # The tutor reaches its provider (docs/24): Anthropic, OpenAI, or an
+        # endpoint the student adds.
+        com.apple.security.network.client: true
   RomlensTests:
     type: bundle.unit-test
     platform: macOS

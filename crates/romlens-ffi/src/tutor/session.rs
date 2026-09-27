@@ -309,6 +309,17 @@ pub fn tutor_models() -> Vec<TutorModelInfo> {
         .collect()
 }
 
+/// The models an endpoint serves, with the key given: Settings' Test
+/// button. A network call; not on the main thread.
+#[uniffi::export]
+pub fn tutor_list_models(
+    endpoint: TutorEndpointInfo,
+    key: Option<String>,
+) -> Result<Vec<String>, RomlensError> {
+    let e: Endpoint = endpoint.into();
+    list_models(&UreqTransport::new(), &e, key.as_deref().filter(|k| !k.is_empty())).map_err(err)
+}
+
 /// The model a new conversation starts on for a protocol, where there is
 /// one.
 #[uniffi::export]

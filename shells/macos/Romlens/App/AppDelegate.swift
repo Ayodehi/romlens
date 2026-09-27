@@ -20,6 +20,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AboutPanel.show()
     }
 
+    @objc func showSettings(_ sender: Any?) {
+        SettingsWindowController.shared.show()
+    }
+
     func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool {
         // There is no empty project: the controller turns this into an Open
         // panel instead.

@@ -37,6 +37,8 @@ enum MainMenu {
         return submenu(name, [
             item("About \(name)", #selector(AppDelegate.showAboutPanel(_:))),
             .separator(),
+            item("Settings…", #selector(AppDelegate.showSettings(_:)), ","),
+            .separator(),
             item("Hide \(name)", #selector(NSApplication.hide(_:)), "h"),
             item("Hide Others", #selector(NSApplication.hideOtherApplications(_:)), "h", modifiers: [.command, .option]),
             item("Show All", #selector(NSApplication.unhideAllApplications(_:))),

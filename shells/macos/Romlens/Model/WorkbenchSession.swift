@@ -247,7 +247,8 @@ final class WorkbenchSession {
 
     static func affectsAnalysis(_ command: Command) -> Bool {
         switch command {
-        case .setLabel, .setComment, .setRegionParams, .setVariable: false
+        case .setLabel, .setComment, .setRegionParams, .setVariable, .setLocalName, .setRoutineNote,
+             .setCComment, .setCVersion: false
         case .markRegion, .clearRegionOverride, .setFlagOverride: true
         }
     }

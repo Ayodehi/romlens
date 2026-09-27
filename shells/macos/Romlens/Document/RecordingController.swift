@@ -307,7 +307,7 @@ enum RecordingController {
         guard let e = error as? RomlensError else { return error.localizedDescription }
         switch e {
         case .Io(let msg), .InvalidRom(let msg), .BadAddress(let msg), .Project(let msg),
-             .RomMismatch(let msg), .InvalidLabel(let msg), .Recording(let msg):
+             .RomMismatch(let msg), .InvalidLabel(let msg), .Recording(let msg), .Tutor(let msg):
             return msg
         case .Cancelled:
             return "cancelled"

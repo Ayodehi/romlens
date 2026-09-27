@@ -24,6 +24,10 @@ final class ProjectDocument: NSDocument {
     nonisolated static let coreFiles = [
         "project.json", "labels.json", "comments.json", "regions.json", "flags.json",
     ]
+    /// Files the core writes only while they have something in them. A
+    /// save removes one the core no longer writes, or the last variable,
+    /// note or C version removed would come back when the project reopens.
+    nonisolated static let optionalCoreFiles = ["variables.json", "c_notes.json", "c_versions.json"]
 
     /// Injected for tests; the app uses the bookmark-based default.
     nonisolated(unsafe) static var locatorFactory: @MainActor () -> RomLocator = { DefaultRomLocator() }
@@ -179,8 +183,12 @@ final class ProjectDocument: NSDocument {
         if wrapper.preferredFilename == nil, let name = fileURL?.lastPathComponent, !name.isEmpty {
             wrapper.preferredFilename = name
         }
-        for (path, data) in workbench.projectFiles() {
+        let files = workbench.projectFiles()
+        for (path, data) in files {
             Self.put(data, at: path, in: wrapper)
+        }
+        for name in Self.optionalCoreFiles where files[name] == nil {
+            if let old = wrapper.fileWrappers?[name] { wrapper.removeFileWrapper(old) }
         }
         let local = LocalRecord(bookmark: romBookmark, lastPath: romURL?.path)
         if let old = wrapper.fileWrappers?[Self.localFileName] { wrapper.removeFileWrapper(old) }
