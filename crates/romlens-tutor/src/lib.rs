@@ -4,6 +4,8 @@
 //! the transcript, the three wire protocols, the model table, the tool loop
 //! and the conversation store, and the FFI and the CLI share it.
 
+pub mod agent;
+pub mod http;
 pub mod models;
 pub mod provider;
 pub mod sse;

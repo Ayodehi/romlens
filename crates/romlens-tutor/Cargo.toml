@@ -11,3 +11,4 @@ repository.workspace = true
 thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+ureq = { version = "3", features = ["platform-verifier"] }

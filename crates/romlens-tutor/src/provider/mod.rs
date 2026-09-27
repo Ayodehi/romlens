@@ -182,6 +182,7 @@ impl Reply {
             blocks: self.blocks,
             native: Some(self.native),
             usage: self.usage,
+            cost: 0.0,
             sent: true,
         }
     }

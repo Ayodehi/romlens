@@ -375,6 +375,13 @@ enum Command {
         #[command(subcommand)]
         what: ApuCommand,
     },
+    /// The tutor (docs/24): questions answered on Anthropic, OpenAI or an
+    /// endpoint of your own. Keys come from `ANTHROPIC_API_KEY`,
+    /// `OPENAI_API_KEY` or `ROMLENS_KEY_<NAME>`.
+    Tutor {
+        #[command(subcommand)]
+        what: TutorCommand,
+    },
     /// A BRR sound sample, decoded block by block (docs/23).
     Brr {
         rom: PathBuf,
@@ -695,6 +702,48 @@ enum ApuCommand {
         /// the recording's snapshot.
         #[arg(long)]
         free: bool,
+    },
+}
+
+#[derive(clap::Args)]
+struct TutorWhere {
+    /// `anthropic`, `openai`, or a name for an endpoint of your own (with
+    /// --base-url).
+    #[arg(long, default_value = "anthropic")]
+    provider: String,
+    /// Up to the version, e.g. `http://localhost:11434/v1`.
+    #[arg(long)]
+    base_url: Option<String>,
+    /// The endpoint speaks OpenAI's Responses API rather than Chat
+    /// Completions.
+    #[arg(long)]
+    responses: bool,
+}
+
+#[derive(Subcommand)]
+enum TutorCommand {
+    /// Ask a question about a ROM; the answer streams to stdout, the
+    /// thinking and the tool log to stderr.
+    Ask {
+        rom: PathBuf,
+        question: String,
+        #[command(flatten)]
+        at: TutorWhere,
+        /// The model (default: the provider's default in the model table).
+        #[arg(long)]
+        model: Option<String>,
+        /// `low` to `max`, as the model takes.
+        #[arg(long)]
+        effort: Option<String>,
+        /// Stop before a request once the conversation has cost this many
+        /// dollars.
+        #[arg(long)]
+        cap: Option<f64>,
+    },
+    /// The models an endpoint serves, with what the model table knows.
+    Models {
+        #[command(flatten)]
+        at: TutorWhere,
     },
 }
 
@@ -1642,6 +1691,34 @@ fn run() -> Result<()> {
                 free,
             })
         }
+        Command::Tutor { what } => match what {
+            TutorCommand::Ask {
+                rom,
+                question,
+                at,
+                model,
+                effort,
+                cap,
+            } => commands::tutor::ask(
+                &commands::tutor::Where {
+                    provider: &at.provider,
+                    base_url: at.base_url.as_deref(),
+                    responses: at.responses,
+                },
+                &commands::tutor::Ask {
+                    rom: &rom,
+                    question: &question,
+                    model: model.as_deref(),
+                    effort: effort.as_deref(),
+                    cap,
+                },
+            ),
+            TutorCommand::Models { at } => commands::tutor::models_list(&commands::tutor::Where {
+                provider: &at.provider,
+                base_url: at.base_url.as_deref(),
+                responses: at.responses,
+            }),
+        },
         Command::Brr {
             rom,
             at,

@@ -115,6 +115,9 @@ pub struct Turn {
     pub native: Option<Native>,
     #[serde(default)]
     pub usage: Usage,
+    /// Dollars, from the model table; zero for a local model.
+    #[serde(default)]
+    pub cost: f64,
     /// False once a rewind or a compaction has taken the turn out of what
     /// is sent; it stays in the file.
     #[serde(default = "yes")]
@@ -132,6 +135,7 @@ impl Turn {
             blocks,
             native: None,
             usage: Usage::default(),
+            cost: 0.0,
             sent: true,
         }
     }
@@ -213,6 +217,7 @@ mod tests {
                 cache_read: 5,
                 cache_write: 6,
             },
+            cost: 0.0,
             sent: true,
         };
         let s = serde_json::to_string(&t).unwrap();

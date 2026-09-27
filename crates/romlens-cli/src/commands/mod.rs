@@ -29,4 +29,5 @@ pub mod source;
 pub mod spc;
 pub mod tables;
 pub mod truth;
+pub mod tutor;
 pub mod xrefs;

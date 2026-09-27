@@ -13,5 +13,6 @@ path = "src/main.rs"
 
 [dependencies]
 romlens-core = { path = "../romlens-core" }
+romlens-tutor = { path = "../romlens-tutor" }
 clap.workspace = true
 anyhow.workspace = true
