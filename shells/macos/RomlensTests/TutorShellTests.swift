@@ -114,6 +114,11 @@ import Testing
         #expect(r.tutor.error?.contains("not a command") == true)
         r.tutor.run(command: "/selection")
         #expect(!r.tutor.includeSelection)
+        #expect(!r.tutor.settings.showWork, "thinking and tool calls start hidden")
+        r.tutor.run(command: "/details")
+        #expect(r.tutor.settings.showWork)
+        r.tutor.run(command: "/details")
+        #expect(!r.tutor.settings.showWork)
         r.tutor.run(command: "/new")
         #expect(r.tutor.session?.conversationId() != nil)
         r.tutor.run(command: "/attach frame")
@@ -129,6 +134,23 @@ import Testing
         let plain = String(p.characters)
         #expect(plain == "Why\n• one $00:8000")
         #expect(p.runs.contains { $0.link == URL(string: "romlens://a/008000") })
+    }
+
+    @Test func aReplyShowsAsOneAnswer() {
+        let tool = TutorModel.ToolRow(id: "1", name: "listing", input: "{}", summary: "SEI", done: true)
+        let rows: [TranscriptRow] = [
+            .question(index: 0, text: "Q", images: [], selection: false),
+            .answer(index: 1, text: "", reasoning: "look", tools: [tool], model: "m", cost: 0.25),
+            .answer(index: 3, text: "Answer.", reasoning: "", tools: [], model: "m", cost: 0.5),
+        ]
+        let quiet = TranscriptRow.shown(rows, work: false)
+        #expect(quiet.map(\.id) == ["q0", "a3"], "the round with only a tool call is left out")
+        guard case .answer(_, _, _, _, let model, let cost) = quiet[1] else { Issue.record("no answer"); return }
+        #expect(model == "m" && cost == 0.75, "one footer with the reply's whole cost")
+        let all = TranscriptRow.shown(rows, work: true)
+        #expect(all.map(\.id) == ["q0", "a1", "a3"])
+        guard case .answer(_, _, _, _, let m1, let c1) = all[1] else { Issue.record("no round"); return }
+        #expect(m1 == nil && c1 == 0)
     }
 
     @Test func aScrollUpStopsFollowingTheStream() {
@@ -169,7 +191,7 @@ import Testing
     }
 
     @Test func theWindowShowsAConversation() async throws {
-        let r = try await rig([tutorTestTextReply(text: "It is `$00:8000`.\n```c\nvoid Reset(void);\n```\n| Where | Bytes | As code |\n|---|---|---|\n| `$7F:8000` | `A9 F0` | `LDA #$F0` |\n| `$7F:8182` | `6B` | **RTL**, the routine's end |\n\nThen more.")])
+        let r = try await rig([tutorTestCallReply(name: "listing", arguments: #"{"address":"$00:8000","lines":4}"#), tutorTestTextReply(text: "It is `$00:8000`.\n```c\nvoid Reset(void);\n```\n| Where | Bytes | As code |\n|---|---|---|\n| `$7F:8000` | `A9 F0` | `LDA #$F0` |\n| `$7F:8182` | `6B` | **RTL**, the routine's end |\n\nThen more.")])
         defer { try? FileManager.default.removeItem(at: r.root) }
         try await ask(r.tutor, "Where is RESET?")
         let c = TutorWindowController(tutor: r.tutor, title: "Test")

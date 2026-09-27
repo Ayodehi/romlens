@@ -238,7 +238,8 @@ struct TutorPane: View {
                 }
                 .help("Dollars; empty for no limit")
             }
-            Toggle("Show the model's thinking", isOn: $settings.showThinking)
+            Toggle("Show thinking and tool calls", isOn: $settings.showWork)
+            Text("Details in the Tutor window's status line, or /details, switches it there too.").font(.caption).foregroundStyle(.secondary)
         }
         .formStyle(.grouped)
     }

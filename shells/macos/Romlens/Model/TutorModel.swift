@@ -492,6 +492,7 @@ final class TutorModel {
         Command(name: "/cost", about: "What this conversation has cost"),
         Command(name: "/attach", about: "/attach frame: the recording's frame as a picture"),
         Command(name: "/selection", about: "Send the main window's selection with questions, or not"),
+        Command(name: "/details", about: "Show or hide the tutor's thinking and tool calls"),
         Command(name: "/help", about: "What the tutor can do and the keys it takes"),
     ]
 
@@ -539,6 +540,8 @@ final class TutorModel {
             if arg.lowercased().hasPrefix("frame") { attachFrame() } else { error = "Try /attach frame, or paste or drop a picture." }
         case "/selection":
             includeSelection.toggle()
+        case "/details":
+            settings.showWork.toggle()
         case "/help":
             sheet = .help
         default:

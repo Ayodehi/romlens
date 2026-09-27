@@ -101,7 +101,9 @@ final class TutorSettings {
         var efforts: [String: String] = [:]
         var mode = TutorModePreference.askBeforeEdits
         var costCap: Double? = 5
-        var showThinking = true
+        /// The thinking and the tool calls under each answer; off, only
+        /// the answers, pictures and edit cards show.
+        var showWork = false
         /// Where `generate_image` draws: an endpoint that speaks OpenAI's
         /// Images API, or none.
         var imageEndpoint: String?
@@ -117,7 +119,7 @@ final class TutorSettings {
             efforts = try c.decodeIfPresent([String: String].self, forKey: .efforts) ?? [:]
             mode = try c.decodeIfPresent(TutorModePreference.self, forKey: .mode) ?? .askBeforeEdits
             costCap = try c.decodeIfPresent(Double.self, forKey: .costCap)
-            showThinking = try c.decodeIfPresent(Bool.self, forKey: .showThinking) ?? true
+            showWork = try c.decodeIfPresent(Bool.self, forKey: .showWork) ?? false
             imageEndpoint = try c.decodeIfPresent(String.self, forKey: .imageEndpoint)
             imageModel = try c.decodeIfPresent(String.self, forKey: .imageModel) ?? "gpt-image-1"
         }
@@ -182,9 +184,9 @@ final class TutorSettings {
         set { stored.costCap = newValue.map { max(0, $0) }; save() }
     }
 
-    var showThinking: Bool {
-        get { stored.showThinking }
-        set { stored.showThinking = newValue; save() }
+    var showWork: Bool {
+        get { stored.showWork }
+        set { stored.showWork = newValue; save() }
     }
 
     /// The endpoint pictures are drawn at, if one is chosen and still there.

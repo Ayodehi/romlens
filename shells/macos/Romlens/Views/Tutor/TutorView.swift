@@ -89,7 +89,8 @@ enum TranscriptRow: Identifiable {
                 for b in t.blocks {
                     switch b {
                     case .text(let text):
-                        if text.hasPrefix("[The mode is now") || text.hasPrefix("[The student's selection") {
+                        if text.hasPrefix("[The mode is now") || text.hasPrefix("[The student's selection")
+                            || text.hasPrefix("[The changes you proposed last time") {
                             selection = selection || text.contains("selection")
                         } else {
                             words.append(text)
@@ -122,6 +123,35 @@ enum TranscriptRow: Identifiable {
         }
         return out
     }
+
+    /// The rows as the window shows them. A reply's rounds share one
+    /// footer, on its last answer, with the reply's whole cost; without
+    /// the thinking and tool calls, rounds with nothing else are left out.
+    static func shown(_ rows: [TranscriptRow], work: Bool) -> [TranscriptRow] {
+        var out: [TranscriptRow] = []
+        var reply: [TranscriptRow] = []
+        func close() {
+            var kept = reply.filter { r in
+                guard !work, case .answer(_, let text, _, let tools, _, _) = r else { return true }
+                return !text.isEmpty || tools.contains { $0.name == "generate_image" && !$0.images.isEmpty }
+            }
+            let cost = reply.reduce(0.0) { if case .answer(_, _, _, _, _, let c) = $1 { $0 + c } else { $0 } }
+            let model = reply.last.flatMap { if case .answer(_, _, _, _, let m, _) = $0 { m } else { nil } }
+            kept = kept.enumerated().map { n, r in
+                guard case .answer(let i, let text, let reasoning, let tools, _, _) = r else { return r }
+                let last = n == kept.count - 1
+                return .answer(index: i, text: text, reasoning: reasoning, tools: tools,
+                               model: last ? model : nil, cost: last ? cost : 0)
+            }
+            out += kept
+            reply = []
+        }
+        for r in rows {
+            if case .answer = r { reply.append(r) } else { close(); out.append(r) }
+        }
+        close()
+        return out
+    }
 }
 
 struct TranscriptView: View {
@@ -145,7 +175,7 @@ struct TranscriptView: View {
     }
 
     var body: some View {
-        let rows = TranscriptRow.rows(tutor.turns)
+        let rows = TranscriptRow.shown(TranscriptRow.rows(tutor.turns), work: tutor.settings.showWork)
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
@@ -237,10 +267,10 @@ struct RowView: View {
             .frame(maxWidth: .infinity, alignment: .trailing)
         case .answer(_, let text, let reasoning, let tools, let model, let cost):
             VStack(alignment: .leading, spacing: 8) {
-                if !reasoning.isEmpty && tutor.settings.showThinking {
-                    ThinkingView(text: reasoning)
+                if tutor.settings.showWork {
+                    if !reasoning.isEmpty { ThinkingView(text: reasoning, open: true) }
+                    if !tools.isEmpty { ToolLog(tutor: tutor, tools: tools, open: true) }
                 }
-                if !tools.isEmpty { ToolLog(tutor: tutor, tools: tools, open: false) }
                 // Pictures the tutor drew come first and large; ones a tool
                 // read from the ROM or the recording sit in the log.
                 ForEach(tools.filter { $0.name == "generate_image" }.flatMap(\.images), id: \.self) { id in
@@ -250,11 +280,13 @@ struct RowView: View {
                     }
                 }
                 if !text.isEmpty { MessageText(tutor: tutor, text: text) }
-                HStack(spacing: 6) {
-                    if let model { Text(model) }
-                    if cost > 0 { Text(String(format: "$%.4f", cost)) }
+                if model != nil || cost > 0 {
+                    HStack(spacing: 6) {
+                        if let model { Text(model) }
+                        if cost > 0 { Text(String(format: "$%.4f", cost)) }
+                    }
+                    .font(.caption2).foregroundStyle(.tertiary)
                 }
-                .font(.caption2).foregroundStyle(.tertiary)
             }
         case .note(_, let text):
             Text(text).font(.caption).foregroundStyle(.secondary)
@@ -286,10 +318,10 @@ struct LiveAnswer: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .trailing)
             }
-            if !live.reasoning.isEmpty && tutor.settings.showThinking {
-                ThinkingView(text: live.reasoning, open: live.text.isEmpty)
+            if tutor.settings.showWork {
+                if !live.reasoning.isEmpty { ThinkingView(text: live.reasoning, open: true) }
+                if !live.tools.isEmpty { ToolLog(tutor: tutor, tools: live.tools, open: true) }
             }
-            if !live.tools.isEmpty { ToolLog(tutor: tutor, tools: live.tools, open: true) }
             ForEach(live.cards) { card in EditCard(tutor: tutor, card: card) }
             if !live.text.isEmpty { MessageText(tutor: tutor, text: live.text) }
             HStack(spacing: 6) {
@@ -462,6 +494,12 @@ struct StatusLine: View {
             }
             Text(String(format: "$%.3f", tutor.cost)).help("What this conversation has cost")
             Spacer()
+            Button { tutor.settings.showWork.toggle() } label: {
+                Label("Details", systemImage: tutor.settings.showWork ? "list.bullet.rectangle.fill" : "list.bullet.rectangle")
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(tutor.settings.showWork ? Color.accentColor : Color.secondary)
+            .help(tutor.settings.showWork ? "Hide the tutor's thinking and tool calls (/details)" : "Show the tutor's thinking and tool calls (/details)")
             if tutor.busy {
                 Button("Stop") { tutor.stop() }.keyboardShortcut(.cancelAction).controlSize(.small)
             }
