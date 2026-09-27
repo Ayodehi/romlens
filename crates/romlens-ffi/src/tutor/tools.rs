@@ -12,6 +12,7 @@ use romlens_tutor::provider::ToolSpec;
 use serde_json::{Value, json};
 
 use super::reference;
+use crate::graphics::RecordingSession;
 use crate::records::{
     AddressStyle, DecompileLevel, FlagState, RegionKind, ResolvedAny, SearchQuery,
 };
@@ -24,11 +25,20 @@ pub fn addr(a: u32) -> String {
 
 pub struct RomTools {
     wb: Arc<Workbench>,
+    /// The recording open in the main window, which the recording tools read.
+    recording: std::sync::Mutex<Option<Arc<RecordingSession>>>,
 }
 
 impl RomTools {
     pub fn new(wb: Arc<Workbench>) -> RomTools {
-        RomTools { wb }
+        RomTools {
+            wb,
+            recording: std::sync::Mutex::new(None),
+        }
+    }
+
+    pub fn set_recording(&self, r: Option<Arc<RecordingSession>>) {
+        *self.recording.lock().unwrap_or_else(|e| e.into_inner()) = r;
     }
 
     /// An address the model wrote: `$80:8000`, `808000`, `0x1234` (a file
@@ -66,26 +76,26 @@ impl RomTools {
     }
 }
 
-// Schema pieces.
-fn string(about: &str) -> Value {
+// Schema pieces, also for `media`.
+pub(crate) fn string(about: &str) -> Value {
     json!({"type": "string", "description": about})
 }
-fn integer(about: &str) -> Value {
+pub(crate) fn integer(about: &str) -> Value {
     json!({"type": "integer", "description": about})
 }
-fn boolean(about: &str) -> Value {
+pub(crate) fn boolean(about: &str) -> Value {
     json!({"type": "boolean", "description": about})
 }
-fn choice(values: &[&str], about: &str) -> Value {
+pub(crate) fn choice(values: &[&str], about: &str) -> Value {
     json!({"type": "string", "enum": values, "description": about})
 }
-fn nullable(v: Value) -> Value {
+pub(crate) fn nullable(v: Value) -> Value {
     let about = v["description"].clone();
     let mut inner = v;
     inner.as_object_mut().unwrap().remove("description");
     json!({"anyOf": [inner, {"type": "null"}], "description": about})
 }
-fn object(props: &[(&str, Value)]) -> Value {
+pub(crate) fn object(props: &[(&str, Value)]) -> Value {
     let mut p = serde_json::Map::new();
     for (k, v) in props {
         p.insert((*k).into(), v.clone());
@@ -101,7 +111,7 @@ fn object(props: &[(&str, Value)]) -> Value {
 const ADDRESS: &str =
     "A CPU address such as $80:8000, a file offset such as 0x1234, or a label's name";
 
-fn spec(name: &str, description: &str, props: &[(&str, Value)]) -> ToolSpec {
+pub(crate) fn spec(name: &str, description: &str, props: &[(&str, Value)]) -> ToolSpec {
     ToolSpec {
         name: name.into(),
         description: description.into(),
@@ -110,6 +120,12 @@ fn spec(name: &str, description: &str, props: &[(&str, Value)]) -> ToolSpec {
 }
 
 pub fn specs() -> Vec<ToolSpec> {
+    let mut v = code_specs();
+    v.extend(super::media::specs());
+    v
+}
+
+fn code_specs() -> Vec<ToolSpec> {
     vec![
         spec(
             "rom_info",
@@ -294,6 +310,19 @@ impl Tools for RomTools {
     }
 
     fn run(&self, name: &str, input: &Value, _cx: &ToolContext) -> ToolOutput {
+        let place = |t: &str| self.rom_place(t);
+        let media = super::media::Media {
+            wb: &self.wb,
+            rec: self
+                .recording
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone(),
+            place: &place,
+        };
+        if let Some(out) = media.run(name, input) {
+            return out;
+        }
         match self.dispatch(name, input) {
             Ok(t) => ToolOutput::text(t),
             Err(e) => ToolOutput::error(e),

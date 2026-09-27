@@ -98,8 +98,10 @@ ask users where theirs came from.
    only when the user asks, and never a bulk upload of the ROM or a
    recording; a local endpoint sends nothing off the machine. Image
    generation is sent a text prompt only, never a game asset.
-   Conversations hold ROM bytes and screenshots, so they stay in the app's
-   own folder and never go in a project package. Settings say this plainly.
+   Conversations hold ROM bytes, screenshots and the pictures of tiles and
+   frames that tools show the model, so they stay in the app's own folder,
+   like a recording (rule 4): never in a project package, and never offered
+   for export (rule 5). Settings say this plainly.
 
 **Published educational content**
 

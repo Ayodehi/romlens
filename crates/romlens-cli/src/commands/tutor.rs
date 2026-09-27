@@ -14,7 +14,7 @@ use romlens_tutor::http::{Cancel, UreqTransport, list_models};
 use romlens_tutor::models;
 use romlens_tutor::prompt;
 use romlens_tutor::provider::{Delta, Endpoint, Protocol};
-use romlens_tutor::transcript::Turn;
+use romlens_tutor::transcript::{Block, ImageRef, Turn};
 
 /// Which endpoint: `anthropic`, `openai`, or a name of your own with its
 /// base URL and protocol.
@@ -77,6 +77,10 @@ pub struct Ask<'a> {
     /// listing.
     pub at: Option<&'a str>,
     pub question: &'a str,
+    /// A recording of the ROM, for the frame and sound tools.
+    pub rec: Option<&'a Path>,
+    /// Pictures to send with the question (PNG, JPEG, GIF or WebP).
+    pub attach: &'a [std::path::PathBuf],
     pub model: Option<&'a str>,
     pub effort: Option<&'a str>,
     pub cap: Option<f64>,
@@ -132,6 +136,40 @@ pub fn ask(w: &Where, a: &Ask) -> Result<()> {
     }
     text.push_str(a.question);
     let tools = RomTools::new(wb.clone());
+    if let Some(r) = a.rec {
+        let rec = romlens_ffi::RecordingSession::open(r.to_string_lossy().into_owned(), false)?;
+        rec.check_rom(wb.rom())?;
+        tools.set_recording(Some(rec));
+    }
+    let mut blocks = Vec::new();
+    for (i, p) in a.attach.iter().enumerate() {
+        let media_type = match p
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(str::to_ascii_lowercase)
+            .as_deref()
+        {
+            Some("png") => "image/png",
+            Some("jpg" | "jpeg") => "image/jpeg",
+            Some("gif") => "image/gif",
+            Some("webp") => "image/webp",
+            _ => {
+                return Err(anyhow!(
+                    "{}: attach a PNG, JPEG, GIF or WebP picture",
+                    p.display()
+                ));
+            }
+        };
+        let id = format!("attached-{i}");
+        s.pictures.insert(id.clone(), std::fs::read(p)?);
+        blocks.push(Block::Image {
+            image: ImageRef {
+                id,
+                media_type: media_type.into(),
+            },
+        });
+    }
+    blocks.push(Block::Text { text: text.clone() });
     let on = |ev: Event| {
         let mut err = std::io::stderr();
         match ev {
@@ -164,7 +202,7 @@ pub fn ask(w: &Where, a: &Ask) -> Result<()> {
     };
     let cancel = Cancel::new();
     let stop = s.ask(
-        Turn::user_text(&text),
+        Turn::user(blocks),
         &Deps {
             transport: &UreqTransport::new(),
             credentials: &EnvCredentials,

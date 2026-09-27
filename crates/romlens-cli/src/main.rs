@@ -720,32 +720,41 @@ struct TutorWhere {
     responses: bool,
 }
 
+#[derive(clap::Args)]
+struct TutorAsk {
+    rom: PathBuf,
+    question: String,
+    /// A project package for the ROM, with its names and marks.
+    #[arg(long)]
+    project: Option<PathBuf>,
+    /// The address the question is about, sent with the listing there.
+    #[arg(long = "at")]
+    selection: Option<String>,
+    /// A recording of the ROM, for the frame, sound and change tools.
+    #[arg(long)]
+    rec: Option<PathBuf>,
+    /// A picture to send with the question (repeatable).
+    #[arg(long)]
+    attach: Vec<PathBuf>,
+    #[command(flatten)]
+    at: TutorWhere,
+    /// The model (default: the provider's default in the model table).
+    #[arg(long)]
+    model: Option<String>,
+    /// `low` to `max`, as the model takes.
+    #[arg(long)]
+    effort: Option<String>,
+    /// Stop before a request once the conversation has cost this many
+    /// dollars.
+    #[arg(long)]
+    cap: Option<f64>,
+}
+
 #[derive(Subcommand)]
 enum TutorCommand {
     /// Ask a question about a ROM; the answer streams to stdout, the
     /// thinking and the tool log to stderr.
-    Ask {
-        rom: PathBuf,
-        question: String,
-        /// A project package for the ROM, with its names and marks.
-        #[arg(long)]
-        project: Option<PathBuf>,
-        /// The address the question is about, sent with the listing there.
-        #[arg(long = "at")]
-        selection: Option<String>,
-        #[command(flatten)]
-        at: TutorWhere,
-        /// The model (default: the provider's default in the model table).
-        #[arg(long)]
-        model: Option<String>,
-        /// `low` to `max`, as the model takes.
-        #[arg(long)]
-        effort: Option<String>,
-        /// Stop before a request once the conversation has cost this many
-        /// dollars.
-        #[arg(long)]
-        cap: Option<f64>,
-    },
+    Ask(Box<TutorAsk>),
     /// The models an endpoint serves, with what the model table knows.
     Models {
         #[command(flatten)]
@@ -1698,31 +1707,38 @@ fn run() -> Result<()> {
             })
         }
         Command::Tutor { what } => match what {
-            TutorCommand::Ask {
-                rom,
-                question,
-                project,
-                selection,
-                at,
-                model,
-                effort,
-                cap,
-            } => commands::tutor::ask(
-                &commands::tutor::Where {
-                    provider: &at.provider,
-                    base_url: at.base_url.as_deref(),
-                    responses: at.responses,
-                },
-                &commands::tutor::Ask {
-                    rom: &rom,
-                    project: project.as_deref(),
-                    at: selection.as_deref(),
-                    question: &question,
-                    model: model.as_deref(),
-                    effort: effort.as_deref(),
+            TutorCommand::Ask(ask) => {
+                let TutorAsk {
+                    rom,
+                    question,
+                    project,
+                    selection,
+                    rec,
+                    attach,
+                    at,
+                    model,
+                    effort,
                     cap,
-                },
-            ),
+                } = *ask;
+                commands::tutor::ask(
+                    &commands::tutor::Where {
+                        provider: &at.provider,
+                        base_url: at.base_url.as_deref(),
+                        responses: at.responses,
+                    },
+                    &commands::tutor::Ask {
+                        rom: &rom,
+                        project: project.as_deref(),
+                        at: selection.as_deref(),
+                        question: &question,
+                        rec: rec.as_deref(),
+                        attach: &attach,
+                        model: model.as_deref(),
+                        effort: effort.as_deref(),
+                        cap,
+                    },
+                )
+            }
             TutorCommand::Models { at } => commands::tutor::models_list(&commands::tutor::Where {
                 provider: &at.provider,
                 base_url: at.base_url.as_deref(),
