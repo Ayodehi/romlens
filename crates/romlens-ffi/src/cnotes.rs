@@ -49,6 +49,17 @@ pub struct CCommentInfo {
     pub text: String,
 }
 
+/// What `/rewind` did to the tutor's edits.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct RewoundInfo {
+    /// Edits undone from the top of the undo stack.
+    pub undone: u32,
+    /// Older edits taken back as one new undoable step.
+    pub reverted: u32,
+    /// Edits left because the student changed the same thing afterwards.
+    pub kept: Vec<String>,
+}
+
 /// Who a batch of edits is from.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
 pub enum EditOrigin {
@@ -148,6 +159,24 @@ impl Workbench {
             }
         };
         self.apply_commands(commands.into_iter().map(Into::into).collect(), origin)
+    }
+
+    /// Take back the edits the tutor made in `conversation` from turn
+    /// `from_turn` on (docs/24, `/rewind`).
+    pub fn rewind_tutor_edits(
+        &self,
+        conversation: String,
+        from_turn: u32,
+    ) -> Result<RewoundInfo, crate::RomlensError> {
+        let r = self.rewind_edits(&|o| {
+            matches!(o, romlens_core::model::Origin::Tutor { conversation: c, turn }
+                if *c == conversation && *turn >= from_turn)
+        })?;
+        Ok(RewoundInfo {
+            undone: r.undone,
+            reverted: r.reverted,
+            kept: r.kept,
+        })
     }
 
     pub fn local_names(&self, routine: u32) -> Vec<LocalNameInfo> {

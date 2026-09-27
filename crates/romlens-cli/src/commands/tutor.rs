@@ -9,7 +9,9 @@ use anyhow::{Result, anyhow};
 use romlens_ffi::tutor::{digest::digest, tools::RomTools};
 use romlens_ffi::workbench::read_project_package;
 use romlens_ffi::{Rom, Workbench};
-use romlens_tutor::agent::{Credentials, Deps, EnvCredentials, Event, Mode, Session};
+use romlens_tutor::agent::{
+    Approver, Credentials, Decision, Deps, EnvCredentials, Event, Mode, Proposal, Session,
+};
 use romlens_tutor::http::{Cancel, UreqTransport, list_models};
 use romlens_tutor::models;
 use romlens_tutor::prompt;
@@ -84,6 +86,35 @@ pub struct Ask<'a> {
     pub model: Option<&'a str>,
     pub effort: Option<&'a str>,
     pub cap: Option<f64>,
+    /// `read-only`, `ask` (each edit asked on the terminal) or `accept`.
+    pub mode: &'a str,
+}
+
+/// Asks about each edit on the terminal.
+struct Terminal;
+
+impl Approver for Terminal {
+    fn decide(&self, p: &Proposal) -> Decision {
+        let mut err = std::io::stderr();
+        let _ = writeln!(err, "\n┌ The tutor wants to: {}", p.summary);
+        if !p.reason.is_empty() {
+            let _ = writeln!(err, "│ because {}", p.reason);
+        }
+        if let Some(b) = &p.before {
+            let _ = writeln!(err, "│ now:   {b}");
+        }
+        if let Some(a) = &p.after {
+            let _ = writeln!(err, "│ after: {a}");
+        }
+        let _ = write!(err, "└ Accept? [y/N] ");
+        let mut line = String::new();
+        let _ = std::io::stdin().read_line(&mut line);
+        if line.trim().eq_ignore_ascii_case("y") || line.trim().eq_ignore_ascii_case("yes") {
+            Decision::Accept
+        } else {
+            Decision::Reject { why: None }
+        }
+    }
 }
 
 fn workbench(rom: &Path, project: Option<&Path>) -> Result<std::sync::Arc<Workbench>> {
@@ -126,7 +157,15 @@ pub fn ask(w: &Where, a: &Ask) -> Result<()> {
     let mut s = Session::new(&format!("cli-{}", wb.rom_identity().sha256), e, &model);
     s.effort = a.effort.map(str::to_owned);
     s.cost_cap = a.cap;
-    s.mode = Mode::ReadOnly;
+    s.mode = match a.mode {
+        "accept" => Mode::AcceptEdits,
+        "ask" => Mode::AskBeforeEdits,
+        "read-only" => Mode::ReadOnly,
+        other => return Err(anyhow!("--mode is read-only, ask or accept, not {other}")),
+    };
+    if s.mode != Mode::ReadOnly && a.project.is_none() {
+        return Err(anyhow!("edits need --project, where they are saved"));
+    }
     s.system = prompt::system();
     s.digest = digest(&wb);
     let sel = a.at.map(|at| selection(&wb, at)).transpose()?;
@@ -207,11 +246,18 @@ pub fn ask(w: &Where, a: &Ask) -> Result<()> {
             transport: &UreqTransport::new(),
             credentials: &EnvCredentials,
             tools: &tools,
+            approver: &Terminal,
             events: &on,
             cancel: &cancel,
         },
     )?;
     println!();
     eprintln!("({model}, stopped: {stop:?})");
+    if let Some(p) = a.project
+        && wb.is_dirty()
+    {
+        wb.save_project(p.to_string_lossy().into_owned())?;
+        eprintln!("(the tutor's edits are saved in {})", p.display());
+    }
     Ok(())
 }

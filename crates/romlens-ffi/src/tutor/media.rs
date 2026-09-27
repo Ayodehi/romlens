@@ -911,13 +911,16 @@ mod tests {
 
     fn call(t: &RomTools, name: &str, input: Value) -> ToolOutput {
         let on = |_: Event| {};
+        let cancel = romlens_tutor::http::Cancel::new();
         let cx = ToolContext {
             mode: Mode::ReadOnly,
             conversation: "c",
             turn: 1,
             events: &on,
+            approver: &romlens_tutor::agent::AcceptAll,
+            cancel: &cancel,
         };
-        t.run(name, &input, &cx)
+        t.run("call", name, &input, &cx)
     }
 
     fn text(o: &ToolOutput) -> String {

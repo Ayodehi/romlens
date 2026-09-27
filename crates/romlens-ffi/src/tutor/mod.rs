@@ -3,6 +3,7 @@
 //! in `romlens-tutor`.
 
 pub mod digest;
+pub mod edits;
 pub mod media;
 pub mod png;
 pub mod reference;

@@ -224,3 +224,87 @@ fn the_package_keeps_them() {
     let files = to_files(&rom, &Project::new(&rom));
     assert!(!files.contains_key("c_notes.json") && !files.contains_key("c_versions.json"));
 }
+
+#[test]
+fn rewind_takes_back_the_tutors_edits_and_spares_the_students() {
+    use romlens_core::model::undo::UndoStack;
+    let rom = RomImage::from_bytes(fixtures::explain_lorom(), "e.sfc").unwrap();
+    let mut project = Project::new(&rom);
+    let mut undo = UndoStack::default();
+    let label = |a: u32, n: &str| Command::SetLabel {
+        address: at(a),
+        name: Some(n.into()),
+    };
+    let tutor = |turn| Origin::Tutor {
+        conversation: "c1".into(),
+        turn,
+    };
+    let mut run = |p: &mut Project, cmds: Vec<Command>, o: Origin| {
+        let e = p.apply_batch(&rom, cmds, o).unwrap();
+        undo.push(e);
+    };
+    run(&mut project, vec![label(0x00_8000, "Reset")], tutor(1));
+    run(&mut project, vec![label(0x00_80A0, "ClearSlots")], tutor(2));
+    run(&mut project, vec![label(0x00_8000, "Start")], Origin::User);
+    run(&mut project, vec![label(0x00_80A4, "Beep")], tutor(3));
+    run(
+        &mut project,
+        vec![label(0x00_80F0, "Nmi")],
+        Origin::Tutor {
+            conversation: "other".into(),
+            turn: 9,
+        },
+    );
+    let name = |p: &Project, a: u32| p.labels.get(&at(a)).map(|l| l.name.clone());
+
+    let r = undo
+        .rewind(&mut project, &rom, &|o| matches!(o, Origin::Tutor { conversation, turn } if conversation == "c1" && *turn >= 1))
+        .unwrap();
+    // Another conversation's edit sits on top, so nothing is undone
+    // outright; turns 3 and 2 are reverted, turn 1 is kept because the
+    // student renamed the same label after it.
+    assert_eq!(r.undone, 0);
+    assert_eq!(r.reverted, 2);
+    assert_eq!(r.kept, vec!["Tutor: Rename Label".to_owned()]);
+    assert_eq!(name(&project, 0x00_8000).as_deref(), Some("Start"));
+    assert_eq!(name(&project, 0x00_80A0), None);
+    assert_eq!(name(&project, 0x00_80A4), None);
+    assert_eq!(name(&project, 0x00_80F0).as_deref(), Some("Nmi"));
+    assert_eq!(undo.undo_title(), Some("Rewind the Tutor's Edits"));
+    // And the rewind itself undoes.
+    undo.undo(&mut project, &rom).unwrap();
+    assert_eq!(name(&project, 0x00_80A4).as_deref(), Some("Beep"));
+}
+
+#[test]
+fn rewind_undoes_what_is_on_top() {
+    use romlens_core::model::undo::UndoStack;
+    let rom = RomImage::from_bytes(fixtures::explain_lorom(), "e.sfc").unwrap();
+    let mut project = Project::new(&rom);
+    let mut undo = UndoStack::default();
+    for (turn, (a, n)) in [(0x00_8000, "Reset"), (0x00_80A0, "Clear")]
+        .into_iter()
+        .enumerate()
+    {
+        let e = project
+            .apply_batch(
+                &rom,
+                vec![Command::SetLabel {
+                    address: at(a),
+                    name: Some(n.into()),
+                }],
+                Origin::Tutor {
+                    conversation: "c".into(),
+                    turn: turn as u32,
+                },
+            )
+            .unwrap();
+        undo.push(e);
+    }
+    let r = undo
+        .rewind(&mut project, &rom, &|o| matches!(o, Origin::Tutor { .. }))
+        .unwrap();
+    assert_eq!((r.undone, r.reverted), (2, 0));
+    assert!(project.labels.is_empty());
+    assert!(undo.can_redo());
+}

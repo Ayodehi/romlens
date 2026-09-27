@@ -85,7 +85,50 @@ pub enum Command {
     },
 }
 
+/// What a command changes, to tell whether two commands touch the same
+/// thing (`UndoStack::rewind`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Target {
+    Label(SnesAddress),
+    Comment(SnesAddress, CommentKind),
+    /// File offsets, from and to (exclusive).
+    Bytes(u32, u32),
+    Flags(FileOffset),
+    Variable(SnesAddress),
+    Local(SnesAddress, String),
+    Note(SnesAddress),
+    CComment(SnesAddress),
+    CVersion(SnesAddress, String),
+}
+
+impl Target {
+    pub fn overlaps(&self, o: &Target) -> bool {
+        match (self, o) {
+            (Target::Bytes(a, b), Target::Bytes(c, d)) => a < d && c < b,
+            _ => self == o,
+        }
+    }
+}
+
 impl Command {
+    pub fn target(&self) -> Target {
+        match self {
+            Command::SetLabel { address, .. } | Command::RestoreLabel { address, .. } => {
+                Target::Label(*address)
+            }
+            Command::SetComment { address, kind, .. } => Target::Comment(*address, *kind),
+            Command::MarkRegion { start, len, .. }
+            | Command::ClearRegionOverride { start, len } => Target::Bytes(start.0, start.0 + len),
+            Command::SetRegionParams { start, .. } => Target::Bytes(start.0, start.0 + 1),
+            Command::SetFlagOverride { offset, .. } => Target::Flags(*offset),
+            Command::SetVariable { address, .. } => Target::Variable(*address),
+            Command::SetLocalName { routine, local, .. } => Target::Local(*routine, local.clone()),
+            Command::SetRoutineNote { routine, .. } => Target::Note(*routine),
+            Command::SetCComment { address, .. } => Target::CComment(*address),
+            Command::SetCVersion { routine, name, .. } => Target::CVersion(*routine, name.clone()),
+        }
+    }
+
     /// Whether the analyzer must run again after this command.
     pub fn affects_analysis(&self) -> bool {
         matches!(

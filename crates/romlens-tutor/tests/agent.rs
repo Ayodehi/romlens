@@ -6,7 +6,8 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use romlens_tutor::agent::{
-    AskError, Credentials, Deps, Event, Session, ToolContext, ToolKind, ToolOutput, Tools,
+    AcceptAll, AskError, Credentials, Deps, Event, Session, ToolContext, ToolKind, ToolOutput,
+    Tools,
 };
 use romlens_tutor::http::{Cancel, FakeTransport, HttpError};
 use romlens_tutor::provider::{Endpoint, Protocol, Stop, ToolSpec};
@@ -60,7 +61,7 @@ impl Tools for Fake {
             ToolKind::Read
         }
     }
-    fn run(&self, name: &str, input: &Value, _: &ToolContext) -> ToolOutput {
+    fn run(&self, _: &str, name: &str, input: &Value, _: &ToolContext) -> ToolOutput {
         self.runs.fetch_add(1, Ordering::SeqCst);
         self.ran.lock().unwrap().push((name.into(), input.clone()));
         if let Some(c) = &self.cancel_on_run {
@@ -100,6 +101,7 @@ fn a_tool_round_then_an_answer() {
                 credentials: &Key,
                 tools: &tools,
                 events: &on,
+                approver: &AcceptAll,
                 cancel: &cancel,
             },
         )
@@ -184,6 +186,7 @@ fn overload_is_retried() {
         credentials: &Key,
         tools: &Fake::default(),
         events: &on,
+        approver: &AcceptAll,
         cancel: &cancel,
     };
     assert_eq!(s.ask(Turn::user_text("hi"), &deps).unwrap(), Stop::EndTurn);
@@ -206,6 +209,7 @@ fn overload_is_retried() {
         credentials: &Key,
         tools: &Fake::default(),
         events: &on,
+        approver: &AcceptAll,
         cancel: &cancel,
     };
     let e = session().ask(Turn::user_text("hi"), &deps).unwrap_err();
@@ -226,6 +230,7 @@ fn a_key_is_needed_except_locally() {
         credentials: &NoKey,
         tools: &Fake::default(),
         events: &on,
+        approver: &AcceptAll,
         cancel: &cancel,
     };
     assert_eq!(
@@ -262,6 +267,7 @@ fn a_round_cut_short_is_answered_not_run() {
         credentials: &Key,
         tools: &tools,
         events: &on,
+        approver: &AcceptAll,
         cancel: &cancel,
     };
     assert_eq!(
@@ -291,6 +297,7 @@ fn esc_during_the_tools_leaves_a_whole_transcript() {
         credentials: &Key,
         tools: &tools,
         events: &on,
+        approver: &AcceptAll,
         cancel: &cancel,
     };
     assert_eq!(
@@ -307,6 +314,7 @@ fn esc_during_the_tools_leaves_a_whole_transcript() {
         credentials: &Key,
         tools: &tools,
         events: &on,
+        approver: &AcceptAll,
         cancel: &cancel,
     };
     assert_eq!(
@@ -346,6 +354,7 @@ fn reads_run_together_and_bad_arguments_are_refused() {
         credentials: &NoKey,
         tools: &tools,
         events: &on,
+        approver: &AcceptAll,
         cancel: &cancel,
     };
     // The second reply asks for a tool again; with no third reply the loop
@@ -366,4 +375,107 @@ fn reads_run_together_and_bad_arguments_are_refused() {
         &results[1],
         Block::ToolResult { is_error: true, .. }
     ));
+}
+
+#[test]
+fn rewind_gives_back_the_prompt_and_sends_less() {
+    let t = FakeTransport::new(vec![
+        Ok(stream("anthropic_text.sse")),
+        Ok(stream("anthropic_text.sse")),
+        Ok(stream("anthropic_text.sse")),
+    ]);
+    let on = |_: Event| {};
+    let cancel = Cancel::new();
+    let tools = Fake::default();
+    let deps = Deps {
+        transport: &t,
+        credentials: &Key,
+        tools: &tools,
+        events: &on,
+        approver: &AcceptAll,
+        cancel: &cancel,
+    };
+    let mut s = session();
+    s.ask(Turn::user_text("first"), &deps).unwrap();
+    s.ask(Turn::user_text("second"), &deps).unwrap();
+    let prompts = s.prompts();
+    assert_eq!(
+        prompts.iter().map(|(_, p)| p.as_str()).collect::<Vec<_>>(),
+        ["first", "second"]
+    );
+    assert_eq!(s.rewind_to(prompts[1].0).as_deref(), Some("second"));
+    assert_eq!(s.prompts().len(), 1);
+    assert_eq!(s.rewind_to(1), None, "an assistant turn is not a prompt");
+    s.ask(Turn::user_text("second, again"), &deps).unwrap();
+    let body: Value = serde_json::from_slice(&t.sent()[2].body).unwrap();
+    let m = body["messages"].as_array().unwrap();
+    assert_eq!(m.len(), 3);
+    assert_eq!(m[2]["content"][0]["text"], "second, again");
+    // The rewound turns are still in the transcript, unsent.
+    assert_eq!(s.turns.len(), 6);
+}
+
+#[test]
+fn compaction_starts_again_from_a_summary() {
+    let summary = String::from_utf8(stream("anthropic_text.sse"))
+        .unwrap()
+        .replace(
+            "RESET at `$00:8000` masks interrupts and enters native mode.",
+            "The student asked about RESET at `$00:8000`.",
+        );
+    let t = FakeTransport::new(vec![
+        Ok(stream("anthropic_text.sse")),
+        Ok(summary.into_bytes()),
+        Ok(stream("anthropic_text.sse")),
+    ]);
+    let (log,) = events();
+    let on = |e: Event| log.lock().unwrap().push(e);
+    let cancel = Cancel::new();
+    let tools = Fake::default();
+    let deps = Deps {
+        transport: &t,
+        credentials: &Key,
+        tools: &tools,
+        events: &on,
+        approver: &AcceptAll,
+        cancel: &cancel,
+    };
+    let mut s = session();
+    s.ask(Turn::user_text("What does RESET do?"), &deps)
+        .unwrap();
+    let got = s.compact(&deps).unwrap();
+    assert_eq!(got, "The student asked about RESET at `$00:8000`.");
+    s.ask(Turn::user_text("And then?"), &deps).unwrap();
+    let sent = t.sent();
+    let asked: Value = serde_json::from_slice(&sent[1].body).unwrap();
+    let last = asked["messages"]
+        .as_array()
+        .unwrap()
+        .last()
+        .unwrap()
+        .clone();
+    assert!(
+        last["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .starts_with("Stop here and write a summary")
+    );
+    // After it, only the summary and the new question go.
+    let after: Value = serde_json::from_slice(&sent[2].body).unwrap();
+    let m = after["messages"].as_array().unwrap();
+    assert_eq!(m.len(), 1);
+    assert!(
+        m[0]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("The student asked about RESET")
+    );
+    assert_eq!(m[0]["content"][1]["text"], "And then?");
+    assert!(
+        log.lock()
+            .unwrap()
+            .iter()
+            .any(|e| matches!(e, Event::Compacted { .. }))
+    );
+    assert!(s.cost() > 0.0, "the summary's cost is counted");
 }

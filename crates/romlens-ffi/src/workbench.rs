@@ -96,6 +96,26 @@ impl Workbench {
         f(&self.lock().project)
     }
 
+    /// Take back the undo entries `mine` claims (`UndoStack::rewind`).
+    pub(crate) fn rewind_edits(
+        &self,
+        mine: &dyn Fn(&model::Origin) -> bool,
+    ) -> Result<romlens_core::model::undo::Rewound, RomlensError> {
+        let (r, generation, dirty) = {
+            let mut inner = self.lock();
+            let Inner { project, undo, .. } = &mut *inner;
+            let r = undo.rewind(project, &self.rom.image, mine)?;
+            // A mark or a flag override may have come back out.
+            let (g, d) = self.after_edit(&mut inner, true);
+            (r, g, d)
+        };
+        self.emit(WorkbenchEvent::ProjectChanged { dirty });
+        self.emit(WorkbenchEvent::ViewChanged {
+            view_generation: generation,
+        });
+        Ok(r)
+    }
+
     /// Apply commands as one undoable step, from `origin`.
     pub(crate) fn apply_commands(
         &self,

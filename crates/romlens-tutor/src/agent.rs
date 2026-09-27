@@ -115,6 +115,45 @@ pub struct ToolContext<'a> {
     /// The index of the assistant turn that made the call.
     pub turn: usize,
     pub events: &'a dyn Events,
+    /// Asks the student about an edit, in "ask before edits".
+    pub approver: &'a dyn Approver,
+    pub cancel: &'a Cancel,
+}
+
+/// An edit the tutor wants to make, as its card shows it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Proposal {
+    /// The tool call's id.
+    pub id: String,
+    pub tool: String,
+    /// What it does, in a line: "Name $80:8000 `Reset`".
+    pub summary: String,
+    /// Why, in the tutor's words.
+    pub reason: String,
+    /// What is there now, and what there would be, where it can be shown.
+    pub before: Option<String>,
+    pub after: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Decision {
+    Accept,
+    Reject { why: Option<String> },
+}
+
+/// The student's answer to an edit card. The app's waits for a click (or
+/// Esc, which rejects); the CLI's asks on the terminal.
+pub trait Approver: Sync {
+    fn decide(&self, p: &Proposal) -> Decision;
+}
+
+/// Accepts everything: for accept-edits runs and tests.
+pub struct AcceptAll;
+
+impl Approver for AcceptAll {
+    fn decide(&self, _: &Proposal) -> Decision {
+        Decision::Accept
+    }
 }
 
 pub trait Tools: Sync {
@@ -122,7 +161,8 @@ pub trait Tools: Sync {
     /// append-only").
     fn specs(&self) -> Vec<ToolSpec>;
     fn kind(&self, name: &str) -> ToolKind;
-    fn run(&self, name: &str, input: &Value, cx: &ToolContext) -> ToolOutput;
+    /// Runs the call `id` (the model's id for it).
+    fn run(&self, id: &str, name: &str, input: &Value, cx: &ToolContext) -> ToolOutput;
 }
 
 /// No tools: a plain chat.
@@ -135,7 +175,7 @@ impl Tools for NoTools {
     fn kind(&self, _: &str) -> ToolKind {
         ToolKind::Read
     }
-    fn run(&self, name: &str, _: &Value, _: &ToolContext) -> ToolOutput {
+    fn run(&self, _: &str, name: &str, _: &Value, _: &ToolContext) -> ToolOutput {
         ToolOutput::error(format!("there is no tool named {name}"))
     }
 }
@@ -163,6 +203,17 @@ pub enum Event {
         name: String,
         summary: String,
         is_error: bool,
+    },
+    /// An edit waits for the student's answer.
+    EditProposed(Proposal),
+    /// It was made (or not).
+    EditDecided {
+        id: String,
+        applied: bool,
+    },
+    /// Older turns were summarised to make room.
+    Compacted {
+        summary: String,
     },
     /// After each reply: that reply's cost and the conversation's.
     Cost {
@@ -209,6 +260,7 @@ pub struct Deps<'a> {
     pub credentials: &'a dyn Credentials,
     pub tools: &'a dyn Tools,
     pub events: &'a dyn Events,
+    pub approver: &'a dyn Approver,
     pub cancel: &'a Cancel,
 }
 
@@ -232,6 +284,11 @@ pub struct Session {
 }
 
 pub const MAX_ROUNDS: u32 = 60;
+
+/// Past this share of the context, the next question compacts first.
+pub const COMPACT_AT: f64 = 0.8;
+
+const COMPACT_PROMPT: &str = "Stop here and write a summary of our conversation so far, for yourself to continue from: what the student is trying to learn or do, what you found (with every address, frame and name, cited), what changed in their project, and what is still open. Do not call tools. Write only the summary.";
 const ATTEMPTS: u32 = 4;
 
 impl Session {
@@ -268,6 +325,9 @@ impl Session {
         let key = d.credentials.key(&self.endpoint.id);
         if key.is_none() && !self.keyless {
             return Err(AskError::NoKey(self.endpoint.id.clone()));
+        }
+        if self.context_used() > COMPACT_AT {
+            self.compact(d)?;
         }
         self.turns.push(question);
         let tools = d.tools.specs();
@@ -324,6 +384,108 @@ impl Session {
             }
         }
         Err(AskError::TooManyRounds(MAX_ROUNDS))
+    }
+
+    /// Takes the conversation back to before the user turn at `index`:
+    /// that turn and every one after it are no longer sent (they stay in
+    /// the file). Returns the words the student asked then, for the
+    /// composer. The edits made from that turn on are the shell's to take
+    /// back, by `Origin::Tutor { turn >= index }`.
+    pub fn rewind_to(&mut self, index: usize) -> Option<String> {
+        let t = self.turns.get(index)?;
+        if t.role != Role::User || !t.sent {
+            return None;
+        }
+        let asked = t
+            .blocks
+            .iter()
+            .rev()
+            .find_map(|b| match b {
+                Block::Text { text } => Some(text.clone()),
+                _ => None,
+            })
+            .unwrap_or_default();
+        for t in &mut self.turns[index..] {
+            t.sent = false;
+        }
+        Some(asked)
+    }
+
+    /// The user turns a rewind can go back to: their index and words.
+    pub fn prompts(&self) -> Vec<(usize, String)> {
+        self.turns
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| {
+                t.sent
+                    && t.role == Role::User
+                    && t.blocks.iter().any(|b| matches!(b, Block::Text { .. }))
+            })
+            .map(|(i, t)| (i, t.text()))
+            .collect()
+    }
+
+    /// How full the context was at the last reply, from 0 to 1.
+    pub fn context_used(&self) -> f64 {
+        let last = self
+            .turns
+            .iter()
+            .rev()
+            .find(|t| t.sent && t.role == Role::Assistant)
+            .map(|t| t.usage.prompt() + t.usage.output)
+            .unwrap_or(0);
+        last as f64 / self.caps().context.max(1) as f64
+    }
+
+    /// Summarises the conversation so far and starts again from the
+    /// summary (docs/24, "Compaction"): the model writes it, the old turns
+    /// stop being sent, and the next question follows the summary. Never in
+    /// the middle of a tool round.
+    pub fn compact(&mut self, d: &Deps) -> Result<String, AskError> {
+        d.cancel.reset();
+        let key = d.credentials.key(&self.endpoint.id);
+        if key.is_none() && !self.keyless {
+            return Err(AskError::NoKey(self.endpoint.id.clone()));
+        }
+        self.close_round("stopped for a summary");
+        self.turns.push(Turn::user_text(COMPACT_PROMPT));
+        let tools = d.tools.specs();
+        let reply = self.request(&tools, key.as_deref(), d);
+        // The request's own turn is not part of the conversation.
+        self.turns.pop();
+        let reply = reply?;
+        let summary = reply
+            .blocks
+            .iter()
+            .filter_map(|b| match b {
+                Block::Text { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("");
+        let cost = self
+            .caps()
+            .price
+            .map(|p| p.cost(&reply.usage))
+            .unwrap_or(0.0);
+        for t in &mut self.turns {
+            t.sent = false;
+        }
+        let mut turn = Turn::user(vec![
+            Block::Note {
+                text: "The conversation was summarised to make room.".into(),
+            },
+            Block::Text {
+                text: format!("[A summary of our conversation so far]\n{summary}"),
+            },
+        ]);
+        turn.cost = cost;
+        turn.usage = reply.usage;
+        self.turns.push(turn);
+        d.events.event(Event::Compacted {
+            summary: summary.clone(),
+        });
+        Ok(summary)
     }
 
     /// Answers every call of the last turn left without a result.
@@ -463,6 +625,8 @@ impl Session {
             conversation: &self.id,
             turn,
             events: d.events,
+            approver: d.approver,
+            cancel: d.cancel,
         };
         let run = |(id, name, input): &(String, String, Value)| -> ToolOutput {
             d.events.event(Event::ToolStarted {
@@ -477,7 +641,7 @@ impl Session {
             } else if d.cancel.is_cancelled() {
                 ToolOutput::error("stopped by the user")
             } else {
-                d.tools.run(name, input, &cx)
+                d.tools.run(id, name, input, &cx)
             };
             d.events.event(Event::ToolFinished {
                 id: id.clone(),

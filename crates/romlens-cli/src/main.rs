@@ -748,6 +748,10 @@ struct TutorAsk {
     /// dollars.
     #[arg(long)]
     cap: Option<f64>,
+    /// What the tutor may change in the project: `read-only`, `ask` (each
+    /// edit asked on the terminal) or `accept`.
+    #[arg(long, default_value = "read-only")]
+    mode: String,
 }
 
 #[derive(Subcommand)]
@@ -1776,6 +1780,7 @@ fn run() -> Result<()> {
                     model,
                     effort,
                     cap,
+                    mode,
                 } = *ask;
                 commands::tutor::ask(
                     &commands::tutor::Where {
@@ -1793,6 +1798,7 @@ fn run() -> Result<()> {
                         model: model.as_deref(),
                         effort: effort.as_deref(),
                         cap,
+                        mode: &mode,
                     },
                 )
             }

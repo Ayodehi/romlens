@@ -122,6 +122,7 @@ pub(crate) fn spec(name: &str, description: &str, props: &[(&str, Value)]) -> To
 pub fn specs() -> Vec<ToolSpec> {
     let mut v = code_specs();
     v.extend(super::media::specs());
+    v.extend(super::edits::specs());
     v
 }
 
@@ -305,12 +306,23 @@ impl Tools for RomTools {
         specs()
     }
 
-    fn kind(&self, _: &str) -> ToolKind {
-        ToolKind::Read
+    fn kind(&self, name: &str) -> ToolKind {
+        if super::edits::NAMES.contains(&name) {
+            ToolKind::Edit
+        } else {
+            ToolKind::Read
+        }
     }
 
-    fn run(&self, name: &str, input: &Value, _cx: &ToolContext) -> ToolOutput {
+    fn run(&self, id: &str, name: &str, input: &Value, cx: &ToolContext) -> ToolOutput {
         let place = |t: &str| self.rom_place(t);
+        if super::edits::NAMES.contains(&name) {
+            let edits = super::edits::Edits {
+                wb: &self.wb,
+                place: &place,
+            };
+            return edits.run(id, name, input, cx);
+        }
         let media = super::media::Media {
             wb: &self.wb,
             rec: self
@@ -347,6 +359,7 @@ impl RomTools {
             "labels" => self.labels(text(v, "address")?, int(v, "length", 1, u32::MAX as u64)?),
             "find_label" => Ok(self.find_label(text(v, "name")?)),
             "variables" => Ok(self.variables()),
+            "c_versions" => self.c_versions(v["routine"].as_str()),
             "xrefs" => self.xrefs(text(v, "address")?, text(v, "direction")?),
             "search" => self.search(text(v, "pattern")?, v["text"].as_bool().unwrap_or(false)),
             "decompile" => self.decompile(text(v, "address")?, text(v, "level")?),
@@ -587,6 +600,46 @@ impl RomTools {
         } else {
             vs.join("\n")
         }
+    }
+
+    fn c_versions(&self, routine: Option<&str>) -> Result<String, String> {
+        let r = routine.map(|t| self.routine(t)).transpose()?;
+        let vs = self.wb.c_versions(r);
+        if vs.is_empty() {
+            return Ok("no C versions saved".into());
+        }
+        Ok(vs
+            .iter()
+            .map(|v| {
+                let anchors: Vec<String> = v
+                    .version
+                    .anchors
+                    .iter()
+                    .map(|a| {
+                        format!(
+                            "lines {}–{} = {}–{}",
+                            a.first,
+                            a.last,
+                            addr(a.start),
+                            addr(a.end)
+                        )
+                    })
+                    .collect();
+                format!(
+                    "\"{}\" of {} by the {:?}{}\n```c\n{}\n```",
+                    v.name,
+                    addr(v.routine),
+                    v.version.author,
+                    if anchors.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" ({})", anchors.join(", "))
+                    },
+                    v.version.text.trim_end()
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n"))
     }
 
     fn xrefs(&self, t: &str, direction: &str) -> Result<String, String> {
@@ -929,13 +982,16 @@ mod tests {
 
     fn call(t: &RomTools, name: &str, input: Value) -> ToolOutput {
         let on = |_: romlens_tutor::agent::Event| {};
+        let cancel = romlens_tutor::http::Cancel::new();
         let cx = ToolContext {
             mode: romlens_tutor::agent::Mode::ReadOnly,
             conversation: "c",
             turn: 1,
             events: &on,
+            approver: &romlens_tutor::agent::AcceptAll,
+            cancel: &cancel,
         };
-        t.run(name, &input, &cx)
+        t.run("call", name, &input, &cx)
     }
 
     #[test]
