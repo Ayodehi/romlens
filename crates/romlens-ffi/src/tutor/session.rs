@@ -317,7 +317,12 @@ pub fn tutor_list_models(
     key: Option<String>,
 ) -> Result<Vec<String>, RomlensError> {
     let e: Endpoint = endpoint.into();
-    list_models(&UreqTransport::new(), &e, key.as_deref().filter(|k| !k.is_empty())).map_err(err)
+    list_models(
+        &UreqTransport::new(),
+        &e,
+        key.as_deref().filter(|k| !k.is_empty()),
+    )
+    .map_err(err)
 }
 
 /// The model a new conversation starts on for a protocol, where there is
@@ -453,11 +458,11 @@ impl Credentials for Keys {
     }
 }
 
-/// The card waiting for the student, and their answer.
+/// The student's answers, by card. An answer can arrive before its card
+/// is waited on: the card is shown first, then waited for.
 #[derive(Default)]
 struct Pending {
-    waiting: Option<String>,
-    answer: Option<Decision>,
+    answers: HashMap<String, Decision>,
 }
 
 struct Cards {
@@ -469,15 +474,11 @@ struct Cards {
 impl Approver for Cards {
     fn decide(&self, p: &Proposal) -> Decision {
         let mut g = self.pending.lock().unwrap_or_else(|e| e.into_inner());
-        g.waiting = Some(p.id.clone());
-        g.answer = None;
         loop {
-            if let Some(a) = g.answer.take() {
-                g.waiting = None;
+            if let Some(a) = g.answers.remove(&p.id) {
                 return a;
             }
             if self.cancel.is_cancelled() {
-                g.waiting = None;
                 return Decision::Reject {
                     why: Some("the student stopped the turn".into()),
                 };
@@ -792,14 +793,15 @@ impl TutorSession {
     /// The student's answer to the card `edit_id`.
     pub fn answer(&self, edit_id: String, accept: bool, why: Option<String>) {
         let mut g = self.cards.pending.lock().unwrap_or_else(|e| e.into_inner());
-        if g.waiting.as_deref() == Some(edit_id.as_str()) {
-            g.answer = Some(if accept {
+        g.answers.insert(
+            edit_id,
+            if accept {
                 Decision::Accept
             } else {
                 Decision::Reject { why }
-            });
-            self.cards.changed.notify_all();
-        }
+            },
+        );
+        self.cards.changed.notify_all();
     }
 
     /// Changes the provider, model or effort from the next question on.
@@ -1179,6 +1181,35 @@ mod tests {
         assert_eq!(r.prompt.as_deref(), Some("What does RESET do?"));
         assert!(again.transcript().iter().take(4).all(|t| !t.sent));
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn an_answer_before_the_wait_is_kept() {
+        let cards = Cards {
+            pending: Mutex::new(Pending::default()),
+            changed: Condvar::new(),
+            cancel: Cancel::new(),
+        };
+        cards
+            .pending
+            .lock()
+            .unwrap()
+            .answers
+            .insert("call_1".into(), Decision::Accept);
+        let p = Proposal {
+            id: "call_1".into(),
+            tool: "set_label".into(),
+            summary: String::new(),
+            reason: String::new(),
+            before: None,
+            after: None,
+        };
+        assert_eq!(cards.decide(&p), Decision::Accept);
+        cards.cancel.cancel();
+        assert!(
+            matches!(cards.decide(&p), Decision::Reject { .. }),
+            "Esc says no"
+        );
     }
 
     #[test]
