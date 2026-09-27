@@ -23,11 +23,14 @@ pub fn addr(a: u32) -> String {
     format!("${:02X}:{:04X}", (a >> 16) & 0xFF, a & 0xFFFF)
 }
 
+/// Finds an endpoint's key when a picture is asked for.
+pub type KeyLookup = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
+
 /// Where `generate_image` sends its prompt, and how it gets the key.
 pub struct ImageSetup {
     pub endpoint: romlens_tutor::provider::Endpoint,
     pub model: String,
-    pub key: Arc<dyn Fn(&str) -> Option<String> + Send + Sync>,
+    pub key: KeyLookup,
 }
 
 pub struct RomTools {
