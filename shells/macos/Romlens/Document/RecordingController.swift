@@ -14,15 +14,69 @@ import UniformTypeIdentifiers
 @MainActor
 enum RecordingController {
     static let recordingType = UTType(filenameExtension: "romrec") ?? .data
+    static let streamType = UTType(filenameExtension: "rlstream") ?? .data
 
     static func open(model: RomViewModel, window: NSWindow?) {
         let panel = NSOpenPanel()
         panel.title = "Open Recording"
-        panel.message = "A .romrec recording of this ROM, from the Mesen recorder (Help › Save Mesen Recorder Script…), Import Snapshot… or romlens testrec. It stays where it is; the project remembers where."
+        panel.message = "What the Mesen recorder wrote (a .rlstream, in Mesen's script data folder), or a .romrec recording of this ROM."
         panel.allowsMultipleSelection = false
-        panel.allowedContentTypes = [recordingType]
+        panel.allowedContentTypes = [streamType, recordingType]
         panel.allowsOtherFileTypes = true
-        run(panel, on: window) { url in attach(url: url, model: model, window: window) }
+        if let mesen = mesenScriptData, FileManager.default.fileExists(atPath: mesen.path) {
+            panel.directoryURL = mesen
+        }
+        run(panel, on: window) { url in
+            if url.pathExtension.lowercased() == "rlstream" {
+                pack(stream: url, model: model, window: window)
+            } else {
+                attach(url: url, model: model, window: window)
+            }
+        }
+    }
+
+    /// Where Mesen's recorder script writes its streams: the real home's,
+    /// not the sandbox container's.
+    static var mesenScriptData: URL? {
+        guard let pw = getpwuid(getuid()), let home = pw.pointee.pw_dir else { return nil }
+        return URL(fileURLWithPath: String(cString: home))
+            .appendingPathComponent("Library/Application Support/Mesen2/LuaScriptData", isDirectory: true)
+    }
+
+    /// Where packed recordings are kept: the app's own Recordings folder.
+    static var packedFolder: URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        return base.appendingPathComponent("Recordings", isDirectory: true)
+    }
+
+    /// Pack the recorder's stream into a recording in the app's own folder,
+    /// off the main thread, then open it.
+    static func pack(stream: URL, model: RomViewModel, window: NSWindow?) {
+        let folder = packedFolder
+        let name = stream.deletingPathExtension().lastPathComponent
+        let stamp = Int(Date().timeIntervalSince1970)
+        let out = folder.appendingPathComponent("\(name)-\(stamp).romrec")
+        let rom = model.rom
+        model.graphics.packing = stream.lastPathComponent
+        Task {
+            let result: Result<PackSummary, Error> = await Task.detached {
+                do {
+                    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                    return .success(try packRecorderStream(rom: rom, stream: stream.path, out: out.path))
+                } catch {
+                    return .failure(error)
+                }
+            }.value
+            model.graphics.packing = nil
+            switch result {
+            case .success(let summary):
+                if attach(url: out, model: model, window: window), summary.truncated {
+                    show("The recording was cut short", "Mesen closed before the recorder finished; every whole frame, \(summary.frames) of them, was kept.", window: window, style: .informational)
+                }
+            case .failure(let error):
+                show("The recorder's stream could not be read", message(error), window: window)
+            }
+        }
     }
 
     /// Open, validate and attach, reporting any refusal. Split out so tests
@@ -111,7 +165,8 @@ enum RecordingController {
                     """
                     1. In Mesen, open Debug › Script Window and load \(url.lastPathComponent).
                     2. In the script window's settings, allow access to I/O and OS functions, then run it.
-                    3. Play, then stop the script. Run romlens rec pack on the .rlstream it wrote (in Mesen's script data folder) to make a .romrec, and open that here.
+                    3. Play, then stop the script, and open what it wrote with File › Open Recording…: the panel starts in Mesen's script data folder, and Romlens packs the stream itself.
+                    Or choose File › Start Live Session first: while it runs, the views follow the game, sound included.
                     4. A Mesen with an execution log (the MesenCE fork) also gets a .mxlog beside the stream: import it with File › Import › Execution Trace… for the calls, jumps, reads and DMA the game made.
                     5. To watch the game live, also allow network access in the script settings, and choose File › Start Live Session here. The script connects within two seconds.
                     """,

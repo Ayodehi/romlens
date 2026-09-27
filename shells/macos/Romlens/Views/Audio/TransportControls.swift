@@ -172,40 +172,75 @@ struct ScopeTrace: View {
     }
 }
 
-/// Two octaves of keys around A4 for playing one sample by hand.
+/// Two octaves of keys, C4 to B5, for playing one sample by hand, laid
+/// out as a piano's: the white keys side by side, each black key shorter,
+/// on top and across the gap between its two white keys.
 struct SampleKeyboard: View {
     let audio: AudioModel
     let sample: UInt8
     @State private var down: Int?
 
-    /// Semitones from A4, C4 to B5.
-    private let keys = Array(-9..<15)
+    static let whiteWidth: CGFloat = 24
+    static let whiteHeight: CGFloat = 76
+    static let blackWidth: CGFloat = 15
+    static let blackHeight: CGFloat = 46
+    static let gap: CGFloat = 1
+
+    /// Semitones from A4 of each white key, and of each black key with the
+    /// white key it follows.
+    private static let whites: [Int] = (0..<2).flatMap { o in [0, 2, 4, 5, 7, 9, 11].map { o * 12 + $0 - 9 } }
+    private static let blacks: [(after: Int, semitone: Int)] = (0..<2).flatMap { o in
+        [(0, 1), (1, 3), (3, 6), (4, 8), (5, 10)].map { (o * 7 + $0.0, o * 12 + $0.1 - 9) }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 1) {
-                ForEach(keys, id: \.self) { k in
-                    let black = [1, 3, 6, 8, 10].contains((k + 9 + 120) % 12)
-                    Rectangle()
-                        .fill(down == k ? Color.accentColor : black ? Color.black : Color.white)
-                        .frame(width: 18, height: black ? 44 : 60)
-                        .overlay(Rectangle().stroke(Color.secondary.opacity(0.5), lineWidth: 0.5))
-                        .frame(height: 60, alignment: .top)
-                        .gesture(DragGesture(minimumDistance: 0)
-                            .onChanged { _ in
-                                guard down != k else { return }
-                                down = k
-                                audio.press(sample: sample, pitch: audio.pitch(sample: sample, semitones: k))
-                            }
-                            .onEnded { _ in
-                                down = nil
-                                audio.release()
-                            })
-                        .help(noteForFrequency(hz: 440 * pow(2, Double(k) / 12)))
+            ZStack(alignment: .topLeading) {
+                HStack(spacing: Self.gap) {
+                    ForEach(Self.whites, id: \.self) { k in
+                        key(k, black: false)
+                            .frame(width: Self.whiteWidth, height: Self.whiteHeight)
+                    }
+                }
+                ForEach(Self.blacks, id: \.semitone) { b in
+                    key(b.semitone, black: true)
+                        .frame(width: Self.blackWidth, height: Self.blackHeight)
+                        .offset(x: CGFloat(b.after + 1) * (Self.whiteWidth + Self.gap) - Self.gap / 2 - Self.blackWidth / 2)
                 }
             }
+            .frame(
+                width: CGFloat(Self.whites.count) * (Self.whiteWidth + Self.gap) - Self.gap,
+                height: Self.whiteHeight,
+                alignment: .topLeading
+            )
             Text(caption).font(.caption).foregroundStyle(.secondary)
         }
+    }
+
+    private func key(_ k: Int, black: Bool) -> some View {
+        UnevenRoundedRectangle(bottomLeadingRadius: 3, bottomTrailingRadius: 3)
+            .fill(down == k ? Color.accentColor : black ? Color.black : Color.white)
+            .overlay(
+                UnevenRoundedRectangle(bottomLeadingRadius: 3, bottomTrailingRadius: 3)
+                    .stroke(Color.secondary.opacity(black ? 0.8 : 0.5), lineWidth: 0.5)
+            )
+            .overlay(alignment: .bottom) {
+                if !black, (k + 9) % 12 == 0 {
+                    Text("C\(4 + (k + 9) / 12)").font(.system(size: 8)).foregroundStyle(.black.opacity(0.5)).padding(.bottom, 3)
+                }
+            }
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 0)
+                .onChanged { _ in
+                    guard down != k else { return }
+                    down = k
+                    audio.press(sample: sample, pitch: audio.pitch(sample: sample, semitones: k))
+                }
+                .onEnded { _ in
+                    down = nil
+                    audio.release()
+                })
+            .help(noteForFrequency(hz: 440 * pow(2, Double(k) / 12)))
     }
 
     private var caption: String {

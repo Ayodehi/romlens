@@ -1689,3 +1689,57 @@ mod tests {
         assert_eq!(d.output, tiles);
     }
 }
+
+/// What packing a recorder stream made.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct PackSummary {
+    pub frames: u64,
+    /// The sound side's events, when the stream has them.
+    pub sound_events: u64,
+    /// The stream ended mid-recording; every whole frame was kept.
+    pub truncated: bool,
+    /// The SPC700's execution log beside the stream went with it.
+    pub spc_log: bool,
+}
+
+/// Pack a Mesen recorder stream (`.rlstream`) made while running `rom`
+/// into a recording at `out`, as `romlens rec pack` does: written beside
+/// `out` and moved into place, so a failure leaves nothing half-written.
+/// The SPC700's execution log beside the stream, when there is one and it
+/// can be read, goes beside the recording.
+#[uniffi::export]
+pub fn pack_recorder_stream(
+    rom: Arc<Rom>,
+    stream: String,
+    out: String,
+) -> Result<PackSummary, RomlensError> {
+    use romlens_core::recording::mesen::pack::{PackOptions, pack};
+    let io = |e: std::io::Error| RomlensError::Io { msg: e.to_string() };
+    let input = std::io::BufReader::new(std::fs::File::open(&stream).map_err(io)?);
+    let part = format!("{out}.part");
+    let result = (|| {
+        let file = std::io::BufWriter::new(std::fs::File::create(&part).map_err(io)?);
+        let report = pack(input, &rom.image, file, PackOptions::default())
+            .map_err(|e| RomlensError::Recording { msg: e.to_string() })?;
+        std::fs::rename(&part, &out).map_err(io)?;
+        Ok(report)
+    })();
+    let report = match result {
+        Ok(r) => r,
+        Err(e) => {
+            let _ = std::fs::remove_file(&part);
+            return Err(e);
+        }
+    };
+    let beside = Path::new(&stream).with_extension("spc.mxlog");
+    let spc_log = std::fs::read(&beside)
+        .ok()
+        .filter(|b| romlens_core::io::import::spc_log::read(b, Some(rom.image.bytes())).is_ok())
+        .is_some_and(|b| std::fs::write(Path::new(&out).with_extension("spc.mxlog"), b).is_ok());
+    Ok(PackSummary {
+        frames: report.frames,
+        sound_events: report.apu_events,
+        truncated: report.truncated,
+        spc_log,
+    })
+}

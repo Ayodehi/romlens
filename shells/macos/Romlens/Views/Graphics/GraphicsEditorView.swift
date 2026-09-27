@@ -65,6 +65,9 @@ struct GraphicsSourceBar: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
+            if let packing = graphics.packing {
+                PackingNote(name: packing)
+            }
             if let note = graphics.screenNote {
                 Text(note)
                     .font(.callout)
@@ -110,6 +113,19 @@ struct GraphicsSourceBar: View {
                 }
             }
         )
+    }
+}
+
+/// A recorder stream being packed into a recording.
+struct PackingNote: View {
+    let name: String
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ProgressView().controlSize(.small)
+            Text("Packing \(name)…").font(.callout).foregroundStyle(.secondary)
+        }
+        .help("Turning the recorder's stream into a recording; it opens when done")
     }
 }
 

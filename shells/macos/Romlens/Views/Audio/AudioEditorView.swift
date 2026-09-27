@@ -88,6 +88,9 @@ struct AudioSourceBar: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
+            if let packing = model.graphics.packing {
+                PackingNote(name: packing)
+            }
             Spacer()
             TransportControls(audio: audio)
             switch audio.source {

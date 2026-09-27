@@ -148,3 +148,26 @@ fn execution_logs_arrive_between_frames() {
     wait("all frames", || log.frames.lock().unwrap().len() == 4);
     server.stop();
 }
+
+#[test]
+fn a_live_session_carries_the_sound_side() {
+    // Romlens's own SPC700 and DSP made this stream's sound side: in frame
+    // 1 the S-CPU sends $01 and the driver plays a note.
+    let rom = rom();
+    let log = Arc::new(Log::default());
+    let mut server = LiveServer::start(&rom, 0, 600, log.clone()).unwrap();
+    let port = server.port();
+    let source = server.source();
+    send(port, &encode::fixture_run_by_apu(rom.bytes(), 5));
+    wait("five frames", || log.frames.lock().unwrap().len() == 5);
+    assert!(source.regions().contains(&StateRegion::Aram));
+    let aram = source.region_at(3, StateRegion::Aram).unwrap();
+    assert_eq!(aram.len(), 0x10000);
+    assert_eq!(&aram[0x3C00..0x3C02], &[0x00, 0x40], "the sample directory");
+    let e = source.apu_events(1).unwrap().expect("frame 1's events");
+    assert_eq!(e.frame, 1);
+    assert!(e.events.iter().any(|x| x.value == 1), "the command");
+    let notes = romlens_core::audio::timeline(&*source, 0, 4).unwrap();
+    assert!(notes.iter().any(|n| n.voice == 0));
+    server.stop();
+}

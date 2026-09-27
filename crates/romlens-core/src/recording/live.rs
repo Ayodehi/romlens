@@ -51,6 +51,9 @@ pub struct LiveSource {
     identity: RecordingIdentity,
     capacity: usize,
     inner: RwLock<Window>,
+    /// The stream carries the sound side (docs/23): its frames hold audio
+    /// RAM, the DSP's registers and the SPC700, and each its sound events.
+    audio: std::sync::atomic::AtomicBool,
 }
 
 #[derive(Default)]
@@ -59,6 +62,8 @@ struct Window {
     frames: VecDeque<MachineState>,
     /// Each frame's PPU register writes, where the stream sent them.
     lines: VecDeque<Option<Vec<crate::recording::lines::RegWrite>>>,
+    /// Each frame's sound events, where the stream sent them.
+    apu: VecDeque<Option<crate::recording::apu::ApuEvents>>,
     /// The number of `frames[0]`.
     first: u64,
 }
@@ -69,7 +74,17 @@ impl LiveSource {
             identity,
             capacity: capacity.max(2),
             inner: RwLock::new(Window::default()),
+            audio: std::sync::atomic::AtomicBool::new(false),
         }
+    }
+
+    /// Whether frames carry the sound side.
+    pub fn has_audio(&self) -> bool {
+        self.audio.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    fn set_audio(&self, on: bool) {
+        self.audio.store(on, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Add the next frame, numbered after the last, dropping the oldest when
@@ -82,17 +97,32 @@ impl LiveSource {
     /// was drawn.
     pub fn push_with_lines(
         &self,
+        state: MachineState,
+        lines: Option<Vec<crate::recording::lines::RegWrite>>,
+    ) -> u64 {
+        self.push_frame(state, lines, None)
+    }
+
+    /// The next frame with its register writes and its sound events.
+    pub fn push_frame(
+        &self,
         mut state: MachineState,
         lines: Option<Vec<crate::recording::lines::RegWrite>>,
+        apu: Option<crate::recording::apu::ApuEvents>,
     ) -> u64 {
         let mut w = self.inner.write().unwrap();
         let number = w.first + w.frames.len() as u64;
         state.frame = number;
         w.frames.push_back(state);
         w.lines.push_back(lines);
+        w.apu.push_back(apu.map(|mut e| {
+            e.frame = number;
+            e
+        }));
         if w.frames.len() > self.capacity {
             w.frames.pop_front();
             w.lines.pop_front();
+            w.apu.pop_front();
             w.first += 1;
         }
         number
@@ -138,7 +168,23 @@ impl MachineStateSource for LiveSource {
     }
 
     fn regions(&self) -> Vec<StateRegion> {
-        LIVE_REGIONS.to_vec()
+        let mut r = LIVE_REGIONS.to_vec();
+        if self.has_audio() {
+            r.extend(StateRegion::AUDIO);
+        }
+        r
+    }
+
+    fn apu_events(
+        &self,
+        frame: u64,
+    ) -> Result<Option<crate::recording::apu::ApuEvents>, RecordingError> {
+        let w = self.inner.read().unwrap();
+        Ok(frame
+            .checked_sub(w.first)
+            .and_then(|i| w.apu.get(i as usize))
+            .cloned()
+            .flatten())
     }
 
     fn state_at(&self, frame: u64) -> Result<MachineState, RecordingError> {
@@ -396,16 +442,31 @@ fn read_stream(
         producer: reader.header.producer.clone(),
     });
     let mut decoder = StreamDecoder::new(&reader.header);
+    let audio = reader.header.audio();
+    source.set_audio(audio);
+    let regions: Vec<StateRegion> = if audio {
+        LIVE_REGIONS
+            .iter()
+            .copied()
+            .chain(StateRegion::AUDIO)
+            .collect()
+    } else {
+        LIVE_REGIONS.to_vec()
+    };
     let mut lines = None;
+    let mut apu = None;
     loop {
         match reader.next_record() {
             Ok(Some(Record::Frame(f))) => {
                 let next = source.latest().map_or(source.first_frame(), |l| l + 1);
-                let n =
-                    source.push_with_lines(decoder.frame(&f, next, &LIVE_REGIONS), lines.take());
+                let state = decoder.frame(&f, next, &regions);
+                let sound = apu.take().map(|a| decoder.apu(&a, next));
+                let n = source.push_frame(state, lines.take(), sound);
                 events.frame(n);
             }
             Ok(Some(Record::Lines(l))) => lines = Some(l.writes),
+            Ok(Some(Record::Apu(a))) => apu = Some(*a),
+            Ok(Some(Record::Audio(s))) => decoder.audio(&s),
             Ok(Some(Record::ExecLog(log))) => events.exec_log(log),
             Ok(Some(Record::End { .. })) => {
                 return LiveStatus::Disconnected {

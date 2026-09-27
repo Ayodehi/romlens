@@ -139,6 +139,9 @@ final class GraphicsModel {
         }
     }
 
+    /// A recorder stream being packed into a recording, by name.
+    var packing: String?
+
     // Live
     /// The live session the recording is fed from, while one runs.
     private(set) var live: LiveSession?

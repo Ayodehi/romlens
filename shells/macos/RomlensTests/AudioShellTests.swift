@@ -147,3 +147,25 @@ import Testing
         }
     }
 }
+
+/// Opening what the Mesen recorder wrote: the stream is packed into the
+/// app's own Recordings folder and opened, sound side and all.
+@MainActor
+@Suite struct RecorderStreamTests {
+    @Test func aStreamOpensAsARecordingWithSound() async throws {
+        let rom = try Rom.fromBytes(bytes: makeSoundTestRom(), name: "sound.sfc")
+        let m = try await Fixture.analyzedModel(rom: rom)
+        let stream = FileManager.default.temporaryDirectory.appendingPathComponent("romlens-\(UUID().uuidString).rlstream")
+        try makeSoundTestStream(frames: 5).write(to: stream)
+        defer { try? FileManager.default.removeItem(at: stream) }
+        RecordingController.pack(stream: stream, model: m, window: nil)
+        #expect(m.graphics.packing == stream.lastPathComponent)
+        try await Fixture.settle { m.graphics.hasRecording }
+        #expect(m.graphics.packing == nil)
+        #expect(m.graphics.frameCount == 5)
+        #expect(m.audio.hasRecordingSound)
+        if let path = m.graphics.recordingName {
+            try? FileManager.default.removeItem(at: RecordingController.packedFolder.appendingPathComponent(path))
+        }
+    }
+}

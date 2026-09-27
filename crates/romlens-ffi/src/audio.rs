@@ -871,6 +871,17 @@ pub fn make_sound_test_rom() -> Vec<u8> {
     romlens_core::fixtures::sound::sound_upload_lorom()
 }
 
+/// The recorder stream [`make_sound_test_recording`] is packed from: what
+/// Mesen's recorder would write for [`make_sound_test_rom`], for shell
+/// tests of opening a stream.
+#[uniffi::export]
+pub fn make_sound_test_stream(frames: u32) -> Vec<u8> {
+    romlens_core::recording::mesen::stream::encode::fixture_run_by_apu(
+        &make_sound_test_rom(),
+        frames.max(2),
+    )
+}
+
 /// A player over [`romlens_core::fixtures::sound::nspc_aram`]: audio RAM
 /// laid out as the N-SPC driver keeps it, song 1 playing, for shell
 /// tests of the song views.
@@ -1645,6 +1656,30 @@ mod tests {
         let t = p.nspc_track(0x2000);
         assert_eq!(t[6].calls, Some(0x2300));
         assert_eq!(t[2].text, "note C3");
+    }
+
+    #[test]
+    fn a_recorder_stream_packs_into_a_recording_with_sound() {
+        use romlens_core::recording::mesen::stream::encode::fixture_run_by_apu;
+        let dir = std::env::temp_dir().join(format!("romlens-pack-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let bytes = make_sound_test_rom();
+        let stream = dir.join("s.rlstream");
+        std::fs::write(&stream, fixture_run_by_apu(&bytes, 5)).unwrap();
+        let out = dir.join("s.romrec");
+        let rom = Rom::from_bytes(bytes, "sound.sfc".to_owned()).unwrap();
+        let summary = crate::graphics::pack_recorder_stream(
+            rom,
+            stream.to_string_lossy().into_owned(),
+            out.to_string_lossy().into_owned(),
+        )
+        .unwrap();
+        assert_eq!(summary.frames, 5);
+        assert!(summary.sound_events > 0 && !summary.truncated && !summary.spc_log);
+        let rec = RecordingSession::open(out.to_string_lossy().into_owned(), false).unwrap();
+        assert!(rec.has_sound());
+        assert!(!dir.join("s.romrec.part").exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
