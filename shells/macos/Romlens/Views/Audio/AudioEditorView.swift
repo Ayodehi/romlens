@@ -13,17 +13,23 @@ struct AudioEditorView: View {
             if model.audio.state == nil {
                 AudioUnavailable(audio: model.audio)
             } else {
-                switch model.audioTab {
-                case .voices: VoicesView(audio: model.audio)
-                case .samples: SamplesView(audio: model.audio)
-                case .aram: AramView(audio: model.audio)
-                case .scope: ScopeView(audio: model.audio)
-                case .timeline: NoteTimelineView(audio: model.audio)
-                case .ports: PortsView(audio: model.audio)
-                case .echo: EchoView(audio: model.audio)
-                case nil: EmptyView()
-                }
+                content
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch model.audioTab {
+        case .voices: VoicesView(audio: model.audio)
+        case .samples: SamplesView(audio: model.audio)
+        case .aram: AramView(audio: model.audio)
+        case .scope: ScopeView(audio: model.audio)
+        case .timeline: NoteTimelineView(audio: model.audio)
+        case .ports: PortsView(audio: model.audio)
+        case .echo: EchoView(audio: model.audio)
+        case nil: EmptyView()
         }
     }
 }

@@ -22,6 +22,11 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
         shouldCascadeWindows = true
         let hosting = NSHostingController(rootView: DocumentView(model: model))
         hosting.sceneBridgingOptions = [.toolbars]
+        // Only the content's minimum: by default the host also sizes the
+        // window to the content's preferred size, so a view that prefers
+        // to be short (the Voices grid) shrank the window and nothing grew
+        // it back.
+        hosting.sizingOptions = [.minSize]
         window.contentViewController = hosting
         window.subtitle = Self.subtitle(for: model.info)
         RecordingController.reattach(model: model)
