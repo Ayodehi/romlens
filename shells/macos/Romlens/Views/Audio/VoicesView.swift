@@ -56,9 +56,12 @@ struct VoiceStrip: View {
                     .help("Solo: hear only this voice")
             }
             Text(sampleLine).font(.caption.monospaced()).foregroundStyle(.secondary)
+                .lineLimit(1)
+            // Room kept for the longest, so the strips stay one height as
+            // the words change.
             Text("pitch \(AudioStyle.hex(voice.pitch, 4)): \(voice.pitchWords)")
                 .font(.caption).foregroundStyle(.secondary)
-                .lineLimit(2)
+                .lineLimit(2, reservesSpace: true)
             HStack(spacing: 8) {
                 VolumeBar(label: "L", value: voice.volumeLeft)
                 VolumeBar(label: "R", value: voice.volumeRight)
@@ -67,8 +70,7 @@ struct VoiceStrip: View {
                 .frame(height: 64)
             Text(voice.envelopeWords)
                 .font(.caption2).foregroundStyle(.secondary)
-                .lineLimit(3)
-                .fixedSize(horizontal: false, vertical: true)
+                .lineLimit(3, reservesSpace: true)
             HStack(spacing: 4) {
                 Flag("echo", on: voice.echo, help: "EON: it feeds the echo")
                 Flag("noise", on: voice.noise, help: "NON: it plays the noise generator, not its sample")
