@@ -287,6 +287,13 @@ pub struct Session {
     /// A digest of the tools the conversation was last sent (kept in its
     /// meta), to notice a Romlens that declares others.
     pub tools_seen: Option<String>,
+    /// Edits the tutor proposed before writing anything in its reply,
+    /// held so their cards come after the answer: the call, and the turn
+    /// that made it.
+    held: Vec<(String, String, Value, usize)>,
+    /// What the student decided about held edits, told to the model with
+    /// the next question.
+    decided: Vec<String>,
 }
 
 pub const MAX_ROUNDS: u32 = 60;
@@ -315,6 +322,8 @@ impl Session {
             keyless,
             retry_unit: Duration::from_secs(1),
             tools_seen: None,
+            held: Vec::new(),
+            decided: Vec::new(),
         }
     }
 
@@ -327,7 +336,7 @@ impl Session {
     }
 
     /// Asks `question` and runs the loop until the model stops.
-    pub fn ask(&mut self, question: Turn, d: &Deps) -> Result<Stop, AskError> {
+    pub fn ask(&mut self, mut question: Turn, d: &Deps) -> Result<Stop, AskError> {
         d.cancel.reset();
         let key = d.credentials.key(&self.endpoint.id);
         if key.is_none() && !self.keyless {
@@ -339,7 +348,15 @@ impl Session {
         if self.context_used() > COMPACT_AT {
             self.compact(d)?;
         }
+        if !self.decided.is_empty() {
+            let text = format!(
+                "[The changes you proposed last time: {}]",
+                std::mem::take(&mut self.decided).join(" ")
+            );
+            question.blocks.insert(0, Block::Text { text });
+        }
         self.turns.push(question);
+        self.held.clear();
         let tools = d.tools.specs();
         self.check_tools(&tools);
         for round in 0..MAX_ROUNDS {
@@ -377,10 +394,12 @@ impl Session {
                 _ if has_calls => {
                     // Cut off mid-round: the calls are answered, not run.
                     self.close_round("not run: the reply was cut off");
+                    self.offer_held(d);
                     d.events.event(Event::Ended { stop: stop.clone() });
                     return Ok(stop);
                 }
                 _ => {
+                    self.offer_held(d);
                     d.events.event(Event::Ended { stop: stop.clone() });
                     return Ok(stop);
                 }
@@ -522,9 +541,40 @@ impl Session {
         self.tools_seen = Some(digest);
     }
 
+    /// Shows the held edits' cards, now the answer is written, and keeps
+    /// what the student decides for the next question.
+    fn offer_held(&mut self, d: &Deps) {
+        for (id, name, input, turn) in std::mem::take(&mut self.held) {
+            if d.cancel.is_cancelled() {
+                self.decided.push(format!(
+                    "{name} was not shown: the student stopped the reply."
+                ));
+                continue;
+            }
+            let cx = ToolContext {
+                mode: self.mode,
+                conversation: &self.id,
+                turn,
+                events: d.events,
+                approver: d.approver,
+                cancel: d.cancel,
+            };
+            let out = d.tools.run(&id, &name, &input, &cx);
+            let text: Vec<&str> = out
+                .parts
+                .iter()
+                .filter_map(|p| match p {
+                    Part::Text { text } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect();
+            self.decided.push(text.join(" "));
+        }
+    }
+
     /// Whether the tutor has written to the student since the question:
-    /// an edit waits for that, so the student reads the explanation before
-    /// a card asks them to change anything.
+    /// in "ask before edits", an edit before that waits, so the student
+    /// reads the explanation before a card asks them to change anything.
     fn explained_this_reply(&self) -> bool {
         self.turns
             .iter()
@@ -697,10 +747,10 @@ impl Session {
             } else if d.cancel.is_cancelled() {
                 ToolOutput::error("stopped by the user")
             } else if d.tools.kind(name) == ToolKind::Edit
-                && self.mode != Mode::ReadOnly
+                && self.mode == Mode::AskBeforeEdits
                 && !explained
             {
-                ToolOutput::error(EXPLAIN_FIRST)
+                ToolOutput::text(HELD)
             } else {
                 d.tools.run(id, name, input, &cx)
             };
@@ -728,6 +778,14 @@ impl Session {
         } else {
             calls.iter().map(run).collect()
         };
+        if !explained && self.mode == Mode::AskBeforeEdits {
+            for (id, name, input) in &calls {
+                if d.tools.kind(name) == ToolKind::Edit && input.get(INVALID_JSON).is_none() {
+                    self.held
+                        .push((id.clone(), name.clone(), input.clone(), turn));
+                }
+            }
+        }
         let mut blocks = Vec::new();
         for ((id, _, _), out) in calls.into_iter().zip(outs) {
             for (image, bytes) in out.pictures {
@@ -743,8 +801,8 @@ impl Session {
     }
 }
 
-/// Why an edit before any explanation is not made.
-pub const EXPLAIN_FIRST: &str = "Not made: answer the student's question first. Write your explanation to them, then propose the change, with its reason, at the end of your reply.";
+/// The result of an edit held until the answer is written.
+pub const HELD: &str = "Proposed. The student sees it as a card when your reply ends, and you will hear what they decided with their next message. Do not call it again; go on with your reply.";
 
 /// A short digest of a tool list.
 pub fn tools_digest(tools: &[ToolSpec]) -> String {

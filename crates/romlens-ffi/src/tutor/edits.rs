@@ -483,7 +483,11 @@ impl Edits<'_> {
                     id: id.to_owned(),
                     applied: true,
                 });
-                ToolOutput::text(format!("Done: {line}. The student can undo it."))
+                ToolOutput::text(if cx.mode == Mode::AskBeforeEdits {
+                    format!("The student accepted: {line}. They can undo it.")
+                } else {
+                    format!("Done: {line}. The student can undo it.")
+                })
             }
             Err(e) => {
                 cx.events.event(Event::EditDecided {
@@ -606,7 +610,7 @@ mod tests {
             "set_label",
             name_reset("Reset"),
         );
-        assert!(text(&o).starts_with("Done"), "{}", text(&o));
+        assert!(text(&o).starts_with("The student accepted"), "{}", text(&o));
         assert_eq!(wb.label_at(0x8000).unwrap().name, "Reset");
         assert_eq!(wb.undo_title().as_deref(), Some("Tutor: Rename Label"));
 

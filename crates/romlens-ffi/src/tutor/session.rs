@@ -1267,7 +1267,8 @@ mod tests {
     }
 
     /// A card never comes before the explanation: an edit called before
-    /// the tutor has written anything is refused, and made once it has.
+    /// the tutor has written anything is held, shown after the answer, and
+    /// the student's decision goes with the next question.
     #[test]
     fn an_edit_waits_for_the_explanation() {
         let bare = test_chunk(
@@ -1278,26 +1279,40 @@ mod tests {
             "explain",
             vec![
                 bare,
-                call_reply(
-                    "set_label",
-                    serde_json::json!({"address": "$00:8000", "name": "Reset", "reason": "the vector"}),
-                ),
-                text_reply("Named it."),
+                text_reply("RESET starts the game."),
+                text_reply("Good."),
             ],
         );
-        t.new_conversation(local, "qwen3".into(), None, TutorMode::AcceptEdits, None)
+        t.new_conversation(local, "qwen3".into(), None, TutorMode::AskBeforeEdits, None)
             .unwrap();
         Arc::clone(&t)
             .send("What is RESET?".into(), Vec::new(), None)
             .unwrap();
-        let mut results = Vec::new();
-        until_done(&rx, |e| {
-            if let TutorEventInfo::ToolFinished { is_error, .. } = e {
-                results.push(*is_error);
+        let mut order = Vec::new();
+        until_done(&rx, |e| match e {
+            TutorEventInfo::TextDelta { .. } => order.push("text"),
+            TutorEventInfo::ToolFinished { is_error, .. } => {
+                assert!(!is_error);
+                order.push("held")
             }
+            TutorEventInfo::EditProposed { proposal } => {
+                order.push("card");
+                t.answer(proposal.id.clone(), true, None);
+            }
+            _ => {}
         });
-        assert_eq!(results, vec![true, false], "refused, then made");
+        assert_eq!(order, ["held", "text", "card"]);
         assert_eq!(wb.label_at(0x8000).unwrap().name, "Reset");
+        Arc::clone(&t)
+            .send("Thanks".into(), Vec::new(), None)
+            .unwrap();
+        until_done(&rx, |_| {});
+        let told = t.transcript().iter().any(|turn| {
+            turn.blocks.iter().any(|b| {
+                matches!(b, TurnBlockInfo::Text { text } if text.contains("[The changes you proposed last time: The student accepted: Name $00:8000 `Reset`."))
+            })
+        });
+        assert!(told, "the decision goes with the next question");
         let _ = std::fs::remove_dir_all(root);
     }
 
