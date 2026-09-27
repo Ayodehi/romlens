@@ -1,0 +1,171 @@
+import AppKit
+import Foundation
+import RomlensKit
+import SwiftUI
+import Testing
+@testable import Romlens
+
+/// The Tutor window (docs/24, U8 and U9), against a model server on the
+/// loopback that answers from a script: nothing leaves the machine.
+@MainActor
+@Suite(.serialized) struct TutorShellTests {
+    struct Rig {
+        let rom: RomViewModel
+        let tutor: TutorModel
+        let root: URL
+    }
+
+    /// A project, and a tutor on a local endpoint that answers `replies`.
+    private func rig(_ replies: [String], mode: TutorModePreference = .readOnly) async throws -> Rig {
+        let rom = try await Fixture.analyzedModel(rom: try Fixture.smallRom())
+        let name = "romlens-tutor-shell-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name)!
+        let settings = TutorSettings(defaults: defaults, keys: MemoryKeyStore())
+        let local = TutorEndpoint.local(name: "Test", baseURL: tutorTestServer(replies: replies), kind: .chat, taken: [])
+        settings.add(local)
+        settings.defaultEndpoint = local
+        settings.setModel("test-model", for: local)
+        settings.mode = mode
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+        return Rig(rom: rom, tutor: TutorModel(rom: rom, settings: settings, root: root), root: root)
+    }
+
+    private func ask(_ t: TutorModel, _ text: String) async throws {
+        t.composer = text
+        t.submit()
+        #expect(t.busy)
+        try await Fixture.settle(timeout: 20) { !t.busy }
+    }
+
+    @Test func aQuestionIsAnsweredWithItsToolsAndCitations() async throws {
+        let r = try await rig([
+            tutorTestCallReply(name: "listing", arguments: #"{"address":"$00:8000","lines":4}"#),
+            tutorTestTextReply(text: "RESET at `$00:8000` masks interrupts:\n```asm\n$00:8000  78  SEI\n```"),
+        ])
+        defer { try? FileManager.default.removeItem(at: r.root) }
+        r.rom.select(offset: 0)
+        #expect(r.tutor.selectionChip?.hasPrefix("$00:8000") == true)
+        try await ask(r.tutor, "What does RESET do?")
+        #expect(r.tutor.error == nil)
+        let rows = TranscriptRow.rows(r.tutor.turns)
+        guard case .question(_, let q, _, let selection) = rows[0] else { Issue.record("no question"); return }
+        #expect(q == "What does RESET do?" && selection)
+        guard case .answer(_, _, _, let tools, _, _) = rows[1] else { Issue.record("no tool round"); return }
+        #expect(tools.map(\.name) == ["listing"] && tools[0].summary?.contains("SEI") == true)
+        guard case .answer(_, let text, _, _, let model, _) = rows.last else { Issue.record("no answer"); return }
+        #expect(text.hasPrefix("RESET at `$00:8000`") && model == "test-model")
+        #expect(r.tutor.cost == 0, "a local model costs nothing")
+
+        // The citation leads to the main window.
+        r.rom.select(offset: 1)
+        #expect(r.tutor.follow(URL(string: "romlens://a/008000")!))
+        #expect(r.rom.selectedAddress == 0x00_8000)
+        #expect(!r.tutor.follow(URL(string: "https://example.com")!))
+
+        // ↑ brings the question back, ↓ the draft.
+        r.tutor.composer = "draft"
+        #expect(r.tutor.historyUp())
+        #expect(r.tutor.composer == "What does RESET do?")
+        #expect(r.tutor.historyDown())
+        #expect(r.tutor.composer == "draft")
+
+        // It was saved: the conversation lists and the rewind points hold it.
+        #expect(r.tutor.conversations.count == 1)
+        #expect(r.tutor.session?.rewindPoints().count == 1)
+    }
+
+    @Test func anEditWaitsForItsCardAndUndoes() async throws {
+        let r = try await rig([
+            tutorTestCallReply(name: "set_label", arguments: #"{"address":"$00:8000","name":"Boot","reason":"the reset vector points here"}"#),
+            tutorTestTextReply(text: "Named it Boot."),
+        ], mode: .askBeforeEdits)
+        defer { try? FileManager.default.removeItem(at: r.root) }
+        r.tutor.composer = "Name RESET"
+        r.tutor.submit()
+        try await Fixture.settle(timeout: 20) { r.tutor.live?.cards.first?.state == .waiting }
+        let card = try #require(r.tutor.live?.cards.first)
+        #expect(card.proposal.summary == "Name $00:8000 `Boot`")
+        #expect(card.proposal.reason == "the reset vector points here")
+        r.tutor.answer(card, accept: true)
+        try await Fixture.settle(timeout: 20) { !r.tutor.busy }
+        #expect(r.rom.session.workbench.labelAt(snesAddress: 0x00_8000)?.name == "Boot")
+        #expect(r.rom.session.undoTitle == "Tutor: Rename Label")
+        #expect(r.rom.session.canUndo)
+        // /rewind of the edits alone takes the name back.
+        let point = try #require(r.tutor.session?.rewindPoints().first)
+        let back = try #require(try r.tutor.session?.rewind(index: point.index, what: .edits))
+        #expect(back.edits?.undone == 1)
+        #expect(r.rom.session.workbench.labelAt(snesAddress: 0x00_8000)?.name != "Boot")
+    }
+
+    @Test func commandsAndModes() async throws {
+        let r = try await rig([])
+        defer { try? FileManager.default.removeItem(at: r.root) }
+        r.tutor.composer = "/re"
+        #expect(r.tutor.matchingCommands.map(\.name) == ["/resume", "/rewind"])
+        r.tutor.composer = "/mode accept"
+        r.tutor.submit()
+        #expect(r.tutor.mode == .acceptEdits && r.tutor.composer.isEmpty)
+        r.tutor.cycleMode()
+        #expect(r.tutor.mode == .readOnly)
+        r.tutor.run(command: "/model")
+        #expect(r.tutor.sheet == .model)
+        r.tutor.run(command: "/nonsense")
+        #expect(r.tutor.error?.contains("not a command") == true)
+        r.tutor.run(command: "/selection")
+        #expect(!r.tutor.includeSelection)
+        r.tutor.run(command: "/new")
+        #expect(r.tutor.session?.conversationId() != nil)
+        r.tutor.run(command: "/attach frame")
+        #expect(r.tutor.error?.contains("recording") == true, "no recording is open")
+    }
+
+    @Test func citationsAndCodeAreFoundInTheText() {
+        #expect(MessageText.link("See `$80:8000` and $7E:0AF6, frame 12.")
+            == "See [`$80:8000`](romlens://a/808000) and [$7E:0AF6](romlens://a/7E0AF6), [frame 12](romlens://f/12).")
+        let s = MessageText.segments("Look:\n```c\nx = 1;\n```\nThen `a`.\n```asm\nSEI")
+        #expect(s == [.prose("Look:"), .code(language: "c", body: "x = 1;"), .prose("Then `a`."), .code(language: "asm", body: "SEI")])
+        let p = MessageText.prose("## Why\n- one `$00:8000`")
+        let plain = String(p.characters)
+        #expect(plain == "Why\n• one $00:8000")
+        #expect(p.runs.contains { $0.link == URL(string: "romlens://a/008000") })
+    }
+
+    @Test func theWindowShowsAConversation() async throws {
+        let r = try await rig([tutorTestTextReply(text: "It is `$00:8000`.\n```c\nvoid Reset(void);\n```")])
+        defer { try? FileManager.default.removeItem(at: r.root) }
+        try await ask(r.tutor, "Where is RESET?")
+        let c = TutorWindowController(tutor: r.tutor, title: "Test")
+        let w = try #require(c.window)
+        w.appearance = NSAppearance(named: .aqua)
+        w.setContentSize(NSSize(width: 520, height: 640))
+        w.orderFront(nil)
+        defer { w.close() }
+        w.contentView?.layoutSubtreeIfNeeded()
+        Fixture.spin(0.3)
+        w.display()
+        #expect(w.title == "Tutor — Test")
+        #expect(!c.shouldCloseDocument)
+        // With ROMLENS_SNAPSHOTS set, saved in the sandbox's temporary folder.
+        if ProcessInfo.processInfo.environment["ROMLENS_SNAPSHOTS"] != nil, let view = w.contentView,
+           let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+            view.cacheDisplay(in: view.bounds, to: rep)
+            try? rep.representation(using: .png, properties: [:])?
+                .write(to: FileManager.default.temporaryDirectory.appendingPathComponent("tutor.png"))
+        }
+    }
+
+    @Test func theDocumentOpensOneTutorWindow() throws {
+        let doc = ProjectDocument()
+        try doc.read(from: makeTestRom(mapping: .loRom), ofType: Fixture.romType)
+        doc.model?.session.cancelAnalysis()
+        doc.makeWindowControllers()
+        doc.showTutor()
+        let first = try #require(doc.tutorController)
+        doc.showTutor()
+        #expect(doc.tutorController === first)
+        #expect(doc.windowControllers.count == 2)
+        first.window?.close()
+        doc.close()
+    }
+}

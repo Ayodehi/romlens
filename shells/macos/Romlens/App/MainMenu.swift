@@ -165,6 +165,7 @@ enum MainMenu {
             .separator(),
             item("Show Navigator", #selector(RomWindowController.toggleNavigator(_:)), "0"),
             item("Show Inspector", #selector(RomWindowController.toggleInspector(_:)), "0", modifiers: [.command, .option]),
+            item("Show Tutor", #selector(RomWindowController.showTutor(_:)), "t", modifiers: [.command, .option]),
             item("Show Overview Strip", #selector(RomWindowController.toggleStrip(_:)), "0", modifiers: [.command, .shift]),
             item("Show Results", #selector(RomWindowController.toggleResults(_:)), "0", modifiers: [.command, .control]),
             item("Focus on Code", #selector(RomWindowController.toggleFocus(_:)), "f", modifiers: [.command, .option]),

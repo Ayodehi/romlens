@@ -978,66 +978,85 @@ impl TutorSession {
     }
 }
 
+/// For shell tests: a server on the loopback that answers each request with
+/// the next of `replies` (Chat Completions streams), one connection each.
+/// Returns its base URL. Nothing leaves the machine.
+#[uniffi::export]
+pub fn tutor_test_server(replies: Vec<String>) -> String {
+    use std::io::{BufRead, BufReader, Read, Write};
+    let l = std::net::TcpListener::bind("127.0.0.1:0").expect("a loopback port");
+    let url = format!("http://{}/v1", l.local_addr().expect("bound"));
+    std::thread::spawn(move || {
+        for body in replies {
+            let Ok((s, _)) = l.accept() else { return };
+            let Ok(clone) = s.try_clone() else { return };
+            let mut r = BufReader::new(clone);
+            let mut len = 0;
+            loop {
+                let mut line = String::new();
+                if r.read_line(&mut line).unwrap_or(0) == 0 {
+                    break;
+                }
+                if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                    len = v.trim().parse().unwrap_or(0);
+                }
+                if line == "\r\n" {
+                    break;
+                }
+            }
+            let mut b = vec![0; len];
+            let _ = r.read_exact(&mut b);
+            let mut s = s;
+            let _ = write!(
+                s,
+                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+        }
+    });
+    url
+}
+
+fn test_chunk(delta: serde_json::Value, finish: Option<&str>) -> String {
+    format!(
+        "data: {}\n\n",
+        serde_json::json!({"model": "test-model", "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]})
+    )
+}
+
+/// For shell tests: a Chat Completions stream that answers `text`.
+#[uniffi::export]
+pub fn tutor_test_text_reply(text: String) -> String {
+    test_chunk(serde_json::json!({"content": text}), None)
+        + &test_chunk(serde_json::json!({}), Some("stop"))
+        + "data: [DONE]\n\n"
+}
+
+/// For shell tests: a Chat Completions stream that calls tool `name` with
+/// `arguments` (JSON).
+#[uniffi::export]
+pub fn tutor_test_call_reply(name: String, arguments: String) -> String {
+    test_chunk(
+        serde_json::json!({"tool_calls": [{"index": 0, "id": "call_9", "function": {"name": name, "arguments": arguments}}]}),
+        Some("tool_calls"),
+    ) + "data: [DONE]\n\n"
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::{BufRead, BufReader, Read, Write};
-    use std::net::TcpListener;
     use std::sync::mpsc;
 
-    /// Serves `replies` in order, one connection each, like a local model
-    /// server speaking Chat Completions.
-    fn server(replies: Vec<String>) -> String {
-        let l = TcpListener::bind("127.0.0.1:0").unwrap();
-        let url = format!("http://{}/v1", l.local_addr().unwrap());
-        std::thread::spawn(move || {
-            for body in replies {
-                let Ok((s, _)) = l.accept() else { return };
-                let mut r = BufReader::new(s.try_clone().unwrap());
-                let mut len = 0;
-                loop {
-                    let mut line = String::new();
-                    if r.read_line(&mut line).unwrap_or(0) == 0 {
-                        break;
-                    }
-                    if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
-                        len = v.trim().parse().unwrap();
-                    }
-                    if line == "\r\n" {
-                        break;
-                    }
-                }
-                let mut b = vec![0; len];
-                let _ = r.read_exact(&mut b);
-                let mut s = s;
-                let _ = write!(
-                    s,
-                    "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
-                    body.len()
-                );
-            }
-        });
-        url
-    }
-
-    fn chunk(delta: serde_json::Value, finish: Option<&str>) -> String {
-        format!(
-            "data: {}\n\n",
-            serde_json::json!({"model": "qwen3", "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]})
-        )
-    }
-
     fn text_reply(t: &str) -> String {
-        chunk(serde_json::json!({"content": t}), None)
-            + &chunk(serde_json::json!({}), Some("stop"))
-            + "data: [DONE]\n\n"
+        tutor_test_text_reply(t.into())
     }
 
     fn call_reply(name: &str, args: serde_json::Value) -> String {
-        chunk(
-            serde_json::json!({"tool_calls": [{"index": 0, "id": "call_9", "function": {"name": name, "arguments": args.to_string()}}]}),
-            Some("tool_calls"),
-        ) + "data: [DONE]\n\n"
+        tutor_test_call_reply(name.into(), args.to_string())
+    }
+
+    fn server(replies: Vec<String>) -> String {
+        tutor_test_server(replies)
     }
 
     struct NoKeys;

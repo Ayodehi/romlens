@@ -209,14 +209,14 @@ Written from `24-tutor.md` on 27 September 2026; it replaces rows 3.19–3.21.
 
 | # | Capability | Shell must expose | CLI scenario | macOS | Win | Linux |
 |---|---|---|---|---|---|---|
-| 6.1 | Keys and endpoints | Settings: the Anthropic and OpenAI keys in the credential store, local endpoints with a Test that lists models, the default model and mode, what is sent | `romlens tutor models [--provider P]` | ⬜ | ⬜ | ⬜ |
-| 6.2 | Ask about the selection | A Tutor window: the answer streamed with cited addresses and frames as links into the main window, thinking and the tool log collapsed, the cost | `romlens tutor ask <rom> "<question>" [--at <a>]` | ⬜ | ⬜ | ⬜ |
+| 6.1 | Keys and endpoints | Settings: the Anthropic and OpenAI keys in the credential store, local endpoints with a Test that lists models, the default model and mode, what is sent | `romlens tutor models [--provider P]` | 🧪 | ⬜ | ⬜ |
+| 6.2 | Ask about the selection | A Tutor window: the answer streamed with cited addresses and frames as links into the main window, thinking and the tool log collapsed, the cost | `romlens tutor ask <rom> "<question>" [--at <a>]` | 🧪 | ⬜ | ⬜ |
 | 6.3 | Pictures in and out | Paste or drop a screenshot or photo; attach the current frame; tools that return tiles and frames show them; a generated picture when an image provider is set | `romlens tutor ask … --attach <png>` | ⬜ | ⬜ | ⬜ |
-| 6.4 | Edits under a mode | Read-only, Ask before edits (cards with Accept and Reject), Accept edits; Shift-Tab cycles; every edit undoable and marked as the tutor's | `romlens tutor ask … --mode accept --project P` | ⬜ | ⬜ | ⬜ |
+| 6.4 | Edits under a mode | Read-only, Ask before edits (cards with Accept and Reject), Accept edits; Shift-Tab cycles; every edit undoable and marked as the tutor's | `romlens tutor ask … --mode accept --project P` | 🧪 | ⬜ | ⬜ |
 | 6.5 | The C shaped | Signatures, local names, structs and C comments change the generated C; C versions beside it, anchored to addresses | `romlens project <p> signature\|local\|struct\|ccomment\|cversion …`; `romlens decompile …` | ⬜ | ⬜ | ⬜ |
-| 6.6 | A conversation kept | Conversations listed and resumed; ↑ recalls earlier prompts; `/rewind` takes back the conversation, the edits, or both | `romlens tutor conversations` | ⬜ | ⬜ | ⬜ |
-| 6.7 | Another provider mid-conversation | `/model` changes provider, model and effort between turns, and the conversation goes on | `romlens tutor ask … --resume <id> --provider P --model M` | ⬜ | ⬜ | ⬜ |
-| 6.8 | A recording investigated | Recording tools (changes, who wrote a byte, provenance, frames) in the tool log | `romlens tutor ask <rom> "<question>" --rec R` | ⬜ | ⬜ | ⬜ |
+| 6.6 | A conversation kept | Conversations listed and resumed; ↑ recalls earlier prompts; `/rewind` takes back the conversation, the edits, or both | `romlens tutor conversations` | 🧪 | ⬜ | ⬜ |
+| 6.7 | Another provider mid-conversation | `/model` changes provider, model and effort between turns, and the conversation goes on | `romlens tutor ask … --resume <id> --provider P --model M` | 🧪 | ⬜ | ⬜ |
+| 6.8 | A recording investigated | Recording tools (changes, who wrote a byte, provenance, frames) in the tool log | `romlens tutor ask <rom> "<question>" --rec R` | 🧪 | ⬜ | ⬜ |
 
 ## Manual pass, macOS (to repeat before each release)
 

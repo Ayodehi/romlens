@@ -233,6 +233,24 @@ final class ProjectDocument: NSDocument {
         addWindowController(RomWindowController(model: model))
     }
 
+    /// The tutor's window (docs/24): a second window of this project, made
+    /// on first use, closing with it.
+    private(set) var tutorController: TutorWindowController?
+
+    func showTutor() {
+        guard let model else { return }
+        if tutorController == nil {
+            let c = TutorWindowController(tutor: TutorModel(rom: model), title: displayName)
+            addWindowController(c)
+            tutorController = c
+        }
+        // Closing the window takes it off the document; showing it again
+        // puts it back, conversation and all.
+        if let c = tutorController, c.document == nil { addWindowController(c) }
+        tutorController?.showWindow(nil)
+        tutorController?.window?.makeKeyAndOrderFront(nil)
+    }
+
     /// The document's ROM hash, for de-duplication by the controller.
     var sha256: String? { romSha256 }
 }

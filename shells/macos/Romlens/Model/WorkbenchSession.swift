@@ -253,6 +253,13 @@ final class WorkbenchSession {
         }
     }
 
+    /// The tutor changed the project through the core, not through here
+    /// (docs/24): refresh as after any edit, and analyse again if a mark or
+    /// flag changed.
+    func tutorEdited() {
+        finishCommand(affectsAnalysis: workbench.needsAnalysis())
+    }
+
     private func finishCommand(affectsAnalysis: Bool) {
         refreshUndoState()
         generation += 1

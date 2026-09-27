@@ -49,6 +49,9 @@ final class RomViewModel {
     let palette: SpanPalette
     let rowCount: UInt32
     let session: WorkbenchSession
+    /// Brings the project's main window to the front: set by its window
+    /// controller, used when the tutor's citation is followed.
+    @ObservationIgnored var bringMainWindowForward: (() -> Void)?
     let navigator = NavigatorModel()
     let search = SearchModel()
     let references = ReferencesModel()
