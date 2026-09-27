@@ -37,6 +37,11 @@ pub const PROJECT_VERSION: u32 = 2;
 /// Variable types. Optional: a package without it has none, and older
 /// Romlens builds ignore it.
 pub const VARIABLES_FILE: &str = "variables.json";
+/// Local names, routine notes and C comments (`model::c_notes`). Optional,
+/// like the variables.
+pub const C_NOTES_FILE: &str = "c_notes.json";
+/// C versions of routines. Optional.
+pub const C_VERSIONS_FILE: &str = "c_versions.json";
 
 /// Where the merged coverage lives inside a package.
 pub const COVERAGE_FILE: &str = "traces/coverage.cdl";
@@ -174,6 +179,52 @@ struct VariableDto {
     #[serde(rename = "type")]
     width: String,
     count: u16,
+}
+
+#[derive(Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct CNotesDto {
+    #[serde(default)]
+    locals: Vec<LocalDto>,
+    #[serde(default)]
+    notes: Vec<NoteDto>,
+    #[serde(default)]
+    comments: Vec<NoteDto>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalDto {
+    routine: String,
+    local: String,
+    name: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NoteDto {
+    address: String,
+    text: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CVersionDto {
+    routine: String,
+    name: String,
+    author: String,
+    text: String,
+    #[serde(default)]
+    anchors: Vec<AnchorDto>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AnchorDto {
+    first: u32,
+    last: u32,
+    start: String,
+    end: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -358,6 +409,62 @@ pub fn to_files(rom: &RomImage, project: &Project) -> BTreeMap<String, Vec<u8>> 
             })
             .collect();
         files.insert(VARIABLES_FILE.to_owned(), to_bytes(&variables));
+    }
+    if !(project.local_names.is_empty()
+        && project.routine_notes.is_empty()
+        && project.c_comments.is_empty())
+    {
+        let notes = CNotesDto {
+            locals: project
+                .local_names
+                .iter()
+                .map(|((r, l), n)| LocalDto {
+                    routine: r.to_string(),
+                    local: l.clone(),
+                    name: n.clone(),
+                })
+                .collect(),
+            notes: project
+                .routine_notes
+                .iter()
+                .map(|(a, t)| NoteDto {
+                    address: a.to_string(),
+                    text: t.clone(),
+                })
+                .collect(),
+            comments: project
+                .c_comments
+                .iter()
+                .map(|(a, t)| NoteDto {
+                    address: a.to_string(),
+                    text: t.clone(),
+                })
+                .collect(),
+        };
+        files.insert(C_NOTES_FILE.to_owned(), to_bytes(&notes));
+    }
+    if !project.c_versions.is_empty() {
+        let versions: Vec<CVersionDto> = project
+            .c_versions
+            .iter()
+            .map(|((r, name), v)| CVersionDto {
+                routine: r.to_string(),
+                name: name.clone(),
+                author: v.author.as_str().to_owned(),
+                text: v.text.clone(),
+                anchors: v
+                    .anchors
+                    .iter()
+                    .map(|a| AnchorDto {
+                        first: a.first,
+                        last: a.last,
+                        start: a.start.to_string(),
+                        end: a.end.to_string(),
+                    })
+                    .collect(),
+            })
+            .collect();
+        files.insert(C_VERSIONS_FILE.to_owned(), to_bytes(&versions));
     }
     let comments: Vec<CommentDto> = project
         .comments
@@ -581,6 +688,42 @@ pub fn from_files(
         };
         ty.validate()?;
         project.variables.insert(address, ty);
+    }
+    if let Some(bytes) = files.get(C_NOTES_FILE) {
+        let n: CNotesDto = serde_json::from_slice(bytes).map_err(|e| json(C_NOTES_FILE, e))?;
+        for l in n.locals {
+            let r = Project::canonical(rom, parse_snes(C_NOTES_FILE, &l.routine)?);
+            project.local_names.insert((r, l.local), l.name);
+        }
+        for t in n.notes {
+            let a = Project::canonical(rom, parse_snes(C_NOTES_FILE, &t.address)?);
+            project.routine_notes.insert(a, t.text);
+        }
+        for t in n.comments {
+            let a = Project::canonical(rom, parse_snes(C_NOTES_FILE, &t.address)?);
+            project.c_comments.insert(a, t.text);
+        }
+    }
+    for v in read_list::<CVersionDto>(files, C_VERSIONS_FILE)? {
+        use crate::model::c_notes::{Anchor, Author, CVersion};
+        let r = Project::canonical(rom, parse_snes(C_VERSIONS_FILE, &v.routine)?);
+        let mut anchors = Vec::with_capacity(v.anchors.len());
+        for a in v.anchors {
+            anchors.push(Anchor {
+                first: a.first,
+                last: a.last,
+                start: parse_snes(C_VERSIONS_FILE, &a.start)?,
+                end: parse_snes(C_VERSIONS_FILE, &a.end)?,
+            });
+        }
+        project.c_versions.insert(
+            (r, v.name),
+            CVersion {
+                text: v.text,
+                author: Author::parse(&v.author),
+                anchors,
+            },
+        );
     }
     for c in read_list::<CommentDto>(files, "comments.json")? {
         let address = Project::canonical(rom, parse_snes("comments.json", &c.address)?);

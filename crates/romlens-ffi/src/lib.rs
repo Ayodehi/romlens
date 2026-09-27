@@ -4,6 +4,7 @@
 //! (docs/10); everything else returns typed records.
 
 pub mod audio;
+pub mod cnotes;
 pub mod compare;
 pub mod explain;
 mod future;

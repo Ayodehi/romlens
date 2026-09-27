@@ -1,6 +1,7 @@
 //! Every edit is a command with an inverse, so undo is a matter of replaying.
 
 use crate::memory::address::{FileOffset, SnesAddress};
+use crate::model::c_notes::CVersion;
 use crate::model::comment::CommentKind;
 use crate::model::label::{Label, LabelSource};
 use crate::model::project::FlagOverride;
@@ -58,6 +59,30 @@ pub enum Command {
         address: SnesAddress,
         ty: Option<VarType>,
     },
+    /// A name for one of a routine's locals or parameters in the C (`a8`,
+    /// `x`, `i`…); `None` puts Romlens's name back.
+    SetLocalName {
+        routine: SnesAddress,
+        local: String,
+        name: Option<String>,
+    },
+    /// A note printed above the routine in the C; `None` removes it.
+    SetRoutineNote {
+        routine: SnesAddress,
+        text: Option<String>,
+    },
+    /// A comment printed in the C before the statement the instruction at
+    /// `address` makes; `None` removes it.
+    SetCComment {
+        address: SnesAddress,
+        text: Option<String>,
+    },
+    /// A C version of a routine, by its name; `None` removes it.
+    SetCVersion {
+        routine: SnesAddress,
+        name: String,
+        version: Option<CVersion>,
+    },
 }
 
 impl Command {
@@ -98,6 +123,16 @@ impl Command {
             Command::SetFlagOverride { flags: None, .. } => "Remove Flags",
             Command::SetVariable { ty: Some(_), .. } => "Define Variable",
             Command::SetVariable { ty: None, .. } => "Remove Variable",
+            Command::SetLocalName { name: Some(_), .. } => "Rename Local",
+            Command::SetLocalName { name: None, .. } => "Restore Local Name",
+            Command::SetRoutineNote { text: Some(_), .. } => "Set Routine Note",
+            Command::SetRoutineNote { text: None, .. } => "Remove Routine Note",
+            Command::SetCComment { text: Some(_), .. } => "Set C Comment",
+            Command::SetCComment { text: None, .. } => "Remove C Comment",
+            Command::SetCVersion {
+                version: Some(_), ..
+            } => "Save C Version",
+            Command::SetCVersion { version: None, .. } => "Remove C Version",
         }
     }
 }
@@ -118,6 +153,9 @@ pub enum Origin {
     Import(String),
     /// A proposal the user accepted, named by what proposed it.
     Accepted(String),
+    /// The tutor's edit (docs/24, decision 5), made in a conversation's
+    /// turn, whether the student accepted a card or the mode let it through.
+    Tutor { conversation: String, turn: u32 },
 }
 
 impl Origin {
@@ -128,6 +166,7 @@ impl Origin {
             Origin::Import(source) | Origin::Accepted(source) => {
                 LabelSource::Imported(source.clone())
             }
+            Origin::Tutor { .. } => LabelSource::Imported("tutor".into()),
         }
     }
 
@@ -145,6 +184,10 @@ impl Origin {
             },
             Origin::Import(source) => format!("Import from {source}"),
             Origin::Accepted(source) => format!("Accept {source}"),
+            Origin::Tutor { .. } => match commands {
+                [one] => format!("Tutor: {}", one.menu_title()),
+                other => format!("Tutor: {} Changes", other.len()),
+            },
         }
     }
 }

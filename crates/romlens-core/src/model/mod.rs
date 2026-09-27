@@ -1,6 +1,7 @@
 //! The annotation model: labels, comments, regions, cross-references, the
 //! project overlay, commands and undo.
 
+pub mod c_notes;
 pub mod command;
 pub mod comment;
 pub mod coverage;

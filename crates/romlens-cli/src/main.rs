@@ -1067,6 +1067,42 @@ enum ProjectCommand {
         #[arg(long)]
         rom: Option<PathBuf>,
     },
+    /// Name one of a routine's locals in the C (`-` restores Romlens's
+    /// name): `a8`, `x`, `i`, a parameter such as `x_out`.
+    Local {
+        routine: String,
+        local: String,
+        name: String,
+        #[arg(long)]
+        rom: Option<PathBuf>,
+    },
+    /// Set (or remove with `-`) the note above a routine in the C.
+    Note {
+        routine: String,
+        text: String,
+        #[arg(long)]
+        rom: Option<PathBuf>,
+    },
+    /// Set (or remove with `-`) a comment in the C before an instruction's
+    /// statement.
+    Ccomment {
+        expr: String,
+        text: String,
+        #[arg(long)]
+        rom: Option<PathBuf>,
+    },
+    /// Save a C version of a routine from a file (or remove it with `-`).
+    Cversion {
+        routine: String,
+        name: String,
+        file: String,
+        /// `FIRST-LAST=START-END`: lines of the version and the addresses
+        /// they stand for (repeatable).
+        #[arg(long)]
+        anchor: Vec<String>,
+        #[arg(long)]
+        rom: Option<PathBuf>,
+    },
     /// Mark a range as code, a data kind or unknown.
     Mark {
         expr: String,
@@ -1549,6 +1585,27 @@ fn run() -> Result<()> {
             ProjectCommand::Init { rom } => commands::project::init(&path, &rom),
             ProjectCommand::Label { expr, name, rom } => {
                 commands::project::label(&path, rom.as_deref(), &expr, &name)
+            }
+            ProjectCommand::Local {
+                routine,
+                local,
+                name,
+                rom,
+            } => commands::project::local(&path, rom.as_deref(), &routine, &local, &name),
+            ProjectCommand::Note { routine, text, rom } => {
+                commands::project::note(&path, rom.as_deref(), &routine, &text)
+            }
+            ProjectCommand::Ccomment { expr, text, rom } => {
+                commands::project::ccomment(&path, rom.as_deref(), &expr, &text)
+            }
+            ProjectCommand::Cversion {
+                routine,
+                name,
+                file,
+                anchor,
+                rom,
+            } => {
+                commands::project::cversion(&path, rom.as_deref(), &routine, &name, &file, &anchor)
             }
             ProjectCommand::Comment {
                 expr,

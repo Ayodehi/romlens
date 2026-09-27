@@ -1008,6 +1008,28 @@ pub enum Command {
         address: u32,
         ty: Option<VarTypeInfo>,
     },
+    /// A name for one of a routine's locals in the C; `None` restores it.
+    SetLocalName {
+        routine: u32,
+        local: String,
+        name: Option<String>,
+    },
+    /// A note above the routine in the C; `None` removes it.
+    SetRoutineNote {
+        routine: u32,
+        text: Option<String>,
+    },
+    /// A comment in the C before the instruction's statement.
+    SetCComment {
+        address: u32,
+        text: Option<String>,
+    },
+    /// A C version of a routine; `None` removes it.
+    SetCVersion {
+        routine: u32,
+        name: String,
+        version: Option<crate::cnotes::CVersionInfo>,
+    },
 }
 
 impl From<Command> for model::Command {
@@ -1065,6 +1087,32 @@ impl From<Command> for model::Command {
             Command::SetVariable { address, ty } => model::Command::SetVariable {
                 address: SnesAddress::from_u24(address),
                 ty: ty.map(Into::into),
+            },
+            Command::SetLocalName {
+                routine,
+                local,
+                name,
+            } => model::Command::SetLocalName {
+                routine: SnesAddress::from_u24(routine),
+                local,
+                name,
+            },
+            Command::SetRoutineNote { routine, text } => model::Command::SetRoutineNote {
+                routine: SnesAddress::from_u24(routine),
+                text,
+            },
+            Command::SetCComment { address, text } => model::Command::SetCComment {
+                address: SnesAddress::from_u24(address),
+                text,
+            },
+            Command::SetCVersion {
+                routine,
+                name,
+                version,
+            } => model::Command::SetCVersion {
+                routine: SnesAddress::from_u24(routine),
+                name,
+                version: version.map(Into::into),
             },
         }
     }

@@ -1067,6 +1067,45 @@ fn decompile_commands() {
             run(&["decompile", rom, "$7E:0000"]),
         ),
     );
+    // The C shaped by the project (docs/24, U4): a local's name, a note,
+    // a C comment; and a C version kept beside it.
+    let project = dir.join("p.romlens");
+    let p = project.to_str().unwrap();
+    let version = dir.join("clear.c");
+    std::fs::write(
+        &version,
+        "void ClearSlots(void)\n{\n    memset(slots, 0, 16);\n}\n",
+    )
+    .unwrap();
+    let mut all = run(&["project", p, "init", "--rom", rom]);
+    all.push_str(&run_with(
+        &["project", p, "local", "$00:8020", "x"],
+        &["slot", "--rom", rom],
+    ));
+    all.push_str(&run_with(
+        &["project", p, "note", "$00:8020"],
+        &["Clears the 16 slots at $7E:0200.", "--rom", rom],
+    ));
+    all.push_str(&run_with(
+        &["project", p, "ccomment", "$00:8022"],
+        &["one slot a pass", "--rom", rom],
+    ));
+    all.push_str(&run_with(
+        &["project", p, "cversion", "$00:8020", "Plain"],
+        &[
+            version.to_str().unwrap(),
+            "--anchor",
+            "3-3=$00:8020-$00:8027",
+            "--rom",
+            rom,
+        ],
+    ));
+    all.push_str(&run(&["decompile", rom, "$00:8020", "--project", p]));
+    all.push_str(&run(&["decompile", rom, "$00:8000", "--project", p]));
+    all.push_str(&std::fs::read_to_string(project.join("c_notes.json")).unwrap());
+    all.push_str(&std::fs::read_to_string(project.join("c_versions.json")).unwrap());
+    check("decompile-annotated", &redact_tmp(&dir, &all));
+
     let header = dir.join("snes.h");
     let wrote = run(&["decompile", "--header", header.to_str().unwrap()]);
     assert!(wrote.starts_with("wrote "), "{wrote}");

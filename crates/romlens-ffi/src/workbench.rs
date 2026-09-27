@@ -96,6 +96,28 @@ impl Workbench {
         f(&self.lock().project)
     }
 
+    /// Apply commands as one undoable step, from `origin`.
+    pub(crate) fn apply_commands(
+        &self,
+        commands: Vec<model::Command>,
+        origin: model::Origin,
+    ) -> Result<(), RomlensError> {
+        let affects = commands.iter().any(model::Command::affects_analysis);
+        let (generation, dirty) = {
+            let mut inner = self.lock();
+            let entry = inner
+                .project
+                .apply_batch(&self.rom.image, commands, origin)?;
+            inner.undo.push(entry);
+            self.after_edit(&mut inner, affects)
+        };
+        self.emit(WorkbenchEvent::ProjectChanged { dirty });
+        self.emit(WorkbenchEvent::ViewChanged {
+            view_generation: generation,
+        });
+        Ok(())
+    }
+
     fn emit(&self, event: WorkbenchEvent) {
         let listener = self
             .listener
@@ -1133,19 +1155,7 @@ impl Workbench {
 
     /// Apply a command; the inverse goes on the undo stack.
     pub fn execute(&self, command: Command) -> Result<(), RomlensError> {
-        let cmd: model::Command = command.into();
-        let affects = cmd.affects_analysis();
-        let (generation, dirty) = {
-            let mut inner = self.lock();
-            let entry = inner.project.apply(&self.rom.image, cmd)?;
-            inner.undo.push(entry);
-            self.after_edit(&mut inner, affects)
-        };
-        self.emit(WorkbenchEvent::ProjectChanged { dirty });
-        self.emit(WorkbenchEvent::ViewChanged {
-            view_generation: generation,
-        });
-        Ok(())
+        self.apply_commands(vec![command.into()], model::Origin::User)
     }
 
     pub fn undo(&self) -> Result<bool, RomlensError> {

@@ -1,0 +1,82 @@
+created <tmp>/p.romlens for "ROMLENS ROUTINES"
+Rename Local
+Set Routine Note
+Set C Comment
+Save C Version
+/* SUB_008020 at $00:8020: 5 instructions, full level. From Romlens; for reading, not for rebuilding the ROM. */
+#include "snes.h"
+
+extern u8 ADDR_7E0200[];
+
+/* Clears the 16 slots at $7E:0200. */
+/* Reads nothing; returns X. */
+u8 SUB_008020(void)
+{
+    u8 slot;
+
+    /* ▸ Clear memory: Clears $7E:0200 to $7E:020F: 16 bytes, a byte at a time, indexed by X. */
+    for (slot = 0x0F; (s8)slot >= 0; slot--) {
+        /* one slot a pass */
+        ADDR_7E0200[slot] = 0;
+    }
+    return slot;
+}
+/* RESET_008000 at $00:8000: 10 instructions, full level. From Romlens; for reading, not for rebuilding the ROM. */
+#include "snes.h"
+
+u8 SUB_008020(void); /* Reads nothing; returns X. */
+void SUB_008030(void); /* Reads nothing; returns nothing. */
+void SUB_008040(void); /* Reads nothing; returns nothing. */
+void SUB_008050(u8 x); /* Reads X; returns nothing; preserves X. */
+
+/* Reads nothing; returns A, X and the carry (some callers are not known, so returns are assumed). */
+u16 RESET_008000(u16 *x_out, bool *c_out)
+{
+    u8 x;
+
+    SEI();
+    native_mode();
+    x = SUB_008020();
+    SUB_008030();
+    SUB_008040();
+    SUB_008050(x);
+    for (;;) {
+    }
+}
+{
+  "locals": [
+    {
+      "routine": "$00:8020",
+      "local": "x",
+      "name": "slot"
+    }
+  ],
+  "notes": [
+    {
+      "address": "$00:8020",
+      "text": "Clears the 16 slots at $7E:0200."
+    }
+  ],
+  "comments": [
+    {
+      "address": "$00:8022",
+      "text": "one slot a pass"
+    }
+  ]
+}
+[
+  {
+    "routine": "$00:8020",
+    "name": "Plain",
+    "author": "user",
+    "text": "void ClearSlots(void)\n{\n    memset(slots, 0, 16);\n}\n",
+    "anchors": [
+      {
+        "first": 3,
+        "last": 3,
+        "start": "$00:8020",
+        "end": "$00:8027"
+      }
+    ]
+  }
+]

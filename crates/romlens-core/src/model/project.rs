@@ -8,6 +8,7 @@ use std::sync::Arc;
 use crate::error::ProjectError;
 use crate::memory::address::{FileOffset, SnesAddress};
 use crate::memory::map::MappingMode;
+use crate::model::c_notes::{CVersion, validate_c_name, validate_note};
 use crate::model::command::{Command, Origin, UndoEntry};
 use crate::model::comment::{Comment, CommentKind};
 use crate::model::coverage::Coverage;
@@ -132,6 +133,14 @@ pub struct Project {
     /// Variable types by canonical address; each one's name is the label at
     /// the same address.
     pub variables: BTreeMap<SnesAddress, VarType>,
+    /// Names for routines' locals in the C, by routine and Romlens's name.
+    pub local_names: BTreeMap<(SnesAddress, String), String>,
+    /// Notes printed above routines in the C.
+    pub routine_notes: BTreeMap<SnesAddress, String>,
+    /// Comments printed in the C, by the instruction they come before.
+    pub c_comments: BTreeMap<SnesAddress, String>,
+    /// C versions, by routine and name (`model::c_notes`).
+    pub c_versions: BTreeMap<(SnesAddress, String), CVersion>,
     /// Every imported trace, merged.
     ///
     /// Not a `Command`, and deliberately so: an import is not an edit with an
@@ -165,6 +174,10 @@ impl Project {
             region_overrides: Vec::new(),
             flag_overrides: BTreeMap::new(),
             variables: BTreeMap::new(),
+            local_names: BTreeMap::new(),
+            routine_notes: BTreeMap::new(),
+            c_comments: BTreeMap::new(),
+            c_versions: BTreeMap::new(),
             coverage: None,
             exec_log: None,
             traces: Vec::new(),
@@ -451,6 +464,77 @@ impl Project {
                 vec![Command::SetVariable {
                     address,
                     ty: previous,
+                }]
+            }
+            Command::SetLocalName {
+                routine,
+                local,
+                name,
+            } => {
+                let routine = Self::canonical(rom, *routine);
+                validate_c_name(local)?;
+                if let Some(n) = name {
+                    validate_c_name(n)?;
+                }
+                let key = (routine, local.clone());
+                let previous = match name {
+                    Some(n) if n != local => self.local_names.insert(key, n.clone()),
+                    _ => self.local_names.remove(&key),
+                };
+                vec![Command::SetLocalName {
+                    routine,
+                    local: local.clone(),
+                    name: previous,
+                }]
+            }
+            Command::SetRoutineNote { routine, text } => {
+                let routine = Self::canonical(rom, *routine);
+                let text = text.as_ref().map(|t| t.trim()).filter(|t| !t.is_empty());
+                if let Some(t) = text {
+                    validate_note(t)?;
+                }
+                let previous = match text {
+                    Some(t) => self.routine_notes.insert(routine, t.to_owned()),
+                    None => self.routine_notes.remove(&routine),
+                };
+                vec![Command::SetRoutineNote {
+                    routine,
+                    text: previous,
+                }]
+            }
+            Command::SetCComment { address, text } => {
+                let address = Self::canonical(rom, *address);
+                let text = text.as_ref().map(|t| t.trim()).filter(|t| !t.is_empty());
+                if let Some(t) = text {
+                    validate_note(t)?;
+                }
+                let previous = match text {
+                    Some(t) => self.c_comments.insert(address, t.to_owned()),
+                    None => self.c_comments.remove(&address),
+                };
+                vec![Command::SetCComment {
+                    address,
+                    text: previous,
+                }]
+            }
+            Command::SetCVersion {
+                routine,
+                name,
+                version,
+            } => {
+                let routine = Self::canonical(rom, *routine);
+                if let Some(v) = version {
+                    v.validate(name)?;
+                }
+                let key = (routine, name.trim().to_owned());
+                let previous = match version {
+                    Some(v) => self.c_versions.insert(key.clone(), v.clone()),
+                    None => self.c_versions.remove(&key),
+                };
+                vec![Command::SetCVersion {
+                    routine,
+                    name: key.1,
+                    version: previous,
                 }]
             }
             Command::SetFlagOverride { offset, flags } => {

@@ -64,6 +64,9 @@ pub enum ProjectError {
     BadRange(String),
     #[error("{0}: preview options need a marked range that starts there")]
     NotMarked(String),
+    /// A C name, note or version refused.
+    #[error("{0}")]
+    InvalidC(String),
 }
 
 impl From<io::Error> for ProjectError {

@@ -5,6 +5,7 @@
 //! loops (`cfg`), lift each instruction to IR (`ir`, `lift`), then print it
 //! (`emit`) against the declarations in `snes.h` (`header`).
 
+pub mod annotate;
 pub mod canon;
 pub mod cfg;
 pub mod dataflow;
@@ -12,6 +13,7 @@ pub mod emit;
 pub mod function;
 pub mod header;
 pub mod ir;
+pub mod lex;
 pub mod lift;
 pub mod loops;
 pub mod notes;
@@ -499,7 +501,7 @@ pub fn render_with(
             offs
         })
         .collect();
-    Decompiled {
+    let mut d = Decompiled {
         name,
         entry: f.entry,
         text: w.text,
@@ -508,7 +510,11 @@ pub fn render_with(
         warnings,
         stats,
         callees,
+    };
+    if opts.names {
+        annotate::annotate(&mut d, project, rom);
     }
+    d
 }
 
 /// Every statement the printed code has, and every expression outside

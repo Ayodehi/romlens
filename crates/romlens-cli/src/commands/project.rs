@@ -82,6 +82,85 @@ pub fn comment(dir: &Path, rom: Option<&Path>, expr: &str, block: bool, text: &s
     })
 }
 
+/// A name for a routine's local in the C (`-` restores Romlens's).
+pub fn local(dir: &Path, rom: Option<&Path>, routine: &str, local: &str, name: &str) -> Result<()> {
+    apply(dir, rom, |r| {
+        Ok(Command::SetLocalName {
+            routine: snes_of(r, routine)?,
+            local: local.to_owned(),
+            name: text_arg(name),
+        })
+    })
+}
+
+/// A note above a routine in the C (`-` removes it).
+pub fn note(dir: &Path, rom: Option<&Path>, routine: &str, text: &str) -> Result<()> {
+    apply(dir, rom, |r| {
+        Ok(Command::SetRoutineNote {
+            routine: snes_of(r, routine)?,
+            text: text_arg(text),
+        })
+    })
+}
+
+/// A comment in the C before an instruction's statement (`-` removes it).
+pub fn ccomment(dir: &Path, rom: Option<&Path>, expr: &str, text: &str) -> Result<()> {
+    apply(dir, rom, |r| {
+        Ok(Command::SetCComment {
+            address: snes_of(r, expr)?,
+            text: text_arg(text),
+        })
+    })
+}
+
+/// A C version of a routine from a file, or removed with `-`. Anchors are
+/// `FIRST-LAST=START-END` (lines from 1, addresses).
+pub fn cversion(
+    dir: &Path,
+    rom: Option<&Path>,
+    routine: &str,
+    name: &str,
+    file: &str,
+    anchors: &[String],
+) -> Result<()> {
+    use romlens_core::model::c_notes::{Anchor, Author, CVersion};
+    let text = match file {
+        "-" => None,
+        f => Some(std::fs::read_to_string(f).with_context(|| format!("reading {f}"))?),
+    };
+    apply(dir, rom, |r| {
+        let mut list = Vec::new();
+        for a in anchors {
+            let (lines, addrs) = a
+                .split_once('=')
+                .ok_or_else(|| anyhow!("anchor {a:?}: write FIRST-LAST=START-END"))?;
+            let (first, last) = lines.split_once('-').unwrap_or((lines, lines));
+            let (start, end) = addrs.split_once('-').unwrap_or((addrs, addrs));
+            list.push(Anchor {
+                first: first
+                    .trim()
+                    .parse()
+                    .with_context(|| format!("anchor {a:?}"))?,
+                last: last
+                    .trim()
+                    .parse()
+                    .with_context(|| format!("anchor {a:?}"))?,
+                start: snes_of(r, start)?,
+                end: snes_of(r, end)?,
+            });
+        }
+        Ok(Command::SetCVersion {
+            routine: snes_of(r, routine)?,
+            name: name.to_owned(),
+            version: text.clone().map(|text| CVersion {
+                text,
+                author: Author::User,
+                anchors: list,
+            }),
+        })
+    })
+}
+
 pub struct MarkArgs<'a> {
     pub dir: &'a Path,
     pub rom: Option<&'a Path>,
