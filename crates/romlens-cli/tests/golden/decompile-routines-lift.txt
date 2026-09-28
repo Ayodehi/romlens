@@ -83,7 +83,7 @@ void SUB_008040(void)
 {
     u32 t1;
 
-    A = (A & 0xFF00) | ADDR_7E0020;
+    LO(A) = ADDR_7E0020;
     N = ((u8)A & 0x80) != 0;
     Z = (u8)A == 0;
     t1 = ADDR_7E0021;
@@ -91,7 +91,7 @@ void SUB_008040(void)
     Z = (u8)A == t1;
     N = (((u8)A - t1) & 0x80) != 0;
     if (C) goto SKIP_008048;
-    A = (A & 0xFF00) | ADDR_7E0021;
+    LO(A) = ADDR_7E0021;
     N = ((u8)A & 0x80) != 0;
     Z = (u8)A == 0;
 
@@ -109,7 +109,7 @@ extern u8 DATA_008070[];
 void SUB_008050(void)
 {
     push8(X);
-    A = (A & 0xFF00) | DATA_008070[X];
+    LO(A) = DATA_008070[X];
     N = ((u8)A & 0x80) != 0;
     Z = (u8)A == 0;
     ADDR_7E0300 = (u8)A;

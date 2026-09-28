@@ -1061,6 +1061,21 @@ impl<'a, 'n> Emitter<'a, 'n> {
                 self.w.w(");");
                 self.w.end(steps);
             }
+            // A byte written to a 16-bit variable, its high byte kept: the
+            // variable is not read, only its low byte set.
+            Stmt::Assign {
+                dst: Place::Var(v),
+                value,
+            } if low_byte_of(*v, value).is_some() => {
+                let e = low_byte_of(*v, value).unwrap();
+                self.w.tok("LO", CTokenKind::Helper, None);
+                self.w.w("(");
+                self.place(&Place::Var(*v));
+                self.w.w(") = ");
+                self.byte(e);
+                self.w.w(";");
+                self.w.end(steps);
+            }
             Stmt::Assign { dst, value } if self.modern && self.compound(dst, value).is_some() => {
                 let (op, rhs) = self.compound(dst, value).unwrap();
                 self.place(dst);
@@ -1080,20 +1095,23 @@ impl<'a, 'n> Emitter<'a, 'n> {
                 self.w.w(";");
                 self.w.end(steps);
             }
+            // Only the low byte changes.
+            Stmt::Assign {
+                dst: Place::Reg(crate::decompile::ir::Reg::A, Width::W8),
+                value,
+            } => {
+                self.w.tok("LO", CTokenKind::Helper, None);
+                self.w.w("(");
+                self.local("A");
+                self.w.w(") = ");
+                self.byte(value);
+                self.w.w(";");
+                self.w.end(steps);
+            }
             Stmt::Assign { dst, value } => {
                 self.place(dst);
                 self.w.w(" = ");
-                if let Place::Reg(crate::decompile::ir::Reg::A, Width::W8) = dst {
-                    // Only the low byte changes.
-                    self.w.w("(");
-                    self.local("A");
-                    self.w.w(" & ");
-                    self.num(0xFF00);
-                    self.w.w(") | ");
-                    self.byte(value);
-                } else {
-                    self.expr(value);
-                }
+                self.expr(value);
                 self.w.w(";");
                 self.w.end(steps);
             }
@@ -1799,4 +1817,22 @@ impl TreeLayout<'_> {
             }
         }
     }
+}
+
+/// `(v & 0xFF00) | e`, either way round: `e`, the byte that becomes `v`'s
+/// low byte (its cast to `u8` taken off).
+fn low_byte_of(v: u32, value: &Expr) -> Option<&Expr> {
+    let high = |x: &Expr| {
+        matches!(x, Expr::Bin(BinOp::And, a, k)
+            if **a == Expr::Var(v) && **k == Expr::Const(0xFF00))
+    };
+    let e = match value {
+        Expr::Bin(BinOp::Or, l, r) if high(l) => r,
+        Expr::Bin(BinOp::Or, l, r) if high(r) => l,
+        _ => return None,
+    };
+    Some(match &**e {
+        Expr::Cast(Width::W8, inner) => inner,
+        other => other,
+    })
 }

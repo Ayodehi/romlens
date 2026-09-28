@@ -44,6 +44,9 @@ extern u8 N, V, Z, C;
 #endif
 /* Store a 24-bit value: C has no 24-bit type. */
 #define SET24(a, v) (MEM16((uintptr_t)(a)) = (u16)(v), MEM8((uintptr_t)(a) + 2) = (u8)((u32)(v) >> 16))
+/* The low byte of a 16-bit variable, set on its own: `LO(a) = 5;` is
+* what an 8-bit load does to A, leaving the high byte as it was. */
+#define LO(v) (*(u8 *)&(v))
 /* A 24-bit value held in a three-byte array. */
 #define LONG(p) ((u32)(p)[0] | (u32)(p)[1] << 8 | (u32)(p)[2] << 16)
 
