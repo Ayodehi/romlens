@@ -42,6 +42,13 @@ pub struct Meta {
     /// The tools last sent (`agent::tools_digest`).
     #[serde(default)]
     pub tools: Option<String>,
+    /// The title is the model's name for the conversation, not the start
+    /// of its first question.
+    #[serde(default)]
+    pub titled: bool,
+    /// What naming it cost, beside the turns.
+    #[serde(default)]
+    pub side_cost: f64,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -84,10 +91,10 @@ pub fn title_for(turns: &[Turn]) -> String {
             })
         })
         .unwrap_or("A conversation");
-    // The selection and mode lines come first in a question; skip them.
+    // What the student typed first: code they pasted comes after, and a
+    // bracketed note to the model before.
     let words = first
         .lines()
-        .rev()
         .find(|l| !l.trim().is_empty() && !l.starts_with('['))
         .unwrap_or(first)
         .trim();
@@ -131,7 +138,7 @@ impl Store {
         std::fs::create_dir_all(dir.join("pictures"))?;
         let meta = Meta {
             id: s.id.clone(),
-            title: title.into(),
+            title: s.title.clone().unwrap_or_else(|| title.into()),
             created,
             updated: now(),
             endpoint: s.endpoint.clone(),
@@ -144,6 +151,8 @@ impl Store {
             system: s.system.clone(),
             digest: s.digest.clone(),
             tools: s.tools_seen.clone(),
+            titled: s.title.is_some(),
+            side_cost: s.side_cost,
         };
         for (id, bytes) in &s.pictures {
             let p = dir.join("pictures").join(id);
@@ -180,6 +189,8 @@ impl Store {
         s.system = meta.system.clone();
         s.digest = meta.digest.clone();
         s.tools_seen = meta.tools.clone();
+        s.title = meta.titled.then(|| meta.title.clone());
+        s.side_cost = meta.side_cost;
         for t in &turns {
             for image in pictures_of(t) {
                 if let Ok(bytes) = std::fs::read(dir.join("pictures").join(&image)) {
@@ -266,7 +277,26 @@ fn pictures_of(t: &Turn) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent::tidy_name;
     use crate::transcript::ImageRef;
+
+    #[test]
+    fn a_name_is_tidied_to_a_title() {
+        assert_eq!(
+            tidy_name("\"Sharing the NMI's tail.\"\n").as_deref(),
+            Some("Sharing the NMI's tail")
+        );
+        assert_eq!(
+            tidy_name("\n**RESET's WRAM routine**").as_deref(),
+            Some("RESET's WRAM routine")
+        );
+        assert_eq!(tidy_name("# Title: x").as_deref(), Some("Title: x"));
+        assert_eq!(tidy_name("  \n"), None);
+        assert_eq!(
+            tidy_name(&"word ".repeat(20)).map(|t| t.chars().count()),
+            Some(48)
+        );
+    }
 
     fn scratch(name: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("romlens-store-{name}-{}", std::process::id()));
@@ -284,8 +314,20 @@ mod tests {
         s.mode = Mode::AcceptEdits;
         s.pictures.insert("shot-1".into(), b"PNG".to_vec());
         s.turns.push(Turn::user(vec![
-            Block::Image { image: ImageRef { id: "shot-1".into(), media_type: "image/png".into() } },
-            Block::Text { text: "[The student's selection in Romlens:]\n$00:8000\n\nWhat does RESET do at the start of the game, in detail please?".into() },
+            Block::Image {
+                image: ImageRef {
+                    id: "shot-1".into(),
+                    media_type: "image/png".into(),
+                },
+            },
+            Block::Text {
+                text: "[The student's selection in Romlens:]\n$00:8000".into(),
+            },
+            Block::Text {
+                text:
+                    "What does RESET do at the start of the game, in detail please?\n```c\n}\n```"
+                        .into(),
+            },
         ]));
         let mut gone = Turn::user_text("rewound");
         gone.sent = false;
@@ -307,6 +349,20 @@ mod tests {
         assert_eq!(m.created, 1000);
         assert_eq!(store.list().len(), 1);
         assert!(store.load("../etc").is_err());
+        assert_eq!(back.title, None, "not named yet");
+
+        // The model's name replaces the question's words, and stays.
+        let mut named = back;
+        named.title = Some("RESET's first steps".into());
+        named.side_cost = 0.002;
+        let meta = store.save(&named, &title, 1000).unwrap();
+        assert_eq!(
+            (meta.title.as_str(), meta.titled),
+            ("RESET's first steps", true)
+        );
+        let (again, _) = store.load(&s.id).unwrap();
+        assert_eq!(again.title.as_deref(), Some("RESET's first steps"));
+        assert!((again.cost() - 0.002).abs() < 1e-9);
         store.delete(&s.id).unwrap();
         assert!(store.list().is_empty());
         let _ = std::fs::remove_dir_all(root);

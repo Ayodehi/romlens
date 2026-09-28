@@ -22,6 +22,15 @@ final class TutorWindowController: NSWindowController, NSWindowDelegate {
         window.delegate = self
         shouldCascadeWindows = false
         if window.frame.origin == .zero { window.center() }
+        showTitle()
+    }
+
+    /// The conversation's name under the window's title, kept up to date.
+    private func showTitle() {
+        let title = withObservationTracking { tutor.title } onChange: { [weak self] in
+            Task { @MainActor in self?.showTitle() }
+        }
+        window?.subtitle = title ?? ""
     }
 
     @available(*, unavailable)

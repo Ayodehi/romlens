@@ -70,6 +70,8 @@ final class TutorModel {
     var includeSelection = true
     var sheet: Sheet?
     private(set) var cost = 0.0
+    /// The conversation's name: the model's, after the first answer.
+    private(set) var title: String?
     private(set) var contextUsed = 0.0
     private(set) var modelName: String?
     private(set) var endpointName: String?
@@ -153,6 +155,7 @@ final class TutorModel {
     func refresh() {
         guard let s = session else { return }
         turns = s.transcript()
+        title = s.title()
         cost = s.cost()
         contextUsed = s.contextUsed()
         modelName = s.model()
@@ -273,6 +276,9 @@ final class TutorModel {
             live?.reasoning = ""
         case .compacted:
             live?.status = "Summarised to make room."
+        case .named(let name, let total):
+            title = name
+            if !busy { cost = total }
         case .ended:
             finish(error: nil)
         case .failed(let message):

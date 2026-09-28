@@ -268,6 +268,7 @@ pub struct Deps<'a> {
 }
 
 /// A conversation in progress.
+#[derive(Clone)]
 pub struct Session {
     pub id: String,
     pub turns: Vec<Turn>,
@@ -294,6 +295,11 @@ pub struct Session {
     /// What the student decided about held edits, told to the model with
     /// the next question.
     decided: Vec<String>,
+    /// The model's short name for the conversation, once it has made one
+    /// (`name`).
+    pub title: Option<String>,
+    /// What requests outside the turns cost: naming the conversation.
+    pub side_cost: f64,
 }
 
 pub const MAX_ROUNDS: u32 = 60;
@@ -303,6 +309,9 @@ pub const COMPACT_AT: f64 = 0.8;
 
 const COMPACT_PROMPT: &str = "Stop here and write a summary of our conversation so far, for yourself to continue from: what the student is trying to learn or do, what you found (with every address, frame and name, cited), what changed in their project, and what is still open. Do not call tools. Write only the summary.";
 const ATTEMPTS: u32 = 4;
+
+/// What naming a conversation asks (`Session::name`).
+pub const NAME_PROMPT: &str = "Name this conversation for the student's list of past conversations: two to four words saying what it is about, such as \"RESET's WRAM routine\" or \"Sharing the NMI's tail\". Do not call tools. Reply with the name alone.";
 
 impl Session {
     pub fn new(id: &str, endpoint: Endpoint, model: &str) -> Session {
@@ -324,6 +333,8 @@ impl Session {
             tools_seen: None,
             held: Vec::new(),
             decided: Vec::new(),
+            title: None,
+            side_cost: 0.0,
         }
     }
 
@@ -332,7 +343,49 @@ impl Session {
     }
 
     pub fn cost(&self) -> f64 {
-        self.turns.iter().map(|t| t.cost).sum()
+        self.turns.iter().map(|t| t.cost).sum::<f64>() + self.side_cost
+    }
+
+    /// Whether the conversation has an answer to name it by.
+    pub fn answered(&self) -> bool {
+        self.turns.iter().any(|t| {
+            t.role == Role::Assistant && t.blocks.iter().any(|b| matches!(b, Block::Text { .. }))
+        })
+    }
+
+    /// A short name for the conversation, from the model, and what asking
+    /// cost. Asked after the conversation so far, the prefix the answers
+    /// used, so it is read from the cache; nothing is shown and the
+    /// conversation is left as it was.
+    pub fn name(&self, d: &Deps) -> Result<(String, f64), AskError> {
+        let key = d.credentials.key(&self.endpoint.id);
+        if key.is_none() && !self.keyless {
+            return Err(AskError::NoKey(self.endpoint.id.clone()));
+        }
+        let quiet = |_: Event| {};
+        let d = Deps {
+            events: &quiet,
+            ..*d
+        };
+        let mut turns = self.turns.clone();
+        close_calls(&mut turns);
+        turns.push(Turn::user_text(NAME_PROMPT));
+        let reply = self.request_turns(&turns, &d.tools.specs(), key.as_deref(), &d)?;
+        let cost = self
+            .caps()
+            .price
+            .map(|p| p.cost(&reply.usage))
+            .unwrap_or(0.0);
+        let text: String = reply
+            .blocks
+            .iter()
+            .filter_map(|b| match b {
+                Block::Text { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        let name = tidy_name(&text).ok_or(AskError::Stream(StreamError::Truncated))?;
+        Ok((name, cost))
     }
 
     /// Asks `question` and runs the loop until the model stops.
@@ -620,7 +673,17 @@ impl Session {
         key: Option<&str>,
         d: &Deps,
     ) -> Result<provider::Reply, AskError> {
-        let sent = sendable(&self.turns);
+        self.request_turns(&self.turns, tools, key, d)
+    }
+
+    fn request_turns(
+        &self,
+        turns: &[Turn],
+        tools: &[ToolSpec],
+        key: Option<&str>,
+        d: &Deps,
+    ) -> Result<provider::Reply, AskError> {
+        let sent = sendable(turns);
         let caps = self.caps();
         let r = Request {
             endpoint: &self.endpoint,
@@ -805,6 +868,47 @@ impl Session {
 pub const HELD: &str = "Proposed. The student sees it as a card when your reply ends, and you will hear what they decided with their next message. Do not call it again; go on with your reply.";
 
 /// A short digest of a tool list.
+/// A reply's last tool calls with no results yet (a card still waiting)
+/// are answered, so the turns can be sent as they are.
+fn close_calls(turns: &mut Vec<Turn>) {
+    let Some(last) = turns.last() else { return };
+    if last.role != Role::Assistant {
+        return;
+    }
+    let results: Vec<Block> = last
+        .tool_calls()
+        .map(|(id, _, _)| Block::ToolResult {
+            id: id.to_owned(),
+            parts: vec![Part::Text {
+                text: "not run".into(),
+            }],
+            is_error: true,
+        })
+        .collect();
+    if !results.is_empty() {
+        turns.push(Turn::user(results));
+    }
+}
+
+/// The model's name as a title: its first line, without quotes, markup or
+/// a closing full stop, and short.
+pub fn tidy_name(text: &str) -> Option<String> {
+    let line = text.lines().map(str::trim).find(|l| !l.is_empty())?;
+    let name = line
+        .trim_start_matches(['#', '*', '-', ' '])
+        .trim_matches(['"', '\'', '*', '`', '“', '”', ' '])
+        .trim_end_matches('.')
+        .trim();
+    if name.is_empty() {
+        return None;
+    }
+    Some(if name.chars().count() > 48 {
+        name.chars().take(47).chain(['…']).collect()
+    } else {
+        name.to_owned()
+    })
+}
+
 pub fn tools_digest(tools: &[ToolSpec]) -> String {
     let bytes = serde_json::to_vec(tools).expect("tools serialise");
     let mut h = 0xcbf2_9ce4_8422_2325u64;

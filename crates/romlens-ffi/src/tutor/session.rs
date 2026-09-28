@@ -206,6 +206,11 @@ pub enum TutorEventInfo {
     Failed {
         message: String,
     },
+    /// The model named the conversation, after its first answer.
+    Named {
+        title: String,
+        total: f64,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
@@ -503,6 +508,9 @@ struct State {
     /// The mode changed since the model was last told.
     mode_changed: bool,
     busy: bool,
+    /// A name that came while a turn had the session: the conversation,
+    /// the name, and what it cost.
+    named: Option<(String, String, f64)>,
 }
 
 #[derive(uniffi::Object)]
@@ -552,7 +560,9 @@ impl TutorSession {
     }
 
     fn save(&self, s: &Session, st: &mut State) {
-        if st.title.is_empty() || st.title == "A conversation" {
+        if let Some(t) = &s.title {
+            st.title = t.clone();
+        } else if st.title.is_empty() || st.title == "A conversation" {
             st.title = title_for(&s.turns);
         }
         let _ = self.store.save(s, &st.title, st.created);
@@ -599,8 +609,17 @@ impl TutorSession {
                 ended: &ended,
             };
             let r = job(&mut s, &me.deps(&keys, &on));
+            // Named once, after the first answer, from a copy: the student
+            // need not wait for it.
+            let namer = (r.is_ok() && s.title.is_none() && s.answered()).then(|| s.clone());
             {
                 let mut st = me.lock();
+                if let Some((id, title, cost)) = st.named.take()
+                    && id == s.id
+                {
+                    s.title = Some(title);
+                    s.side_cost += cost;
+                }
                 me.save(&s, &mut st);
                 st.last = s.turns.clone();
                 st.session = Some(s);
@@ -617,8 +636,53 @@ impl TutorSession {
                     }));
                 }
             }
+            if let Some(n) = namer {
+                me.name(&n, &keys);
+            }
         });
         Ok(())
+    }
+
+    /// Asks the model to name the conversation `n` is a copy of, and keeps
+    /// the name: in the session if it is back, else for when it is. A
+    /// failure keeps the first question's words.
+    fn name(self: &Arc<Self>, n: &Session, keys: &Keys) {
+        let quiet = |_: agent::Event| {};
+        let Ok((title, cost)) = n.name(&self.deps(keys, &quiet)) else {
+            return;
+        };
+        let total = {
+            let mut st = self.lock();
+            let busy = st.busy;
+            match st.session.as_mut() {
+                Some(s) if s.id == n.id => {
+                    s.title = Some(title.clone());
+                    s.side_cost += cost;
+                    let s = s.clone();
+                    self.save(&s, &mut st);
+                    s.cost()
+                }
+                // Another conversation is open now: its file only.
+                Some(_) => {
+                    let mut s = n.clone();
+                    s.title = Some(title.clone());
+                    s.side_cost += cost;
+                    let _ = self.store.save(
+                        &s,
+                        &title,
+                        self.store.meta(&s.id).map(|m| m.created).unwrap_or(0),
+                    );
+                    return;
+                }
+                None if busy => {
+                    st.named = Some((n.id.clone(), title.clone(), cost));
+                    n.cost() + cost
+                }
+                None => return,
+            }
+        };
+        self.listener
+            .on_event(TutorEventInfo::Named { title, total });
     }
 }
 
@@ -653,6 +717,7 @@ impl TutorSession {
                 created: 0,
                 mode_changed: false,
                 busy: false,
+                named: None,
             }),
         })
     }
@@ -736,6 +801,14 @@ impl TutorSession {
     pub fn conversation_id(&self) -> Option<String> {
         let st = self.lock();
         st.session.as_ref().map(|s| s.id.clone())
+    }
+
+    /// The open conversation's title: the model's name for it once made,
+    /// else its first question's words; `None` before the first question.
+    pub fn title(&self) -> Option<String> {
+        let st = self.lock();
+        let named = st.session.as_ref().and_then(|s| s.title.clone());
+        named.or_else(|| (!st.title.is_empty()).then(|| st.title.clone()))
     }
 
     /// Every turn, the ones not sent too (rewound or compacted).
@@ -1012,14 +1085,22 @@ impl TutorSession {
 
 /// For shell tests: a server on the loopback that answers each request with
 /// the next of `replies` (Chat Completions streams), one connection each.
+/// A request to name the conversation (`agent::NAME_PROMPT`) is answered
+/// "Test conversation" without taking a reply, then and after the last.
 /// Returns its base URL. Nothing leaves the machine.
 #[uniffi::export]
 pub fn tutor_test_server(replies: Vec<String>) -> String {
     use std::io::{BufRead, BufReader, Read, Write};
     let l = std::net::TcpListener::bind("127.0.0.1:0").expect("a loopback port");
     let url = format!("http://{}/v1", l.local_addr().expect("bound"));
+    let naming = agent::NAME_PROMPT
+        .split(':')
+        .next()
+        .unwrap_or_default()
+        .to_owned();
     std::thread::spawn(move || {
-        for body in replies {
+        let mut replies = std::collections::VecDeque::from(replies);
+        loop {
             let Ok((s, _)) = l.accept() else { return };
             let Ok(clone) = s.try_clone() else { return };
             let mut r = BufReader::new(clone);
@@ -1038,6 +1119,14 @@ pub fn tutor_test_server(replies: Vec<String>) -> String {
             }
             let mut b = vec![0; len];
             let _ = r.read_exact(&mut b);
+            let body = if String::from_utf8_lossy(&b).contains(&naming) {
+                tutor_test_text_reply("\"Test conversation.\"".into())
+            } else if let Some(next) = replies.pop_front() {
+                next
+            } else {
+                // Out of replies: the connection closes unanswered.
+                continue;
+            };
             let mut s = s;
             let _ = write!(
                 s,
@@ -1185,7 +1274,7 @@ mod tests {
         .unwrap();
         Arc::clone(&t)
             .send(
-                "What does RESET do?".into(),
+                "What does RESET do?\n```c\n}\n```".into(),
                 Vec::new(),
                 Some("$00:8000 SEI".into()),
             )
@@ -1207,6 +1296,11 @@ mod tests {
         );
         assert_eq!(text, "Let me look.RESET at `$00:8000` masks interrupts.");
         assert_eq!(tools, [("listing".to_owned(), false)]);
+        let named = rx.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
+        assert!(
+            matches!(&named, TutorEventInfo::Named { title, .. } if title == "Test conversation"),
+            "{named:?}"
+        );
         let turns = t.transcript();
         assert_eq!(turns.len(), 4);
         assert!(
@@ -1226,13 +1320,24 @@ mod tests {
         );
         let list = again.conversations();
         assert_eq!(list.len(), 1);
-        assert_eq!(list[0].title, "What does RESET do?");
+        assert_eq!(list[0].title, "Test conversation");
         assert_eq!(again.resume(list[0].id.clone()).unwrap().len(), 4);
-        assert_eq!(again.prompt_history(10), ["What does RESET do?"]);
+        assert_eq!(
+            again.conversations()[0].title,
+            "Test conversation",
+            "kept on resume"
+        );
+        assert_eq!(
+            again.prompt_history(10),
+            ["What does RESET do?\n```c\n}\n```"]
+        );
         let points = again.rewind_points();
         assert_eq!(points.len(), 1);
         let r = again.rewind(points[0].index, RewindWhat::Both).unwrap();
-        assert_eq!(r.prompt.as_deref(), Some("What does RESET do?"));
+        assert_eq!(
+            r.prompt.as_deref(),
+            Some("What does RESET do?\n```c\n}\n```")
+        );
         assert!(again.transcript().iter().take(4).all(|t| !t.sent));
         let _ = std::fs::remove_dir_all(root);
     }

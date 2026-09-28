@@ -494,6 +494,12 @@ struct StatusLine: View {
             }
             Text(String(format: "$%.3f", tutor.cost)).help("What this conversation has cost")
             Spacer()
+            Button { tutor.sheet = .resume } label: {
+                Label("Conversations", systemImage: "clock.arrow.circlepath")
+            }
+            .buttonStyle(.plain)
+            .disabled(tutor.busy)
+            .help("Go back to an earlier conversation (/resume)")
             Button { tutor.settings.showWork.toggle() } label: {
                 Label("Details", systemImage: tutor.settings.showWork ? "list.bullet.rectangle.fill" : "list.bullet.rectangle")
             }

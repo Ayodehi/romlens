@@ -72,6 +72,12 @@ import Testing
         // It was saved: the conversation lists and the rewind points hold it.
         #expect(r.tutor.conversations.count == 1)
         #expect(r.tutor.session?.rewindPoints().count == 1)
+
+        // After the answer the model names it, for the list and the window.
+        try await Fixture.settle(timeout: 10) { r.tutor.title == "Test conversation" }
+        #expect(r.tutor.conversations.first?.title == "Test conversation")
+        let window = TutorWindowController(tutor: r.tutor, title: "t.sfc")
+        #expect(window.window?.subtitle == "Test conversation")
     }
 
     @Test func anEditWaitsForItsCardAndUndoes() async throws {

@@ -2,25 +2,41 @@ import AppKit
 import RomlensKit
 import SwiftUI
 
-/// `/resume`: the project's conversations, latest first.
+/// `/resume`: the project's conversations, latest first, each by the name
+/// the model gave it after its first answer.
 struct ResumeSheet: View {
     let tutor: TutorModel
     @Environment(\.dismiss) private var dismiss
     @State private var list: [ConversationSummaryInfo] = []
     @State private var selection: String?
 
+    private var open: String? { tutor.session?.conversationId() }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Resume a conversation").font(.headline)
+            Text("Conversations").font(.headline)
             List(list, id: \.id, selection: $selection) { c in
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(c.title).lineLimit(1)
-                    Text("\(Self.date(c.updated)) · \(c.model) · \(c.turns) turns · \(String(format: "$%.3f", c.cost))")
+                    HStack {
+                        Text(c.title).lineLimit(1)
+                        if c.id == open {
+                            Text("open").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    Text("\(Self.date(c.updated)) · \(c.model) · \(String(format: "$%.3f", c.cost))")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 .tag(c.id)
             }
+            .contextMenu(forSelectionType: String.self) { _ in } primaryAction: { ids in
+                if let id = ids.first { resume(id) }
+            }
             .frame(minHeight: 240)
+            .overlay {
+                if list.isEmpty {
+                    Text("No conversations about this ROM yet.").foregroundStyle(.secondary)
+                }
+            }
             HStack {
                 Button("Delete", role: .destructive) {
                     if let id = selection {
@@ -30,12 +46,16 @@ struct ResumeSheet: View {
                         } catch { tutor.error = TutorModel.message(error) }
                     }
                 }
-                .disabled(selection == nil || selection == tutor.session?.conversationId())
+                .disabled(selection == nil || selection == open)
+                Button("New Conversation") {
+                    tutor.newConversation()
+                    dismiss()
+                }
+                .disabled(tutor.busy)
                 Spacer()
                 Button("Cancel", role: .cancel) { dismiss() }
                 Button("Resume") {
-                    if let id = selection { tutor.resume(id) }
-                    dismiss()
+                    if let id = selection { resume(id) }
                 }
                 .keyboardShortcut(.defaultAction)
                 .disabled(selection == nil || tutor.busy)
@@ -43,7 +63,16 @@ struct ResumeSheet: View {
         }
         .padding(16)
         .frame(width: 480)
-        .onAppear { list = tutor.conversations }
+        .onAppear {
+            list = tutor.conversations
+            selection = open ?? list.first?.id
+        }
+    }
+
+    private func resume(_ id: String) {
+        guard !tutor.busy else { return }
+        if id != open { tutor.resume(id) }
+        dismiss()
     }
 
     static func date(_ seconds: UInt64) -> String {
