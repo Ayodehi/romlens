@@ -234,6 +234,7 @@ final class CFoldGutter: NSRulerView {
         super.init(scrollView: scrollView, orientation: .verticalRuler)
         clientView = textView
         ruleThickness = 14
+        clipsToBounds = true
         reservedThicknessForMarkers = 0
         reservedThicknessForAccessoryView = 0
         setAccessibilityIdentifier("c-folds")
@@ -270,9 +271,12 @@ final class CFoldGutter: NSRulerView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
+        // Views need not clip to their bounds (macOS 14): the dirty rect
+        // can reach over the text beside the gutter.
+        let rect = dirtyRect.intersection(bounds)
         NSColor.textBackgroundColor.setFill()
-        dirtyRect.fill()
-        drawHashMarksAndLabels(in: dirtyRect)
+        rect.fill()
+        drawHashMarksAndLabels(in: rect)
     }
 
     override func drawHashMarksAndLabels(in rect: NSRect) {
