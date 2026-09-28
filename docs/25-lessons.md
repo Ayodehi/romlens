@@ -8,7 +8,7 @@ that tracks progress against it.
 | Task | State |
 |---|---|
 | L0 this document, the pointers from `06` and `24`, the checklist rows | planned |
-| L1 the lesson format, the concept map and the learner record, in `romlens-tutor` | planned |
+| L1 the lesson format, the concept map and the learner record, in `romlens-tutor` | done, 28 September 2026: `romlens_tutor::lesson`: `Lesson`, `Step` (title, a predict question, the body, a `Focus` of an address range, a routine at an instruction, a frame in one of the Graphics views, or a register, and a picture), `Offer`; the ladder's five levels; `CONCEPTS`, 46 concepts in five groups, each with what it rests on and a line in our own words, checked for missing and circular needs; `LessonStore` in `<root>/Learner/` (lessons whole, with their pictures, and `learner.json` for the concepts marked known). How far the student has got (`Learner`) is worked out from the finished lessons and the marks each time, so a lesson not ended counts for nothing, a later lower level never lowers one, and deleting a lesson takes back what it taught |
 | L2 the lesson tools, Explain mode's prompt, the learner summary in the prefix | planned |
 | L3 the store, `romlens tutor lessons` and `lesson show` | planned |
 | L4 FFI: lessons, steps and the learner record for the shell | planned |

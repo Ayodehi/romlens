@@ -105,13 +105,13 @@ pub fn title_for(turns: &[Turn]) -> String {
     }
 }
 
-fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let tmp = path.with_extension("tmp");
     std::fs::write(&tmp, bytes)?;
     std::fs::rename(tmp, path)
 }
 
-fn safe(id: &str) -> bool {
+pub(crate) fn safe(id: &str) -> bool {
     !id.is_empty()
         && id
             .chars()
