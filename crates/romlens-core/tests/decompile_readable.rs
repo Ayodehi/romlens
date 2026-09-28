@@ -164,3 +164,38 @@ fn a_test_names_only_the_instructions_it_shows() {
         d.text
     );
 }
+
+/// Two branches share one `JSR` as their tail, the way games save bytes
+/// (Super Mario World's NMI does it three times):
+///
+/// ```text
+/// $8020  SEP #$20
+/// $8022  LDA $10 / BNE $8030
+/// $8026  JSR $8060 / LDA $12 / LSR A
+/// $802C  BCS $8036            ; skips the shared call
+/// $802E  BRA $8033
+/// $8030  JSR $8070            ; falls into it
+/// $8033  JSR $8080            ; the shared tail
+/// $8036  RTI
+/// ```
+///
+/// The C repeats the one call in each branch rather than jump to it.
+#[test]
+fn a_shared_call_is_repeated_not_jumped_to() {
+    let mut code = vec![0u8; 0x90];
+    code[..fixtures::BOOT_CODE.len()].copy_from_slice(&fixtures::BOOT_CODE);
+    code[0x20..0x37].copy_from_slice(&[
+        0xE2, 0x20, 0xA5, 0x10, 0xD0, 0x0A, 0x20, 0x60, 0x80, 0xA5, 0x12, 0x4A, 0xB0, 0x08, 0x80,
+        0x03, 0x20, 0x70, 0x80, 0x20, 0x80, 0x80, 0x40,
+    ]);
+    for at in [0x60, 0x70, 0x80] {
+        code[at] = 0x60; // RTS
+    }
+    let mut vectors = fixtures::DEFAULT_VECTORS;
+    vectors[3] = 0x8020;
+    let bytes = fixtures::build_custom(MappingMode::LoRom, 0x8000, false, &code, "TAIL", vectors);
+    let rom = RomImage::from_bytes(bytes, "t.sfc").unwrap();
+    let text = c(&Project::new(&rom), &rom);
+    assert!(!text.contains("goto"), "{text}");
+    assert_eq!(text.matches("SUB_008080();").count(), 2, "{text}");
+}

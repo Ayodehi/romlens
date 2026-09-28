@@ -9,7 +9,9 @@
 //! post-dominator, and a branch whose other way is only another test (the
 //! `BEQ`, `BEQ` of two checks for one outcome) becomes one `if` with `&&`
 //! or `||`. A block reached a second time, which the structure could
-//! not place, is a `goto` to its label. Iterative where it matters: the
+//! not place, is a `goto` to its label, unless it is a small shared tail
+//! (a `JSR` or an epilogue that goes on where the arm goes anyway), which
+//! is repeated in place. Iterative where it matters: the
 //! recursion is bounded by nesting depth, not by the routine's length.
 
 use std::collections::BTreeSet;
@@ -80,6 +82,10 @@ pub enum Node {
 
 /// Recursion limit for nesting; deeper structure falls back to gotos.
 const MAX_DEPTH: usize = 64;
+
+/// The most statements a shared tail may have for the C to repeat it
+/// instead of jumping to it.
+const TAIL_LINES: usize = 3;
 
 #[derive(Clone, Copy)]
 struct Ctx<'l> {
@@ -153,7 +159,14 @@ impl<'a> Structurer<'a> {
 
     /// Control to `t` from `from`: a `continue`, `break`, exit or goto if it
     /// cannot be emitted in place; `None` to go on emitting `t`.
-    fn jump(&mut self, t: BlockId, from: BlockId, ctx: Ctx, out: &mut Vec<Node>) -> Option<()> {
+    fn jump(
+        &mut self,
+        t: BlockId,
+        from: BlockId,
+        stop: Option<BlockId>,
+        ctx: Ctx,
+        out: &mut Vec<Node>,
+    ) -> Option<()> {
         if let Some((l, follow)) = ctx.lp {
             // `continue` means the loop even inside a switch; `break` would
             // leave the switch, so there it is a goto.
@@ -176,11 +189,43 @@ impl<'a> Structurer<'a> {
             return Some(());
         }
         if self.visited.contains(&t) {
-            self.gotos.insert(t);
-            out.push(Node::Goto(t, from));
+            if !self.copy_tail(t, stop, ctx, out) {
+                self.gotos.insert(t);
+                out.push(Node::Goto(t, from));
+            }
             return Some(());
         }
         None
+    }
+
+    /// A small block reached again whose way on is where this arm goes
+    /// anyway: the join, the loop's head or follow, or out of the routine.
+    /// The 65816 shares one `JSR` or epilogue between branches to save
+    /// bytes; the C repeats it instead of jumping to it. The copy takes no
+    /// label.
+    fn copy_tail(&self, t: BlockId, stop: Option<BlockId>, ctx: Ctx, out: &mut Vec<Node>) -> bool {
+        let n = self.blocks[t].lines.len();
+        if n > TAIL_LINES
+            || self.loop_of(t).is_some()
+            || self.innermost(t).map(|l| l.header) != ctx.lp.map(|(l, _)| l.header)
+        {
+            return false;
+        }
+        let then = match self.cfg.blocks[t].term {
+            Term::Fall(s) | Term::Goto(s) if Some(s) == stop => None,
+            Term::Fall(s) | Term::Goto(s) => match ctx.lp {
+                Some((l, _)) if s == l.header => Some(Node::Continue(t)),
+                Some((_, follow)) if Some(s) == follow && !ctx.in_switch => Some(Node::Break(t)),
+                _ => return false,
+            },
+            Term::Return | Term::Halt | Term::Tail(_) => Some(Node::Exit(t, t)),
+            _ => return false,
+        };
+        if n > 0 {
+            out.push(Node::Lines(t, 0, n, false));
+        }
+        out.extend(then);
+        true
     }
 
     /// Emit from `b` until `stop`.
@@ -207,7 +252,7 @@ impl<'a> Structurer<'a> {
         mut body_start: bool,
     ) {
         if ctx.depth > MAX_DEPTH {
-            if Some(b) != stop && self.jump(b, from, ctx, out).is_none() {
+            if Some(b) != stop && self.jump(b, from, stop, ctx, out).is_none() {
                 self.gotos.insert(b);
                 out.push(Node::Goto(b, from));
             }
@@ -218,7 +263,7 @@ impl<'a> Structurer<'a> {
                 if Some(b) == stop {
                     return;
                 }
-                if self.jump(b, from, ctx, out).is_some() {
+                if self.jump(b, from, stop, ctx, out).is_some() {
                     return;
                 }
                 // A loop header not yet entered starts its loop.
