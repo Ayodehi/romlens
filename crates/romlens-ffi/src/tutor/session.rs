@@ -91,6 +91,149 @@ pub struct ConversationSummaryInfo {
     pub turns: u32,
 }
 
+/// A lesson for the window (docs/25).
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct LessonInfo {
+    pub id: String,
+    pub title: String,
+    /// The ROM it used (levels 3 to 5), and whether that is the one open.
+    pub rom: Option<String>,
+    pub this_rom: bool,
+    pub created: u64,
+    pub from_level: u8,
+    pub to_level: u8,
+    /// "The idea", or "The idea to the hardware".
+    pub level_name: String,
+    pub concepts: Vec<LessonConceptInfo>,
+    pub builds_on: Vec<String>,
+    pub steps: Vec<LessonStepInfo>,
+    pub next: Vec<LessonOfferInfo>,
+    /// Ended with `end_lesson`; `false` while it is being written.
+    pub finished: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct LessonConceptInfo {
+    pub id: String,
+    pub name: String,
+    pub level: u8,
+}
+
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct LessonStepInfo {
+    pub title: String,
+    pub predict: Option<String>,
+    pub body: String,
+    /// Where the main window goes: `romlens://a/<addr>`, `romlens://c/<addr>`
+    /// (the routine's C), `romlens://f/<n>?view=<view>`, or
+    /// `romlens://r/<register>`.
+    pub focus: Option<String>,
+    /// The focus in words: `$00:8000`, `frame 12, oam`.
+    pub focus_text: Option<String>,
+    pub picture: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct LessonOfferInfo {
+    pub title: String,
+    pub concept: String,
+    pub level: u8,
+}
+
+/// What the student knows, concept by concept, for the map.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct LearnerInfo {
+    pub concepts: Vec<ConceptInfo>,
+    /// The groups in order, and the ladder's level names.
+    pub groups: Vec<String>,
+    pub levels: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct ConceptInfo {
+    pub id: String,
+    pub name: String,
+    pub group: String,
+    pub needs: Vec<String>,
+    pub line: String,
+    /// 0 when not reached.
+    pub level: u8,
+    pub marked: bool,
+    pub lesson: Option<String>,
+}
+
+fn focus_url(f: &romlens_tutor::lesson::Focus) -> String {
+    use romlens_tutor::lesson::Focus;
+    match f {
+        Focus::Address { start, .. } => format!("romlens://a/{start:06X}"),
+        Focus::Routine { at, .. } => format!("romlens://c/{at:06X}"),
+        Focus::Frame { n, view } => format!("romlens://f/{n}?view={view}"),
+        Focus::Register { address } => format!("romlens://r/{address:06X}"),
+    }
+}
+
+fn lesson_info(l: &romlens_tutor::lesson::Lesson, rom: &str) -> LessonInfo {
+    use romlens_tutor::lesson::{concept, level_name};
+    LessonInfo {
+        id: l.id.clone(),
+        title: l.title.clone(),
+        rom: l.rom.clone(),
+        this_rom: l.rom.as_deref().is_none_or(|r| r == rom),
+        created: l.created,
+        from_level: l.levels.0,
+        to_level: l.levels.1,
+        level_name: if l.levels.0 == l.levels.1 {
+            level_name(l.levels.0).to_owned()
+        } else {
+            format!(
+                "{} to {}",
+                level_name(l.levels.0),
+                level_name(l.levels.1).to_lowercase()
+            )
+        },
+        concepts: l
+            .concepts
+            .iter()
+            .map(|(id, level)| LessonConceptInfo {
+                id: id.clone(),
+                name: concept(id).map_or(id.clone(), |c| c.name.to_owned()),
+                level: *level,
+            })
+            .collect(),
+        builds_on: l.builds_on.clone(),
+        steps: l
+            .steps
+            .iter()
+            .map(|s| LessonStepInfo {
+                title: s.title.clone(),
+                predict: s.predict.clone(),
+                body: s.body.clone(),
+                focus: s.focus.as_ref().map(focus_url),
+                focus_text: s.focus.as_ref().map(|f| f.text()),
+                picture: s.picture.clone(),
+            })
+            .collect(),
+        next: l
+            .next
+            .iter()
+            .map(|o| LessonOfferInfo {
+                title: o.title.clone(),
+                concept: o.concept.clone(),
+                level: o.level,
+            })
+            .collect(),
+        finished: l.finished,
+    }
+}
+
+/// The lesson a `begin_lesson` result names: "Lesson l… begun (…)".
+#[uniffi::export]
+pub fn lesson_id_from_result(text: String) -> Option<String> {
+    let rest = text.trim().strip_prefix("Lesson ")?;
+    let id = rest.split_whitespace().next()?;
+    (id.starts_with('l') && id.contains('-')).then(|| id.to_owned())
+}
+
 #[derive(Debug, Clone, PartialEq, uniffi::Enum)]
 pub enum TurnBlockInfo {
     Text {
@@ -987,6 +1130,86 @@ impl TutorSession {
         self.lock().session.as_ref().is_some_and(|s| s.explain)
     }
 
+    /// A lesson, finished or still being written.
+    pub fn lesson(&self, id: String) -> Option<LessonInfo> {
+        let rom = self.wb.rom_identity().sha256;
+        self.tools
+            .lessons
+            .open_lesson(&id)
+            .or_else(|| self.tools.lessons.store()?.load(&id).ok())
+            .map(|l| lesson_info(&l, &rom))
+    }
+
+    /// Every lesson, the latest first.
+    pub fn lessons(&self) -> Vec<LessonInfo> {
+        let rom = self.wb.rom_identity().sha256;
+        self.tools
+            .lessons
+            .store()
+            .map(|s| s.list().iter().map(|l| lesson_info(l, &rom)).collect())
+            .unwrap_or_default()
+    }
+
+    /// A picture a lesson's step shows: kept with the lesson, or still in
+    /// the conversation while it is written.
+    pub fn lesson_picture(&self, lesson: String, picture: String) -> Option<Vec<u8>> {
+        self.tools
+            .lessons
+            .store()
+            .and_then(|s| s.picture(&lesson, &picture))
+            .or_else(|| self.picture(picture))
+    }
+
+    pub fn delete_lesson(&self, id: String) -> Result<(), RomlensError> {
+        let store = self
+            .tools
+            .lessons
+            .store()
+            .ok_or_else(|| err("no lessons here"))?;
+        store.delete(&id).map_err(err)
+    }
+
+    /// What the student knows, every concept on the map.
+    pub fn learner(&self) -> LearnerInfo {
+        use romlens_tutor::lesson::{CONCEPTS, Group, LEVELS};
+        let l = self
+            .tools
+            .lessons
+            .store()
+            .map(|s| s.learner())
+            .unwrap_or_default();
+        LearnerInfo {
+            concepts: CONCEPTS
+                .iter()
+                .map(|c| {
+                    let r = l.concepts.get(c.id);
+                    ConceptInfo {
+                        id: c.id.into(),
+                        name: c.name.into(),
+                        group: c.group.name().into(),
+                        needs: c.needs.iter().map(|n| (*n).to_owned()).collect(),
+                        line: c.line.into(),
+                        level: r.map_or(0, |r| r.level),
+                        marked: r.is_some_and(|r| r.marked),
+                        lesson: r.and_then(|r| r.lesson.clone()),
+                    }
+                })
+                .collect(),
+            groups: Group::ALL.iter().map(|g| g.name().to_owned()).collect(),
+            levels: LEVELS.iter().map(|l| (*l).to_owned()).collect(),
+        }
+    }
+
+    /// Marks a concept known at a level (1 to 5), or clears the mark.
+    pub fn mark_known(&self, concept: String, level: Option<u8>) -> Result<(), RomlensError> {
+        let store = self
+            .tools
+            .lessons
+            .store()
+            .ok_or_else(|| err("no lessons here"))?;
+        store.mark_known(&concept, level).map_err(err)
+    }
+
     pub fn mode(&self) -> TutorMode {
         let st = self.lock();
         mode_info(
@@ -1363,6 +1586,36 @@ mod tests {
         assert!(lessons[0].finished && lessons[0].steps.len() == 1);
         assert_eq!(lessons[0].next[0].concept, "oam");
         assert_eq!(store.learner().level("sprites"), 2);
+        // For the window: the lesson, the record, the mark.
+        let begun = turns
+            .iter()
+            .flat_map(|t| &t.blocks)
+            .find_map(|b| match b {
+                TurnBlockInfo::ToolResult { text, .. } => lesson_id_from_result(text.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let info = t.lesson(begun.clone()).unwrap();
+        assert_eq!(info.id, lessons[0].id);
+        assert_eq!(info.level_name, "The idea to the hardware");
+        assert_eq!(info.steps[0].predict.as_deref(), Some("Which chip draws?"));
+        assert!(info.finished && info.this_rom);
+        assert_eq!(t.lessons().len(), 1);
+        let learner = t.learner();
+        let sprites = learner.concepts.iter().find(|c| c.id == "sprites").unwrap();
+        assert_eq!(
+            (sprites.level, sprites.lesson.as_deref()),
+            (2, Some(begun.as_str()))
+        );
+        assert_eq!(learner.levels[0], "The idea");
+        t.mark_known("dma".into(), Some(2)).unwrap();
+        assert!(
+            t.learner()
+                .concepts
+                .iter()
+                .any(|c| c.id == "dma" && c.marked && c.level == 2)
+        );
+        assert!(t.mark_known("nope".into(), Some(2)).is_err());
         // A new conversation starts from it.
         t.new_conversation(local, "qwen3".into(), None, TutorMode::ReadOnly, None)
             .unwrap();
