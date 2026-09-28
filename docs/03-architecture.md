@@ -267,7 +267,20 @@ Deltas from Phase 1 ("Disassemble", 21 September 2026):
   every sizeable operand so reassembly is byte-exact without flag tracking,
   uses labels only where they equal the resolved operand exactly, keeps
   hardware registers numeric with the name as a comment, and defines RAM
-  labels as `NAME = $xxxxxx`.
+  labels as `NAME = $xxxxxx`. What asar itself does decides four more
+  (measured against asar 1.91, 28 September 2026, when the first run of the
+  real asar over six games failed on five): a label no line starts at (a
+  table based on the last byte of a `JMP`, or outside `--range`) is defined
+  by value too, only if the listing names it; a number after a branch is
+  asar's displacement, not a target, so a branch to no label is written as
+  its displacement with the target in a comment; a branch that reaches its
+  target only by the program counter wrapping in the bank (Chrono Trigger's
+  `BRL`s) goes as `db` bytes; and `MVN`/`MVP` take their operands in byte
+  order, destination bank first. `romlens export asm --check` runs asar on
+  the listing (checksum fixing off) and compares it with the ROM: Super Mario
+  World, ActRaiser, F-Zero, Chrono Trigger, Secret of Mana and Final Fantasy
+  III (12 MB) and every fixture are byte-exact; `tests/asar.rs` runs it on
+  the fixtures where asar is on the PATH.
 - Selection, jump history and the hex ↔ asm lockstep live in the Swift view
   model in Phase 1; the core provides `line_for_offset`,
   `line_numbers_for_bytes` and `item_range` so a later move into the core is
@@ -457,7 +470,9 @@ asking the user.
 
 - Decoder table tested exhaustively against a generated oracle (all opcodes,
   both M and X states, emulation mode) and against asar's assembler output
-  for round-trips.
+  for round-trips: the test suite's own small assembler follows asar where
+  they could differ, and `crates/romlens-cli/tests/asar.rs` runs the real
+  one when it is installed.
 - Mapping tested with known addresses from public docs (fullsnes, SNESdev
   wiki) for LoROM, HiROM, ExHiROM, plus mirror equivalence.
 - Tile decoder tested against hand-built tiles in all three depths and

@@ -58,25 +58,32 @@ fn operand_for(
         };
         return (mode, sized(v));
     }
+    // As asar does it (measured against asar 1.91): a block move's operands
+    // in the order of its bytes, destination bank first; and a number after
+    // a branch is the displacement, where a label is the target.
     if matches!(mnemonic, Mnemonic::MVN | Mnemonic::MVP) {
         let (a, b) = t.split_once(',').unwrap();
         return (
             BlockMove,
             Operand::Move {
-                src: val(a) as u8,
-                dst: val(b) as u8,
+                dst: val(a) as u8,
+                src: val(b) as u8,
             },
         );
     }
+    let relative = |pc_next: u32| {
+        let v = val(t);
+        if t.starts_with('$') {
+            v as i32
+        } else {
+            (v as i32 & 0xFFFF) - (pc_next as i32 & 0xFFFF)
+        }
+    };
     if mnemonic.is_branch() || mnemonic == Mnemonic::BRA {
-        let target = val(t);
-        let disp = (target as i32 & 0xFFFF) - (pc_next as i32 & 0xFFFF);
-        return (Relative8, Operand::Byte(disp as i8 as u8));
+        return (Relative8, Operand::Byte(relative(pc_next) as i8 as u8));
     }
     if matches!(mnemonic, Mnemonic::BRL | Mnemonic::PER) {
-        let target = val(t);
-        let disp = (target as i32 & 0xFFFF) - (pc_next as i32 & 0xFFFF);
-        return (Relative16, Operand::Word(disp as i16 as u16));
+        return (Relative16, Operand::Word(relative(pc_next) as i16 as u16));
     }
     if let Some(inner) = t.strip_prefix('(').and_then(|s| s.strip_suffix(",S),Y")) {
         return (
@@ -300,7 +307,10 @@ fn every_opcode_reassembles_through_asar_syntax() {
         pos += insn.len as u32;
     }
     assert!(listing.contains("  LDA.w #$3412\n"), "{listing}");
-    assert!(listing.contains("  MVN $34,$12\n"));
+    assert!(
+        listing.contains("  MVN $12,$34  ; from bank $34 to bank $12\n"),
+        "{listing}"
+    );
     assert!(listing.contains("  ASL A\n"));
     assert!(listing.contains("  JML.l $563412\n"));
     assert!(listing.contains("  LDA.b ($12,S),Y\n"));
@@ -432,4 +442,41 @@ fn ranges_start_and_end_anywhere() {
     let listing = check_exact(&rom, &project, Some((3, 0x7FF0)));
     assert!(listing.starts_with("; Romlens export"));
     assert!(listing.contains("org $008003"));
+}
+
+/// A table read through an index that is never 0 can have its base inside
+/// the instruction before it, as Super Mario World's `LDA $9450,X` does
+/// (`$9450` is the last byte of a `JMP`). No line starts there, so the
+/// label is defined by value, and the operand keeps its name.
+///
+/// ```text
+/// $8020  LDA $8025,X / JMP $8030     ; $8025 is the JMP's high byte
+/// $8030  BRA $8030
+/// ```
+#[test]
+fn a_label_inside_an_instruction_is_defined_by_value() {
+    let mut code = vec![0u8; 0x40];
+    code[..fixtures::BOOT_CODE.len()].copy_from_slice(&fixtures::BOOT_CODE);
+    code[0x20..0x26].copy_from_slice(&[0xBD, 0x25, 0x80, 0x4C, 0x30, 0x80]);
+    code[0x30..0x32].copy_from_slice(&[0x80, 0xFE]);
+    let mut vectors = fixtures::DEFAULT_VECTORS;
+    vectors[3] = 0x8020; // native NMI
+    let rom = RomImage::from_bytes(
+        fixtures::build_custom(MappingMode::LoRom, 0x8000, false, &code, "INSIDE", vectors),
+        "i.sfc",
+    )
+    .unwrap();
+    let mut project = Project::new(&rom);
+    project
+        .apply(
+            &rom,
+            Command::SetLabel {
+                address: SnesAddress::new(0, 0x8025),
+                name: Some("TableBase".into()),
+            },
+        )
+        .unwrap();
+    let listing = check_exact(&rom, &project, None);
+    assert!(listing.contains("LDA.w TableBase,X"), "{listing}");
+    assert!(listing.contains("TableBase = $008025"), "{listing}");
 }

@@ -1054,6 +1054,10 @@ enum ExportCommand {
         /// start..end address expressions (end exclusive).
         #[arg(long)]
         range: Option<String>,
+        /// Assemble the listing with asar (on the PATH) and compare what it
+        /// makes with the ROM, byte for byte.
+        #[arg(long)]
+        check: bool,
     },
     /// bsnes-plus style symbol file (labels and comments only).
     Sym {
@@ -1579,7 +1583,8 @@ fn run() -> Result<()> {
                 out,
                 project,
                 range,
-            } => commands::export::asm(&rom, &out, project.as_deref(), range.as_deref()),
+                check,
+            } => commands::export::asm(&rom, &out, project.as_deref(), range.as_deref(), check),
             ExportCommand::Sym {
                 rom,
                 out,
