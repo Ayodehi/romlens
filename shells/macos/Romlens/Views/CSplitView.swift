@@ -93,8 +93,14 @@ final class CPaneController: NSObject, NSTextViewDelegate {
     )
     private let scrollView: NSScrollView
     let textView: CTextView
+    /// Which blocks are folded (the gutter's arrows, ⌥⌘← and ⌥⌘→).
+    let folder = CFolder()
+    private var gutter: CFoldGutter?
     private var shownGeneration = -1
     private var highlighted: [Int] = []
+    /// The instruction the highlight is for: a block opens when the
+    /// selection moves into it, not when the same C comes back.
+    private var highlightedFor: UInt32?
     /// UTF-16 offset where each line starts, plus the end.
     private var lineStarts: [Int] = []
     /// A click in the C moved the selection: the C need not scroll to it.
@@ -114,7 +120,7 @@ final class CPaneController: NSObject, NSTextViewDelegate {
 
     init(model: RomViewModel) {
         self.model = model
-        textView = CTextView()
+        textView = CTextView(usingTextLayoutManager: false)
         scrollView = NSScrollView()
         view = NSView()
         super.init()
@@ -135,6 +141,14 @@ final class CPaneController: NSObject, NSTextViewDelegate {
         textView.delegate = self
         textView.setAccessibilityIdentifier("decompiled-c")
         textView.onDoubleClick = { [weak self] index in self?.follow(tokenAt: index) }
+        textView.layoutManager?.delegate = folder
+        folder.textView = textView
+        textView.onClickCharacter = { [weak self] index in
+            guard let self, let f = folder.placeholder(at: index) else { return false }
+            folder.toggle(f)
+            return true
+        }
+        textView.onFoldKey = { [weak self] key in self?.foldKey(key) ?? false }
 
         scrollView.documentView = textView
         scrollView.hasVerticalScroller = true
@@ -142,6 +156,12 @@ final class CPaneController: NSObject, NSTextViewDelegate {
         scrollView.autohidesScrollers = true
         scrollView.drawsBackground = true
         scrollView.backgroundColor = .textBackgroundColor
+        let gutter = CFoldGutter(scrollView: scrollView, textView: textView, folder: folder)
+        scrollView.verticalRulerView = gutter
+        scrollView.hasVerticalRuler = true
+        scrollView.rulersVisible = true
+        folder.changed = { [weak gutter] in gutter?.needsDisplay = true }
+        self.gutter = gutter
 
         title.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
         title.lineBreakMode = .byTruncatingTail
@@ -253,7 +273,8 @@ final class CPaneController: NSObject, NSTextViewDelegate {
         let start = model.instruction?.fileOffset ?? model.selectedOffset
         let lines = start.map { d.lines(forInstructionAt: $0) } ?? []
         if lines != highlighted {
-            setHighlight(lines)
+            setHighlight(lines, reveal: start != highlightedFor)
+            highlightedFor = start
             if !selectingFromText, let first = lines.first {
                 scrollToLine(first)
             }
@@ -296,16 +317,16 @@ final class CPaneController: NSObject, NSTextViewDelegate {
                 s.addAttribute(.toolTip, value: Self.bases(v), range: range)
             }
         }
+        // The same routine's C again, a label changed: what was folded
+        // stays folded, by line.
+        let foldedLines = sameRoutine ? Set(folder.folded.map { line(at: $0) }) : []
+        folder.clear()
         // A new text keeps the old caret's character index, which falls on
         // some line of the new routine; that must not read as a click there.
         replacingText = true
         textView.textStorage?.setAttributedString(s)
         textView.setSelectedRange(NSRange(location: 0, length: 0))
         replacingText = false
-        if sameRoutine {
-            scrollView.contentView.scroll(to: origin)
-            scrollView.reflectScrolledClipView(scrollView.contentView)
-        }
         let ns = text as NSString
         var starts = [0]
         var at = 0
@@ -317,6 +338,12 @@ final class CPaneController: NSObject, NSTextViewDelegate {
         }
         lineStarts = starts
         highlighted = []
+        let folds = CFold.find(in: text)
+        folder.set(folds, folded: Set(folds.filter { foldedLines.contains(line(at: $0.open)) }.map(\.open)))
+        if sameRoutine {
+            scrollView.contentView.scroll(to: origin)
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+        }
     }
 
     private func range(ofLine line: Int) -> NSRange? {
@@ -324,8 +351,17 @@ final class CPaneController: NSObject, NSTextViewDelegate {
         return NSRange(location: lineStarts[line], length: lineStarts[line + 1] - lineStarts[line])
     }
 
-    private func setHighlight(_ lines: [Int]) {
+    private func setHighlight(_ lines: [Int], reveal: Bool = true) {
         guard let lm = textView.layoutManager else { return }
+        // The selection moved into a folded block: open it, as an IDE does.
+        // A block's first line and its closing brace show while it is
+        // folded: a line is hidden when its first word is.
+        let ns = textView.string as NSString
+        for l in lines where reveal {
+            guard let r = range(ofLine: l) else { continue }
+            let word = ns.rangeOfCharacter(from: CharacterSet.whitespacesAndNewlines.inverted, range: r)
+            if word.location != NSNotFound { folder.reveal(NSRange(location: word.location, length: 1)) }
+        }
         let all = NSRange(location: 0, length: textView.textStorage?.length ?? 0)
         lm.removeTemporaryAttribute(.backgroundColor, forCharacterRange: all)
         let color = NSColor.selectedTextBackgroundColor.withAlphaComponent(0.45)
@@ -477,6 +513,7 @@ extension CPaneController: NSMenuDelegate {
             guard NSMaxRange(r) <= s.length else { continue }
             s.addAttribute(.foregroundColor, value: CTokenPalette.color(for: t.kind), range: r)
         }
+        folder.clear()
         replacingText = true
         textView.textStorage?.setAttributedString(s)
         textView.setSelectedRange(NSRange(location: 0, length: 0))
@@ -493,6 +530,7 @@ extension CPaneController: NSMenuDelegate {
         if starts.last != ns.length { starts.append(ns.length) }
         lineStarts = starts
         highlighted = []
+        folder.set(CFold.find(in: v.text), folded: [])
         title.stringValue = "\(title.stringValue.split(separator: " ").first ?? "")  version “\(shownVersion ?? "")”"
         status.stringValue = v.author == .tutor ? "Written by the tutor; not checked against the code" : "Written by you; not checked against the code"
     }
@@ -542,7 +580,42 @@ extension CPaneController: NSMenuDelegate {
             menu.addItem(item("Edit C Version…") { [weak self] in self?.model.beginCEdit(.version(routine: entry, name: v)) })
         }
         menu.addItem(.separator())
+        addFoldItems(to: menu, at: index)
         menu.addItem(NSMenuItem(title: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: ""))
+    }
+
+    /// Fold and Unfold at the click, and every block at once, with the keys
+    /// Xcode uses.
+    private func addFoldItems(to menu: NSMenu, at index: Int) {
+        guard !folder.folds.isEmpty else { return }
+        let line = range(ofLine: self.line(at: index)) ?? NSRange(location: index, length: 0)
+        let entries: [(String, CFoldKey, Bool)] = [
+            ("Fold", .fold, folder.folds.contains { !folder.isFolded($0) && (NSLocationInRange($0.open, line) || $0.contains(index)) }),
+            ("Unfold", .unfold, folder.folds.contains { folder.isFolded($0) && (NSLocationInRange($0.open, line) || $0.contains(index)) }),
+            ("Fold All", .foldAll, true),
+            ("Unfold All", .unfoldAll, !folder.folded.isEmpty),
+        ]
+        for (title, key, enabled) in entries {
+            let i = item(title) { [weak self] in _ = self?.foldKey(key, at: index) }
+            i.keyEquivalent = String(UnicodeScalar(key.unfolds ? NSRightArrowFunctionKey : NSLeftArrowFunctionKey)!)
+            i.keyEquivalentModifierMask = key.all ? [.command, .option, .shift] : [.command, .option]
+            if !enabled { i.action = nil }
+            menu.addItem(i)
+        }
+        menu.addItem(.separator())
+    }
+
+    /// ⌥⌘← folds the block at the caret, ⌥⌘→ opens it; with ⇧, every block.
+    func foldKey(_ key: CFoldKey, at index: Int? = nil) -> Bool {
+        let at = index ?? textView.selectedRange().location
+        let line = range(ofLine: self.line(at: at)) ?? NSRange(location: at, length: 0)
+        switch key {
+        case .fold: return folder.fold(at: at, line: line)
+        case .unfold: return folder.unfold(at: at, line: line)
+        case .foldAll: folder.foldAll()
+        case .unfoldAll: folder.unfoldAll()
+        }
+        return true
     }
 
     private func item(_ title: String, _ action: @escaping () -> Void) -> NSMenuItem {
@@ -559,15 +632,54 @@ final class ClosureMenuItem: NSMenuItem {
     @objc func fire() { handler?() }
 }
 
-/// The C's text view: reports double-clicks by character index.
+/// The fold commands (docs/18).
+enum CFoldKey {
+    case fold, unfold, foldAll, unfoldAll
+
+    var unfolds: Bool { self == .unfold || self == .unfoldAll }
+    var all: Bool { self == .foldAll || self == .unfoldAll }
+}
+
+/// The C's text view: reports double-clicks by character index, a click on
+/// a character (a folded block's `…`), and the fold keys.
 final class CTextView: NSTextView {
     var onDoubleClick: ((Int) -> Void)?
+    /// A click on the character at this index; true when it was handled.
+    var onClickCharacter: ((Int) -> Bool)?
+    var onFoldKey: ((CFoldKey) -> Bool)?
+
+    override func keyDown(with event: NSEvent) {
+        let mods = event.modifierFlags.intersection([.command, .option, .shift, .control])
+        let arrow = event.specialKey
+        if mods.isSuperset(of: [.command, .option]), !mods.contains(.control),
+           arrow == .leftArrow || arrow == .rightArrow {
+            let all = mods.contains(.shift)
+            let key: CFoldKey = arrow == .leftArrow ? (all ? .foldAll : .fold) : (all ? .unfoldAll : .unfold)
+            if onFoldKey?(key) == true { return }
+        }
+        super.keyDown(with: event)
+    }
 
     override func mouseDown(with event: NSEvent) {
+        if event.clickCount == 1, let index = character(at: event), onClickCharacter?(index) == true {
+            return
+        }
         super.mouseDown(with: event)
         if event.clickCount == 2 {
             let point = convert(event.locationInWindow, from: nil)
             onDoubleClick?(characterIndexForInsertion(at: point))
         }
+    }
+
+    /// The character drawn under the event, if any.
+    private func character(at event: NSEvent) -> Int? {
+        guard let lm = layoutManager, let tc = textContainer else { return nil }
+        let p = convert(event.locationInWindow, from: nil)
+        let inContainer = NSPoint(x: p.x - textContainerOrigin.x, y: p.y - textContainerOrigin.y)
+        let g = lm.glyphIndex(for: inContainer, in: tc)
+        guard g < lm.numberOfGlyphs,
+              lm.boundingRect(forGlyphRange: NSRange(location: g, length: 1), in: tc).contains(inContainer)
+        else { return nil }
+        return lm.characterIndexForGlyph(at: g)
     }
 }
