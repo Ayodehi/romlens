@@ -217,6 +217,7 @@ Written from `24-tutor.md` on 27 September 2026; it replaces rows 3.19–3.21.
 | 6.6 | A conversation kept | Conversations listed and resumed; ↑ recalls earlier prompts; `/rewind` takes back the conversation, the edits, or both | `romlens tutor conversations` | 🧪 | ⬜ | ⬜ |
 | 6.7 | Another provider mid-conversation | `/model` changes provider, model and effort between turns, and the conversation goes on | `romlens tutor ask … --resume <id> --provider P --model M` | 🧪 | ⬜ | ⬜ |
 | 6.8 | A recording investigated | Recording tools (changes, who wrote a byte, provenance, frames) in the tool log | `romlens tutor ask <rom> "<question>" --rec R` | 🧪 | ⬜ | ⬜ |
+| 6.9 | Lessons (`25-lessons.md`) | Explain mode and `/learn`: a lesson card stepped with Back and Next, predict questions behind Show, each step moving the main window, offers to go deeper; the lesson library and the map of concepts shaded by level reached | `romlens tutor lessons`; `romlens tutor lesson show <id>` | ⬜ | ⬜ | ⬜ |
 
 ## Manual pass, macOS (to repeat before each release)
 
@@ -460,3 +461,19 @@ Sound additions (docs/23, still to run):
     `ROMLENS_TUTOR_PROVIDER=openai` or an Ollama URL and
     `ROMLENS_TUTOR_MODEL`) answers most questions with the ROM's facts;
     record its table in `24-tutor.md`.
+
+Lesson additions (`25-lessons.md`, still to run):
+
+59. A first lesson (6.9): with a fresh learner record, Explain on, ask
+    "how does a sprite get rendered to the screen?": a card at levels 1–2
+    with no addresses or code; Next reveals one step at a time; a predict
+    question hides the rest of its step until Show.
+60. Deeper (6.9): the last step's "Go deeper" starts a level-3 lesson that
+    moves the main window to a recording frame's OAM view, then a level-4
+    one that selects the routine and highlights its C lines.
+61. Building on it (6.9): ask "how does the screen scroll?": the lesson
+    links the sprite lessons for the frame and vblank instead of teaching
+    them again.
+62. The library and map (6.9): `/lessons` lists the lessons and reopens one
+    as a card; `/map` shades the concepts reached; marking one known is
+    kept after quitting.

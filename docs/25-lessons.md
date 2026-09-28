@@ -1,0 +1,224 @@
+# Lessons: the tutor's Explain mode
+
+## Progress
+
+Written 28 September 2026 and kept as written. This table is the only part
+that tracks progress against it.
+
+| Task | State |
+|---|---|
+| L0 this document, the pointers from `06` and `24`, the checklist rows | planned |
+| L1 the lesson format, the concept map and the learner record, in `romlens-tutor` | planned |
+| L2 the lesson tools, Explain mode's prompt, the learner summary in the prefix | planned |
+| L3 the store, `romlens tutor lessons` and `lesson show` | planned |
+| L4 FFI: lessons, steps and the learner record for the shell | planned |
+| L5 app: the lesson card in the Tutor window, stepping, focus in the main window | planned |
+| L6 app: the lesson library and the map of what the student knows | planned |
+| L7 live runs: a new learner's sprite lesson, then deeper, then a second topic | planned |
+
+## Context
+
+The tutor answers questions (docs/24). The student wants more than answers:
+to learn the SNES from the top down, at the pace of their own questions. Asked
+"how does a sprite get rendered to the screen?", a beginner should first hear
+what the CPU and the PPU each do and what a sprite is. Machine code comes
+later, when their questions lead there. A student who has already learned
+about OAM and DMA should get the same question answered from the next level
+down, building on what they learned rather than repeating it.
+
+So Explain mode answers with a **lesson**: a short sequence of steps revealed
+one at a time. Each step says one thing, points the main window at what it
+is about, and may ask the student to predict what comes next before showing
+it. How long the lesson is depends on the topic, and how deep it goes depends
+on what the student has already learned. That comes from a **learner
+record**, kept across every conversation and every ROM, which the tutor reads
+before it teaches and adds to when a lesson is done.
+
+docs/06 planned Explain mode "producing scene drafts" for Phase 4. A lesson's
+steps (narration, a focus, a picture) are that draft. Scenes, animation and
+video export (docs/01, Phase 4) build on them later; this plan does not
+include them.
+
+## Scope decisions (28 September 2026)
+
+1. **Depth is a ladder of five levels**, the same for every topic, so that
+   "deeper" means something the student can see:
+
+   | Level | Name | What it holds | "How is a sprite drawn?" |
+   |---|---|---|---|
+   | 1 | The idea | What it is and why, with no registers or code | The CPU decides, the PPU draws; a sprite is a small picture the PPU can place anywhere, on top of the backgrounds |
+   | 2 | The hardware | The chips, memories and registers involved | OAM holds 128 sprites' positions, tiles and palettes; their pixels are tiles in VRAM; colours come from CGRAM; OBSEL picks sizes |
+   | 3 | In this game | Where this game keeps the data, shown with a recording | Its OAM buffer in WRAM, the entries at `frame N`, the sprite drawn with `render_sprite`, its tiles decoded |
+   | 4 | In the code | The routines that do it, in C and assembly | The NMI's DMA of the buffer to OAM, the object loop filling the buffer |
+   | 5 | The bytes and cycles | Instruction-level detail, timing and edge cases | Why the DMA must finish in vblank, the high table's X bit 8, hiding a sprite at Y `$F0` |
+
+   A lesson covers one or two adjacent levels of one topic. A beginner's
+   first sprite lesson is levels 1–2. "Go deeper" asks for the next level.
+2. **A fixed concept map.** About forty SNES concepts (the CPU, the PPU, the
+   memory map, WRAM, VRAM, OAM, CGRAM, tiles, palettes, sprites, backgrounds,
+   BG modes, the frame and vblank, NMI, DMA, HDMA, the 65816's widths, the
+   stack, jump tables, the APU, BRR, and so on), each with an id and the
+   concepts it rests on. Lessons are tagged with the concepts they teach and
+   the level reached. The map is ours, written from our own primer, and
+   lives in `romlens-tutor` beside it. A fixed map keeps the record
+   consistent across conversations and models, and lets the app show what
+   the student knows.
+3. **The learner record is the student's, not a project's.** Knowing what a
+   sprite is carries over from Super Mario World to F-Zero. It lives in the
+   app's folder (`Tutor/Learner/`), beside the conversations and like them
+   never in a package: each concept's level reached, and the lessons, each
+   tagged with the ROM it used. A level-3 or level-4 lesson is about one
+   game; levels 1–2 are about the SNES.
+4. **The tutor decides a lesson's length and depth, within rules.** The
+   prompt says: start at the next level the student has not reached for the
+   concepts the question needs, and teach a concept's prerequisites first,
+   briefly, if the student has not met them. Say in one line what an earlier
+   lesson covered instead of teaching it again, and link to it. Use as many
+   steps as the topic needs: a simple idea in three, a pipeline in eight to
+   twelve. Each step says one thing.
+5. **Progressive revelation within a lesson.** Steps are revealed one at a
+   time, with Next. A step can open with a *predict* question ("Where do you
+   think the sprite's pixels are kept?"). Its answer is in the next step, and
+   the student can answer or just go on. These are not graded; checked
+   questions are Quiz mode's job, later.
+6. **Explain is a mode beside Ask**, switched in the composer and by
+   `/learn <topic>`. With Explain on, a question is answered as a lesson.
+   With it off, questions get ordinary answers, and the tutor may offer "Want
+   this as a lesson?" at the end. A question asked partway through a lesson
+   is answered in the conversation, with the step it was asked at, and the
+   lesson waits at that step.
+7. **Facts still come from tools** (docs/06 principles 1 and 2). Levels 1–2
+   rest on the primer and `reference`. Levels 3–5 cite the ROM and the
+   recording like any answer. Every step's focus is resolved by Romlens
+   before it is shown: an address that is not in the ROM, or a frame the
+   recording does not have, is refused back to the tutor.
+
+## Design
+
+### The lesson format (`romlens-tutor::lesson`)
+
+```text
+Lesson { id, title, rom (SHA-256, or none for levels 1–2), created,
+         levels: (from, to), concepts: [(id, level)],
+         builds_on: [lesson id], steps: [Step], next: [Offer] }
+Step   { title, predict: Option<String>, body (Markdown, cited),
+         focus: Option<Focus>, picture: Option<picture id> }
+Focus  = Address(range) | Routine(entry, C line or instruction)
+       | Frame(n, view: screen | layer | sprites | vram | cgram | oam)
+       | Register(address)
+Offer  { title, concept, level }      // "Go deeper": what the next lesson would be
+```
+
+A lesson is saved whole in `Tutor/Learner/lessons/<id>.json`, and its
+pictures sit beside it. The conversation that made it holds only the tool
+calls that built it (`begin_lesson`, `lesson_step`, `end_lesson`); the
+window finds the lesson by those, so no new kind of transcript block is
+needed and older builds still read the conversation.
+
+### The learner record
+
+`Tutor/Learner/learner.json`: each concept's level reached, when, and in
+which lesson. It is written when a lesson ends (the tutor calls
+`end_lesson`), not while it is being made. A student can mark a concept as
+already known, at a level, from the map (L6), to skip the basics.
+
+### The tools (Explain mode only)
+
+- `learner()`: the concepts and levels reached, and the last lessons' titles.
+  It is also put in the prefix, so this call is only needed after changes.
+- `lesson(id)`: an earlier lesson's steps, to build on it or link to it.
+- `begin_lesson(title, levels, concepts, builds_on)`, then `lesson_step(title,
+  predict?, body, focus?, picture?)` once per step, then `end_lesson(next)`.
+  Step by step so that the lesson appears as it is written. Each call is
+  checked: a focus is resolved, a picture must be one a tool made in this
+  conversation, and a concept id must be on the map.
+
+The read-only tools (docs/24) are all there too. Edit tools follow the
+permission mode as before; a lesson does not change the project.
+
+### The prompt
+
+A fixed section for Explain mode, after the rules and before the primer: the
+ladder, how to choose where to start from the learner record, one idea per
+step, predict questions, not repeating earlier lessons but linking them, and
+the offers of where to go next. The concept map goes in the primer, as ids
+and one line each. The learner summary is compact (only concepts the
+student has reached, and the last ten lessons' titles). It goes into the
+conversation's own prefix when the conversation starts, after the ROM
+digest, so the cache holds across its turns.
+
+### The app
+
+- **The lesson card** in the transcript:
+  - The title, the level as a named badge ("The idea", "The hardware"...),
+    and the step as "3 of 8".
+  - The step's text, and its picture.
+  - Back and Next.
+  - A predict question shows first, with the rest of the step behind
+    "Show".
+  - At the last step, the offers as buttons ("Go deeper: sprites in this
+    game").
+  - Stepping moves the main window to the step's focus: the address
+    selected and scrolled to, the C line highlighted, the recording at the
+    frame with the named view. This is the citation machinery the tutor
+    already uses (`TutorModel.follow`).
+- **Questions at a step:** the composer knows the step, and the question
+  carries it as context (`[At step 3 of "How a sprite reaches the
+  screen"]`).
+- **The library** (`/lessons` and a toolbar button): lessons by concept and
+  date, which reopen as cards.
+- **The map:** the concepts grouped (the machine, graphics, timing, the CPU,
+  sound), each shaded by the level reached. A student can mark one as known.
+
+### CLI
+
+`romlens tutor lessons` lists the lessons. `romlens tutor lesson show <id>`
+prints one step by step, with its focuses and the learner record's changes,
+for reviewing what the tutor taught (as `tutor show` does for
+conversations).
+
+## Ordered tasks (one commit each, pushed to main)
+
+| # | Task | Days |
+|---|---|---|
+| L0 | This document; pointers from `06` (Explain mode) and `24` (cut list); checklist rows in `15` | 0.25 |
+| L1 | `lesson.rs`: the format, the concept map with prerequisites, the learner record; serde round trips; the map's graph has no cycles, and every prerequisite is on it | 1 |
+| L2 | The lesson tools and their checks; Explain mode's prompt section; the learner summary in the prefix; `Session` knows the mode. Tests on `FakeTransport`: a lesson made step by step, a bad focus refused, the record updated at `end_lesson` and not before | 1.5 |
+| L3 | The store (`Tutor/Learner/`); `tutor lessons` and `tutor lesson show`; a lesson whose ROM is not open still reads (its levels 3–5 focuses shown as text) | 0.5 |
+| L4 | FFI: `TutorSession` lessons, the learner record, the mode; events for a lesson begun, a step added, a lesson ended | 1 |
+| L5 | App: the lesson card, Back and Next, predict and Show, the offers; focus in the main window; a question at a step; the Explain toggle and `/learn` | 2 |
+| L6 | App: the library and the concept map, marking a concept known | 1.5 |
+| L7 | Live: as a new learner, "how does a sprite get rendered to the screen?" in SMW (expect levels 1–2 and no code), then Go deeper twice (3 with a recording, then 4), then "how does the screen scroll?" (expect it to build on the frame and vblank, not teach them again). Record what went wrong here and tune the prompt from the transcripts | 1 |
+
+## What is cut for now
+
+- Quiz mode with checked answers (predict questions are not graded).
+- Scenes: animation, camera moves, video export. Lessons are their drafts.
+- Lessons shared between students, or exported as documents.
+- Diagrams drawn by Romlens itself (a lesson can use `generate_image` and the
+  tools' pictures).
+
+## Risks
+
+- **The ladder is only as good as the model's sense of level.** The prompt
+  gives each level's contents per topic, and the live runs (L7) check a
+  beginner gets no code. If models drift, a check in `lesson_step` can flag
+  a level-1 step that cites an address.
+- **The record goes stale or wrong** (a lesson abandoned, a concept marked
+  too high). Only a finished lesson writes it, the student can see and
+  change it on the map, and a lesson can be deleted with its record entries.
+- **Cost.** A lesson is several tool calls. The step calls are small, the
+  prefix is cached, and the cost is shown per lesson.
+- **Long lessons get tedious.** One idea per step, a limit of about twelve
+  steps before offering to continue in another lesson, and the student can
+  skip to the end.
+
+## Verification
+
+- `make test`: the format and map (L1); the tools' checks and the record's
+  timing on `FakeTransport` (L2); the store (L3); the FFI events (L4).
+- `make app-test`: the card steps and moves the main window, a predict step
+  hides its body until Show, the offers start the next lesson, the map shades
+  what the record holds.
+- L7 by hand, with the transcripts read through `romlens tutor show` and
+  `romlens tutor lesson show`.
