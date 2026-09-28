@@ -52,7 +52,7 @@ final class TutorModel {
     }
 
     enum Sheet: Identifiable {
-        case resume, rewind, model, help
+        case resume, rewind, model, help, lessons, map
         var id: Self { self }
     }
 
@@ -526,6 +526,8 @@ final class TutorModel {
         Command(name: "/details", about: "Show or hide the tutor's thinking and tool calls"),
         Command(name: "/learn", about: "/learn <topic>: a lesson about it, as deep as you have got"),
         Command(name: "/explain", about: "Answer with lessons, or not (Explain mode)"),
+        Command(name: "/lessons", about: "Your lessons, to read again"),
+        Command(name: "/map", about: "What you have learned, concept by concept"),
         Command(name: "/help", about: "What the tutor can do and the keys it takes"),
     ]
 
@@ -583,6 +585,10 @@ final class TutorModel {
                 composer = arg
                 send()
             }
+        case "/lessons":
+            sheet = .lessons
+        case "/map":
+            sheet = .map
         case "/explain":
             guard startIfNeeded() else { return }
             setExplain(!explain)
@@ -637,6 +643,24 @@ final class TutorModel {
     func isRevealed(_ lesson: String, _ step: Int) -> Bool { revealed.contains("\(lesson)#\(step)") }
 
     func reveal(_ lesson: String, _ step: Int) { revealed.insert("\(lesson)#\(step)") }
+
+    /// Every lesson, the latest first.
+    var lessons: [LessonInfo] { ensureSession().lessons() }
+
+    /// What the student knows, for the map.
+    var learner: LearnerInfo { ensureSession().learner() }
+
+    /// Marks a concept known at a level (1 to 5), or clears it (`nil`).
+    func markKnown(_ concept: String, level: UInt8?) {
+        do { try ensureSession().markKnown(concept: concept, level: level) } catch { self.error = Self.message(error) }
+    }
+
+    func deleteLesson(_ id: String) {
+        do {
+            try ensureSession().deleteLesson(id: id)
+            lessonCache[id] = nil
+        } catch { self.error = Self.message(error) }
+    }
 
     /// "Go deeper": the next lesson an offer names.
     func take(_ offer: LessonOfferInfo) {

@@ -125,6 +125,47 @@ import Testing
         let sprites = try #require(r.tutor.session?.learner().concepts.first { $0.id == "sprites" })
         #expect(sprites.level == 2)
 
+        // The library and the map.
+        #expect(r.tutor.lessons.map(\.id) == [lesson.id])
+        r.tutor.markKnown("dma", level: 2)
+        let dma = try #require(r.tutor.learner.concepts.first { $0.id == "dma" })
+        #expect(dma.marked && dma.level == 2)
+        r.tutor.markKnown("dma", level: nil)
+        #expect(r.tutor.learner.concepts.first { $0.id == "dma" }?.level == 0)
+        for tab in [LessonsSheet.Tab.lessons, .map] {
+            let host = NSHostingController(rootView: LessonsSheet(tutor: r.tutor, tab: tab))
+            host.view.frame = NSRect(x: 0, y: 0, width: 720, height: 560)
+            host.view.layoutSubtreeIfNeeded()
+        }
+        r.tutor.run(command: "/map")
+        #expect(r.tutor.sheet == .map)
+        r.tutor.sheet = nil
+
+        // With ROMLENS_SNAPSHOTS set, the card and the map as pictures.
+        if ProcessInfo.processInfo.environment["ROMLENS_SNAPSHOTS"] != nil {
+            r.tutor.markKnown("vblank", level: 4)
+            r.tutor.show(step: 0, of: lesson)
+            let c = TutorWindowController(tutor: r.tutor, title: "Test")
+            let map = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 720, height: 560), styleMask: [.titled], backing: .buffered, defer: false)
+            map.isReleasedWhenClosed = false
+            map.contentViewController = NSHostingController(rootView: LessonsSheet(tutor: r.tutor, tab: .map))
+            for (w, name) in [(c.window!, "lesson.png"), (map, "map.png")] {
+                w.appearance = NSAppearance(named: .aqua)
+                if name == "lesson.png" { w.setContentSize(NSSize(width: 520, height: 640)) }
+                w.orderFront(nil)
+                w.contentView?.layoutSubtreeIfNeeded()
+                Fixture.spin(0.3)
+                w.display()
+                if let view = w.contentView, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+                    view.cacheDisplay(in: view.bounds, to: rep)
+                    try? rep.representation(using: .png, properties: [:])?
+                        .write(to: FileManager.default.temporaryDirectory.appendingPathComponent(name))
+                }
+                w.close()
+            }
+            r.tutor.markKnown("vblank", level: nil)
+        }
+
         // Go deeper asks for the offer, with Explain on.
         r.tutor.take(lesson.next[0])
         #expect(r.tutor.busy && r.tutor.live?.question == "Go deeper: Sprites in this game")

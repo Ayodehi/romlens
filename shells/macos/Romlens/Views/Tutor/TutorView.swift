@@ -27,6 +27,8 @@ struct TutorView: View {
             case .rewind: RewindSheet(tutor: tutor)
             case .model: ModelSheet(tutor: tutor)
             case .help: HelpSheet()
+            case .lessons: LessonsSheet(tutor: tutor, tab: .lessons)
+            case .map: LessonsSheet(tutor: tutor, tab: .map)
             }
         }
         .onAppear {
@@ -502,6 +504,7 @@ struct StatusLine: View {
             .help("Change the provider or model (/model)")
             Button { tutor.cycleMode() } label: {
                 Label(tutor.mode.title, systemImage: tutor.mode == .readOnly ? "eye" : tutor.mode == .askBeforeEdits ? "hand.raised" : "pencil")
+                    .lineLimit(1).fixedSize()
             }
             .buttonStyle(.plain)
             .help("What the tutor may change: ⇧⇥ cycles")
@@ -512,11 +515,16 @@ struct StatusLine: View {
             Text(String(format: "$%.3f", tutor.cost)).help("What this conversation has cost")
             Spacer()
             Button { tutor.sheet = .resume } label: {
-                Label("Conversations", systemImage: "clock.arrow.circlepath")
+                Label("Conversations", systemImage: "clock.arrow.circlepath").labelStyle(.iconOnly)
             }
             .buttonStyle(.plain)
             .disabled(tutor.busy)
             .help("Go back to an earlier conversation (/resume)")
+            Button { tutor.sheet = .lessons } label: {
+                Label("Lessons", systemImage: "books.vertical").labelStyle(.iconOnly)
+            }
+            .buttonStyle(.plain)
+            .help("Your lessons, and what you have learned (/lessons, /map)")
             Button { tutor.setExplain(!tutor.explain) } label: {
                 Label("Explain", systemImage: tutor.explain ? "graduationcap.fill" : "graduationcap")
             }
