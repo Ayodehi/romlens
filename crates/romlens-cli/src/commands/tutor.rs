@@ -13,6 +13,7 @@ use romlens_tutor::agent::{
     Approver, Credentials, Decision, Deps, EnvCredentials, Event, Mode, Proposal, Session,
 };
 use romlens_tutor::http::{Cancel, UreqTransport, list_models};
+use romlens_tutor::lesson::LessonStore;
 use romlens_tutor::models;
 use romlens_tutor::prompt;
 use romlens_tutor::provider::{Delta, Endpoint, Protocol};
@@ -88,6 +89,8 @@ pub struct Ask<'a> {
     pub cap: Option<f64>,
     /// `read-only`, `ask` (each edit asked on the terminal) or `accept`.
     pub mode: &'a str,
+    /// Answer with a lesson (docs/25).
+    pub explain: bool,
 }
 
 /// Asks about each edit on the terminal.
@@ -167,14 +170,22 @@ pub fn ask(w: &Where, a: &Ask) -> Result<()> {
         return Err(anyhow!("edits need --project, where they are saved"));
     }
     s.system = prompt::system();
-    s.digest = digest(&wb);
+    let lessons = romlens_tutor::review::default_root().map(|r| LessonStore::new(&r));
+    let learner = lessons
+        .as_ref()
+        .map(|l| l.learner().summary())
+        .unwrap_or_default();
+    s.digest = digest(&wb) + &prompt::learner_section(&learner);
+    s.explain = a.explain;
     let sel = a.at.map(|at| selection(&wb, at)).transpose()?;
-    let mut text = prompt::context(Some(s.mode), None, sel.as_deref()).unwrap_or_default();
+    let explain = a.explain.then_some((true, learner.as_str()));
+    let mut text = prompt::context(Some(s.mode), explain, sel.as_deref()).unwrap_or_default();
     if !text.is_empty() {
         text.push_str("\n\n");
     }
     text.push_str(a.question);
     let tools = RomTools::new(wb.clone());
+    tools.lessons.set_store(lessons);
     if let Some(r) = a.rec {
         let rec = romlens_ffi::RecordingSession::open(r.to_string_lossy().into_owned(), false)?;
         rec.check_rom(wb.rom())?;
@@ -278,6 +289,26 @@ pub fn sessions(dir: Option<&Path>) -> Result<()> {
     for s in &all {
         println!("{}", romlens_tutor::review::line(s));
     }
+    Ok(())
+}
+
+/// `romlens tutor lessons`.
+pub fn lessons(dir: Option<&Path>) -> Result<()> {
+    let store = LessonStore::new(&root(dir)?);
+    let all = store.list();
+    print!("{}", store.learner().summary());
+    println!();
+    for l in &all {
+        println!("{}", romlens_tutor::review::lesson_line(l));
+    }
+    Ok(())
+}
+
+/// `romlens tutor lesson`.
+pub fn lesson(which: &str, dir: Option<&Path>) -> Result<()> {
+    let store = LessonStore::new(&root(dir)?);
+    let l = romlens_tutor::review::find_lesson(&store, which).map_err(|e| anyhow!(e))?;
+    println!("{}", l.describe());
     Ok(())
 }
 

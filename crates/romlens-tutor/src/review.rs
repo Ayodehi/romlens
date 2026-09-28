@@ -99,6 +99,43 @@ pub fn line(s: &Saved) -> String {
     )
 }
 
+/// One line for a lesson, for a list.
+pub fn lesson_line(l: &crate::lesson::Lesson) -> String {
+    format!(
+        "{}  {}  {:>2} steps  {}{}  {}",
+        l.id,
+        when(l.created),
+        l.steps.len(),
+        crate::lesson::levels_text(l.levels),
+        if l.finished { "" } else { " (not ended)" },
+        l.title
+    )
+}
+
+/// The lesson `which` names: `latest`, an id, or the start of one.
+pub fn find_lesson(
+    store: &crate::lesson::LessonStore,
+    which: &str,
+) -> Result<crate::lesson::Lesson, String> {
+    let mut all = store.list();
+    if which == "latest" {
+        return if all.is_empty() {
+            Err("no lessons yet".into())
+        } else {
+            Ok(all.remove(0))
+        };
+    }
+    let mut hits: Vec<_> = all
+        .into_iter()
+        .filter(|l| l.id.starts_with(which))
+        .collect();
+    match hits.len() {
+        0 => Err(format!("no lesson `{which}`")),
+        1 => Ok(hits.remove(0)),
+        n => Err(format!("`{which}` is the start of {n} lessons")),
+    }
+}
+
 /// How much of each tool result and each question to print.
 #[derive(Debug, Clone, Copy)]
 pub struct Show {
@@ -251,6 +288,45 @@ mod tests {
     use crate::provider::Endpoint;
     use crate::transcript::Usage;
     use serde_json::json;
+
+    #[test]
+    fn lessons_are_listed_and_found() {
+        use crate::lesson::{Focus, Lesson, LessonStore, Step};
+        let root =
+            std::env::temp_dir().join(format!("romlens-review-lessons-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let store = LessonStore::new(&root);
+        assert!(find_lesson(&store, "latest").is_err());
+        let mut l = Lesson::new(
+            "How a sprite reaches the screen",
+            (1, 2),
+            vec![("sprites".into(), 2)],
+        );
+        l.steps.push(Step {
+            title: "The register".into(),
+            predict: None,
+            body: "OBSEL picks the sizes.".into(),
+            focus: Some(Focus::Register { address: 0x2101 }),
+            picture: None,
+        });
+        l.finished = true;
+        store.save(&l, &[]).unwrap();
+        let found = find_lesson(&store, &l.id[..5]).unwrap();
+        assert_eq!(found.id, l.id);
+        let line = lesson_line(&found);
+        assert!(
+            line.contains("1 steps  levels 1 to 2, The idea to the hardware  How a sprite"),
+            "{line}"
+        );
+        let text = found.describe();
+        assert!(
+            text.contains(
+                "1. The register\n   OBSEL picks the sizes.\n   [focus: register $00:2101]"
+            ),
+            "{text}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn a_date_reads_as_a_date() {

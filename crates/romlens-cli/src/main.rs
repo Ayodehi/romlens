@@ -752,6 +752,10 @@ struct TutorAsk {
     /// edit asked on the terminal) or `accept`.
     #[arg(long, default_value = "read-only")]
     mode: String,
+    /// Explain mode: answer with a lesson, and keep it in the learner
+    /// record (docs/25) under `ROMLENS_TUTOR_DIR` or the app's folder.
+    #[arg(long)]
+    explain: bool,
 }
 
 #[derive(Subcommand)]
@@ -785,6 +789,19 @@ enum TutorCommand {
         /// The fixed system prompt and ROM digest too.
         #[arg(long)]
         system: bool,
+    },
+    /// The student's lessons, the latest first, and what they have learned.
+    Lessons {
+        #[arg(long)]
+        dir: Option<PathBuf>,
+    },
+    /// A lesson step by step: what each step says, asks and points at.
+    Lesson {
+        /// `latest`, an id, or the start of one.
+        #[arg(default_value = "latest")]
+        which: String,
+        #[arg(long)]
+        dir: Option<PathBuf>,
     },
 }
 
@@ -1808,6 +1825,7 @@ fn run() -> Result<()> {
                     effort,
                     cap,
                     mode,
+                    explain,
                 } = *ask;
                 commands::tutor::ask(
                     &commands::tutor::Where {
@@ -1826,6 +1844,7 @@ fn run() -> Result<()> {
                         effort: effort.as_deref(),
                         cap,
                         mode: &mode,
+                        explain,
                     },
                 )
             }
@@ -1835,6 +1854,8 @@ fn run() -> Result<()> {
                 responses: at.responses,
             }),
             TutorCommand::Sessions { dir } => commands::tutor::sessions(dir.as_deref()),
+            TutorCommand::Lessons { dir } => commands::tutor::lessons(dir.as_deref()),
+            TutorCommand::Lesson { which, dir } => commands::tutor::lesson(&which, dir.as_deref()),
             TutorCommand::Show {
                 which,
                 dir,

@@ -8,10 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use romlens_tutor::ToolSpec;
 use romlens_tutor::agent::{ToolContext, ToolOutput};
-use romlens_tutor::lesson::{
-    FRAME_VIEWS, Focus, LEVELS, Lesson, LessonStore, Offer, Step, check_concepts, concept,
-    level_name,
-};
+use romlens_tutor::lesson::{FRAME_VIEWS, Focus, Lesson, LessonStore, Offer, Step, check_concepts};
 use serde_json::{Value, json};
 
 use super::tools::{addr, choice, integer, nullable, object, spec, string};
@@ -171,7 +168,7 @@ impl Lessons {
             .open_lesson(id)
             .or_else(|| store.load(id).ok())
             .ok_or_else(|| format!("no lesson {id}"))?;
-        Ok(describe(&l))
+        Ok(l.describe())
     }
 
     fn begin(&self, store: &LessonStore, v: &Value, cx: &ToolContext) -> Result<String, String> {
@@ -211,7 +208,7 @@ impl Lessons {
         lock(&self.open).insert(id.clone(), l);
         Ok(format!(
             "Lesson {id} begun ({}). Add its steps with lesson_step, lesson \"{id}\", then end_lesson.",
-            levels((from, to))
+            romlens_tutor::lesson::levels_text((from, to))
         ))
     }
 
@@ -341,18 +338,6 @@ impl Lessons {
     }
 }
 
-fn levels((from, to): (u8, u8)) -> String {
-    if from == to {
-        format!("level {from}, {}", level_name(from))
-    } else {
-        format!(
-            "levels {from} to {to}, {} to {}",
-            level_name(from),
-            level_name(to).to_lowercase()
-        )
-    }
-}
-
 /// A step's focus from its arguments, checked.
 fn focus(
     v: &Value,
@@ -402,55 +387,6 @@ fn focus(
         None => start,
     };
     Ok(Some(Focus::Address { start, end }))
-}
-
-/// A lesson as text, for `lesson` and for review.
-pub fn describe(l: &Lesson) -> String {
-    let mut o = format!("{} ({}): {}\n", l.id, levels(l.levels), l.title);
-    let concepts: Vec<String> = l
-        .concepts
-        .iter()
-        .map(|(c, lv)| format!("{} {lv}", concept(c).map_or(c.as_str(), |c| c.name)))
-        .collect();
-    o.push_str(&format!("Teaches: {}\n", concepts.join(", ")));
-    if !l.builds_on.is_empty() {
-        o.push_str(&format!("Builds on: {}\n", l.builds_on.join(", ")));
-    }
-    for (i, s) in l.steps.iter().enumerate() {
-        o.push_str(&format!("\n{}. {}\n", i + 1, s.title));
-        if let Some(p) = &s.predict {
-            o.push_str(&format!("   (asks first: {p})\n"));
-        }
-        for line in s.body.lines() {
-            o.push_str(&format!("   {line}\n"));
-        }
-        if let Some(f) = &s.focus {
-            o.push_str(&format!("   [focus: {}]\n", focus_text(f)));
-        }
-        if let Some(p) = &s.picture {
-            o.push_str(&format!("   [picture {p}]\n"));
-        }
-    }
-    for n in &l.next {
-        o.push_str(&format!(
-            "\nNext: {} ({} {}, {})",
-            n.title,
-            n.concept,
-            n.level,
-            LEVELS[(n.level.clamp(1, 5) - 1) as usize]
-        ));
-    }
-    o
-}
-
-pub fn focus_text(f: &Focus) -> String {
-    match f {
-        Focus::Address { start, end } if start == end => addr(*start),
-        Focus::Address { start, end } => format!("{} to {}", addr(*start), addr(*end)),
-        Focus::Routine { at, .. } => format!("the C at {}", addr(*at)),
-        Focus::Frame { n, view } => format!("frame {n}, {view}"),
-        Focus::Register { address } => format!("register {}", addr(*address)),
-    }
 }
 
 #[cfg(test)]

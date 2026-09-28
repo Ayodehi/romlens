@@ -528,6 +528,81 @@ impl Lesson {
     }
 }
 
+impl Lesson {
+    /// The lesson as text: for the tutor's `lesson` and for review.
+    pub fn describe(&self) -> String {
+        let mut o = format!(
+            "{} ({}): {}\n",
+            self.id,
+            levels_text(self.levels),
+            self.title
+        );
+        let concepts: Vec<String> = self
+            .concepts
+            .iter()
+            .map(|(c, lv)| format!("{} {lv}", concept(c).map_or(c.as_str(), |c| c.name)))
+            .collect();
+        o.push_str(&format!("Teaches: {}\n", concepts.join(", ")));
+        if !self.builds_on.is_empty() {
+            o.push_str(&format!("Builds on: {}\n", self.builds_on.join(", ")));
+        }
+        for (i, s) in self.steps.iter().enumerate() {
+            o.push_str(&format!("\n{}. {}\n", i + 1, s.title));
+            if let Some(p) = &s.predict {
+                o.push_str(&format!("   (asks first: {p})\n"));
+            }
+            for line in s.body.lines() {
+                o.push_str(&format!("   {line}\n"));
+            }
+            if let Some(f) = &s.focus {
+                o.push_str(&format!("   [focus: {}]\n", f.text()));
+            }
+            if let Some(p) = &s.picture {
+                o.push_str(&format!("   [picture {p}]\n"));
+            }
+        }
+        for n in &self.next {
+            o.push_str(&format!(
+                "\nNext: {} ({} {}, {})",
+                n.title,
+                n.concept,
+                n.level,
+                level_name(n.level)
+            ));
+        }
+        o
+    }
+}
+
+/// `level 2, The hardware` or `levels 1 to 2, The idea to the hardware`.
+pub fn levels_text((from, to): (u8, u8)) -> String {
+    if from == to {
+        format!("level {from}, {}", level_name(from))
+    } else {
+        format!(
+            "levels {from} to {to}, {} to {}",
+            level_name(from),
+            level_name(to).to_lowercase()
+        )
+    }
+}
+
+fn cpu(a: u32) -> String {
+    format!("${:02X}:{:04X}", a >> 16, a & 0xFFFF)
+}
+
+impl Focus {
+    pub fn text(&self) -> String {
+        match self {
+            Focus::Address { start, end } if start == end => cpu(*start),
+            Focus::Address { start, end } => format!("{} to {}", cpu(*start), cpu(*end)),
+            Focus::Routine { at, .. } => format!("the C at {}", cpu(*at)),
+            Focus::Frame { n, view } => format!("frame {n}, {view}"),
+            Focus::Register { address } => format!("register {}", cpu(*address)),
+        }
+    }
+}
+
 pub fn new_lesson_id() -> String {
     let t = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
