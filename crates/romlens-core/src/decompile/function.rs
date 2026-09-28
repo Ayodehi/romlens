@@ -151,7 +151,27 @@ pub fn entries(snap: &AnalysisSnapshot) -> BTreeSet<SnesAddress> {
     for t in snap.jump_tables.iter().filter(|t| t.call) {
         out.extend(t.targets.iter().map(|(a, _)| *a));
     }
+    out.extend(dispatched(snap));
     out
+}
+
+/// Where an indirect jump no table accounts for was seen to go (an
+/// execution log): a dispatcher's handlers, each entered like a routine.
+/// Super Mario World runs its game modes so, through `JSL JumpTableLong`
+/// and a table after the call, which ends in `JML [$0000]`.
+pub fn dispatched(snap: &AnalysisSnapshot) -> BTreeSet<SnesAddress> {
+    let resolved: BTreeSet<u32> = snap.jump_tables.iter().map(|t| t.site).collect();
+    snap.xrefs_by_target
+        .iter()
+        .filter(|x| matches!(x.kind, XRefKind::Jump) && !resolved.contains(&x.from.0))
+        .filter(|x| {
+            snap.instruction_at(x.from).is_some_and(|r| {
+                // JMP (abs), JMP (abs,X), JML [abs]
+                r.offset == x.from.0 && matches!(r.opcode, 0x6C | 0x7C | 0xDC)
+            })
+        })
+        .map(|x| x.to)
+        .collect()
 }
 
 /// Follow a function from `entry`.

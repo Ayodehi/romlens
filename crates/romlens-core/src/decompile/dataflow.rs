@@ -103,6 +103,9 @@ pub struct Conventions {
     /// At the `full` level, per callee taking its arguments as parameters:
     /// each piece's offset above the caller's S at the call, and its bytes.
     pub stack_params: BTreeMap<SnesAddress, Vec<(u32, u32)>>,
+    /// Per callee, what it may hand back as it came in without using it:
+    /// live before a call only when live after it (`Summary::passes`).
+    pub passes: BTreeMap<SnesAddress, LocSet>,
 }
 
 impl Default for Conventions {
@@ -118,6 +121,7 @@ impl Default for Conventions {
             call_defs: BTreeMap::new(),
             stack_args: BTreeMap::new(),
             stack_params: BTreeMap::new(),
+            passes: BTreeMap::new(),
         }
     }
 }
@@ -129,6 +133,13 @@ impl Conventions {
 
     fn call_defs(&self, t: &CallTarget) -> LocSet {
         self.over_targets(t, &self.call_defs, all_fixed)
+    }
+
+    fn call_passes(&self, t: &CallTarget) -> LocSet {
+        if self.passes.is_empty() {
+            return LocSet::new();
+        }
+        self.over_targets(t, &self.passes, LocSet::new)
     }
 
     /// A direct callee's entry in `map`; the union over a table's targets;
@@ -168,6 +179,8 @@ pub struct Info {
     /// Has an effect beyond its locations: a call, a helper, a hardware
     /// register read. Such statements keep their order.
     pub effect: bool,
+    /// A call's: used only if live after it (`Conventions::passes`).
+    pub passes: LocSet,
 }
 
 pub struct Flow<'a> {
@@ -263,6 +276,7 @@ impl<'a> Flow<'a> {
                 }
                 i.uses.extend(self.conv.call_uses(t));
                 i.defs.extend(self.conv.call_defs(t));
+                i.passes = self.conv.call_passes(t);
                 i.writes_mem = true;
                 i.reads_mem = true;
                 i.effect = true;
@@ -382,8 +396,69 @@ fn counts(s: &Stmt, info: &Info, live: &LocSet) -> bool {
     !local || info.effect || info.defs.iter().any(|d| live.contains(d))
 }
 
+/// `a16 = (a16 >> 8) | (a16 << 8)`: `XBA`.
+fn is_swap(e: &Expr) -> bool {
+    let a16 = |x: &Expr| matches!(x, Expr::Reg(Reg::A, Width::W16));
+    matches!(e, Expr::Bin(BinOp::Or, l, r)
+        if matches!(&**l, Expr::Bin(BinOp::Shr, x, k) if a16(x) && **k == Expr::Const(8))
+            && matches!(&**r, Expr::Bin(BinOp::Shl, x, k) if a16(x) && **k == Expr::Const(8)))
+}
+
+/// `(a16 & 0xFF00) | rest`, either way round: a byte written to A, which
+/// keeps its high byte. The rest.
+fn keeps_high(e: &Expr) -> Option<&Expr> {
+    let high = |x: &Expr| {
+        matches!(x, Expr::Bin(BinOp::And, a, k)
+            if matches!(&**a, Expr::Reg(Reg::A, Width::W16)) && **k == Expr::Const(0xFF00))
+    };
+    match e {
+        Expr::Bin(BinOp::Or, l, r) if high(l) => Some(r),
+        Expr::Bin(BinOp::Or, l, r) if high(r) => Some(l),
+        _ => None,
+    }
+}
+
+fn mentions_a(e: &Expr) -> bool {
+    let mut hit = false;
+    e.walk(&mut |x| hit |= matches!(x, Expr::Reg(Reg::A, _)));
+    hit
+}
+
 /// Step `live` back over one statement.
 fn step_back(s: &Stmt, info: &Info, live: &mut LocSet) {
+    // A's halves one at a time where the lifter wrote a byte of it as the
+    // whole: `XBA` swaps which half is live, and a byte written to A leaves
+    // the high byte live before only if it is live after.
+    if let Stmt::Assign {
+        dst: Place::Reg(Reg::A, Width::W16),
+        value,
+    } = s
+    {
+        if is_swap(value) {
+            let (lo, hi) = (live.contains(&Loc::Al), live.contains(&Loc::Ah));
+            for (l, on) in [(Loc::Al, hi), (Loc::Ah, lo)] {
+                if on {
+                    live.insert(l);
+                } else {
+                    live.remove(&l);
+                }
+            }
+            return;
+        }
+        if let Some(rest) = keeps_high(value)
+            && !mentions_a(rest)
+        {
+            if live.remove(&Loc::Al) {
+                live.extend(
+                    info.uses
+                        .iter()
+                        .filter(|l| !matches!(l, Loc::Al | Loc::Ah))
+                        .copied(),
+                );
+            }
+            return;
+        }
+    }
     match s {
         // Each flag goes to its copy and comes back from it. A `PHP` does
         // not kill the copies: another `PHP` on the way may be the one
@@ -411,10 +486,17 @@ fn step_back(s: &Stmt, info: &Info, live: &mut LocSet) {
     if !counts(s, info, live) {
         return;
     }
+    let passed: Vec<Loc> = info
+        .passes
+        .iter()
+        .filter(|l| live.contains(l))
+        .copied()
+        .collect();
     for d in &info.defs {
         live.remove(d);
     }
     live.extend(info.uses.iter().copied());
+    live.extend(passed);
 }
 
 /// Live-out of every block, by fixed point.

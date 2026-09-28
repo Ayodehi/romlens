@@ -19,7 +19,7 @@ use crate::decompile::cfg::{Cfg, Term};
 use crate::decompile::dataflow::{
     self, Conventions, FLAGS, Flow, Loc, LocSet, REGISTERS, all_fixed,
 };
-use crate::decompile::function::{self, Callee, Function, Transfer};
+use crate::decompile::function::{self, Callee, Dest, Function, Transfer};
 use crate::decompile::ir::{CType, CallTarget, Slot, Stmt, Width};
 use crate::decompile::lift::{self, LiftOptions, Lifted};
 use crate::memory::address::SnesAddress;
@@ -45,6 +45,9 @@ pub struct Summary {
     pub open: bool,
     /// Bytes of its caller's stack it reads as arguments.
     pub stack_args: u32,
+    /// Of `reads`, what it only hands back as it came in, on a path that
+    /// leaves it alone: it uses none of it. (S, D and DBR are never here.)
+    pub passes: LocSet,
 }
 
 /// Every routine and its summary.
@@ -636,6 +639,7 @@ impl Program {
                     call_defs: writes.clone(),
                     stack_args: stack_args.clone(),
                     stack_params: BTreeMap::new(),
+                    passes: BTreeMap::new(),
                 };
                 let flow = Flow::new(rom, &conv);
                 let live_out = dataflow::liveness(&flow, &u.cfg, &u.lifted);
@@ -705,12 +709,60 @@ impl Program {
             }
         }
 
+        // What each uses of what it reads: liveness at its entry with nothing
+        // read at its returns, where a callee's passed-through locations
+        // count only if read after the call. Grows from nothing like the
+        // rest; unsettled, everything read is taken as used.
+        let mut used: BTreeMap<SnesAddress, LocSet> =
+            units.keys().map(|&a| (a, LocSet::new())).collect();
+        let mut settled_use = false;
+        if converged {
+            for _ in 0..MAX_ROUNDS {
+                let passes: BTreeMap<SnesAddress, LocSet> = units
+                    .keys()
+                    .map(|a| (*a, reads[a].difference(&used[a]).copied().collect()))
+                    .collect();
+                let mut next = BTreeMap::new();
+                for (a, u) in &units {
+                    let conv = Conventions {
+                        exit: LocSet::new(),
+                        calls: used.clone(),
+                        default_call: base.default_call.clone(),
+                        call_defs: writes.clone(),
+                        stack_args: stack_args.clone(),
+                        stack_params: BTreeMap::new(),
+                        passes: passes.clone(),
+                    };
+                    let flow = Flow::new(rom, &conv);
+                    let live_out = dataflow::liveness(&flow, &u.cfg, &u.lifted);
+                    let mut r = dataflow::live_at_entry(&flow, &u.cfg, &u.lifted, &live_out);
+                    r.retain(|l| reads[a].contains(l));
+                    r.extend(used[a].iter().copied());
+                    next.insert(*a, r);
+                }
+                let done = next == used;
+                used = next;
+                if done {
+                    settled_use = true;
+                    break;
+                }
+            }
+        }
+        if !settled_use {
+            used = reads.clone();
+        }
+
         let summaries: BTreeMap<SnesAddress, Summary> = units
             .keys()
             .map(|a| {
                 (
                     *a,
                     Summary {
+                        passes: reads[a]
+                            .difference(&used[a])
+                            .filter(|l| !GLOBALS.contains(l))
+                            .copied()
+                            .collect(),
                         reads: reads[a].clone(),
                         writes: writes[a].clone(),
                         returns: returns[a].clone(),
@@ -840,6 +892,7 @@ impl Program {
             call_defs,
             stack_args: self.stack_args.clone(),
             stack_params: BTreeMap::new(),
+            passes: BTreeMap::new(),
         }
     }
 }
@@ -1059,7 +1112,13 @@ fn open_routines(
                 XRefKind::JumpTable | XRefKind::Pointer => at.contains_key(&x.from.0),
                 // From another routine this is one of its tail calls, which
                 // the fixed point follows; from the routine itself, a loop.
-                XRefKind::Jump | XRefKind::Branch => at.contains_key(&x.from.0),
+                // Not a jump through a pointer: where that goes, its callers
+                // are not known.
+                XRefKind::Jump | XRefKind::Branch => at.get(&x.from.0).is_some_and(|sites| {
+                    sites
+                        .iter()
+                        .all(|(_, t)| !matches!(t, Transfer::Jump(Dest::Unknown(_))))
+                }),
                 _ => false,
             };
             if !seen {
@@ -1101,7 +1160,8 @@ pub fn describe(s: &Summary) -> String {
         1 => v[0].to_owned(),
         n => format!("{} and {}", v[..n - 1].join(", "), v[n - 1]),
     };
-    let mut reads = name(&s.reads);
+    let used: LocSet = s.reads.difference(&s.passes).copied().collect();
+    let mut reads = name(&used);
     let pushed = match s.stack_args {
         0 => String::new(),
         1 => "a byte its caller pushed".to_owned(),
@@ -1111,7 +1171,20 @@ pub fn describe(s: &Summary) -> String {
         reads.push(&pushed);
     }
     let returns = name(&s.returns);
-    let mut out = format!("Reads {}; returns {}", list(reads), list(returns));
+    let mut out = format!("Reads {}", list(reads));
+    let passes = name(&s.passes);
+    if !passes.is_empty() {
+        let (verb, pronoun) = if passes.len() == 1 {
+            ("comes", "it")
+        } else {
+            ("come", "them")
+        };
+        out.push_str(&format!(
+            "; {} {verb} back as given where it leaves {pronoun} alone",
+            list(passes)
+        ));
+    }
+    out.push_str(&format!("; returns {}", list(returns)));
     let kept = name(&s.preserves);
     if !kept.is_empty() {
         out.push_str(&format!("; preserves {}", list(kept)));
