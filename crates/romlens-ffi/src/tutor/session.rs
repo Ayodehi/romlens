@@ -652,6 +652,8 @@ struct State {
     mode_changed: bool,
     /// Explain mode changed since the model was last told.
     explain_changed: bool,
+    /// The lesson step the student is at, for the next question.
+    at_step: Option<String>,
     busy: bool,
     /// A name that came while a turn had the session: the conversation,
     /// the name, and what it cost.
@@ -881,6 +883,7 @@ impl TutorSession {
                 created: 0,
                 mode_changed: false,
                 explain_changed: false,
+                at_step: None,
                 busy: false,
                 named: None,
             }),
@@ -1035,6 +1038,9 @@ impl TutorSession {
             if let Some(c) = prompt::context(changed, explain, selection.as_deref()) {
                 blocks.push(Block::Text { text: c });
             }
+            if let Some(at) = st.at_step.take() {
+                blocks.push(Block::Text { text: at });
+            }
             blocks.push(Block::Text { text: text.clone() });
             st.mode_changed = false;
             st.explain_changed = false;
@@ -1128,6 +1134,28 @@ impl TutorSession {
 
     pub fn explain(&self) -> bool {
         self.lock().session.as_ref().is_some_and(|s| s.explain)
+    }
+
+    /// The lesson step the student is reading, told to the model with the
+    /// next question; `None` once they leave the lesson.
+    pub fn set_lesson_step(&self, lesson: Option<String>, step: u32) {
+        let mut st = self.lock();
+        st.at_step = lesson.and_then(|id| {
+            let l = self
+                .tools
+                .lessons
+                .open_lesson(&id)
+                .or_else(|| self.tools.lessons.store()?.load(&id).ok())?;
+            let s = l.steps.get(step as usize)?;
+            Some(format!(
+                "[The student is at step {} of {} of lesson {} \"{}\": \"{}\"]",
+                step + 1,
+                l.steps.len(),
+                l.id,
+                l.title,
+                s.title
+            ))
+        });
     }
 
     /// A lesson, finished or still being written.
@@ -1616,6 +1644,12 @@ mod tests {
                 .any(|c| c.id == "dma" && c.marked && c.level == 2)
         );
         assert!(t.mark_known("nope".into(), Some(2)).is_err());
+        t.set_lesson_step(Some(begun.clone()), 0);
+        let at = t.lock().at_step.clone().unwrap();
+        assert!(
+            at.starts_with("[The student is at step 1 of 1 of lesson"),
+            "{at}"
+        );
         // A new conversation starts from it.
         t.new_conversation(local, "qwen3".into(), None, TutorMode::ReadOnly, None)
             .unwrap();

@@ -63,13 +63,23 @@ enum TranscriptRow: Identifiable {
     case question(index: UInt32, text: String, images: [String], selection: Bool)
     case answer(index: UInt32, text: String, reasoning: String, tools: [TutorModel.ToolRow], model: String?, cost: Double)
     case note(index: UInt32, text: String)
+    /// A lesson the tutor wrote in this turn (docs/25).
+    case lesson(index: UInt32, id: String)
 
     var id: String {
         switch self {
         case .question(let i, _, _, _): "q\(i)"
         case .answer(let i, _, _, _, _, _): "a\(i)"
         case .note(let i, _): "n\(i)"
+        case .lesson(_, let id): "l\(id)"
         }
+    }
+
+    /// The notes Romlens adds before the student's words, which the window
+    /// does not show as theirs.
+    static func isNote(_ text: String) -> Bool {
+        ["[The mode is now", "[The student's selection", "[The changes you proposed last time",
+         "[Explain mode is", "[The student is at step"].contains { text.hasPrefix($0) }
     }
 
     static func rows(_ turns: [TurnInfo]) -> [TranscriptRow] {
@@ -89,8 +99,7 @@ enum TranscriptRow: Identifiable {
                 for b in t.blocks {
                     switch b {
                     case .text(let text):
-                        if text.hasPrefix("[The mode is now") || text.hasPrefix("[The student's selection")
-                            || text.hasPrefix("[The changes you proposed last time") {
+                        if isNote(text) {
                             selection = selection || text.contains("selection")
                         } else {
                             words.append(text)
@@ -108,6 +117,7 @@ enum TranscriptRow: Identifiable {
                 var text = ""
                 var reasoning = ""
                 var tools: [TutorModel.ToolRow] = []
+                var lessons: [String] = []
                 for b in t.blocks {
                     switch b {
                     case .text(let s): text += s
@@ -115,10 +125,14 @@ enum TranscriptRow: Identifiable {
                     case .toolCall(let id, let name, let input):
                         let r = results[id]
                         tools.append(TutorModel.ToolRow(id: id, name: name, input: input, summary: r?.0, images: r?.2 ?? [], isError: r?.1 ?? false, done: true))
+                        if name == "begin_lesson", let r, !r.1, let l = lessonIdFromResult(text: r.0) {
+                            lessons.append(l)
+                        }
                     default: break
                     }
                 }
                 out.append(.answer(index: t.index, text: text, reasoning: reasoning, tools: tools, model: t.model, cost: t.cost))
+                for l in lessons { out.append(.lesson(index: t.index, id: l)) }
             }
         }
         return out
@@ -291,6 +305,8 @@ struct RowView: View {
         case .note(_, let text):
             Text(text).font(.caption).foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .center)
+        case .lesson(_, let id):
+            LessonCard(tutor: tutor, id: id)
         }
     }
 }
@@ -324,6 +340,7 @@ struct LiveAnswer: View {
             }
             ForEach(live.cards) { card in EditCard(tutor: tutor, card: card) }
             if !live.text.isEmpty { MessageText(tutor: tutor, text: live.text) }
+            if let l = live.lesson { LessonCard(tutor: tutor, id: l) }
             HStack(spacing: 6) {
                 ProgressView().controlSize(.small)
                 Text(live.status ?? "Thinking…").font(.caption).foregroundStyle(.secondary)
@@ -500,6 +517,12 @@ struct StatusLine: View {
             .buttonStyle(.plain)
             .disabled(tutor.busy)
             .help("Go back to an earlier conversation (/resume)")
+            Button { tutor.setExplain(!tutor.explain) } label: {
+                Label("Explain", systemImage: tutor.explain ? "graduationcap.fill" : "graduationcap")
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(tutor.explain ? Color.accentColor : Color.secondary)
+            .help(tutor.explain ? "Answering with lessons: click for plain answers (/explain)" : "Answer with lessons, as deep as you have got (/explain, /learn <topic>)")
             Button { tutor.settings.showWork.toggle() } label: {
                 Label("Details", systemImage: tutor.settings.showWork ? "list.bullet.rectangle.fill" : "list.bullet.rectangle")
             }

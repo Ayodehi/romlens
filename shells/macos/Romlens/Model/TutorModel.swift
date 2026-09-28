@@ -39,6 +39,8 @@ final class TutorModel {
         var tools: [ToolRow] = []
         var cards: [Card] = []
         var status: String?
+        /// The lesson being written in this turn (docs/25).
+        var lesson: String?
     }
 
     struct Attachment: Identifiable {
@@ -135,6 +137,8 @@ final class TutorModel {
             _ = try s.newConversation(
                 endpoint: e.info, model: model, effort: settings.effort(for: e),
                 mode: mode.mode, costCap: settings.costCap)
+            // Explain mode carries over to the next conversation.
+            s.setExplain(on: explain)
             refresh()
             return true
         } catch {
@@ -155,6 +159,8 @@ final class TutorModel {
     func refresh() {
         guard let s = session else { return }
         turns = s.transcript()
+        explain = s.explain()
+        lessonCache = [:]
         title = s.title()
         cost = s.cost()
         contextUsed = s.contextUsed()
@@ -253,11 +259,18 @@ final class TutorModel {
                 live?.tools.append(ToolRow(id: id, name: name, input: input))
             }
             live?.status = "\(Self.toolTitle(name))…"
-        case .toolFinished(let id, _, let summary, let isError):
+        case .toolFinished(let id, let name, let summary, let isError):
             if let i = live?.tools.firstIndex(where: { $0.id == id }) {
                 live?.tools[i].summary = summary
                 live?.tools[i].isError = isError
                 live?.tools[i].done = true
+            }
+            // A lesson being written shows as it grows.
+            if !isError, name == "begin_lesson", let l = lessonIdFromResult(text: summary) {
+                live?.lesson = l
+            }
+            if let l = live?.lesson, ["begin_lesson", "lesson_step", "end_lesson"].contains(name) {
+                reloadLesson(l)
             }
         case .editProposed(let p):
             live?.cards.append(Card(proposal: p, state: .waiting))
@@ -468,10 +481,22 @@ final class TutorModel {
         case "a":
             guard let a = UInt32(value, radix: 16) else { return false }
             rom.jump(toSnesAddress: a)
+        case "c":
+            // A routine's C: the C tab, at the instruction.
+            guard let a = UInt32(value, radix: 16) else { return false }
+            rom.graphicsTab = nil
+            rom.audioTab = nil
+            rom.editorTab = .c
+            rom.jump(toSnesAddress: a)
         case "f":
             guard let f = UInt64(value), rom.graphics.hasRecording else { return false }
             rom.graphics.frame = f
-            rom.graphicsTab = .frame
+            let view = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?.first { $0.name == "view" }?.value
+            rom.graphicsTab = view.flatMap(GraphicsModel.Tab.init(rawValue:)) ?? .frame
+        case "r":
+            // A register has no place in the ROM to show; the step names it.
+            return true
         default:
             return false
         }
@@ -499,6 +524,8 @@ final class TutorModel {
         Command(name: "/attach", about: "/attach frame: the recording's frame as a picture"),
         Command(name: "/selection", about: "Send the main window's selection with questions, or not"),
         Command(name: "/details", about: "Show or hide the tutor's thinking and tool calls"),
+        Command(name: "/learn", about: "/learn <topic>: a lesson about it, as deep as you have got"),
+        Command(name: "/explain", about: "Answer with lessons, or not (Explain mode)"),
         Command(name: "/help", about: "What the tutor can do and the keys it takes"),
     ]
 
@@ -548,6 +575,17 @@ final class TutorModel {
             includeSelection.toggle()
         case "/details":
             settings.showWork.toggle()
+        case "/learn":
+            guard !busy else { error = "Wait for the answer, or press Esc."; return }
+            guard startIfNeeded() else { return }
+            setExplain(true)
+            if !arg.isEmpty {
+                composer = arg
+                send()
+            }
+        case "/explain":
+            guard startIfNeeded() else { return }
+            setExplain(!explain)
         case "/help":
             sheet = .help
         default:
@@ -557,6 +595,56 @@ final class TutorModel {
 
     /// A line shown under the transcript by /cost.
     var costNote: String?
+
+    // MARK: Lessons (docs/25)
+
+    /// Explain mode: questions answered with lessons.
+    private(set) var explain = false
+    /// The step each lesson's card is at, and the predict questions shown.
+    var lessonSteps: [String: Int] = [:]
+    var revealed: Set<String> = []
+    private var lessonCache: [String: LessonInfo] = [:]
+
+    func setExplain(_ on: Bool) {
+        explain = on
+        session?.setExplain(on: on)
+    }
+
+    func lesson(_ id: String) -> LessonInfo? {
+        if let l = lessonCache[id] { return l }
+        guard let l = session?.lesson(id: id) else { return nil }
+        lessonCache[id] = l
+        return l
+    }
+
+    func reloadLesson(_ id: String) {
+        lessonCache[id] = session?.lesson(id: id)
+    }
+
+    func step(of lesson: String) -> Int { lessonSteps[lesson] ?? 0 }
+
+    /// Moves a lesson's card to step `i`, points the main window at what the
+    /// step is about, and tells the next question where the student is.
+    func show(step i: Int, of lesson: LessonInfo) {
+        guard lesson.steps.indices.contains(i) else { return }
+        lessonSteps[lesson.id] = i
+        session?.setLessonStep(lesson: lesson.id, step: UInt32(i))
+        if let f = lesson.steps[i].focus, let url = URL(string: f) {
+            _ = follow(url)
+        }
+    }
+
+    func isRevealed(_ lesson: String, _ step: Int) -> Bool { revealed.contains("\(lesson)#\(step)") }
+
+    func reveal(_ lesson: String, _ step: Int) { revealed.insert("\(lesson)#\(step)") }
+
+    /// "Go deeper": the next lesson an offer names.
+    func take(_ offer: LessonOfferInfo) {
+        guard !busy else { return }
+        setExplain(true)
+        composer = "Go deeper: \(offer.title)"
+        send()
+    }
 
     // MARK: Words
 

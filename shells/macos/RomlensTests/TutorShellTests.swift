@@ -80,6 +80,57 @@ import Testing
         #expect(window.window?.subtitle == "Test conversation")
     }
 
+    @Test func aLessonIsReadAStepAtATime() async throws {
+        let step: (String, String) -> String = { title, extra in
+            #"{"lesson":"","title":"\#(title)","predict":null,"body":"Words for \#(title).","focus_address":null,"focus_end":null,"focus_in":null,"focus_frame":null,"focus_view":null,"picture":null\#(extra)}"#
+        }
+        let r = try await rig([
+            tutorTestCallReply(name: "begin_lesson", arguments: #"{"title":"How a sprite reaches the screen","from_level":1,"to_level":2,"concepts":[{"id":"sprites","level":2}],"builds_on":[]}"#),
+            tutorTestCallReply(name: "lesson_step", arguments: step("Where the code starts", "").replacingOccurrences(of: #""focus_address":null"#, with: #""focus_address":"$00:8000""#)),
+            tutorTestCallReply(name: "lesson_step", arguments: step("Two chips", "").replacingOccurrences(of: #""predict":null"#, with: #""predict":"Which chip draws?""#).replacingOccurrences(of: #""focus_address":null,"focus_end":null,"focus_in":null"#, with: #""focus_address":"$00:8000","focus_end":null,"focus_in":"c""#)),
+            tutorTestCallReply(name: "end_lesson", arguments: #"{"lesson":"","next":[{"title":"Sprites in this game","concept":"oam","level":3}]}"#),
+            tutorTestTextReply(text: "Next takes you through it."),
+        ])
+        defer { try? FileManager.default.removeItem(at: r.root) }
+        r.tutor.composer = "/learn How does a sprite get rendered to the screen?"
+        r.tutor.submit()
+        #expect(r.tutor.explain)
+        try await Fixture.settle(timeout: 20) { !r.tutor.busy }
+        #expect(r.tutor.error == nil, "\(r.tutor.error ?? "")")
+
+        // The question reads as asked; the lesson is a row of its own.
+        let rows = TranscriptRow.rows(r.tutor.turns)
+        guard case .question(_, let q, _, _) = rows[0] else { Issue.record("no question"); return }
+        #expect(q == "How does a sprite get rendered to the screen?")
+        let ids = rows.compactMap { if case .lesson(_, let id) = $0 { id } else { nil } }
+        #expect(ids.count == 1)
+        let lesson = try #require(r.tutor.lesson(ids[0]))
+        #expect(lesson.finished && lesson.steps.count == 2 && lesson.levelName == "The idea to the hardware")
+
+        // Next moves the main window to each step's focus; a predict
+        // question keeps its answer back until Show.
+        r.rom.select(offset: 0x10)
+        r.tutor.show(step: 0, of: lesson)
+        #expect(r.rom.selectedAddress == 0x00_8000)
+        #expect(r.tutor.step(of: lesson.id) == 0)
+        r.tutor.show(step: 1, of: lesson)
+        #expect(r.rom.editorTab == .c)
+        #expect(!r.tutor.isRevealed(lesson.id, 1))
+        r.tutor.reveal(lesson.id, 1)
+        #expect(r.tutor.isRevealed(lesson.id, 1))
+        r.tutor.show(step: 5, of: lesson)
+        #expect(r.tutor.step(of: lesson.id) == 1, "past the end stays put")
+
+        // The record has it, for the next lesson.
+        let sprites = try #require(r.tutor.session?.learner().concepts.first { $0.id == "sprites" })
+        #expect(sprites.level == 2)
+
+        // Go deeper asks for the offer, with Explain on.
+        r.tutor.take(lesson.next[0])
+        #expect(r.tutor.busy && r.tutor.live?.question == "Go deeper: Sprites in this game")
+        try await Fixture.settle(timeout: 20) { !r.tutor.busy }
+    }
+
     @Test func anEditWaitsForItsCardAndUndoes() async throws {
         let r = try await rig([
             tutorTestCallReply(name: "set_label", arguments: #"{"address":"$00:8000","name":"Boot","reason":"the reset vector points here"}"#),
