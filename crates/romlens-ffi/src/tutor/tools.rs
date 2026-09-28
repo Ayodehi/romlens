@@ -49,6 +49,8 @@ pub struct RomTools {
     /// The recording open in the main window, which the recording tools read.
     recording: std::sync::Mutex<Option<Arc<RecordingSession>>>,
     images: std::sync::Mutex<Option<ImageSetup>>,
+    /// Lessons being written and the store they go to (docs/25).
+    pub lessons: super::lessons::Lessons,
 }
 
 impl RomTools {
@@ -57,6 +59,7 @@ impl RomTools {
             wb,
             recording: std::sync::Mutex::new(None),
             images: std::sync::Mutex::new(None),
+            lessons: super::lessons::Lessons::default(),
         }
     }
 
@@ -218,6 +221,7 @@ pub fn specs() -> Vec<ToolSpec> {
     let mut v = code_specs();
     v.extend(super::media::specs());
     v.extend(super::edits::specs());
+    v.extend(super::lessons::specs());
     v.push(spec(
         "generate_image",
         "Draw a teaching picture with an image model, when the student asks. It gets only your words, so describe everything; say the picture is generated.",
@@ -366,7 +370,8 @@ impl Tools for RomTools {
     fn kind(&self, name: &str) -> ToolKind {
         if super::edits::NAMES.contains(&name) {
             ToolKind::Edit
-        } else if name == "generate_image" {
+        } else if name == "generate_image" || super::lessons::BUILDING.contains(&name) {
+            // A lesson's steps go in the order they were written.
             ToolKind::Visual
         } else {
             ToolKind::Read
@@ -378,6 +383,19 @@ impl Tools for RomTools {
             return self.generate_image(input, cx);
         }
         let place = |t: &str| self.rom_place(t);
+        if super::lessons::NAMES.contains(&name) {
+            let resolve = |t: &str| {
+                self.place(t)
+                    .map(|r| (r.snes_address, r.file_offset, r.register.is_some()))
+            };
+            let rec = self
+                .recording
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone();
+            let rom = self.wb.rom_identity().sha256;
+            return self.lessons.run(name, input, cx, &resolve, rec, &rom);
+        }
         if super::edits::NAMES.contains(&name) {
             let edits = super::edits::Edits {
                 wb: &self.wb,

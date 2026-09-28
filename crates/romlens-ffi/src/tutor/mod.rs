@@ -4,6 +4,7 @@
 
 pub mod digest;
 pub mod edits;
+pub mod lessons;
 pub mod media;
 pub mod png;
 pub mod reference;

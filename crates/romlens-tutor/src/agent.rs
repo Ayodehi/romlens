@@ -298,6 +298,8 @@ pub struct Session {
     /// The model's short name for the conversation, once it has made one
     /// (`name`).
     pub title: Option<String>,
+    /// Explain mode: questions are answered with lessons (docs/25).
+    pub explain: bool,
     /// What requests outside the turns cost: naming the conversation.
     pub side_cost: f64,
 }
@@ -335,6 +337,7 @@ impl Session {
             decided: Vec::new(),
             title: None,
             side_cost: 0.0,
+            explain: false,
         }
     }
 

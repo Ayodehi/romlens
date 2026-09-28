@@ -507,6 +507,8 @@ struct State {
     created: u64,
     /// The mode changed since the model was last told.
     mode_changed: bool,
+    /// Explain mode changed since the model was last told.
+    explain_changed: bool,
     busy: bool,
     /// A name that came while a turn had the session: the conversation,
     /// the name, and what it cost.
@@ -549,6 +551,7 @@ impl agent::Events for Relay<'_> {
     }
 
     fn checkpoint(&self, s: &Session) {
+        self.me.tools.lessons.settle(&s.pictures);
         let mut st = self.me.lock();
         self.me.save(s, &mut st);
     }
@@ -566,6 +569,15 @@ impl TutorSession {
             st.title = title_for(&s.turns);
         }
         let _ = self.store.save(s, &st.title, st.created);
+    }
+
+    /// What the student has learned, for the model.
+    fn learner_summary(&self) -> String {
+        self.tools
+            .lessons
+            .store()
+            .map(|s| s.learner().summary())
+            .unwrap_or_default()
     }
 
     fn deps<'a>(&'a self, keys: &'a Keys, on: &'a dyn agent::Events) -> Deps<'a> {
@@ -609,6 +621,7 @@ impl TutorSession {
                 ended: &ended,
             };
             let r = job(&mut s, &me.deps(&keys, &on));
+            me.tools.lessons.settle(&s.pictures);
             // Named once, after the first answer, from a copy: the student
             // need not wait for it.
             let namer = (r.is_ok() && s.title.is_none() && s.answered()).then(|| s.clone());
@@ -698,8 +711,16 @@ impl TutorSession {
         listener: Arc<dyn TutorListener>,
     ) -> Arc<Self> {
         let sha = workbench.rom_identity().sha256;
+        let tools = RomTools::new(Arc::clone(&workbench));
+        // The student's lessons, beside the conversations: one record for
+        // every ROM.
+        tools
+            .lessons
+            .set_store(Some(romlens_tutor::lesson::LessonStore::new(
+                &PathBuf::from(&root),
+            )));
         Arc::new(TutorSession {
-            tools: Arc::new(RomTools::new(Arc::clone(&workbench))),
+            tools: Arc::new(tools),
             store: Store::new(&PathBuf::from(root), &sha),
             wb: workbench,
             keys: credentials,
@@ -716,6 +737,7 @@ impl TutorSession {
                 title: String::new(),
                 created: 0,
                 mode_changed: false,
+                explain_changed: false,
                 busy: false,
                 named: None,
             }),
@@ -741,7 +763,8 @@ impl TutorSession {
         s.mode = self::mode(mode);
         s.cost_cap = cost_cap;
         s.system = prompt::system();
-        s.digest = digest(&self.wb);
+        // What the student has learned, as it is now, for the lessons.
+        s.digest = digest(&self.wb) + &prompt::learner_section(&self.learner_summary());
         st.last = Vec::new();
         st.title = String::new();
         st.created = now();
@@ -761,6 +784,7 @@ impl TutorSession {
         st.title = meta.title;
         st.created = meta.created;
         st.mode_changed = false;
+        st.explain_changed = false;
         st.last = s.turns.clone();
         let turns = s
             .turns
@@ -849,6 +873,8 @@ impl TutorSession {
                 .as_ref()
                 .ok_or_else(|| err("start a conversation first"))?;
             let changed = st.mode_changed.then_some(s.mode);
+            let summary = self.learner_summary();
+            let explain = st.explain_changed.then_some((s.explain, summary.as_str()));
             let mut blocks = Vec::new();
             let mut pictures = HashMap::new();
             for a in attachments {
@@ -863,11 +889,12 @@ impl TutorSession {
             }
             // The context and the student's words apart, so a rewind gives
             // back just what they typed.
-            if let Some(c) = prompt::context(changed, selection.as_deref()) {
+            if let Some(c) = prompt::context(changed, explain, selection.as_deref()) {
                 blocks.push(Block::Text { text: c });
             }
             blocks.push(Block::Text { text: text.clone() });
             st.mode_changed = false;
+            st.explain_changed = false;
             (Turn::user(blocks), pictures)
         };
         let _ = self.store.remember_prompt(&text);
@@ -942,6 +969,22 @@ impl TutorSession {
             s.mode = self::mode(mode);
             st.mode_changed = true;
         }
+    }
+
+    /// Explain mode (docs/25): questions answered with lessons. The next
+    /// question tells the model, with what the student has learned.
+    pub fn set_explain(&self, on: bool) {
+        let mut st = self.lock();
+        if let Some(s) = st.session.as_mut()
+            && s.explain != on
+        {
+            s.explain = on;
+            st.explain_changed = true;
+        }
+    }
+
+    pub fn explain(&self) -> bool {
+        self.lock().session.as_ref().is_some_and(|s| s.explain)
     }
 
     pub fn mode(&self) -> TutorMode {
@@ -1250,6 +1293,88 @@ mod tests {
             vision: false,
         };
         (t, rx, local, root, wb)
+    }
+
+    #[test]
+    fn explain_mode_answers_with_a_lesson() {
+        let (t, rx, local, root, _wb) = setup(
+            "lesson",
+            vec![
+                call_reply(
+                    "begin_lesson",
+                    serde_json::json!({"title": "How a sprite reaches the screen", "from_level": 1,
+                        "to_level": 2, "concepts": [{"id": "sprites", "level": 2}], "builds_on": []}),
+                ),
+                call_reply(
+                    "lesson_step",
+                    serde_json::json!({"lesson": "", "title": "Two chips", "predict": "Which chip draws?",
+                        "body": "The CPU decides; the PPU draws.", "focus_address": null, "focus_end": null,
+                        "focus_in": null, "focus_frame": null, "focus_view": null, "picture": null}),
+                ),
+                call_reply(
+                    "end_lesson",
+                    serde_json::json!({"lesson": "", "next": [{"title": "OAM", "concept": "oam", "level": 2}]}),
+                ),
+                text_reply("That is the idea; Next takes you through it."),
+            ],
+        );
+        t.new_conversation(
+            local.clone(),
+            "qwen3".into(),
+            None,
+            TutorMode::ReadOnly,
+            None,
+        )
+        .unwrap();
+        t.set_explain(true);
+        assert!(t.explain());
+        Arc::clone(&t)
+            .send(
+                "How does a sprite get rendered to the screen?".into(),
+                Vec::new(),
+                None,
+            )
+            .unwrap();
+        let mut failed = Vec::new();
+        let end = until_done(&rx, |e| {
+            if let TutorEventInfo::ToolFinished {
+                name,
+                summary,
+                is_error: true,
+                ..
+            } = e
+            {
+                failed.push(format!("{name}: {summary}"));
+            }
+        });
+        assert!(matches!(end, TutorEventInfo::Ended { .. }), "{end:?}");
+        assert!(failed.is_empty(), "{failed:?}");
+        // The model was told, with what the student had learned.
+        let turns = t.transcript();
+        assert!(
+            matches!(&turns[0].blocks[0], TurnBlockInfo::Text { text } if text.contains("[Explain mode is on: answer with a lesson.]") && text.contains("start at level 1")),
+            "{:?}",
+            turns[0].blocks
+        );
+        // The lesson is kept, and the record has it.
+        let store = romlens_tutor::lesson::LessonStore::new(&root);
+        let lessons = store.list();
+        assert_eq!(lessons.len(), 1);
+        assert!(lessons[0].finished && lessons[0].steps.len() == 1);
+        assert_eq!(lessons[0].next[0].concept, "oam");
+        assert_eq!(store.learner().level("sprites"), 2);
+        // A new conversation starts from it.
+        t.new_conversation(local, "qwen3".into(), None, TutorMode::ReadOnly, None)
+            .unwrap();
+        let st = t.lock();
+        let digest = &st.session.as_ref().unwrap().digest;
+        assert!(
+            digest.contains("## The student's learning so far"),
+            "{digest}"
+        );
+        assert!(digest.contains("- sprites 2"), "{digest}");
+        drop(st);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

@@ -169,7 +169,7 @@ pub fn ask(w: &Where, a: &Ask) -> Result<()> {
     s.system = prompt::system();
     s.digest = digest(&wb);
     let sel = a.at.map(|at| selection(&wb, at)).transpose()?;
-    let mut text = prompt::context(Some(s.mode), sel.as_deref()).unwrap_or_default();
+    let mut text = prompt::context(Some(s.mode), None, sel.as_deref()).unwrap_or_default();
     if !text.is_empty() {
         text.push_str("\n\n");
     }

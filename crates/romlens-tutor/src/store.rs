@@ -49,6 +49,9 @@ pub struct Meta {
     /// What naming it cost, beside the turns.
     #[serde(default)]
     pub side_cost: f64,
+    /// Explain mode was on (docs/25).
+    #[serde(default)]
+    pub explain: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -153,6 +156,7 @@ impl Store {
             tools: s.tools_seen.clone(),
             titled: s.title.is_some(),
             side_cost: s.side_cost,
+            explain: s.explain,
         };
         for (id, bytes) in &s.pictures {
             let p = dir.join("pictures").join(id);
@@ -191,6 +195,7 @@ impl Store {
         s.tools_seen = meta.tools.clone();
         s.title = meta.titled.then(|| meta.title.clone());
         s.side_cost = meta.side_cost;
+        s.explain = meta.explain;
         for t in &turns {
             for image in pictures_of(t) {
                 if let Ok(bytes) = std::fs::read(dir.join("pictures").join(&image)) {
