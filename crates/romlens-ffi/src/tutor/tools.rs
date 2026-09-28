@@ -161,23 +161,34 @@ impl RomTools {
 }
 
 // Schema pieces, also for `media`.
-pub(crate) fn string(about: &str) -> Value {
-    json!({"type": "string", "description": about})
+/// A schema with its description, left out when there is none to give.
+fn about(mut v: Value, about: &str) -> Value {
+    if !about.is_empty() {
+        v["description"] = about.into();
+    }
+    v
 }
-pub(crate) fn integer(about: &str) -> Value {
-    json!({"type": "integer", "description": about})
+pub(crate) fn string(a: &str) -> Value {
+    about(json!({"type": "string"}), a)
 }
-pub(crate) fn boolean(about: &str) -> Value {
-    json!({"type": "boolean", "description": about})
+pub(crate) fn integer(a: &str) -> Value {
+    about(json!({"type": "integer"}), a)
 }
-pub(crate) fn choice(values: &[&str], about: &str) -> Value {
-    json!({"type": "string", "enum": values, "description": about})
+pub(crate) fn boolean(a: &str) -> Value {
+    about(json!({"type": "boolean"}), a)
+}
+pub(crate) fn choice(values: &[&str], a: &str) -> Value {
+    about(json!({"type": "string", "enum": values}), a)
 }
 pub(crate) fn nullable(v: Value) -> Value {
-    let about = v["description"].clone();
     let mut inner = v;
-    inner.as_object_mut().unwrap().remove("description");
-    json!({"anyOf": [inner, {"type": "null"}], "description": about})
+    let a = inner
+        .as_object_mut()
+        .unwrap()
+        .remove("description")
+        .and_then(|d| d.as_str().map(str::to_owned))
+        .unwrap_or_default();
+    about(json!({"anyOf": [inner, {"type": "null"}]}), &a)
 }
 pub(crate) fn object(props: &[(&str, Value)]) -> Value {
     let mut p = serde_json::Map::new();
@@ -191,9 +202,6 @@ pub(crate) fn object(props: &[(&str, Value)]) -> Value {
         "additionalProperties": false,
     })
 }
-
-const ADDRESS: &str =
-    "A CPU address such as $80:8000, a file offset such as 0x1234, or a label's name";
 
 pub(crate) fn spec(name: &str, description: &str, props: &[(&str, Value)]) -> ToolSpec {
     ToolSpec {
@@ -212,10 +220,10 @@ pub fn specs() -> Vec<ToolSpec> {
     v.extend(super::edits::specs());
     v.push(spec(
         "generate_image",
-        "Draw a picture with an image model, when the student asks for one: a diagram, an illustration of an idea, a teaching visual. It is sent only your words, never a picture from the game, so describe everything it must show. Say in your answer that the picture is generated, not from the ROM.",
+        "Draw a teaching picture with an image model, when the student asks. It gets only your words, so describe everything; say the picture is generated.",
         &[
-            ("prompt", string("The full description of the picture")),
-            ("size", choice(romlens_tutor::images::SIZES, "Square, landscape or portrait")),
+            ("prompt", string("")),
+            ("size", choice(romlens_tutor::images::SIZES, "")),
         ],
     ));
     v
@@ -225,161 +233,115 @@ fn code_specs() -> Vec<ToolSpec> {
     vec![
         spec(
             "rom_info",
-            "The ROM's header, mapping, size, vectors and checksum, and how much of it the analysis has classified.",
+            "Header, mapping, size, vectors, checksum, and how much is classified.",
             &[],
         ),
         spec(
             "resolve",
-            "Where an address is: its CPU address and file offset, what memory it is, its mirrors, the hardware register there if any, and its region and label.",
-            &[("address", string(ADDRESS))],
+            "An address's CPU address, file offset, memory, mirrors, register, region and label.",
+            &[("address", string(""))],
         ),
         spec(
             "read_bytes",
-            "Raw bytes as hex rows. At most 4096 bytes a call.",
-            &[
-                ("address", string(ADDRESS)),
-                ("length", integer("How many bytes, 1 to 4096")),
-            ],
+            "Raw bytes as hex.",
+            &[("address", string("")), ("length", integer("1–4096"))],
         ),
         spec(
             "listing",
-            "Romlens's listing from an address: the instructions as the analysis decoded them (with its M/X flags), data rows, labels and comments. Start here to read code.",
-            &[
-                ("address", string(ADDRESS)),
-                ("lines", integer("How many lines, 1 to 300")),
-            ],
+            "The listing from an address: decoded instructions, data, labels, comments. Start here for code.",
+            &[("address", string("")), ("lines", integer("1–300"))],
         ),
         spec(
             "decode_as",
-            "A what-if: decode instructions straight on from an address with the flags you give, ignoring the analysis. Use it to test whether a different M, X or E would make the code sensible.",
+            "Decode from an address with the flags you give, ignoring the analysis: test whether other M, X or E make sense.",
             &[
-                ("address", string(ADDRESS)),
-                ("count", integer("How many instructions, 1 to 200")),
-                ("m", boolean("M=1: A and memory are 8-bit")),
-                ("x", boolean("X=1: X and Y are 8-bit")),
-                ("e", boolean("E=1: emulation mode")),
+                ("address", string("")),
+                ("count", integer("1–200")),
+                ("m", boolean("A and memory 8-bit")),
+                ("x", boolean("X and Y 8-bit")),
+                ("e", boolean("Emulation mode")),
             ],
         ),
         spec(
             "region_at",
-            "The region an address is in: code, data (and what kind) or unknown, its extent, the analysis's confidence and evidence, and any warnings there.",
-            &[("address", string(ADDRESS))],
+            "The region at an address: kind, extent, confidence, evidence, warnings.",
+            &[("address", string(""))],
         ),
         spec(
             "regions",
-            "The regions in a range of the ROM, at most 100.",
+            "Regions in a range, at most 100.",
             &[
-                ("address", string(ADDRESS)),
-                ("length", integer("Bytes to cover")),
-                (
-                    "kind",
-                    choice(
-                        &["any", "code", "data", "unknown"],
-                        "Only regions of this kind",
-                    ),
-                ),
+                ("address", string("")),
+                ("length", integer("")),
+                ("kind", choice(&["any", "code", "data", "unknown"], "")),
             ],
         ),
         spec(
             "labels",
-            "The labels (names) in a range of the ROM, at most 200.",
-            &[
-                ("address", string(ADDRESS)),
-                ("length", integer("Bytes to cover")),
-            ],
+            "Labels in a range, at most 200.",
+            &[("address", string("")), ("length", integer(""))],
         ),
         spec(
             "find_label",
-            "Labels whose name contains some text, ignoring case, at most 50: how to find a routine or variable by name.",
-            &[("name", string("Part of a name"))],
+            "Labels whose name contains the text, at most 50.",
+            &[("name", string(""))],
         ),
-        spec(
-            "variables",
-            "The typed variables the project defines in RAM.",
-            &[],
-        ),
+        spec("variables", "The project's RAM variables.", &[]),
         spec(
             "xrefs",
-            "Cross-references: what calls, jumps to, reads or writes an address (to), or what the instruction at an address refers to (from).",
+            "What refers to an address (to), or what its instruction refers to (from).",
             &[
-                ("address", string(ADDRESS)),
-                (
-                    "direction",
-                    choice(
-                        &["to", "from"],
-                        "to: references to the address; from: references the instruction there makes",
-                    ),
-                ),
+                ("address", string("")),
+                ("direction", choice(&["to", "from"], "")),
             ],
         ),
         spec(
             "search",
-            "Search the ROM for bytes (hex with ?? wildcards, such as `A9 ?? 8D 00 21`) or text. At most 50 hits.",
-            &[
-                ("pattern", string("Hex bytes with ?? for any byte, or text")),
-                ("text", boolean("Search for text rather than bytes")),
-            ],
+            "Search the ROM for hex bytes (`A9 ?? 8D 00 21`) or text; at most 50 hits.",
+            &[("pattern", string("")), ("text", boolean(""))],
         ),
         spec(
             "decompile",
-            "The routine at an address as C, as Romlens rebuilds it: at full, the C the student sees in the C tab, where names like ADDR_7E0200 are made up from addresses. lift stays close to the instructions; clean folds them into statements; full adds loops, parameters and typed variables.",
+            "A routine as C. full is the C tab: loops, parameters, typed variables; clean folds statements; lift is closest to the instructions.",
             &[
-                (
-                    "address",
-                    string("The routine's entry, or any address in it"),
-                ),
-                (
-                    "level",
-                    choice(&["lift", "clean", "full"], "How far to rebuild"),
-                ),
+                ("address", string("")),
+                ("level", choice(&["lift", "clean", "full"], "")),
             ],
         ),
         spec(
             "routine_graph",
-            "The routine's control flow: its basic blocks, how each ends, the edges between them and its loops.",
-            &[(
-                "address",
-                string("The routine's entry, or any address in it"),
-            )],
+            "A routine's basic blocks, edges and loops.",
+            &[("address", string(""))],
         ),
         spec(
             "calls",
-            "Who calls the routine and what it calls, with each call site.",
-            &[(
-                "address",
-                string("The routine's entry, or any address in it"),
-            )],
+            "A routine's callers and callees, with call sites.",
+            &[("address", string(""))],
         ),
         spec(
             "explain_at",
-            "What the instruction at an address does to the hardware (a register write decoded field by field, with the value when known) and the idioms it belongs to (waiting for vertical blank, a DMA, a sound upload…) with why games do that.",
-            &[("address", string(ADDRESS))],
+            "What an instruction does to the hardware (register fields, with the value when known) and the idioms it belongs to, with why.",
+            &[("address", string(""))],
         ),
         spec(
             "describe_register",
-            "A hardware register's fields, decoded for a value if you give one. For registers at $2100-$21FF and $4200-$437F.",
+            "A register's fields ($2100–$21FF, $4200–$437F), decoded for a value if given.",
             &[
-                (
-                    "register",
-                    string("The register's address, such as $2105, or its name, such as BGMODE"),
-                ),
-                (
-                    "value",
-                    nullable(integer("The value written, or null for the layout only")),
-                ),
+                ("register", string("$2105 or BGMODE")),
+                ("value", nullable(integer(""))),
             ],
         ),
         spec(
             "screen_at",
-            "What the screen is set up to be at an instruction: the mode, each layer's tilemap and tiles, scroll, sprites, colour math, as the code has set the registers by then.",
-            &[("address", string(ADDRESS))],
+            "The screen setup the code has made by an instruction: mode, layers, scroll, sprites, colour math.",
+            &[("address", string(""))],
         ),
         spec(
             "reference",
-            "Romlens's reference pages: 65816_instruction (detail: a mnemonic), 65816_opcodes, addressing_modes, register (detail: an address or name), registers (detail: ppu, cpu, dma, apu or null), dsp_register (detail: $5D or DIR), dsp_registers, spc700_io, spc700_instruction (detail: a mnemonic), idioms.",
+            "Reference pages. detail: a mnemonic for 65816_instruction and spc700_instruction, an address or name for register and dsp_register, ppu/cpu/dma/apu for registers.",
             &[
-                ("topic", choice(reference::TOPICS, "Which page")),
-                ("detail", nullable(string("What the page needs, or null"))),
+                ("topic", choice(reference::TOPICS, "")),
+                ("detail", nullable(string(""))),
             ],
         ),
     ]

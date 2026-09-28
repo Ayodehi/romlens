@@ -21,179 +21,148 @@ use crate::graphics::{
 };
 use crate::workbench::Workbench;
 
-const FRAME: &str = "A frame of the recording open in Romlens";
-const ADDRESS: &str =
-    "A CPU address such as $80:8000, a file offset such as 0x1234, or a label's name";
-
 pub fn specs() -> Vec<ToolSpec> {
     use super::tools::{boolean, choice, integer, nullable, spec, string};
     vec![
         spec(
             "preview_at",
-            "What the analysis thinks the data at an address looks like: a graphics region drawn with its palette, a palette's colours, a tilemap, or a table, as a picture where it is one.",
-            &[("address", string(ADDRESS))],
+            "The data at an address as the analysis sees it: graphics, palette, tilemap or table, as a picture where it is one.",
+            &[("address", string(""))],
         ),
         spec(
             "decode_tiles",
-            "Draw tiles from ROM bytes as a picture, 16 to a row: how to check whether bytes are graphics and in what format.",
+            "Draw ROM bytes as tiles, to check whether and how they are graphics.",
             &[
-                ("address", string(ADDRESS)),
-                (
-                    "format",
-                    choice(&["2bpp", "4bpp", "8bpp", "mode7"], "Bits per pixel"),
-                ),
-                ("count", integer("How many tiles, 1 to 512")),
+                ("address", string("")),
+                ("format", choice(&["2bpp", "4bpp", "8bpp", "mode7"], "")),
+                ("count", integer("1–512")),
                 (
                     "palette",
-                    nullable(string(
-                        "An address of BGR15 colours in the ROM to draw with, or null for grey",
-                    )),
+                    nullable(string("BGR15 colours in the ROM, or null for grey")),
                 ),
             ],
         ),
         spec(
             "recording_info",
-            "The recording open in Romlens: its frames, what it holds, where it came from.",
+            "The open recording: frames, contents, source.",
             &[],
         ),
         spec(
             "ppu_state",
-            "The PPU at a frame: the mode, each layer's tilemap and tile addresses, sizes and scroll, the screens, the brightness, the layers' priority order, and where the CPU was.",
-            &[("frame", integer(FRAME))],
+            "The PPU at a frame: mode, layers, scroll, screens, brightness, priority order, CPU position.",
+            &[("frame", integer(""))],
         ),
         spec(
             "render_frame",
-            "The frame as Romlens draws it from the PPU state, as a picture (colour math, windows and mosaic left out; it says when they are used).",
-            &[("frame", integer(FRAME))],
+            "A frame drawn from its PPU state (no colour math, windows or mosaic).",
+            &[("frame", integer(""))],
         ),
         spec(
             "render_layer",
-            "One background layer of a frame alone, as a picture of its whole tilemap.",
-            &[("frame", integer(FRAME)), ("layer", integer("1 to 4"))],
+            "One layer's whole tilemap at a frame, drawn.",
+            &[("frame", integer("")), ("layer", integer("1 to 4"))],
         ),
         spec(
             "render_sprite",
-            "One sprite (OAM entry 0 to 127) of a frame, as a picture.",
-            &[("frame", integer(FRAME)), ("index", integer("0 to 127"))],
+            "One sprite at a frame, drawn.",
+            &[("frame", integer("")), ("index", integer("0 to 127"))],
         ),
         spec(
             "pixel_provenance",
-            "Where a pixel of a frame came from: the layer or sprite, the tilemap entry, the VRAM bytes, the DMA that put them there, the buffer in WRAM and the code that wrote it, and the ROM bytes, with Romlens's confidence.",
+            "Where a pixel came from: layer or sprite, tilemap entry, VRAM, the DMA, the WRAM buffer and its code, the ROM bytes.",
             &[
-                ("frame", integer(FRAME)),
+                ("frame", integer("")),
                 ("x", integer("0 to 255")),
                 ("y", integer("0 to 223")),
             ],
         ),
         spec(
             "changes",
-            "Which bytes of a memory changed between two frames, as ranges.",
+            "Byte ranges of a memory that changed between two frames.",
             &[
-                ("from", integer("The first frame")),
-                ("to", integer("The last frame")),
+                ("from", integer("")),
+                ("to", integer("")),
                 (
                     "memory",
-                    choice(&["wram", "vram", "cgram", "oam", "aram"], "Which memory"),
+                    choice(&["wram", "vram", "cgram", "oam", "aram"], ""),
                 ),
             ],
         ),
         spec(
             "history",
-            "When a range of a memory last changed before a frame and next changes after it.",
+            "When a memory range last changed before a frame, and next after.",
             &[
                 (
                     "memory",
-                    choice(&["wram", "vram", "cgram", "oam", "aram"], "Which memory"),
+                    choice(&["wram", "vram", "cgram", "oam", "aram"], ""),
                 ),
-                (
-                    "offset",
-                    integer("The offset in that memory (WRAM $7E:0000 is 0)"),
-                ),
+                ("offset", integer("WRAM $7E:0000 is 0")),
                 ("length", integer("Bytes")),
-                ("frame", integer(FRAME)),
+                ("frame", integer("")),
             ],
         ),
         spec(
             "who_writes",
-            "The instructions the project's execution log saw write a WRAM address or a PPU register, with how often: how to find the code behind a variable.",
-            &[(
-                "address",
-                string("A WRAM address such as $7E:0AF6, or a PPU register such as $2118"),
-            )],
+            "Instructions the execution log saw write a WRAM address or PPU register, with counts.",
+            &[("address", string(""))],
         ),
         spec(
             "sound_upload",
-            "How the game sends its sound driver and data to the sound CPU, traced from the ROM: the upload routines, each upload's blocks (audio RAM address, length, ROM source) and entry, and the sound commands the code sends.",
+            "The sound uploads traced from the ROM: routines, blocks (ARAM address, length, ROM source), entry, and sound commands.",
             &[],
         ),
         spec(
             "voices",
-            "The DSP's eight voices at a frame: sample, pitch and note, volume, envelope, flags.",
-            &[("frame", integer(FRAME))],
+            "The eight voices at a frame: sample, pitch, note, volume, envelope.",
+            &[("frame", integer(""))],
         ),
         spec(
             "dsp_registers",
-            "The DSP's registers at a frame, each explained; a voice's ten, or the global ones.",
+            "DSP registers at a frame, explained.",
             &[
-                ("frame", integer(FRAME)),
+                ("frame", integer("")),
                 (
                     "voice",
-                    nullable(integer(
-                        "0 to 7 for that voice's registers, or null for the global ones",
-                    )),
+                    nullable(integer("0–7, or null for the global ones")),
                 ),
             ],
         ),
         spec(
             "aram_map",
-            "What each part of audio RAM holds at a frame: the driver's code and data, the sample directory, the samples, the echo buffer, with where they came from in the ROM.",
-            &[("frame", integer(FRAME))],
+            "What audio RAM holds at a frame (driver, directory, samples, echo), with ROM sources.",
+            &[("frame", integer(""))],
         ),
         spec(
             "samples",
-            "The samples the sample directory names at a frame: where each starts and loops, its length, its tuning, and whether it played.",
-            &[("frame", integer(FRAME))],
+            "The directory's samples at a frame: start, loop, length, tuning, played.",
+            &[("frame", integer(""))],
         ),
         spec(
             "spc_listing",
-            "The SPC700's code in audio RAM at a frame, disassembled, with DSP writes explained.",
+            "SPC700 code in audio RAM at a frame, disassembled.",
             &[
-                ("frame", integer(FRAME)),
-                (
-                    "address",
-                    nullable(integer(
-                        "An audio RAM address, or null for where the SPC700 was",
-                    )),
-                ),
-                ("count", integer("Instructions, 1 to 200")),
+                ("frame", integer("")),
+                ("address", nullable(integer("null: where the SPC700 was"))),
+                ("count", integer("1–200")),
             ],
         ),
         spec(
             "note_timeline",
-            "The notes over a run of frames: each key on, key off and pitch change per voice, with the SPC700 instruction that made it.",
-            &[
-                ("from", integer("The first frame")),
-                ("to", integer("The last frame")),
-            ],
+            "Key ons, key offs and pitch changes per voice over frames, with their SPC700 instructions.",
+            &[("from", integer("")), ("to", integer(""))],
         ),
         spec(
             "port_events",
-            "The two CPUs' conversation over a run of frames: each byte written to the four ports, by which side.",
-            &[
-                ("from", integer("The first frame")),
-                ("to", integer("The last frame")),
-            ],
+            "Bytes written to the four APU ports over frames, and by which CPU.",
+            &[("from", integer("")), ("to", integer(""))],
         ),
         spec(
             "brr_sample",
-            "A BRR sample in the ROM decoded block by block: each block's shift, filter and flags, and whether it loops.",
+            "A BRR sample in the ROM, block by block.",
             &[
-                ("address", string(ADDRESS)),
-                ("blocks", integer("At most this many blocks, 1 to 512")),
-                (
-                    "with_steps",
-                    boolean("Include each nibble's arithmetic for the first block"),
-                ),
+                ("address", string("")),
+                ("blocks", integer("1–512")),
+                ("with_steps", boolean("The first block's arithmetic too")),
             ],
         ),
     ]

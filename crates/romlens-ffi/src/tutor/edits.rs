@@ -18,11 +18,6 @@ use serde_json::{Value, json};
 use super::tools::{addr, boolean, choice, integer, nullable, object, spec, string};
 use crate::workbench::Workbench;
 
-const ADDRESS: &str =
-    "A CPU address such as $80:8000, a file offset such as 0x1234, or a label's name";
-const ROUTINE: &str = "The routine's entry, or any address in it";
-const REASON: &str = "Why, in a sentence the student will read on the card, citing the evidence";
-
 pub const NAMES: &[&str] = &[
     "set_label",
     "set_comment",
@@ -48,53 +43,39 @@ pub fn specs() -> Vec<ToolSpec> {
     vec![
         spec(
             "set_label",
-            "Name (or with null, unname) an address: a routine, a branch target, a variable, a table. The name shows in the listing, the C and everywhere the address is used.",
+            "Name an address, or unname it with null.",
             &[
-                ("address", string(ADDRESS)),
-                (
-                    "name",
-                    nullable(string(
-                        "A name in the project's style, letters, digits and _, or null to remove it",
-                    )),
-                ),
-                ("reason", string(REASON)),
+                ("address", string("")),
+                ("name", nullable(string("Letters, digits and _"))),
+                ("reason", string("")),
             ],
         ),
         spec(
             "set_comment",
-            "A comment in the listing at an address: a line comment after the instruction, or a block comment above it. null removes it.",
+            "A listing comment after an instruction or above it; null removes it.",
             &[
-                ("address", string(ADDRESS)),
-                ("text", nullable(string("The comment, or null"))),
-                (
-                    "kind",
-                    choice(&["line", "block"], "After the instruction, or above it"),
-                ),
-                ("reason", string(REASON)),
+                ("address", string("")),
+                ("text", nullable(string(""))),
+                ("kind", choice(&["line", "block"], "")),
+                ("reason", string("")),
             ],
         ),
         spec(
             "define_variable",
-            "Define a variable in RAM: a name and a type, so the listing and the C read it by name.",
+            "Define a named, typed RAM variable.",
             &[
-                ("address", string("Its address, such as $7E:0AF6")),
-                ("name", string("Its name")),
-                (
-                    "width",
-                    choice(&["byte", "word", "long"], "One element's width"),
-                ),
-                (
-                    "count",
-                    integer("Elements: 1 for a single value, more for an array"),
-                ),
-                ("reason", string(REASON)),
+                ("address", string("")),
+                ("name", string("")),
+                ("width", choice(&["byte", "word", "long"], "")),
+                ("count", integer("1, or more for an array")),
+                ("reason", string("")),
             ],
         ),
         spec(
             "mark_region",
-            "Tell the analysis what a range of the ROM is: code, a kind of data, or unknown. The analysis runs again.",
+            "Say what a ROM range is; the analysis reruns.",
             &[
-                ("address", string(ADDRESS)),
+                ("address", string("")),
                 ("length", integer("Bytes")),
                 (
                     "kind",
@@ -115,66 +96,63 @@ pub fn specs() -> Vec<ToolSpec> {
                             "compressed",
                             "sample",
                         ],
-                        "What it is",
+                        "",
                     ),
                 ),
-                ("reason", string(REASON)),
+                ("reason", string("")),
             ],
         ),
         spec(
             "set_flags",
-            "Tell the analysis the M, X or E flag at an instruction, where it guessed wrong (garbage after a call is the sign). null leaves a flag to the analysis. Test first with decode_as.",
+            "Correct M, X or E at an instruction; null leaves one to the analysis. Test with decode_as first.",
             &[
-                ("address", string(ADDRESS)),
-                ("m", nullable(boolean("M=1: A 8-bit"))),
-                ("x", nullable(boolean("X=1: X and Y 8-bit"))),
-                ("e", nullable(boolean("E=1: emulation mode"))),
-                ("reason", string(REASON)),
+                ("address", string("")),
+                ("m", nullable(boolean("A 8-bit"))),
+                ("x", nullable(boolean("X and Y 8-bit"))),
+                ("e", nullable(boolean("Emulation mode"))),
+                ("reason", string("")),
             ],
         ),
         spec(
             "rename_local",
-            "Give one of a routine's locals or parameters in the C a name (a, x, a8, i, x_out…, as decompile shows them). null restores Romlens's name.",
+            "Rename a local or parameter in a routine's C; null restores it.",
             &[
-                ("routine", string(ROUTINE)),
-                ("local", string("The name decompile shows now")),
-                ("name", nullable(string("A C name, or null"))),
-                ("reason", string(REASON)),
+                ("routine", string("")),
+                ("local", string("")),
+                ("name", nullable(string(""))),
+                ("reason", string("")),
             ],
         ),
         spec(
             "set_routine_note",
-            "A note printed above the routine in the C: what it does and what it takes and returns, in plain words. null removes it.",
+            "A plain-words note above a routine's C; null removes it.",
             &[
-                ("routine", string(ROUTINE)),
-                ("text", nullable(string("The note, or null"))),
-                ("reason", string(REASON)),
+                ("routine", string("")),
+                ("text", nullable(string(""))),
+                ("reason", string("")),
             ],
         ),
         spec(
             "set_c_comment",
-            "A comment in the C before the statement an instruction makes. null removes it.",
+            "A C comment before an instruction's statement; null removes it.",
             &[
-                ("address", string("The instruction's address")),
-                ("text", nullable(string("The comment, or null"))),
-                ("reason", string(REASON)),
+                ("address", string("")),
+                ("text", nullable(string(""))),
+                ("reason", string("")),
             ],
         ),
         spec(
             "write_c_version",
-            "Save a C version of a routine: your own rewrite of it that explains what it does better than the generated C, shown beside it and never compiled. Keep it faithful, say in it what you simplified, and anchor its lines to the instructions they stand for. An empty text removes the version.",
+            "Save your own C rewrite of a routine, shown beside the generated C; empty text removes it.",
             &[
-                ("routine", string(ROUTINE)),
-                (
-                    "name",
-                    string("A short name for this version, such as \"Plain words\""),
-                ),
-                ("text", string("The C")),
+                ("routine", string("")),
+                ("name", string("Such as \"Plain words\"")),
+                ("text", string("")),
                 (
                     "anchors",
-                    json!({"type": "array", "items": anchor, "description": "Which lines stand for which instructions"}),
+                    json!({"type": "array", "items": anchor, "description": ""}),
                 ),
-                ("reason", string(REASON)),
+                ("reason", string("")),
             ],
         ),
     ]
