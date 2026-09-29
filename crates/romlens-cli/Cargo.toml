@@ -15,5 +15,7 @@ path = "src/main.rs"
 romlens-core = { path = "../romlens-core" }
 romlens-tutor = { path = "../romlens-tutor" }
 romlens-ffi = { path = "../romlens-ffi" }
+romlens-draw = { path = "../romlens-draw" }
+serde_json.workspace = true
 clap.workspace = true
 anyhow.workspace = true

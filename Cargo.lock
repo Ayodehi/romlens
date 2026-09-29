@@ -823,8 +823,10 @@ dependencies = [
  "anyhow",
  "clap",
  "romlens-core",
+ "romlens-draw",
  "romlens-ffi",
  "romlens-tutor",
+ "serde_json",
 ]
 
 [[package]]

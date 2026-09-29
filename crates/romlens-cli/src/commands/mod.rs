@@ -9,6 +9,7 @@ pub mod brr;
 pub mod decompile;
 pub mod diff;
 pub mod disasm;
+pub mod draw;
 pub mod explain;
 pub mod export;
 pub mod graph;

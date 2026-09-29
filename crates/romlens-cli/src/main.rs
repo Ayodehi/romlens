@@ -382,6 +382,10 @@ enum Command {
         #[command(subcommand)]
         what: TutorCommand,
     },
+    /// A diagram Romlens draws for the tutor (docs/26), from a JSON spec:
+    /// what it shows, then its SVG (or the file with --out). `romlens draw
+    /// check <svg>` runs the checks the tutor's own SVG must pass.
+    Draw(DrawCli),
     /// A BRR sound sample, decoded block by block (docs/23).
     Brr {
         rom: PathBuf,
@@ -756,6 +760,36 @@ struct TutorAsk {
     /// record (docs/25) under `ROMLENS_TUTOR_DIR` or the app's folder.
     #[arg(long)]
     explain: bool,
+}
+
+#[derive(clap::Args)]
+#[command(args_conflicts_with_subcommands = true)]
+struct DrawCli {
+    #[command(subcommand)]
+    check: Option<DrawCheck>,
+    rom: Option<PathBuf>,
+    /// fields, memory_map, blocks, timeline or chain.
+    kind: Option<String>,
+    /// The spec: a JSON file, `-` for stdin, or the JSON itself.
+    spec: Option<String>,
+    #[arg(long)]
+    project: Option<PathBuf>,
+    /// A recording, for a frame's timeline or a pixel's chain.
+    #[arg(long)]
+    recording: Option<PathBuf>,
+    /// Write the diagram to a .svg or .png file.
+    #[arg(long)]
+    out: Option<PathBuf>,
+}
+
+#[derive(Subcommand)]
+enum DrawCheck {
+    /// Check an SVG as the tutor's is checked, and draw it with --out.
+    Check {
+        svg: PathBuf,
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1862,6 +1896,24 @@ fn run() -> Result<()> {
                 full,
                 system,
             } => commands::tutor::show(&which, dir.as_deref(), full, system),
+        },
+        Command::Draw(d) => match d.check {
+            Some(DrawCheck::Check { svg, out }) => commands::draw::check(&svg, out.as_deref()),
+            None => {
+                let (Some(rom), Some(kind), Some(spec)) = (d.rom, d.kind, d.spec) else {
+                    return Err(anyhow::anyhow!(
+                        "romlens draw <rom> <kind> <spec>, or romlens draw check <svg>"
+                    ));
+                };
+                commands::draw::draw(commands::draw::DrawArgs {
+                    rom: &rom,
+                    kind: &kind,
+                    spec: &spec,
+                    project: d.project.as_deref(),
+                    recording: d.recording.as_deref(),
+                    out: d.out.as_deref(),
+                })
+            }
         },
         Command::Brr {
             rom,

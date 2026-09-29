@@ -120,7 +120,7 @@ impl Approver for Terminal {
     }
 }
 
-fn workbench(rom: &Path, project: Option<&Path>) -> Result<std::sync::Arc<Workbench>> {
+pub fn workbench(rom: &Path, project: Option<&Path>) -> Result<std::sync::Arc<Workbench>> {
     let rom = Rom::open(rom.to_string_lossy().into_owned())?;
     let wb = match project {
         Some(p) => Workbench::with_project_files(

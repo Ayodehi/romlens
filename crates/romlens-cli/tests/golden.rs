@@ -1378,3 +1378,49 @@ fn apu_commands() {
     check("apu", &log);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// Romlens's diagrams (docs/26): what each kind shows and its SVG, and the
+/// checks' verdict on an SVG the tutor might write.
+#[test]
+fn draw() {
+    let dir = temp_dir("draw");
+    let rom = write_fixture(&dir, MappingMode::LoRom);
+    let rom = rom.to_str().unwrap();
+    let mut log = String::new();
+    for (kind, spec) in [
+        (
+            "fields",
+            r#"{"register": "INIDISP", "value": "$8F", "highlight": ["Forced blank"]}"#,
+        ),
+        (
+            "memory_map",
+            r#"{"view": "bank", "bank": "$00", "marks": [{"address": "$00:FFFC"}]}"#,
+        ),
+        ("memory_map", r#"{"view": "banks"}"#),
+        (
+            "blocks",
+            r#"{"preset": "machine", "edges": [{"from": "wram", "to": "oam", "label": "DMA"}]}"#,
+        ),
+        (
+            "timeline",
+            r#"{"span": "frame", "marks": [{"at": 225, "label": "The NMI handler"}]}"#,
+        ),
+        (
+            "chain",
+            r#"{"steps": [{"label": "Tiles", "place": "$00:8000"}, {"label": "VRAM", "place": "VRAM"}]}"#,
+        ),
+    ] {
+        log += &format!("$ romlens draw {kind} {spec}\n");
+        log += &run(&["draw", rom, kind, spec]);
+    }
+    let bad = dir.join("bad.svg");
+    std::fs::write(
+        &bad,
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200"><text x="20" y="60" font-size="8" fill="#1d2433">Tiny</text><script>x</script></svg>"##,
+    )
+    .unwrap();
+    log += "$ romlens draw check bad.svg\n";
+    log += &redact_tmp(&dir, &run(&["draw", "check", bad.to_str().unwrap()]));
+    check("draw-lorom", &log);
+    let _ = std::fs::remove_dir_all(dir);
+}

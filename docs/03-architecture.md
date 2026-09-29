@@ -11,6 +11,10 @@ revisit if Windows or Linux became goals. They have (see
   serialization, importers/exporters, graphics decoders, the reference PPU,
   recording index and provenance, the tutor loop, the scene model and a
   software rasterizer for export.
+- **`romlens-draw`** — the diagrams Romlens draws for the tutor and its
+  lessons (`26-diagrams.md`): kinds drawn from the core's data, an SVG
+  writer, the checks every picture passes, and `resvg` with bundled fonts
+  to draw them, the same on every platform.
 - **`romlens-ffi`** — the public API: UniFFI definitions that generate
   Swift and C# bindings over a C ABI, plus the XCFramework build for macOS.
 - **`romlens-cli`** — headless commands over the same core, used by CI on
@@ -322,6 +326,7 @@ snes_visualizer/
 │   │   ├── viewmodel/  HexRows, Spans, Inspector [Phase 0]; AsmLines (typed tokens),
 │   │   │               RegionSummary, AtlasTiles, TileBitmap, FrameImage
 │   │   └── platform/   Platform trait (future NES/GB/Genesis)
+│   ├── romlens-draw/ diagram kinds, SVG writer, checks, resvg + bundled fonts
 │   ├── romlens-ffi/ UniFFI definitions, C ABI, binding generation,
 │   │                   XCFramework + Swift package build script
 │   └── romlens-cli/ info, dump, disasm, analyze, export, record-index,
