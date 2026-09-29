@@ -895,42 +895,10 @@ impl TutorSession {
         let Some(store) = self.tools.lessons.store() else {
             return;
         };
-        let (changed, cost) = match store.load(id) {
-            Ok(lesson) => {
-                let wb = &self.wb;
-                let insn_at = |a: u32| {
-                    let r = wb.resolve_any(super::tools::addr(a)).ok()?;
-                    let i = wb.disassemble(r.file_offset?, 1, None).into_iter().next()?;
-                    (i.snes_address == a).then(|| (i.mnemonic.clone(), i.operand_text.clone()))
-                };
-                let found = super::lessons::mechanical(&lesson, &insn_at);
-                let quiet = |_: agent::Event| {};
-                let tools = ReviewTools(self.tools.as_ref());
-                let d = Deps {
-                    tools: &tools,
-                    ..self.deps(keys, &quiet)
-                };
-                let (note, cost) = c
-                    .review(&lesson.describe(), &found.join("\n"), &d)
-                    .unwrap_or_else(|e| (format!("The check stopped: {e}"), 0.0));
-                let changed = store.load(id).map_or(0, |l| {
-                    l.revisions.len().saturating_sub(lesson.revisions.len())
-                }) as u32;
-                let _ = store.set_checked(
-                    id,
-                    romlens_tutor::lesson::Checked {
-                        when: std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .map_or(0, |d| d.as_secs()),
-                        changed,
-                        cost,
-                        note,
-                    },
-                );
-                (changed, cost)
-            }
-            Err(_) => (0, 0.0),
-        };
+        let quiet = |_: agent::Event| {};
+        let d = self.deps(keys, &quiet);
+        let (changed, cost) = check_lesson(c, id, &store, self.tools.as_ref(), &self.wb, &d)
+            .map_or((0, 0.0), |(changed, cost, _)| (changed, cost));
         let total = self.charge(c, cost);
         self.lock().checking.remove(id);
         self.listener.on_event(TutorEventInfo::LessonChecked {
@@ -970,6 +938,51 @@ impl TutorSession {
             None => c.cost() + cost,
         }
     }
+}
+
+/// Checks lesson `id` from `c`, a copy of the conversation that wrote it
+/// (docs/25, "Checking lessons"): Romlens's own findings, then the model's
+/// review with only reads and `revise_lesson_step`, then the check recorded
+/// in the lesson. Returns the steps rewritten, the cost and the reviewer's
+/// last line; `None` when the lesson is not in the store.
+pub fn check_lesson(
+    c: &Session,
+    id: &str,
+    store: &romlens_tutor::lesson::LessonStore,
+    tools: &RomTools,
+    wb: &Workbench,
+    d: &Deps,
+) -> Option<(u32, f64, String)> {
+    let lesson = store.load(id).ok()?;
+    let insn_at = |a: u32| {
+        let r = wb.resolve_any(super::tools::addr(a)).ok()?;
+        let i = wb.disassemble(r.file_offset?, 1, None).into_iter().next()?;
+        (i.snes_address == a).then(|| (i.mnemonic.clone(), i.operand_text.clone()))
+    };
+    let found = super::lessons::mechanical(&lesson, &insn_at);
+    let review = ReviewTools(tools);
+    let d = Deps {
+        tools: &review,
+        ..*d
+    };
+    let (note, cost) = c
+        .review(&lesson.describe(), &found.join("\n"), &d)
+        .unwrap_or_else(|e| (format!("The check stopped: {e}"), 0.0));
+    let changed = store.load(id).map_or(0, |l| {
+        l.revisions.len().saturating_sub(lesson.revisions.len())
+    }) as u32;
+    let _ = store.set_checked(
+        id,
+        romlens_tutor::lesson::Checked {
+            when: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs()),
+            changed,
+            cost,
+            note: note.clone(),
+        },
+    );
+    Some((changed, cost, note))
 }
 
 /// The tools a lesson's check may use: every read, and rewriting a

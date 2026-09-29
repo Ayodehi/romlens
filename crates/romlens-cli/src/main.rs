@@ -760,6 +760,10 @@ struct TutorAsk {
     /// record (docs/25) under `ROMLENS_TUTOR_DIR` or the app's folder.
     #[arg(long)]
     explain: bool,
+    /// Leave the lessons it finishes unchecked (docs/25, "Checking
+    /// lessons"); by default each is checked after the answer.
+    #[arg(long)]
+    no_check: bool,
 }
 
 #[derive(clap::Args)]
@@ -1860,6 +1864,7 @@ fn run() -> Result<()> {
                     cap,
                     mode,
                     explain,
+                    no_check,
                 } = *ask;
                 commands::tutor::ask(
                     &commands::tutor::Where {
@@ -1879,6 +1884,7 @@ fn run() -> Result<()> {
                         cap,
                         mode: &mode,
                         explain,
+                        no_check,
                     },
                 )
             }

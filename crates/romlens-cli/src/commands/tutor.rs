@@ -91,6 +91,8 @@ pub struct Ask<'a> {
     pub mode: &'a str,
     /// Answer with a lesson (docs/25).
     pub explain: bool,
+    /// Leave the lessons it finishes unchecked.
+    pub no_check: bool,
 }
 
 /// Asks about each edit on the terminal.
@@ -264,6 +266,29 @@ pub fn ask(w: &Where, a: &Ask) -> Result<()> {
     )?;
     println!();
     eprintln!("({model}, stopped: {stop:?})");
+    // The lessons it finished, checked as the app checks them (docs/25).
+    let reviews = tools.lessons.take_reviews();
+    if !a.no_check
+        && let Some(store) = tools.lessons.store()
+    {
+        let quiet = |_: Event| {};
+        let d = Deps {
+            transport: &UreqTransport::new(),
+            credentials: &EnvCredentials,
+            tools: &tools,
+            approver: &Terminal,
+            events: &quiet,
+            cancel: &cancel,
+        };
+        for id in reviews {
+            eprintln!("(checking lesson {id}…)");
+            if let Some((changed, cost, note)) =
+                romlens_ffi::tutor::session::check_lesson(&s, &id, &store, &tools, &wb, &d)
+            {
+                eprintln!("(checked {id}: {changed} step(s) rewritten, ${cost:.4}: {note})");
+            }
+        }
+    }
     if let Some(p) = a.project
         && wb.is_dirty()
     {
