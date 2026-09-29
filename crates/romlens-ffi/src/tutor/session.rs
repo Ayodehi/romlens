@@ -110,6 +110,16 @@ pub struct LessonInfo {
     pub next: Vec<LessonOfferInfo>,
     /// Ended with `end_lesson`; `false` while it is being written.
     pub finished: bool,
+    /// The background check, once it has run, and whether it is running.
+    pub checked: Option<LessonCheckedInfo>,
+    pub checking: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct LessonCheckedInfo {
+    /// Steps it rewrote.
+    pub changed: u32,
+    pub cost: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
@@ -223,6 +233,11 @@ fn lesson_info(l: &romlens_tutor::lesson::Lesson, rom: &str) -> LessonInfo {
             })
             .collect(),
         finished: l.finished,
+        checked: l.checked.as_ref().map(|c| LessonCheckedInfo {
+            changed: c.changed,
+            cost: c.cost,
+        }),
+        checking: false,
     }
 }
 
@@ -352,6 +367,14 @@ pub enum TutorEventInfo {
     /// The model named the conversation, after its first answer.
     Named {
         title: String,
+        total: f64,
+    },
+    /// A finished lesson was checked in the background (docs/25): how many
+    /// steps it rewrote, what the check cost, and the conversation's cost.
+    LessonChecked {
+        lesson: String,
+        changed: u32,
+        cost: f64,
         total: f64,
     },
 }
@@ -658,6 +681,11 @@ struct State {
     /// A name that came while a turn had the session: the conversation,
     /// the name, and what it cost.
     named: Option<(String, String, f64)>,
+    /// Checks' costs that came while a turn had the session.
+    charged: Vec<(String, f64)>,
+    /// Lessons being checked now, and whether finished lessons are checked.
+    checking: std::collections::HashSet<String>,
+    check_lessons: bool,
 }
 
 #[derive(uniffi::Object)]
@@ -767,6 +795,11 @@ impl TutorSession {
             };
             let r = job(&mut s, &me.deps(&keys, &on));
             me.tools.lessons.settle(&s.pictures);
+            // The lessons this turn finished are checked after it, from a
+            // copy, once the student has the session back (docs/25).
+            let reviews = me.tools.lessons.take_reviews();
+            let check = r.is_ok() && !reviews.is_empty() && me.lock().check_lessons;
+            let reviewer = check.then(|| s.clone());
             // Named once, after the first answer, from a copy: the student
             // need not wait for it.
             let namer = (r.is_ok() && s.title.is_none() && s.answered()).then(|| s.clone());
@@ -777,6 +810,14 @@ impl TutorSession {
                 {
                     s.title = Some(title);
                     s.side_cost += cost;
+                }
+                for (id, cost) in std::mem::take(&mut st.charged) {
+                    if id == s.id {
+                        s.side_cost += cost;
+                    }
+                }
+                if reviewer.is_some() {
+                    st.checking.extend(reviews.iter().cloned());
                 }
                 me.save(&s, &mut st);
                 st.last = s.turns.clone();
@@ -796,6 +837,11 @@ impl TutorSession {
             }
             if let Some(n) = namer {
                 me.name(&n, &keys);
+            }
+            if let Some(c) = reviewer {
+                for id in reviews {
+                    me.check(&c, &id, &keys);
+                }
             }
         });
         Ok(())
@@ -842,6 +888,123 @@ impl TutorSession {
         self.listener
             .on_event(TutorEventInfo::Named { title, total });
     }
+
+    /// Checks lesson `id`, which the conversation `c` is a copy of wrote,
+    /// and corrects its steps; the check's cost goes to the conversation.
+    fn check(self: &Arc<Self>, c: &Session, id: &str, keys: &Keys) {
+        let Some(store) = self.tools.lessons.store() else {
+            return;
+        };
+        let (changed, cost) = match store.load(id) {
+            Ok(lesson) => {
+                let wb = &self.wb;
+                let insn_at = |a: u32| {
+                    let r = wb.resolve_any(super::tools::addr(a)).ok()?;
+                    let i = wb.disassemble(r.file_offset?, 1, None).into_iter().next()?;
+                    (i.snes_address == a).then(|| (i.mnemonic.clone(), i.operand_text.clone()))
+                };
+                let found = super::lessons::mechanical(&lesson, &insn_at);
+                let quiet = |_: agent::Event| {};
+                let tools = ReviewTools(self.tools.as_ref());
+                let d = Deps {
+                    tools: &tools,
+                    ..self.deps(keys, &quiet)
+                };
+                let (note, cost) = c
+                    .review(&lesson.describe(), &found.join("\n"), &d)
+                    .unwrap_or_else(|e| (format!("The check stopped: {e}"), 0.0));
+                let changed = store.load(id).map_or(0, |l| {
+                    l.revisions.len().saturating_sub(lesson.revisions.len())
+                }) as u32;
+                let _ = store.set_checked(
+                    id,
+                    romlens_tutor::lesson::Checked {
+                        when: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map_or(0, |d| d.as_secs()),
+                        changed,
+                        cost,
+                        note,
+                    },
+                );
+                (changed, cost)
+            }
+            Err(_) => (0, 0.0),
+        };
+        let total = self.charge(c, cost);
+        self.lock().checking.remove(id);
+        self.listener.on_event(TutorEventInfo::LessonChecked {
+            lesson: id.to_owned(),
+            changed,
+            cost,
+            total,
+        });
+    }
+
+    /// Adds what a side request cost to the conversation `c` is a copy of:
+    /// to the open session, to its file if another is open, or for when
+    /// the turn that has it ends. Returns the conversation's cost.
+    fn charge(&self, c: &Session, cost: f64) -> f64 {
+        let mut st = self.lock();
+        let busy = st.busy;
+        match st.session.as_mut() {
+            Some(s) if s.id == c.id => {
+                s.side_cost += cost;
+                let s = s.clone();
+                self.save(&s, &mut st);
+                s.cost()
+            }
+            Some(_) => {
+                if let Ok((mut s, meta)) = self.store.load(&c.id) {
+                    s.side_cost += cost;
+                    let _ = self.store.save(&s, &meta.title, meta.created);
+                    s.cost()
+                } else {
+                    c.cost() + cost
+                }
+            }
+            None if busy => {
+                st.charged.push((c.id.clone(), cost));
+                c.cost() + cost
+            }
+            None => c.cost() + cost,
+        }
+    }
+}
+
+/// The tools a lesson's check may use: every read, and rewriting a
+/// lesson's step. The list is the conversation's, so the cache holds.
+struct ReviewTools<'a>(&'a RomTools);
+
+impl agent::Tools for ReviewTools<'_> {
+    fn specs(&self) -> Vec<romlens_tutor::provider::ToolSpec> {
+        self.0.specs()
+    }
+
+    fn kind(&self, name: &str) -> agent::ToolKind {
+        self.0.kind(name)
+    }
+
+    fn run(
+        &self,
+        id: &str,
+        name: &str,
+        input: &serde_json::Value,
+        cx: &agent::ToolContext,
+    ) -> agent::ToolOutput {
+        let building = [
+            "begin_lesson",
+            "lesson_step",
+            "end_lesson",
+            "generate_image",
+        ];
+        if super::edits::NAMES.contains(&name) || building.contains(&name) {
+            return agent::ToolOutput::error(format!(
+                "{name} is not for a check: only read, and correct steps with revise_lesson_step"
+            ));
+        }
+        self.0.run(id, name, input, cx)
+    }
 }
 
 #[uniffi::export]
@@ -886,6 +1049,9 @@ impl TutorSession {
                 at_step: None,
                 busy: false,
                 named: None,
+                charged: Vec::new(),
+                checking: Default::default(),
+                check_lessons: true,
             }),
         })
     }
@@ -1165,7 +1331,15 @@ impl TutorSession {
             .lessons
             .open_lesson(&id)
             .or_else(|| self.tools.lessons.store()?.load(&id).ok())
-            .map(|l| lesson_info(&l, &rom))
+            .map(|l| LessonInfo {
+                checking: self.lock().checking.contains(&l.id),
+                ..lesson_info(&l, &rom)
+            })
+    }
+
+    /// Whether finished lessons are checked in the background (docs/25).
+    pub fn set_check_lessons(&self, on: bool) {
+        self.lock().check_lessons = on;
     }
 
     /// Every lesson, the latest first.
@@ -1561,6 +1735,83 @@ mod tests {
             vision: false,
         };
         (t, rx, local, root, wb)
+    }
+
+    #[test]
+    fn a_finished_lesson_is_checked_and_corrected() {
+        let (t, rx, local, root, _wb) = setup(
+            "check",
+            vec![
+                call_reply(
+                    "begin_lesson",
+                    serde_json::json!({"title": "DMA", "from_level": 1, "to_level": 1,
+                        "concepts": [{"id": "dma", "level": 1}], "builds_on": []}),
+                ),
+                call_reply(
+                    "lesson_step",
+                    serde_json::json!({"lesson": "", "title": "The cost", "predict": null,
+                        "body": "DMA takes about 8 CPU cycles a byte.", "focus_address": null, "focus_end": null,
+                        "focus_in": null, "focus_frame": null, "focus_view": null, "picture": null}),
+                ),
+                call_reply("end_lesson", serde_json::json!({"lesson": "", "next": []})),
+                text_reply("That is DMA."),
+                // The check: it tries an edit, which is refused, then
+                // corrects the step.
+                call_reply(
+                    "set_label",
+                    serde_json::json!({"address": "$00:8000", "name": "Boot", "reason": "r"}),
+                ),
+                call_reply(
+                    "revise_lesson_step",
+                    serde_json::json!({"lesson": "", "step": 1, "title": "The cost", "predict": null,
+                        "body": "DMA takes 8 master cycles a byte.", "reason": "DMA's cost is in master cycles"}),
+                ),
+                text_reply("Corrected step 1: the units."),
+            ],
+        );
+        t.new_conversation(local, "qwen3".into(), None, TutorMode::AcceptEdits, None)
+            .unwrap();
+        t.set_explain(true);
+        Arc::clone(&t)
+            .send("What is DMA?".into(), Vec::new(), None)
+            .unwrap();
+        let end = until_done(&rx, |_| {});
+        assert!(matches!(end, TutorEventInfo::Ended { .. }), "{end:?}");
+        let turns = t.transcript().len();
+        let checked = loop {
+            match rx
+                .recv_timeout(Duration::from_secs(20))
+                .expect("the check ends")
+            {
+                e @ TutorEventInfo::LessonChecked { .. } => break e,
+                _ => continue,
+            }
+        };
+        let TutorEventInfo::LessonChecked {
+            lesson, changed, ..
+        } = checked
+        else {
+            unreachable!()
+        };
+        assert_eq!(changed, 1);
+        let store = romlens_tutor::lesson::LessonStore::new(&root);
+        let l = store.load(&lesson).unwrap();
+        assert_eq!(l.steps[0].body, "DMA takes 8 master cycles a byte.");
+        assert_eq!(
+            l.revisions[0].before.body,
+            "DMA takes about 8 CPU cycles a byte."
+        );
+        let c = l.checked.as_ref().unwrap();
+        assert_eq!(
+            (c.changed, c.note.as_str()),
+            (1, "Corrected step 1: the units.")
+        );
+        // The transcript is as the turn left it, and the edit was not made.
+        assert_eq!(t.transcript().len(), turns);
+        assert!(t.wb.label_at(0x008000).is_none_or(|l| l.name != "Boot"));
+        let info = t.lesson(lesson).unwrap();
+        assert!(info.checked.is_some() && !info.checking);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

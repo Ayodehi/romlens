@@ -15,16 +15,22 @@ use super::tools::{addr, choice, integer, nullable, object, spec, string};
 use crate::RecordingSession;
 
 /// The tools, in the order the model uses them.
-pub const NAMES: [&str; 5] = [
+pub const NAMES: [&str; 6] = [
     "learner",
     "lesson",
     "begin_lesson",
     "lesson_step",
     "end_lesson",
+    "revise_lesson_step",
 ];
 
 /// The ones that build a lesson, which run in order.
-pub const BUILDING: [&str; 3] = ["begin_lesson", "lesson_step", "end_lesson"];
+pub const BUILDING: [&str; 4] = [
+    "begin_lesson",
+    "lesson_step",
+    "end_lesson",
+    "revise_lesson_step",
+];
 
 pub fn specs() -> Vec<ToolSpec> {
     let concept_level = object(&[("id", string("")), ("level", integer(""))]);
@@ -83,7 +89,135 @@ pub fn specs() -> Vec<ToolSpec> {
                 ),
             ],
         ),
+        spec(
+            "revise_lesson_step",
+            "Rewrite a step of a finished lesson that is wrong or imprecise: the whole step as it should read. Its focus and picture stay.",
+            &[
+                (
+                    "lesson",
+                    string("Its id; empty for the latest this conversation finished."),
+                ),
+                ("step", integer("From 1.")),
+                ("title", string("")),
+                ("predict", nullable(string(""))),
+                ("body", string("")),
+                ("reason", string("What was wrong, in a sentence.")),
+            ],
+        ),
     ]
+}
+
+/// What Romlens can check in a lesson without a model (docs/25, "Checking
+/// lessons"): each line of code a step shows as `$BB:AAAA  MNEMONIC
+/// operand` against the instruction there (`insn_at` gives its mnemonic
+/// and operand), and each register a step names as `$21xx NAME` against
+/// the register table. One line per finding.
+pub fn mechanical(l: &Lesson, insn_at: &dyn Fn(u32) -> Option<(String, String)>) -> Vec<String> {
+    let mut out = Vec::new();
+    let norm = |s: &str| s.to_ascii_uppercase().replace([' ', '`'], "");
+    for (i, step) in l.steps.iter().enumerate() {
+        let n = i + 1;
+        let mut code = false;
+        for line in step.body.lines() {
+            let t = line.trim();
+            if t.starts_with("```") {
+                code = !code;
+                continue;
+            }
+            if code && let Some((a, mn, op)) = code_line(t) {
+                match insn_at(a) {
+                    None => out.push(format!(
+                        "step {n}: {} is not an instruction in this ROM's listing",
+                        addr(a)
+                    )),
+                    Some((m, o)) => {
+                        let hex = |s: &str| s.starts_with('#') || s.starts_with('$');
+                        let differs = !m.eq_ignore_ascii_case(&mn)
+                            || hex(&op) && hex(&o) && norm(&op) != norm(&o);
+                        if differs {
+                            out.push(format!(
+                                "step {n}: shows `{mn} {op}` at {}, but the ROM has `{m} {o}` there",
+                                addr(a)
+                            ));
+                        }
+                    }
+                }
+            }
+            for (reg, name) in registers_named(t) {
+                let Some(r) = romlens_core::model::hardware_register(reg) else {
+                    out.push(format!(
+                        "step {n}: ${reg:04X} is not a hardware register, but is named {name}"
+                    ));
+                    continue;
+                };
+                let theirs = romlens_core::model::hardware_register_named(&name);
+                if !r.name.eq_ignore_ascii_case(&name) && theirs.is_some_and(|t| t.address != reg) {
+                    out.push(format!(
+                        "step {n}: calls ${reg:04X} {name}, but ${reg:04X} is {} ({name} is ${:04X})",
+                        r.name,
+                        theirs.map_or(0, |t| t.address)
+                    ));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// `$00:8052  LDX #$1809  ; comment`, or with the bytes after the address
+/// (`$00:8052  A2 09 18  LDX #$1809`): the address, mnemonic and operand.
+fn code_line(t: &str) -> Option<(u32, String, String)> {
+    let t = t.split(';').next()?.trim();
+    let rest = t.strip_prefix('$')?;
+    let (a, rest) = rest.split_once(char::is_whitespace)?;
+    let (bank, off) = a.split_once(':')?;
+    let a = (u32::from_str_radix(bank, 16).ok()? << 16) | u32::from_str_radix(off, 16).ok()?;
+    let mut words = rest
+        .split_whitespace()
+        .skip_while(|w| w.len() == 2 && u8::from_str_radix(w, 16).is_ok());
+    let mn = words.next()?;
+    if mn.len() != 3 || !mn.chars().all(|c| c.is_ascii_alphabetic()) {
+        return None;
+    }
+    Some((
+        a,
+        mn.to_ascii_uppercase(),
+        words.collect::<Vec<_>>().join(" "),
+    ))
+}
+
+/// Registers written as `$2118 VMDATAL` (in backticks or not).
+fn registers_named(t: &str) -> Vec<(u16, String)> {
+    let mut out = Vec::new();
+    let b = t.replace('`', " ");
+    let words: Vec<&str> = b.split_whitespace().collect();
+    for w in words.windows(2) {
+        let Some(h) = w[0].strip_prefix('$') else {
+            continue;
+        };
+        let h = h.trim_end_matches([',', ':', '.', ')']);
+        if h.len() != 4 {
+            continue;
+        }
+        let Ok(a) = u16::from_str_radix(h, 16) else {
+            continue;
+        };
+        if !(0x2100..=0x21FF).contains(&a) && !(0x4200..=0x437F).contains(&a) {
+            continue;
+        }
+        let name: String = w[1]
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric())
+            .collect();
+        if name.len() >= 4
+            && name
+                .chars()
+                .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
+        {
+            out.push((a, name));
+        }
+    }
+    out
 }
 
 /// Lessons being written, and the store the finished ones go to.
@@ -94,6 +228,8 @@ pub struct Lessons {
     /// Finished lessons whose pictures are still to be copied, once the
     /// round that made them has put them in the conversation.
     pending: Mutex<Vec<String>>,
+    /// Finished lessons still to be checked, once the turn is over.
+    reviews: Mutex<Vec<String>>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -131,6 +267,11 @@ impl Lessons {
         }
     }
 
+    /// The lessons ended since last asked, to check.
+    pub fn take_reviews(&self) -> Vec<String> {
+        std::mem::take(&mut *lock(&self.reviews))
+    }
+
     /// A lesson being written, for the window.
     pub fn open_lesson(&self, id: &str) -> Option<Lesson> {
         lock(&self.open).get(id).cloned()
@@ -154,6 +295,7 @@ impl Lessons {
             "begin_lesson" => self.begin(&store, v, cx),
             "lesson_step" => self.step(v, cx, resolve, rec),
             "end_lesson" => self.end(&store, v, cx, rom),
+            "revise_lesson_step" => revise(&store, v, cx),
             _ => Err(format!("no tool {name}")),
         };
         match r {
@@ -321,6 +463,7 @@ impl Lessons {
             .save(&l, &[])
             .map_err(|e| format!("the lesson was not saved: {e}"))?;
         lock(&self.pending).push(l.id.clone());
+        lock(&self.reviews).push(l.id.clone());
         let after = store.learner();
         let raised: Vec<String> = l
             .concepts
@@ -338,6 +481,48 @@ impl Lessons {
             }
         ))
     }
+}
+
+fn revise(store: &LessonStore, v: &Value, cx: &ToolContext) -> Result<String, String> {
+    let named = v["lesson"].as_str().unwrap_or_default().trim();
+    // None named: the latest this conversation finished.
+    let latest = || {
+        store
+            .list()
+            .into_iter()
+            .filter(|l| l.finished && l.conversation == cx.conversation)
+            .max_by_key(|l| l.created)
+            .map(|l| l.id)
+    };
+    let id = if named.is_empty() {
+        latest().ok_or("this conversation has finished no lesson")?
+    } else {
+        named.to_owned()
+    };
+    let id = id.as_str();
+    let n = v["step"].as_u64().unwrap_or(0) as usize;
+    let text = |k: &str| {
+        v[k].as_str()
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .map(str::to_owned)
+    };
+    let (Some(title), Some(body)) = (text("title"), text("body")) else {
+        return Err("a step needs a title and a body".into());
+    };
+    let reason = text("reason").ok_or("say in `reason` what was wrong")?;
+    if n == 0 {
+        return Err("steps are numbered from 1".into());
+    }
+    let step = Step {
+        title,
+        predict: text("predict"),
+        body,
+        focus: None,
+        picture: None,
+    };
+    store.revise(id, n - 1, step, &reason)?;
+    Ok(format!("Step {n} of {id} rewritten."))
 }
 
 /// A step's focus from its arguments, checked.
@@ -617,5 +802,36 @@ mod tests {
         let store = t.lessons.store().unwrap();
         assert_eq!(store.picture(&id, &image.id), Some(bytes));
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn romlens_checks_a_lessons_code_and_registers() {
+        let mut l = Lesson::new("DMA", (3, 3), vec![("dma".into(), 3)]);
+        l.steps.push(Step {
+            title: "The code".into(),
+            predict: None,
+            body: "```asm\n$00:8052  LDX #$1809   ; DMAP0\n$00:8055  A2 00 43  STA $4300\n$00:8060  LDA #$00\n```\nThen `$2118 VMDATAL` and `$2118 CGDATA` and $4300 DMAP0.".into(),
+            focus: None,
+            picture: None,
+        });
+        let insn_at = |a: u32| match a {
+            0x8052 => Some(("LDX".to_string(), "#$1809".to_string())),
+            0x8055 => Some(("STX".to_string(), "$4300".to_string())),
+            _ => None,
+        };
+        let found = mechanical(&l, &insn_at);
+        assert_eq!(found.len(), 3, "{found:?}");
+        assert!(
+            found[0].contains("shows `STA $4300` at $00:8055, but the ROM has `STX $4300`"),
+            "{found:?}"
+        );
+        assert!(
+            found[1].contains("$00:8060 is not an instruction"),
+            "{found:?}"
+        );
+        assert!(
+            found[2].contains("calls $2118 CGDATA, but $2118 is VMDATAL (CGDATA is $2122)"),
+            "{found:?}"
+        );
     }
 }
