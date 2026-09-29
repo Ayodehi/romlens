@@ -480,8 +480,9 @@ final class TutorModel {
     // MARK: Citations
 
     /// A link from an answer: an address or a frame, shown in the main
-    /// window.
-    func follow(_ url: URL) -> Bool {
+    /// window. A click brings the main window forward; a lesson's step
+    /// moving (`raise` false) only points it, so the tutor stays in front.
+    func follow(_ url: URL, raise: Bool = true) -> Bool {
         guard url.scheme == "romlens" else { return false }
         let value = url.lastPathComponent
         switch url.host() {
@@ -507,7 +508,7 @@ final class TutorModel {
         default:
             return false
         }
-        rom.bringMainWindowForward?()
+        if raise { rom.bringMainWindowForward?() }
         return true
     }
 
@@ -646,13 +647,14 @@ final class TutorModel {
     func step(of lesson: String) -> Int { lessonSteps[lesson] ?? 0 }
 
     /// Moves a lesson's card to step `i`, points the main window at what the
-    /// step is about, and tells the next question where the student is.
+    /// step is about (without bringing it forward), and tells the next
+    /// question where the student is.
     func show(step i: Int, of lesson: LessonInfo) {
         guard lesson.steps.indices.contains(i) else { return }
         lessonSteps[lesson.id] = i
         session?.setLessonStep(lesson: lesson.id, step: UInt32(i))
         if let f = lesson.steps[i].focus, let url = URL(string: f) {
-            _ = follow(url)
+            _ = follow(url, raise: false)
         }
     }
 
