@@ -217,7 +217,7 @@ Written from `24-tutor.md` on 27 September 2026; it replaces rows 3.19–3.21.
 | 6.6 | A conversation kept | Conversations listed and resumed; ↑ recalls earlier prompts; `/rewind` takes back the conversation, the edits, or both | `romlens tutor conversations` | 🧪 | ⬜ | ⬜ |
 | 6.7 | Another provider mid-conversation | `/model` changes provider, model and effort between turns, and the conversation goes on | `romlens tutor ask … --resume <id> --provider P --model M` | 🧪 | ⬜ | ⬜ |
 | 6.8 | A recording investigated | Recording tools (changes, who wrote a byte, provenance, frames) in the tool log | `romlens tutor ask <rom> "<question>" --rec R` | 🧪 | ⬜ | ⬜ |
-| 6.9 | Lessons (`25-lessons.md`) | Explain mode and `/learn`: a lesson card stepped with Back and Next, predict questions behind Show, each step moving the main window, offers to go deeper; the lesson library and the map of concepts shaded by level reached | `romlens tutor lessons`; `romlens tutor lesson show <id>` | ⬜ | ⬜ | ⬜ |
+| 6.9 | Lessons (`25-lessons.md`) | Explain mode and `/learn`: a lesson card stepped with Back and Next, predict questions behind Show, each step moving the main window, offers to go deeper; the lesson library and the map of concepts shaded by level reached; each finished lesson checked in the background and corrected | `romlens tutor lessons`; `romlens tutor lesson show <id>` (with each step's revisions) | ⬜ | ⬜ | ⬜ |
 | 6.10 | Diagrams (`26-diagrams.md`) | The tutor draws register fields, memory maps, the machine's parts, a frame's timeline and a byte's way to the screen from the core's own data, and checks its own SVG; shown large in answers and in lesson steps | `romlens draw <rom> <kind> <spec>`; `romlens draw check <svg>` | ⬜ | ⬜ | ⬜ |
 
 ## Manual pass, macOS (to repeat before each release)
@@ -491,3 +491,12 @@ Diagram additions (`26-diagrams.md`, still to run):
 65. The tutor's own SVG (6.10): ask for a picture no kind fits: it is drawn,
     labelled "Drawn by the tutor, checked by Romlens", and a broken one is
     refused with its problems in the tool log.
+
+Lesson check additions (`25-lessons.md`, "Checking lessons", still to run):
+
+66. The check (6.9): end a lesson with Explain on: the card shows
+    "Checking…", then "Checked · $…", and the conversation's cost rises by
+    the same; the transcript gains nothing.
+67. A correction (6.9): a step with a slip is rewritten in place; `romlens
+    tutor lesson latest` prints what it said before and why it changed.
+    With the setting off, nothing is checked.

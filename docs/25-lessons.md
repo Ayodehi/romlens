@@ -15,6 +15,11 @@ that tracks progress against it.
 | L5 app: the lesson card in the Tutor window, stepping, focus in the main window | done, 28 September 2026: `LessonCard`: the title and the level as a badge, the step ("2 of 5", with … while it is still being written), a predict question with the step's answer behind Show, the body as the answers are (citations are links), its picture, a "Show … in Romlens" link, Back, Next (⌘→) and Skip to the end, and at the last step the offers as Where next links, which ask for the next lesson with Explain on. It shows in the transcript where `begin_lesson` was called, and as it is written in the live answer. Each step moves the main window: `romlens://c/` opens the C tab at the instruction, `romlens://f/<n>?view=` the frame in that Graphics view. A question asked at a step carries `[The student is at step N of M of lesson … ]` (`set_lesson_step`), which the window hides like Romlens's other notes. Explain is a toggle in the status line, `/explain`, and `/learn <topic>` (Explain on, and the topic asked); it carries over to a new conversation |
 | L6 app: the lesson library and the map of what the student knows | done, 28 September 2026: one sheet, from `/lessons`, `/map` or the books button in the status line, with two tabs. Lessons: every lesson, newest first (title, level, steps, date, whether it ended), the one picked shown as its card to read again, and Delete Lesson in its menu (which takes back what it taught). What you know: the map's five groups, each concept a chip shaded by the level reached with a legend of the ladder, its line and what it rests on as help, and Mark as Known at a level (or Clear the Mark) in its menu, kept after quitting. The status line's Conversations and Lessons buttons are icons, so it fits in the window's narrowest width |
 | L7 live runs: a new learner's sprite lesson, then deeper, then a second topic | ready, 28 September 2026, for the user's runs in the app (no key is in the sessions' environment and Ollama was not running): the four questions of L7 below and manual rows 59–62 in `15`. Each run is read back with `romlens tutor lesson latest` and `romlens tutor show latest`, and what went wrong is recorded here |
+| L8 checking lessons: this section, the pointers, the checklist rows | done, 29 September 2026 |
+| L9 the lesson's revisions and check, `Session::review` | planned |
+| L10 FFI: `revise_lesson_step`, Romlens's own checks, the review after the job, `LessonChecked` | planned |
+| L11 CLI: the check after `tutor ask --explain`, revisions in `tutor lesson` | planned |
+| L12 app: the setting, Checking… and Checked on the card | planned |
 
 ## Context
 
@@ -189,6 +194,38 @@ conversations).
 | L5 | App: the lesson card, Back and Next, predict and Show, the offers; focus in the main window; a question at a step; the Explain toggle and `/learn` | 2 |
 | L6 | App: the library and the concept map, marking a concept known | 1.5 |
 | L7 | Live: as a new learner, "how does a sprite get rendered to the screen?" in SMW (expect levels 1–2 and no code), then Go deeper twice (3 with a recording, then 4), then "how does the screen scroll?" (expect it to build on the frame and vblank, not teach them again). Record what went wrong here and tune the prompt from the transcripts | 1 |
+
+## Checking lessons (29 September 2026)
+
+The first live lessons were mostly right, but the words slipped: a DMA
+lesson counted "8 CPU cycles per byte" where DMA takes 8 master cycles, and
+said a fill cleared every VRAM word without checking how VMAIN steps the
+address. A lesson is kept and read again, and it feeds the learner record,
+so every finished lesson is checked in the background and corrected.
+
+- **When.** After the turn that ended a lesson, once the student has the
+  session back, on the same thread that names conversations. On by
+  default; Settings › Tutor turns it off. Its cost is added to the
+  conversation's and shown on the lesson's card ("Checked · $0.03").
+- **Who.** The lesson's own model, on a copy of the conversation with one
+  more question, so the prompt and tools are read from the cache. Its
+  turns are thrown away; nothing appears in the transcript.
+- **What it may do.** Only read, and call `revise_lesson_step`: the project
+  cannot change and no lesson can be started during a check.
+- **What it is told.** To check every fact about the ROM with the tools,
+  every hardware fact against the primer and `reference`, numbers, units
+  and cycle counts, and code against the ROM; to rewrite a step that is
+  wrong, imprecise or claims more than the tools show, at the same level
+  and length; and to leave correct steps alone. Romlens's own checks come
+  first and cost nothing: each line of code a step shows as
+  `$BB:AAAA  MNEMONIC operand` against the listing, and each register
+  cited as `$21xx NAME` against the register table.
+- **How a step changes.** Silently (the student chose this): the corrected
+  step replaces the old one on the card. The old step and the reason are
+  kept in the lesson's `revisions`, which `romlens tutor lesson` prints, so
+  the corrections can be audited. The learner record does not change.
+- `revise_lesson_step` is declared always, so the tutor can also correct
+  an earlier lesson in a normal turn when the student finds an error.
 
 ## What is cut for now
 

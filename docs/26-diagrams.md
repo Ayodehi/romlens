@@ -115,6 +115,11 @@ file.
 | D5 | App: diagrams large in answers with their label, smoothly scaled in answers and lesson cards; tests and snapshots | 0.75 |
 | D6 | Live: in SMW with Explain on, "how do the CPU and the PPU work together?" (the machine), "where does the game start?" (a memory map with the reset vector), "what does forced blank do?" (INIDISP's fields), and with a recording "when does the game copy sprites to the PPU?" (a timeline). Record what went wrong here | 0.5 |
 
+## Checking
+
+A lesson's words about its diagrams are checked with the rest of the
+lesson once it ends (`25-lessons.md`, "Checking lessons").
+
 ## What is cut for now
 
 - Drawings in the window's dark colours (the paper reads in both).
