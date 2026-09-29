@@ -240,6 +240,10 @@ struct TutorPane: View {
             }
             Toggle("Show thinking and tool calls", isOn: $settings.showWork)
             Text("Details in the Tutor window's status line, or /details, switches it there too.").font(.caption).foregroundStyle(.secondary)
+            Toggle("Check each lesson in the background", isOn: Binding(
+                get: { settings.checkLessons },
+                set: { settings.checkLessons = $0; TutorModel.checkLessonsChanged($0) }))
+            Text("Once a lesson ends, the same model checks it against the ROM and corrects its steps. What it costs is shown on the lesson.").font(.caption).foregroundStyle(.secondary)
         }
         .formStyle(.grouped)
     }

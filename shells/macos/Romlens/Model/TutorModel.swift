@@ -112,7 +112,9 @@ final class TutorModel {
             credentials: TutorCredentials(store: settings.keys), listener: bridge)
         bridge.model = self
         self.bridge = bridge
+        s.setCheckLessons(on: settings.checkLessons)
         session = s
+        Self.open.append(WeakTutor(self))
         history = s.promptHistory(limit: 500)
         return s
     }
@@ -292,8 +294,13 @@ final class TutorModel {
         case .named(let name, let total):
             title = name
             if !busy { cost = total }
+        case .lessonChecked(let lesson, _, _, let total):
+            reloadLesson(lesson)
+            if !busy { cost = total }
         case .ended:
             finish(error: nil)
+            // A lesson this turn finished is being checked now.
+            for id in Array(lessonCache.keys) { reloadLesson(id) }
         case .failed(let message):
             finish(error: message)
         }
@@ -610,6 +617,15 @@ final class TutorModel {
     var lessonSteps: [String: Int] = [:]
     var revealed: Set<String> = []
     private var lessonCache: [String: LessonInfo] = [:]
+
+    /// Every open Tutor, so a change in Settings reaches them all.
+    struct WeakTutor { weak var tutor: TutorModel?; init(_ t: TutorModel) { tutor = t } }
+    static var open: [WeakTutor] = []
+
+    static func checkLessonsChanged(_ on: Bool) {
+        open.removeAll { $0.tutor == nil }
+        for t in open { t.tutor?.session?.setCheckLessons(on: on) }
+    }
 
     func setExplain(_ on: Bool) {
         explain = on

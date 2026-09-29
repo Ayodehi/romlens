@@ -104,6 +104,9 @@ final class TutorSettings {
         /// The thinking and the tool calls under each answer; off, only
         /// the answers, pictures and edit cards show.
         var showWork = false
+        /// Each finished lesson checked and corrected in the background
+        /// (docs/25, "Checking lessons").
+        var checkLessons = true
         /// Where `generate_image` draws: an endpoint that speaks OpenAI's
         /// Images API, or none.
         var imageEndpoint: String?
@@ -120,6 +123,7 @@ final class TutorSettings {
             mode = try c.decodeIfPresent(TutorModePreference.self, forKey: .mode) ?? .askBeforeEdits
             costCap = try c.decodeIfPresent(Double.self, forKey: .costCap)
             showWork = try c.decodeIfPresent(Bool.self, forKey: .showWork) ?? false
+            checkLessons = try c.decodeIfPresent(Bool.self, forKey: .checkLessons) ?? true
             imageEndpoint = try c.decodeIfPresent(String.self, forKey: .imageEndpoint)
             imageModel = try c.decodeIfPresent(String.self, forKey: .imageModel) ?? "gpt-image-1"
         }
@@ -187,6 +191,11 @@ final class TutorSettings {
     var showWork: Bool {
         get { stored.showWork }
         set { stored.showWork = newValue; save() }
+    }
+
+    var checkLessons: Bool {
+        get { stored.checkLessons }
+        set { stored.checkLessons = newValue; save() }
     }
 
     /// The endpoint pictures are drawn at, if one is chosen and still there.

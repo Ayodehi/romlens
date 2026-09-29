@@ -234,6 +234,50 @@ import Testing
         }
     }
 
+    /// A finished lesson is checked in the background (docs/25): the card
+    /// says so, the step is rewritten in place, and the cost is shown.
+    @Test func aLessonIsCheckedAfterItEnds() async throws {
+        let r = try await rig([
+            tutorTestCallReply(name: "begin_lesson", arguments: #"{"title":"DMA","from_level":1,"to_level":1,"concepts":[{"id":"dma","level":1}],"builds_on":[]}"#),
+            tutorTestCallReply(name: "lesson_step", arguments: #"{"lesson":"","title":"The cost","predict":null,"body":"DMA takes about 8 CPU cycles a byte.","focus_address":null,"focus_end":null,"focus_in":null,"focus_frame":null,"focus_view":null,"picture":null}"#),
+            tutorTestCallReply(name: "end_lesson", arguments: #"{"lesson":"","next":[]}"#),
+            tutorTestTextReply(text: "That is DMA."),
+            tutorTestCallReply(name: "revise_lesson_step", arguments: #"{"lesson":"","step":1,"title":"The cost","predict":null,"body":"DMA takes 8 master cycles a byte.","reason":"units"}"#),
+            tutorTestTextReply(text: "Corrected step 1."),
+        ])
+        defer { try? FileManager.default.removeItem(at: r.root) }
+        r.tutor.settings.checkLessons = true
+        try await ask(r.tutor, "/learn What is DMA?")
+        let rows = TranscriptRow.rows(r.tutor.turns)
+        let id = try #require(rows.compactMap { if case .lesson(_, let l) = $0 { l } else { nil } }.first)
+        try await Fixture.settle(timeout: 20) { r.tutor.lesson(id)?.checked != nil }
+        let lesson = try #require(r.tutor.lesson(id))
+        #expect(lesson.steps[0].body == "DMA takes 8 master cycles a byte.")
+        #expect(!lesson.checking)
+        let checked = try #require(lesson.checked)
+        #expect(checked.changed == 1)
+        #expect(LessonCard.checked(checked).hasPrefix("Checked · 1 step corrected · $"))
+        #expect(LessonCard.checked(LessonCheckedInfo(changed: 0, cost: 0.031)) == "Checked · $0.03")
+        #expect(TranscriptRow.rows(r.tutor.turns).count == rows.count, "the check adds nothing to the transcript")
+
+        if ProcessInfo.processInfo.environment["ROMLENS_SNAPSHOTS"] != nil {
+            let host = NSHostingController(rootView: LessonCard(tutor: r.tutor, id: id).frame(width: 480).padding())
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 260), styleMask: [.titled], backing: .buffered, defer: false)
+            w.isReleasedWhenClosed = false
+            w.contentViewController = host
+            w.appearance = NSAppearance(named: .aqua)
+            w.orderFront(nil)
+            Fixture.spin(0.3)
+            w.display()
+            if let view = w.contentView, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+                view.cacheDisplay(in: view.bounds, to: rep)
+                try? rep.representation(using: .png, properties: [:])?
+                    .write(to: FileManager.default.temporaryDirectory.appendingPathComponent("checked.png"))
+            }
+            w.close()
+        }
+    }
+
     @Test func anEditWaitsForItsCardAndUndoes() async throws {
         let r = try await rig([
             tutorTestCallReply(name: "set_label", arguments: #"{"address":"$00:8000","name":"Boot","reason":"the reset vector points here"}"#),

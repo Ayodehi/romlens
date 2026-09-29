@@ -62,9 +62,28 @@ struct LessonCard: View {
                     }
                 }
             }
+            if lesson.checking {
+                Label("Checking…", systemImage: "checkmark.seal")
+                    .font(.caption2).foregroundStyle(.tertiary)
+                    .help("The tutor is checking this lesson against the ROM, and will correct any step that is wrong.")
+            } else if let c = lesson.checked {
+                Label(Self.checked(c), systemImage: "checkmark.seal.fill")
+                    .font(.caption2).foregroundStyle(.tertiary)
+                    .help("Checked against the ROM after it was written.")
+            }
             if !lesson.thisRom {
                 Text("Made with another ROM: its addresses are that game's.").font(.caption2).foregroundStyle(.tertiary)
             }
+        }
+    }
+
+    /// "Checked · $0.03", or with the steps it corrected.
+    static func checked(_ c: LessonCheckedInfo) -> String {
+        let cost = String(format: "$%.2f", c.cost)
+        switch c.changed {
+        case 0: return "Checked · \(cost)"
+        case 1: return "Checked · 1 step corrected · \(cost)"
+        default: return "Checked · \(c.changed) steps corrected · \(cost)"
         }
     }
 
