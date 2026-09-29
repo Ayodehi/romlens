@@ -16,7 +16,13 @@ struct TutorView: View {
             StatusLine(tutor: tutor)
         }
         .frame(minWidth: 380, minHeight: 360)
-        .environment(\.openURL, OpenURLAction { url in tutor.follow(url) ? .handled : .systemAction })
+        .environment(\.openURL, OpenURLAction { url in
+            if let e = Glossary.entry(for: url) {
+                GlossaryPopover.show(e) { term in tutor.composer = "Tell me more about \(term)." }
+                return .handled
+            }
+            return tutor.follow(url) ? .handled : .systemAction
+        })
         .onDrop(of: [.fileURL, .image], isTargeted: nil) { providers in
             drop(providers)
             return true

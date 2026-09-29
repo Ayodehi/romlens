@@ -11,10 +11,10 @@ struct MessageText: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            ForEach(Array(Self.segments(text).enumerated()), id: \.offset) { _, s in
+            ForEach(Array(Self.rendered(text).enumerated()), id: \.offset) { _, s in
                 switch s {
                 case .prose(let p):
-                    Text(Self.prose(p))
+                    Text(p)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 case .code(let lang, let body):
@@ -24,6 +24,30 @@ struct MessageText: View {
                 case .rule:
                     Divider()
                 }
+            }
+        }
+    }
+
+    /// A segment made ready to show: prose and table cells as attributed
+    /// text, with each glossary term linked the first time the message
+    /// uses it.
+    enum Rendered {
+        case prose(AttributedString)
+        case code(language: String, body: String)
+        case table(header: [AttributedString], rows: [[AttributedString]])
+        case rule
+    }
+
+    static func rendered(_ text: String) -> [Rendered] {
+        var seen = Set<String>()
+        return segments(text).map { s in
+            switch s {
+            case .prose(let p): return .prose(prose(p, seen: &seen))
+            case .code(let lang, let body): return .code(language: lang, body: body)
+            case .table(let header, let rows):
+                let h = header.map { prose($0, seen: &seen) }
+                return .table(header: h, rows: rows.map { $0.map { prose($0, seen: &seen) } })
+            case .rule: return .rule
             }
         }
     }
@@ -136,6 +160,12 @@ struct MessageText: View {
     /// become bold lines and list items bullets, since the text keeps its
     /// line breaks.
     static func prose(_ text: String) -> AttributedString {
+        var seen = Set<String>()
+        return prose(text, seen: &seen)
+    }
+
+    /// As `prose(_:)`, linking only the glossary terms not in `seen`.
+    static func prose(_ text: String, seen: inout Set<String>) -> AttributedString {
         var lines: [String] = []
         for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
             var l = String(line)
@@ -145,11 +175,17 @@ struct MessageText: View {
                 let indent = l[l.startIndex..<r.upperBound].prefix { $0 == " " }
                 l = indent + "• " + l[r.upperBound...]
             }
-            lines.append(link(l))
+            lines.append(link(Glossary.link(l, seen: &seen)))
         }
         let md = lines.joined(separator: "\n")
         let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        return (try? AttributedString(markdown: md, options: options)) ?? AttributedString(text)
+        guard var a = try? AttributedString(markdown: md, options: options) else { return AttributedString(text) }
+        // A term's link is marked with a dotted underline, apart from the
+        // links into the main window.
+        for run in a.runs where run.link?.host() == "g" {
+            a[run.range].underlineStyle = Text.LineStyle(pattern: .dot)
+        }
+        return a
     }
 
     /// `$80:8000` (bare or in backticks) and `frame 12` as Markdown links.
@@ -171,21 +207,21 @@ struct MessageText: View {
 /// A Markdown table in an answer: a bold header, rows between rules, each
 /// cell inline Markdown with its citations as links.
 struct TableBlock: View {
-    let header: [String]
-    let rows: [[String]]
+    let header: [AttributedString]
+    let rows: [[AttributedString]]
 
     var body: some View {
         Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 6) {
             GridRow {
                 ForEach(Array(header.enumerated()), id: \.offset) { _, h in
-                    Text(MessageText.prose(h)).bold()
+                    Text(h).bold()
                 }
             }
             Divider()
             ForEach(Array(rows.enumerated()), id: \.offset) { n, row in
                 GridRow {
                     ForEach(Array(row.enumerated()), id: \.offset) { _, c in
-                        Text(MessageText.prose(c)).fixedSize(horizontal: false, vertical: true)
+                        Text(c).fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 if n < rows.count - 1 { Divider().opacity(0.5) }

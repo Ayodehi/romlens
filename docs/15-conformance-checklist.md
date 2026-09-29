@@ -217,8 +217,9 @@ Written from `24-tutor.md` on 27 September 2026; it replaces rows 3.19–3.21.
 | 6.6 | A conversation kept | Conversations listed and resumed; ↑ recalls earlier prompts; `/rewind` takes back the conversation, the edits, or both | `romlens tutor conversations` | 🧪 | ⬜ | ⬜ |
 | 6.7 | Another provider mid-conversation | `/model` changes provider, model and effort between turns, and the conversation goes on | `romlens tutor ask … --resume <id> --provider P --model M` | 🧪 | ⬜ | ⬜ |
 | 6.8 | A recording investigated | Recording tools (changes, who wrote a byte, provenance, frames) in the tool log | `romlens tutor ask <rom> "<question>" --rec R` | 🧪 | ⬜ | ⬜ |
-| 6.9 | Lessons (`25-lessons.md`) | Explain mode and `/learn`: a lesson card stepped with Back and Next, predict questions behind Show, each step moving the main window, offers to go deeper; the lesson library and the map of concepts shaded by level reached; each finished lesson checked in the background and corrected | `romlens tutor lessons`; `romlens tutor lesson show <id>` (with each step's revisions) | ⬜ | ⬜ | ⬜ |
+| 6.9 | Lessons (`25-lessons.md`) | Explain mode and `/learn`: a lesson card stepped with Back and Next, predict questions behind Show, each step pointing the main window at its place without bringing it forward, offers to go deeper; the lesson library and the map of concepts shaded by level reached; each finished lesson checked in the background and corrected | `romlens tutor lessons`; `romlens tutor lesson show <id>` (with each step's revisions) | ⬜ | ⬜ | ⬜ |
 | 6.10 | Diagrams (`26-diagrams.md`) | The tutor draws register fields, memory maps, the machine's parts, a frame's timeline and a byte's way to the screen from the core's own data, and checks its own SVG; shown large in answers and in lesson steps | `romlens draw <rom> <kind> <spec>`; `romlens draw check <svg>` | ⬜ | ⬜ | ⬜ |
+| 6.11 | The glossary (`27-glossary.md`) | Each acronym, initialism and register in an answer or a lesson step is linked the first time it appears; a click shows a bubble spelling it out, with a sentence or two and a button to ask the tutor about it | `romlens glossary [TERM] [--registers]`; the tutor's `reference` topic `glossary` | ⬜ | ⬜ | ⬜ |
 
 ## Manual pass, macOS (to repeat before each release)
 
@@ -500,3 +501,13 @@ Lesson check additions (`25-lessons.md`, "Checking lessons", still to run):
 67. A correction (6.9): a step with a slip is rewritten in place; `romlens
     tutor lesson latest` prints what it said before and why it changed.
     With the setting off, nothing is checked.
+
+Glossary additions (`27-glossary.md`, still to run):
+
+68. The bubble (6.11): in an answer that says DMA twice, only the first is
+    linked, with a dotted underline; clicking it shows "Direct Memory
+    Access" in a bubble at the word, which closes on a click elsewhere, and
+    "Ask the tutor about DMA" puts the question in the composer.
+69. Registers and lessons (6.11): a register such as `VMAIN` in a lesson
+    step shows its bubble with its address; stepping through a lesson
+    leaves the tutor window in front.

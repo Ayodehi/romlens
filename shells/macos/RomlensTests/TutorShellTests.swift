@@ -340,6 +340,57 @@ import Testing
         #expect(p.runs.contains { $0.link == URL(string: "romlens://a/008000") })
     }
 
+    @Test func glossaryTermsAreLinkedTheFirstTimeOnly() {
+        var seen = Set<String>()
+        let line = Glossary.link("DMA fills VRAM in V-blank; DMA again, `VMAIN` and `LDA`, [OAM](romlens://a/008000) at $00:DMA0.", seen: &seen)
+        let dma = Glossary.url("DMA").absoluteString
+        #expect(line.hasPrefix("[DMA](\(dma)) fills [VRAM]("), "\(line)")
+        #expect(line.contains("in [V-blank](\(Glossary.url("VBlank").absoluteString))"), "\(line)")
+        #expect(line.contains("; DMA again"), "the second DMA is not linked: \(line)")
+        #expect(line.contains("[`VMAIN`]("), "\(line)")
+        #expect(line.contains("and `LDA`"), "code that is not a term is left alone: \(line)")
+        #expect(line.contains("[OAM](romlens://a/008000)"), "a link already there is kept: \(line)")
+        #expect(seen == ["DMA", "VRAM", "VBlank", "VMAIN"])
+        #expect(Glossary.entry(for: Glossary.url("I/O"))?.words == "Input/Output")
+        #expect(Glossary.entry(for: URL(string: "romlens://a/808000")!) == nil)
+
+        let parts = MessageText.rendered("HDMA and OAM.\n\n| Chip | Memory |\n|---|---|\n| PPU | OAM |")
+        guard case .prose(let p) = parts.first, case .table(let h, let rows) = parts.last else {
+            Issue.record("prose then a table"); return
+        }
+        #expect(p.runs.contains { $0.link == Glossary.url("HDMA") && $0.underlineStyle != nil })
+        #expect(!h.contains { $0.runs.contains { $0.link != nil } }, "no terms in the header")
+        #expect(rows[0][0].runs.contains { $0.link == Glossary.url("PPU") })
+        #expect(!rows[0][1].runs.contains { $0.link != nil }, "OAM was linked in the prose")
+    }
+
+    @MainActor @Test func aGlossaryCardLaysOut() throws {
+        let e = try #require(Glossary.entry("NMI"))
+        let host = NSHostingView(rootView: GlossaryCard(entry: e, ask: {}))
+        let size = host.fittingSize
+        #expect(size.width == 300)
+        #expect(size.height > 80 && size.height < 260, "\(size)")
+        // With ROMLENS_SNAPSHOTS set, a line of prose and the card.
+        if ProcessInfo.processInfo.environment["ROMLENS_SNAPSHOTS"] != nil {
+            let page = VStack(alignment: .leading, spacing: 12) {
+                Text(MessageText.prose("The NMI handler starts a DMA to VRAM at $00:8123, then sets VMAIN; the NMI returns."))
+                GlossaryCard(entry: e, ask: {})
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .windowBackgroundColor)))
+            }
+            .padding(16)
+            .frame(width: 420)
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
+            w.contentView = NSHostingView(rootView: page)
+            w.setContentSize(w.contentView!.fittingSize)
+            w.display()
+            if let view = w.contentView, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+                view.cacheDisplay(in: view.bounds, to: rep)
+                try? rep.representation(using: .png, properties: [:])?
+                    .write(to: FileManager.default.temporaryDirectory.appendingPathComponent("glossary.png"))
+            }
+        }
+    }
+
     @Test func aReplyShowsAsOneAnswer() {
         let tool = TutorModel.ToolRow(id: "1", name: "listing", input: "{}", summary: "SEI", done: true)
         let rows: [TranscriptRow] = [
