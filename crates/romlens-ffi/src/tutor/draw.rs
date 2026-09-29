@@ -44,9 +44,10 @@ pub fn specs() -> Vec<ToolSpec> {
     ]
 }
 
-/// The picture as a tool result: the words, then the image, kept by its id.
-fn output(png: Vec<u8>, title: &str, text: String) -> ToolOutput {
-    let id = png::id(&png).replacen("tool-", "draw-", 1);
+/// The picture as a tool result: the words, then the image, kept by its id:
+/// `draw-` for Romlens's own diagrams, `svg-` for the tutor's SVG.
+fn output(png: Vec<u8>, prefix: &str, title: &str, text: String) -> ToolOutput {
+    let id = png::id(&png).replacen("tool-", prefix, 1);
     let image = ImageRef {
         id: id.clone(),
         media_type: "image/png".into(),
@@ -91,6 +92,7 @@ impl Draw<'_> {
         match romlens_draw::render(&d.svg) {
             Ok(p) => output(
                 p.png,
+                "draw-",
                 &d.title,
                 format!(
                     "{}, drawn by Romlens from its own data; its id is {{id}}, for a lesson step's picture. What it shows:\n{}",
@@ -111,6 +113,7 @@ fn svg(v: &Value) -> ToolOutput {
     match romlens_draw::render(svg) {
         Ok(p) => output(
             p.png,
+            "svg-",
             title,
             format!(
                 "{title}: your SVG passed Romlens's checks; its id is {{id}}. Look at the picture before you use it, and draw it again if it does not say what you meant."
@@ -121,6 +124,26 @@ fn svg(v: &Value) -> ToolOutput {
             romlens_draw::check::describe(&p)
         )),
     }
+}
+
+/// For tests: the id `draw_diagram` gives a kind that needs no ROM
+/// (`fields`, `blocks`), so a scripted step can name it in advance.
+pub fn id_without_rom(kind: &str, spec: &Value) -> Option<String> {
+    struct NoRom;
+    impl Source for NoRom {
+        fn rom(&self) -> Option<&romlens_core::RomImage> {
+            None
+        }
+        fn resolve(&self, _: &str) -> Result<u32, String> {
+            Err("no ROM".into())
+        }
+        fn name_at(&self, _: u32) -> Option<String> {
+            None
+        }
+    }
+    let d = kinds::draw(kind, spec, &NoRom).ok()?;
+    let p = romlens_draw::render(&d.svg).ok()?;
+    Some(png::id(&p.png).replacen("tool-", "draw-", 1))
 }
 
 /// Where a DMA channel wrote, by its B-bus register.
@@ -476,7 +499,7 @@ mod tests {
         let o = call(&t, "draw_svg", json!({"svg": good, "title": "A box"}));
         assert!(!o.is_error, "{}", text(&o));
         assert!(text(&o).contains("Look at the picture"));
-        assert!(matches!(&o.parts[1], Part::Image { image } if image.id.starts_with("draw-")));
+        assert!(matches!(&o.parts[1], Part::Image { image } if image.id.starts_with("svg-")));
     }
 
     #[test]

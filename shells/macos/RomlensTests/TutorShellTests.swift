@@ -172,6 +172,68 @@ import Testing
         try await Fixture.settle(timeout: 20) { !r.tutor.busy }
     }
 
+    /// A diagram Romlens drew (docs/26): large and captioned in an answer,
+    /// and in a lesson's card instead when a step shows it.
+    @Test func aDiagramShowsInTheAnswerAndInItsLesson() async throws {
+        let machine = #"{"preset":"machine","highlight":["ppu"]}"#
+        let fields = #"{"register":"INIDISP","value":"$80"}"#
+        let id = tutorTestDiagramId(kind: "blocks", spec: machine)
+        #expect(id.hasPrefix("draw-"))
+        let r = try await rig([
+            tutorTestCallReply(name: "draw_diagram", arguments: #"{"kind":"blocks","spec":\#(machine)}"#),
+            tutorTestCallReply(name: "draw_diagram", arguments: #"{"kind":"fields","spec":\#(fields)}"#),
+            tutorTestCallReply(name: "begin_lesson", arguments: #"{"title":"Inside the SNES","from_level":1,"to_level":1,"concepts":[{"id":"ppu","level":1}],"builds_on":[]}"#),
+            tutorTestCallReply(name: "lesson_step", arguments: #"{"lesson":"","title":"Two chips","predict":null,"body":"The CPU decides; the PPU draws.","focus_address":null,"focus_end":null,"focus_in":null,"focus_frame":null,"focus_view":null,"picture":"\#(id)"}"#),
+            tutorTestCallReply(name: "end_lesson", arguments: #"{"lesson":"","next":[]}"#),
+            tutorTestTextReply(text: "That is the machine."),
+        ])
+        defer { try? FileManager.default.removeItem(at: r.root) }
+        try await ask(r.tutor, "What is inside an SNES?")
+        #expect(r.tutor.error == nil, "\(r.tutor.error ?? "")")
+
+        // The lesson's diagram is in its card, not the answer; the other one
+        // is the answer's, large and captioned.
+        let rows = TranscriptRow.rows(r.tutor.turns)
+        let drawn = rows.flatMap { row -> [TutorModel.ToolRow] in
+            if case .answer(_, _, _, let tools, _, _) = row { tools.filter { $0.name == "draw_diagram" } } else { [] }
+        }
+        #expect(drawn.count == 2)
+        #expect(drawn[0].images.isEmpty, "the lesson shows it")
+        #expect(drawn[1].images.count == 1 && drawn[1].images[0].hasPrefix("draw-"))
+        #expect(TutorModel.drawing["draw_diagram"] == "Drawn by Romlens from the ROM")
+        let shown = TranscriptRow.shown(rows, work: false)
+        #expect(shown.contains { if case .answer(_, _, _, let t, _, _) = $0 { t.contains { !$0.images.isEmpty } } else { false } },
+                "a round with only a diagram is still shown")
+        let lessonId = try #require(rows.compactMap { if case .lesson(_, let l) = $0 { l } else { nil } }.first)
+        let lesson = try #require(r.tutor.lesson(lessonId))
+        #expect(lesson.steps[0].picture == id)
+        let data = try #require(r.tutor.session?.lessonPicture(lesson: lessonId, picture: id))
+        let image = try #require(NSImage(data: data))
+        #expect(image.representations.first?.pixelsWide == 1440, "twice its 720 points")
+        #expect(Picture.isDiagram(id) && Picture.caption(id) == "Drawn by Romlens from the ROM")
+        #expect(Picture.caption("svg-1") == "Drawn by the tutor, checked by Romlens" && Picture.caption("tool-1") == nil)
+
+        if ProcessInfo.processInfo.environment["ROMLENS_SNAPSHOTS"] != nil {
+            r.tutor.show(step: 0, of: lesson)
+            let c = TutorWindowController(tutor: r.tutor, title: "Test")
+            for (appearance, name) in [(NSAppearance.Name.aqua, "diagram-light.png"), (.darkAqua, "diagram-dark.png")] {
+                let w = c.window!
+                w.appearance = NSAppearance(named: appearance)
+                w.setContentSize(NSSize(width: 560, height: 900))
+                w.orderFront(nil)
+                w.contentView?.layoutSubtreeIfNeeded()
+                Fixture.spin(0.5)
+                w.display()
+                if let view = w.contentView, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+                    view.cacheDisplay(in: view.bounds, to: rep)
+                    try? rep.representation(using: .png, properties: [:])?
+                        .write(to: FileManager.default.temporaryDirectory.appendingPathComponent(name))
+                }
+            }
+            c.window?.close()
+        }
+    }
+
     @Test func anEditWaitsForItsCardAndUndoes() async throws {
         let r = try await rig([
             tutorTestCallReply(name: "set_label", arguments: #"{"address":"$00:8000","name":"Boot","reason":"the reset vector points here"}"#),

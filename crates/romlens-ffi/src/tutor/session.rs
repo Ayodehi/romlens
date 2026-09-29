@@ -1451,13 +1451,30 @@ pub fn tutor_test_text_reply(text: String) -> String {
 /// `arguments` (JSON).
 #[uniffi::export]
 pub fn tutor_test_call_reply(name: String, arguments: String) -> String {
+    // Each call its own id, as a model gives them, so the window pairs
+    // each call with its own result.
+    static CALLS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let id = format!(
+        "call_{}",
+        CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    );
     // A line to the student first, as an edit needs.
     test_chunk(serde_json::json!({"content": "Let me look."}), None)
         + &test_chunk(
-            serde_json::json!({"tool_calls": [{"index": 0, "id": "call_9", "function": {"name": name, "arguments": arguments}}]}),
+            serde_json::json!({"tool_calls": [{"index": 0, "id": id, "function": {"name": name, "arguments": arguments}}]}),
             Some("tool_calls"),
         )
         + "data: [DONE]\n\n"
+}
+
+/// For shell tests: the picture id `draw_diagram` gives a diagram that
+/// needs no ROM (`fields`, `blocks`), with its spec as JSON.
+#[uniffi::export]
+pub fn tutor_test_diagram_id(kind: String, spec: String) -> String {
+    serde_json::from_str(&spec)
+        .ok()
+        .and_then(|v| super::draw::id_without_rom(&kind, &v))
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -1551,22 +1568,8 @@ mod tests {
         // The picture's id is its bytes' hash, so the scripted step can
         // name it before it is drawn.
         let spec = serde_json::json!({"kind": "blocks", "spec": {"preset": "machine", "highlight": ["ppu"]}});
-        let id = {
-            let wb = Workbench::new(
-                crate::Rom::from_bytes(romlens_core::fixtures::explain_lorom(), "e.sfc".into())
-                    .unwrap(),
-            );
-            let draw = crate::tutor::draw::Draw {
-                wb: &wb,
-                rom: wb.rom(),
-                rec: None,
-                resolve: &|_| Err(String::new()),
-            };
-            draw.run("draw_diagram", &spec).unwrap().pictures[0]
-                .0
-                .id
-                .clone()
-        };
+        let id = tutor_test_diagram_id("blocks".into(), spec["spec"].to_string());
+        assert!(id.starts_with("draw-"));
         let (t, rx, local, root, _wb) = setup(
             "diagram",
             vec![

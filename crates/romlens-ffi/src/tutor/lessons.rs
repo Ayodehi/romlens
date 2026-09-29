@@ -260,7 +260,9 @@ impl Lessons {
             .filter(|p| !p.is_empty())
             .map(str::to_owned);
         if let Some(p) = &picture
-            && !(p.starts_with("tool-") || p.starts_with("draw-") || p.starts_with("shot-"))
+            && !["tool-", "draw-", "svg-", "shot-"]
+                .iter()
+                .any(|k| p.starts_with(k))
         {
             return Err(format!("{p} is not a picture a tool returned"));
         }

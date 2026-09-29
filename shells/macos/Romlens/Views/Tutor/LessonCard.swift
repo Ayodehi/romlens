@@ -135,11 +135,10 @@ struct LessonPicture: View {
 
     var body: some View {
         if let data = tutor.session?.lessonPicture(lesson: lesson, picture: id), let image = NSImage(data: data) {
-            Image(nsImage: image)
-                .resizable()
-                .interpolation(.none)
-                .aspectRatio(contentMode: .fit)
-                .frame(maxHeight: 280)
+            Picture(image: image, id: id, height: 280)
+            if let caption = Picture.caption(id) {
+                Text(caption).font(.caption2).foregroundStyle(.tertiary)
+            }
         }
     }
 }
