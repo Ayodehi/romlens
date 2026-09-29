@@ -233,7 +233,7 @@ fn frame(spec: &Value, src: &dyn Source) -> Result<Drawing, String> {
     );
     bar(&mut svg, &scale, &bands, &ticks, &mut placer);
     let bottom = events(&mut svg, &scale, &evs, &mut placer);
-    let mut h = (bottom + 20.0).max(250.0);
+    let mut h = bottom + 20.0;
     if more > 0 {
         svg.text(
             PAD,
@@ -341,7 +341,7 @@ fn line(spec: &Value) -> Result<Drawing, String> {
     placer.take(hx, BAR_Y - 22.0, 40.0, 16.0);
     bar(&mut svg, &scale, &bands, &ticks, &mut placer);
     let bottom = events(&mut svg, &scale, &evs, &mut placer);
-    svg.grow((bottom + 20.0).max(250.0) - svg.height());
+    svg.grow(bottom + 20.0 - svg.height());
     let mut description = format!(
         "One scanline: {dots} dots ({} master cycles). The picture's 256 pixels are drawn in dots {first}–{last}, about; horizontal blank follows, and HDMA runs at its start, about dot {hdma}.",
         timing::MASTER_PER_LINE

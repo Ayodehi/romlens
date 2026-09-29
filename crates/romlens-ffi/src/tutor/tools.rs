@@ -222,6 +222,7 @@ pub fn specs() -> Vec<ToolSpec> {
     v.extend(super::media::specs());
     v.extend(super::edits::specs());
     v.extend(super::lessons::specs());
+    v.extend(super::draw::specs());
     v.push(spec(
         "generate_image",
         "Draw a teaching picture with an image model, when the student asks. It gets only your words, so describe everything; say the picture is generated.",
@@ -402,6 +403,22 @@ impl Tools for RomTools {
                 place: &place,
             };
             return edits.run(id, name, input, cx);
+        }
+        if super::draw::NAMES.contains(&name) {
+            let resolve = |t: &str| self.place(t).map(|r| r.snes_address);
+            let draw = super::draw::Draw {
+                wb: &self.wb,
+                rom: self.wb.rom(),
+                rec: self
+                    .recording
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clone(),
+                resolve: &resolve,
+            };
+            if let Some(out) = draw.run(name, input) {
+                return out;
+            }
         }
         let media = super::media::Media {
             wb: &self.wb,

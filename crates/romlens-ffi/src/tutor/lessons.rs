@@ -260,7 +260,7 @@ impl Lessons {
             .filter(|p| !p.is_empty())
             .map(str::to_owned);
         if let Some(p) = &picture
-            && !(p.starts_with("tool-") || p.starts_with("shot-"))
+            && !(p.starts_with("tool-") || p.starts_with("draw-") || p.starts_with("shot-"))
         {
             return Err(format!("{p} is not a picture a tool returned"));
         }
@@ -581,6 +581,39 @@ mod tests {
             "concepts": [{"id": "oam", "level": 3}], "builds_on": ["l1-00000"]}),
         );
         assert!(orphan.is_error);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_step_shows_a_diagram_romlens_drew() {
+        let (t, root) = fixture("diagram");
+        let drawn = call(
+            &t,
+            "draw_diagram",
+            json!({"kind": "fields", "spec": {"register": "INIDISP", "value": "$80"}}),
+        );
+        assert!(!drawn.is_error, "{}", text(&drawn));
+        let (image, bytes) = drawn.pictures[0].clone();
+        assert!(image.id.starts_with("draw-"));
+        let begun = call(
+            &t,
+            "begin_lesson",
+            json!({"title": "Forced blank", "from_level": 2, "to_level": 2,
+            "concepts": [{"id": "forced_blank", "level": 2}], "builds_on": []}),
+        );
+        let id = text(&begun).split_whitespace().nth(1).unwrap().to_owned();
+        let r = call(
+            &t,
+            "lesson_step",
+            step(&id, "Bit 7", json!({"picture": image.id})),
+        );
+        assert!(!r.is_error, "{}", text(&r));
+        assert!(!call(&t, "end_lesson", json!({"lesson": id, "next": []})).is_error);
+        // At the end of the round the picture goes with the lesson.
+        let pictures = HashMap::from([(image.id.clone(), bytes.clone())]);
+        t.lessons.settle(&pictures);
+        let store = t.lessons.store().unwrap();
+        assert_eq!(store.picture(&id, &image.id), Some(bytes));
         let _ = std::fs::remove_dir_all(root);
     }
 }

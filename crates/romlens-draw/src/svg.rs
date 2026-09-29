@@ -272,7 +272,20 @@ impl Svg {
         }
     }
 
+    /// The SVG. A short, wide drawing gets room below it, so its aspect
+    /// stays within the checks' 3:1.
     pub fn finish(self) -> String {
+        let height = self.height.max(self.width / 3.0).ceil();
+        let (width, body) = (self.width, self.body);
+        Svg {
+            width,
+            height,
+            body,
+        }
+        .write()
+    }
+
+    fn write(self) -> String {
         format!(
             "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {w} {h}\" width=\"{w}\" height=\"{h}\">\n{}</svg>\n",
             self.body,

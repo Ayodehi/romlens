@@ -105,7 +105,8 @@ pub struct Transfer {
 }
 
 impl Transfer {
-    fn of(r: &DmaRecord, channel: u8) -> Transfer {
+    /// Channel `channel` of a DMA start.
+    pub fn of(r: &DmaRecord, channel: u8) -> Transfer {
         let c = r.channel(channel as usize);
         let count = u16::from_le_bytes([c[5], c[6]]);
         Transfer {
@@ -155,7 +156,7 @@ impl Transfer {
 
 /// A DMA start placed on the frame's line numbering: before line 0 in the
 /// vertical blank that opens the frame.
-fn start_time(r: &DmaRecord, total: i16, last_visible: i16) -> (i16, u16) {
+pub fn start_time(r: &DmaRecord, total: i16, last_visible: i16) -> (i16, u16) {
     let s = r.scanline as i16;
     let line = if s > last_visible { s - total } else { s };
     (line, r.context.map_or(0, |c| c.h_clock / 4))

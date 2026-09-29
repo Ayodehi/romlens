@@ -854,6 +854,7 @@ name = "romlens-ffi"
 version = "0.1.0"
 dependencies = [
  "romlens-core",
+ "romlens-draw",
  "romlens-tutor",
  "serde_json",
  "thiserror",

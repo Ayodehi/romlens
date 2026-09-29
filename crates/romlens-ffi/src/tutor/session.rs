@@ -1547,6 +1547,77 @@ mod tests {
     }
 
     #[test]
+    fn a_lesson_step_carries_a_diagram_romlens_drew() {
+        // The picture's id is its bytes' hash, so the scripted step can
+        // name it before it is drawn.
+        let spec = serde_json::json!({"kind": "blocks", "spec": {"preset": "machine", "highlight": ["ppu"]}});
+        let id = {
+            let wb = Workbench::new(
+                crate::Rom::from_bytes(romlens_core::fixtures::explain_lorom(), "e.sfc".into())
+                    .unwrap(),
+            );
+            let draw = crate::tutor::draw::Draw {
+                wb: &wb,
+                rom: wb.rom(),
+                rec: None,
+                resolve: &|_| Err(String::new()),
+            };
+            draw.run("draw_diagram", &spec).unwrap().pictures[0]
+                .0
+                .id
+                .clone()
+        };
+        let (t, rx, local, root, _wb) = setup(
+            "diagram",
+            vec![
+                call_reply("draw_diagram", spec),
+                call_reply(
+                    "begin_lesson",
+                    serde_json::json!({"title": "The machine", "from_level": 1,
+                        "to_level": 1, "concepts": [{"id": "ppu", "level": 1}], "builds_on": []}),
+                ),
+                call_reply(
+                    "lesson_step",
+                    serde_json::json!({"lesson": "", "title": "Two chips", "predict": null,
+                        "body": "The CPU decides; the PPU draws.", "focus_address": null, "focus_end": null,
+                        "focus_in": null, "focus_frame": null, "focus_view": null, "picture": id}),
+                ),
+                call_reply("end_lesson", serde_json::json!({"lesson": "", "next": []})),
+                text_reply("Here is the machine."),
+            ],
+        );
+        t.new_conversation(local, "qwen3".into(), None, TutorMode::ReadOnly, None)
+            .unwrap();
+        t.set_explain(true);
+        Arc::clone(&t)
+            .send("What is inside an SNES?".into(), Vec::new(), None)
+            .unwrap();
+        let mut failed = Vec::new();
+        let end = until_done(&rx, |e| {
+            if let TutorEventInfo::ToolFinished {
+                name,
+                summary,
+                is_error: true,
+                ..
+            } = e
+            {
+                failed.push(format!("{name}: {summary}"));
+            }
+        });
+        assert!(matches!(end, TutorEventInfo::Ended { .. }), "{end:?}");
+        assert!(failed.is_empty(), "{failed:?}");
+        let lessons = t.lessons();
+        assert_eq!(lessons.len(), 1);
+        assert_eq!(lessons[0].steps[0].picture.as_deref(), Some(id.as_str()));
+        // Kept with the lesson, so it reads again after the conversation.
+        let store = romlens_tutor::lesson::LessonStore::new(&root);
+        let png = store.picture(&lessons[0].id, &id).unwrap();
+        assert_eq!(&png[..4], b"\x89PNG");
+        assert_eq!(t.lesson_picture(lessons[0].id.clone(), id), Some(png));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn explain_mode_answers_with_a_lesson() {
         let (t, rx, local, root, _wb) = setup(
             "lesson",
