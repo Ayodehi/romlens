@@ -8,7 +8,7 @@ that tracks progress against it.
 | Task | State |
 |---|---|
 | D0 this document, the pointers from `24` and `25`, the checklist rows | done, 28 September 2026 |
-| D1 `romlens-draw`: fonts, the SVG writer, rendering, the validation pass | planned |
+| D1 `romlens-draw`: fonts, the SVG writer, rendering, the validation pass | done, 28 September 2026: `crates/romlens-draw`. `fonts`: IBM Plex Sans (Regular, SemiBold) and Mono built in, every family an SVG names mapped to one of them and no fallback to the system's, `measure` for layout and `has_char`. `svg`: a writer (boxes, text, lines, dashed lines, arrows) in one palette whose contrasts a test measures. `check`: the five checks, each problem a line the model can act on. `render`: the checks, then `resvg` onto the paper at twice the display size (at most 720 × 540 points), as a PNG with real deflate. The new crates and the fonts are in `THIRD-PARTY-NOTICES.md`, all MIT, Apache-2.0, BSD, Zlib or OFL |
 | D2 the diagram kinds, fed by the core | planned |
 | D3 `draw_diagram` and `draw_svg`, the prompt | planned |
 | D4 `romlens draw` and `romlens draw check` | planned |

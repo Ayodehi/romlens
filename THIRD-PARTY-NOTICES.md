@@ -10,10 +10,19 @@ notices be preserved, which this file does.
 |---|---|---|
 | [ruzstd](https://github.com/KillingSpark/zstd-rs) 0.8, Copyright (c) 2019 Moritz Borcherding | MIT | Compressing and decompressing `.romrec` payloads (zstd frames), behind `romlens-core`'s `recording` feature |
 | [twox-hash](https://github.com/shepmaster/twox-hash) 2.1, Copyright (c) 2015 Jake Goulding | MIT | ruzstd's frame checksums |
+| [resvg and usvg](https://github.com/linebender/resvg) 0.48, the Resvg Authors | Apache-2.0 OR MIT | Reading and drawing the diagrams' SVG (`romlens-draw`, docs/26) |
+| [tiny-skia](https://github.com/linebender/tiny-skia) 0.12, Yevhenii Reizner and the Linebender authors | BSD-3-Clause | resvg's rasterizer, and the diagrams' PNG |
+| [fontdb](https://github.com/RazrFalcon/fontdb), [harfrust](https://github.com/harfbuzz/harfrust), [skrifa, read-fonts and font-types](https://github.com/googlefonts/fontations) | MIT; MIT; MIT OR Apache-2.0 | Loading, shaping and measuring the diagrams' text |
+| resvg's other dependencies: roxmltree, svgtypes, simplecss, kurbo, polycool, xmlwriter, strict-num, rgb, bytemuck, arrayref, arrayvec, euclid, float-cmp, imagesize, data-url, base64, png, fdeflate, flate2, miniz_oxide, zlib-rs, adler2, crc32fast, simd-adler32, slotmap, smallvec, tinyvec, unicode-bidi, unicode-script, unicode-vo, pico-args, log | Each MIT, Apache-2.0, BSD-2-Clause, Zlib or a choice of these (listed with `cargo metadata`) | Parsing SVG and CSS, geometry, PNG and deflate |
+| [IBM Plex Sans and IBM Plex Mono](https://github.com/IBM/plex), Copyright © 2017 IBM Corp., with Reserved Font Name "Plex" | SIL Open Font License 1.1 (`crates/romlens-draw/fonts/OFL.txt`) | The diagrams' text, shipped unmodified so every machine draws the same picture |
 
-Both are MIT: permission to use, copy, modify and distribute, provided the
+ruzstd and twox-hash are MIT: permission to use, copy, modify and distribute, provided the
 copyright notice and the permission notice are included in copies. The full
-text is in each crate's `LICENSE` file as published on crates.io.
+text is in each crate's `LICENSE` file as published on crates.io; the
+same holds for the diagram crates' MIT, Apache-2.0, BSD and Zlib notices.
+The fonts are bundled, not modified, and the OFL's text travels with them;
+the OFL lets them be embedded in software under any licence, as long as
+they are not sold on their own.
 
 The pure-Rust zstd was chosen over the `zstd` crate (BSD-3-Clause, a
 binding to the C library) because the C build needs a cross-compiler for

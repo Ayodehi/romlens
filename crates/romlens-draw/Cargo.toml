@@ -1,0 +1,15 @@
+[package]
+name = "romlens-draw"
+description = "Diagrams Romlens draws from the core's data, and the checks every SVG passes before it is drawn"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+romlens-core = { path = "../romlens-core" }
+serde.workspace = true
+serde_json.workspace = true
+resvg = { version = "0.48", default-features = false, features = ["text"] }
+skrifa = "0.44"
