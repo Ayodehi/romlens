@@ -2,8 +2,9 @@
 //! decision 9). A provider's own model list says which ids exist; only this
 //! table says what they take. Checked against the providers' documentation
 //! on 27 September 2026 (platform.claude.com models and pricing;
-//! developers.openai.com models and pricing). Check again before relying on
-//! a price.
+//! developers.openai.com models and pricing), and Claude Sonnet 5.5 on 29
+//! September 2026 (released the 28th). Check again before relying on a
+//! price.
 
 use crate::provider::Protocol;
 use crate::transcript::Usage;
@@ -133,6 +134,26 @@ pub const MODELS: &[ModelInfo] = &[
             cache_write: 2.5,
         },
         fallbacks: false,
+    },
+    ModelInfo {
+        id: "claude-sonnet-5-5",
+        protocol: Protocol::Anthropic,
+        name: "Claude Sonnet 5.5",
+        context: 1_000_000,
+        max_output: 128_000,
+        vision: true,
+        thinking: Thinking::Adaptive,
+        efforts: ANTHROPIC_EFFORTS,
+        default_effort: Some("high"),
+        price: Price {
+            input: 2.0,
+            output: 10.0,
+            cache_read: 0.2,
+            cache_write: 2.5,
+        },
+        // Server-side fallback retries its "cyber" and "frontier_llm"
+        // declines on Claude Sonnet 5.
+        fallbacks: true,
     },
     ModelInfo {
         id: "claude-haiku-4-5",

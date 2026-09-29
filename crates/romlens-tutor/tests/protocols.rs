@@ -546,3 +546,42 @@ fn haiku_is_not_asked_to_think() {
     assert!(v.get("fallbacks").is_none());
     assert!(!h.headers.iter().any(|(k, _)| k == "anthropic-beta"));
 }
+
+/// Claude Sonnet 5.5 (29 September 2026): what its release notes say a
+/// request must and must not carry. Adaptive thinking with summaries shown,
+/// so the notes it now writes between tool calls as thinking come back with
+/// their text; no `tool_choice` (forcing a tool is refused) and no
+/// `temperature`; the server-side fallback.
+#[test]
+fn sonnet_5_5_is_asked_as_its_notes_say() {
+    let turns = vec![Turn::user_text("What does RESET do?")];
+    let (h, v) = body(
+        &Endpoint::anthropic(),
+        "claude-sonnet-5-5",
+        &turns,
+        &HashMap::new(),
+    );
+    assert_eq!(v["model"], "claude-sonnet-5-5");
+    assert_eq!(
+        v["thinking"],
+        json!({"type": "adaptive", "display": "summarized"})
+    );
+    assert_eq!(v["output_config"], json!({"effort": "high"}));
+    assert!(v.get("tool_choice").is_none() && v.get("temperature").is_none());
+    assert_eq!(v["fallbacks"], "default");
+    assert!(h.headers.contains(&(
+        "anthropic-beta".into(),
+        "server-side-fallback-2026-07-01".into()
+    )));
+    let m = romlens_tutor::models::model("claude-sonnet-5-5").unwrap();
+    assert_eq!((m.context, m.max_output), (1_000_000, 128_000));
+    assert_eq!(
+        (
+            m.price.input,
+            m.price.output,
+            m.price.cache_read,
+            m.price.cache_write
+        ),
+        (2.0, 10.0, 0.2, 2.5)
+    );
+}

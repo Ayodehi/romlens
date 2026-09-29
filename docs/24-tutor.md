@@ -453,6 +453,10 @@ request rewrites what an earlier one sent:
 
 Each task is one or more commits, pushed.
 
+## Models added since
+
+- **Claude Sonnet 5.5** (29 September 2026, released the 28th): `claude-sonnet-5-5`, 1M context, 128K out, $2 / $10 a million tokens (cache reads $0.20, writes $2.50), adaptive thinking, efforts low to max with `high` the default, and the server-side fallback. Its release notes' breaking changes needed nothing else here: Romlens never forces a tool (`tool_choice` any or tool is refused), never sets `temperature`, never sends `thinking: disabled`, and already asks for summarised thinking, so the notes it now writes between tool calls as thinking blocks arrive with their text (in the thinking, shown with Details). Its thinking blocks are bound to the model and to the conversation's prefix: switching models drops the blocks the new model cannot read, and every edit Romlens makes to a history (rewind, compaction, the thinking dropped when the tools change) truncates or removes them, so the prefix check cannot fail.
+
 ## What is cut for now
 
 - The Explain and Quiz modes and scene drafts (Phase 4). Explain mode is
