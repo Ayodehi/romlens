@@ -305,6 +305,19 @@ pub fn hardware_register(address: u16) -> Option<&'static HardwareRegister> {
     }
 }
 
+/// The register with this name (`INIDISP`, `bbad0`), ignoring case. Names
+/// are looked up before anything is read as hex, since `BBAD0` is both.
+pub fn hardware_register_named(name: &str) -> Option<&'static HardwareRegister> {
+    let n = name.trim();
+    PPU.iter()
+        .chain(APU.iter())
+        .chain(WRAM.iter())
+        .chain(JOY.iter())
+        .chain(CPU.iter())
+        .chain(DMA.iter().flatten())
+        .find(|r| r.name.eq_ignore_ascii_case(n))
+}
+
 /// Every named register, ascending by address.
 pub fn all_hardware_registers() -> Vec<&'static HardwareRegister> {
     let mut out: Vec<&'static HardwareRegister> = PPU

@@ -8,6 +8,13 @@ use crate::check::{self, Problem};
 use crate::fonts;
 use crate::svg::palette;
 
+/// A 64-bit FNV-1a hash, for naming pictures.
+pub fn hash(bytes: &str) -> u64 {
+    bytes.bytes().fold(0xcbf2_9ce4_8422_2325, |h, b| {
+        (h ^ b as u64).wrapping_mul(0x0000_0100_0000_01b3)
+    })
+}
+
 /// A drawn picture. Its PNG is twice its display size in points.
 #[derive(Clone, Debug)]
 pub struct Picture {
@@ -27,7 +34,7 @@ pub fn render(svg: &str) -> Result<Picture, Vec<Problem>> {
     })?;
     check::layout(&tree)?;
     let size = tree.size();
-    let scale = 2.0 * check::display_scale(size.width() as f64, size.height() as f64) as f32;
+    let scale = 2.0 * check::display_scale(size.width() as f64) as f32;
     let (w, h) = (
         (size.width() * scale).ceil() as u32,
         (size.height() * scale).ceil() as u32,

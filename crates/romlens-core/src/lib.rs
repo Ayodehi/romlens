@@ -26,6 +26,7 @@ pub mod provenance;
 pub mod recording;
 pub mod rom;
 pub mod spc700;
+pub mod timing;
 pub mod viewmodel;
 
 pub use error::{AddressError, ProjectError, RomError};

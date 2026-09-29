@@ -129,12 +129,11 @@ fn parse_hex(s: &str) -> Option<u32> {
 
 fn register(d: &str) -> Result<String, String> {
     let regs = all_hardware_registers();
-    let address = match parse_hex(d) {
-        Some(a) => (a & 0xFFFF) as u16,
-        None => regs
-            .iter()
-            .find(|r| r.name.eq_ignore_ascii_case(d))
-            .map(|r| r.address)
+    // A name first: `BBAD0` is also hex.
+    let address = match romlens_core::model::hardware_register_named(d) {
+        Some(r) => r.address,
+        None => parse_hex(d)
+            .map(|a| (a & 0xFFFF) as u16)
             .ok_or_else(|| format!("no register named {d}"))?,
     };
     let base = regs.iter().find(|r| r.address == address);
@@ -269,6 +268,9 @@ mod tests {
         let bgmode = page("register", Some("BGMODE")).unwrap();
         assert!(bgmode.starts_with("$2105 BGMODE"), "{bgmode}");
         assert_eq!(page("register", Some("$2105")).unwrap(), bgmode);
+        // A name that is also hex is the name.
+        let bbad = page("register", Some("BBAD0")).unwrap();
+        assert!(bbad.starts_with("$4301 BBAD0"), "{bbad}");
         let dir = page("dsp_register", Some("DIR")).unwrap();
         assert!(dir.contains("$005D") || dir.contains("DIR"), "{dir}");
         let mov = page("spc700_instruction", Some("MOV")).unwrap();

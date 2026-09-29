@@ -20,6 +20,8 @@ pub mod palette {
         "#e8edf5", "#e6f2e8", "#fbeede", "#efe7f6", "#f6e3e3", "#eef0e0",
     ];
     pub const QUIET_FILL: &str = "#f0eee9";
+    /// Text on the accent.
+    pub const ON_ACCENT: &str = "#ffffff";
 }
 
 pub fn escape(s: &str) -> String {
@@ -138,6 +140,11 @@ impl Svg {
         self.height
     }
 
+    /// Makes the canvas taller, for something added at the bottom.
+    pub fn grow(&mut self, by: f64) {
+        self.height += by;
+    }
+
     pub fn rect(&mut self, x: f64, y: f64, w: f64, h: f64, s: Shape) {
         let _ = writeln!(
             self.body,
@@ -192,6 +199,34 @@ impl Svg {
             n(y1),
             n(x2),
             n(y2)
+        );
+    }
+
+    pub fn circle(&mut self, cx: f64, cy: f64, r: f64, fill: &str) {
+        let _ = writeln!(
+            self.body,
+            r#"<circle cx="{}" cy="{}" r="{}" fill="{fill}"/>"#,
+            n(cx),
+            n(cy),
+            n(r)
+        );
+    }
+
+    /// A polyline without an arrowhead.
+    pub fn arrow_less(&mut self, points: &[(f64, f64)], colour: &str, width: f64) {
+        if points.len() < 2 {
+            return;
+        }
+        let d: Vec<String> = points
+            .iter()
+            .enumerate()
+            .map(|(i, (x, y))| format!("{}{} {}", if i == 0 { "M" } else { "L" }, n(*x), n(*y)))
+            .collect();
+        let _ = writeln!(
+            self.body,
+            r#"<path d="{}" fill="none" stroke="{colour}" stroke-width="{}" stroke-linejoin="round"/>"#,
+            d.join(" "),
+            n(width)
         );
     }
 

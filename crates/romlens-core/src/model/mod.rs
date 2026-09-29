@@ -21,7 +21,8 @@ pub use command::{Command, Origin, UndoEntry};
 pub use comment::{Comment, CommentKind};
 pub use coverage::{BitSet, Coverage, ObservedFlags};
 pub use hardware::{
-    Access, HardwareRegister, all_hardware_registers, hardware_register, is_system_bank,
+    Access, HardwareRegister, all_hardware_registers, hardware_register, hardware_register_named,
+    is_system_bank,
 };
 pub use label::{Label, LabelSource, validate_label_name};
 pub use project::{FlagOverride, ImportRecord, Project, RomIdentity, Settings, TraceRecord};

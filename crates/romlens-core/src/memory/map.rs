@@ -274,3 +274,87 @@ impl AddressMap {
         MemoryClass::OpenBus
     }
 }
+/// A named stretch of one bank, for drawing a memory map (docs/26).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BankRegion {
+    /// First and last offset within the bank.
+    pub start: u16,
+    pub end: u16,
+    pub class: MemoryClass,
+    /// What is there: `PPU registers`, `ROM`, `Low RAM`.
+    pub name: &'static str,
+}
+
+/// The hardware window's parts, in the system banks.
+const HARDWARE_PARTS: &[(u16, u16, &str)] = &[
+    (0x2100, 0x213F, "PPU registers"),
+    (0x2140, 0x217F, "Sound CPU ports"),
+    (0x2180, 0x2183, "WRAM port"),
+    (0x4016, 0x4017, "Joypad ports"),
+    (0x4200, 0x421F, "CPU registers"),
+    (0x4300, 0x437F, "DMA registers"),
+];
+
+impl AddressMap {
+    /// One bank from `$0000` to `$FFFF` as runs of what is there, the
+    /// hardware window split into its parts and the unused space between
+    /// them.
+    pub fn regions(&self, bank: u8) -> Vec<BankRegion> {
+        let name = |c: MemoryClass| match c {
+            MemoryClass::Rom => "ROM",
+            MemoryClass::Wram => "WRAM",
+            MemoryClass::LowRam => "Low RAM",
+            MemoryClass::Hardware => "Unused",
+            MemoryClass::Sram => "Cartridge SRAM",
+            MemoryClass::OpenBus => "Open bus",
+        };
+        let mut out: Vec<BankRegion> = Vec::new();
+        let mut push = |start: u16, end: u16, class: MemoryClass, name: &'static str| {
+            if let Some(last) = out.last_mut()
+                && last.class == class
+                && last.name == name
+                && last.end.wrapping_add(1) == start
+            {
+                last.end = end;
+                return;
+            }
+            out.push(BankRegion {
+                start,
+                end,
+                class,
+                name,
+            });
+        };
+        for page in 0..=0xFFu16 {
+            let start = page << 8;
+            let class = self.classify(SnesAddress::new(bank, start));
+            if class == MemoryClass::Hardware {
+                // Split the page at the parts it holds.
+                let mut at = start;
+                let end = start | 0xFF;
+                while at <= end {
+                    let part = HARDWARE_PARTS.iter().find(|(a, b, _)| *a <= at && at <= *b);
+                    let (stop, n) = match part {
+                        Some((_, b, n)) => ((*b).min(end), *n),
+                        None => {
+                            let next = HARDWARE_PARTS
+                                .iter()
+                                .map(|(a, _, _)| *a)
+                                .filter(|a| *a > at && *a <= end)
+                                .min();
+                            (next.map_or(end, |a| a - 1), "Unused")
+                        }
+                    };
+                    push(at, stop, class, n);
+                    if stop == 0xFFFF {
+                        break;
+                    }
+                    at = stop + 1;
+                }
+            } else {
+                push(start, start | 0xFF, class, name(class));
+            }
+        }
+        out
+    }
+}

@@ -231,6 +231,48 @@ pub fn layout(address: u16) -> Option<Layout> {
 }
 
 /// One byte of a pair written on its own: the pair's text, no fields.
+/// The layout a register name stands for: a pair's name (`VMADD`, `A1T3`)
+/// or a register's (`INIDISP`, `VMADDL`, which is half of `VMADD`), with
+/// the pair's name when the register is half of one.
+pub fn layout_named(name: &str) -> Option<(String, Layout)> {
+    let n = name.trim().to_ascii_uppercase();
+    for l in LAYOUTS.iter().filter(|l| l.pair.is_some()) {
+        let pair = l.pair.unwrap_or_default();
+        if l.address == 0x4300 | (l.address & 0x0F) && (0x4300..=0x430F).contains(&l.address) {
+            for ch in 0..8u16 {
+                if n == format!("{pair}{ch}") {
+                    let a = l.address + ch * 0x10;
+                    return Some((n, Layout { address: a, ..*l }));
+                }
+            }
+        } else if n == pair {
+            return Some((n, *l));
+        }
+    }
+    let r = crate::model::hardware_register_named(&n)?;
+    let own = |a: u16| {
+        layout(a).map(|l| {
+            (
+                l.pair.map_or_else(|| r.name.to_owned(), |_| pair_name(&l)),
+                l,
+            )
+        })
+    };
+    own(r.address).or_else(|| {
+        let low = layout(r.address.wrapping_sub(1)).filter(|l| l.pair.is_some())?;
+        Some((pair_name(&low), low))
+    })
+}
+
+fn pair_name(l: &Layout) -> String {
+    let name = l.pair.unwrap_or_default();
+    if (0x4300..=0x437F).contains(&l.address) {
+        format!("{name}{}", (l.address >> 4) & 7)
+    } else {
+        name.to_owned()
+    }
+}
+
 fn half_of(pair: &Layout, address: u16) -> Layout {
     Layout {
         address,

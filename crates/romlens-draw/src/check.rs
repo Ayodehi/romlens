@@ -147,10 +147,10 @@ pub fn structure(svg: &str) -> Result<(f64, f64), Vec<Problem>> {
     if out.is_empty() { Ok(size) } else { Err(out) }
 }
 
-/// How much smaller than its viewBox a picture is shown: never larger than
-/// 720 × 540 points.
-pub fn display_scale(width: f64, height: f64) -> f64 {
-    (720.0 / width).min(540.0 / height).min(1.0)
+/// How much smaller than its viewBox a picture is shown: never wider than
+/// 720 points. Lessons and answers scroll, so its height is not capped.
+pub fn display_scale(width: f64) -> f64 {
+    (720.0 / width).min(1.0)
 }
 
 struct Filled {
@@ -286,7 +286,7 @@ fn overlap(a: &Rect, b: &Rect) -> f64 {
 pub fn layout(tree: &usvg::Tree) -> Result<(), Vec<Problem>> {
     let size = tree.size();
     let (w, h) = (size.width() as f64, size.height() as f64);
-    let shown = display_scale(w, h);
+    let shown = display_scale(w);
     let mut shapes = Vec::new();
     let mut labels = Vec::new();
     let mut drawn = 0;

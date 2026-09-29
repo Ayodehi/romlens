@@ -4,6 +4,7 @@
 
 pub mod check;
 pub mod fonts;
+pub mod kinds;
 pub mod render;
 pub mod svg;
 
