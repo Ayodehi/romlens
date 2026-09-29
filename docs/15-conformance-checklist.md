@@ -218,6 +218,7 @@ Written from `24-tutor.md` on 27 September 2026; it replaces rows 3.19–3.21.
 | 6.7 | Another provider mid-conversation | `/model` changes provider, model and effort between turns, and the conversation goes on | `romlens tutor ask … --resume <id> --provider P --model M` | 🧪 | ⬜ | ⬜ |
 | 6.8 | A recording investigated | Recording tools (changes, who wrote a byte, provenance, frames) in the tool log | `romlens tutor ask <rom> "<question>" --rec R` | 🧪 | ⬜ | ⬜ |
 | 6.9 | Lessons (`25-lessons.md`) | Explain mode and `/learn`: a lesson card stepped with Back and Next, predict questions behind Show, each step moving the main window, offers to go deeper; the lesson library and the map of concepts shaded by level reached | `romlens tutor lessons`; `romlens tutor lesson show <id>` | ⬜ | ⬜ | ⬜ |
+| 6.10 | Diagrams (`26-diagrams.md`) | The tutor draws register fields, memory maps, the machine's parts, a frame's timeline and a byte's way to the screen from the core's own data, and checks its own SVG; shown large in answers and in lesson steps | `romlens draw <rom> <kind> <spec>`; `romlens draw check <svg>` | ⬜ | ⬜ | ⬜ |
 
 ## Manual pass, macOS (to repeat before each release)
 
@@ -477,3 +478,16 @@ Lesson additions (`25-lessons.md`, still to run):
 62. The library and map (6.9): `/lessons` lists the lessons and reopens one
     as a card; `/map` shades the concepts reached; marking one known is
     kept after quitting.
+
+Diagram additions (`26-diagrams.md`, still to run):
+
+63. The machine (6.10): with Explain on, ask "how do the CPU and the PPU
+    work together?": a step carries the machine diagram, labelled "Drawn by
+    Romlens from the ROM", sharp at its size, and readable in light and
+    dark appearance.
+64. Fields and maps (6.10): ask "what does forced blank do?" and "where does
+    the game start?": INIDISP's bits with bit 7 as forced blank, and bank
+    `$00`'s map with the reset vector marked and where it points.
+65. The tutor's own SVG (6.10): ask for a picture no kind fits: it is drawn,
+    labelled "Drawn by the tutor, checked by Romlens", and a broken one is
+    refused with its problems in the tool log.

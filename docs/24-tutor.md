@@ -459,7 +459,8 @@ Each task is one or more commits, pushed.
   planned in `25-lessons.md`.
 - Making media or videos from C versions. The versions are kept for it.
 - Sending game assets to an image model, and editing pictures.
-- Diagrams drawn from text (Mermaid, SVG) in the chat.
+- Diagrams drawn from text in the chat. Diagrams Romlens draws itself, and
+  checked SVG, are planned in `26-diagrams.md`.
 - Branching conversations. A rewind cuts the conversation; the cut turns
   stay on disk but are not shown.
 - The Windows and Linux credential stores. The trait is ready for them.

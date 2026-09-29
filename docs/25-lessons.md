@@ -195,8 +195,8 @@ conversations).
 - Quiz mode with checked answers (predict questions are not graded).
 - Scenes: animation, camera moves, video export. Lessons are their drafts.
 - Lessons shared between students, or exported as documents.
-- Diagrams drawn by Romlens itself (a lesson can use `generate_image` and the
-  tools' pictures).
+- Diagrams drawn by Romlens itself, planned in `26-diagrams.md` (until
+  then a lesson can use `generate_image` and the tools' pictures).
 
 ## Risks
 
