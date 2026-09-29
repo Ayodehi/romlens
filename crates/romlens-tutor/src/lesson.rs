@@ -508,6 +508,35 @@ pub struct Lesson {
     /// Ended with `end_lesson`: only a finished lesson counts.
     #[serde(default)]
     pub finished: bool,
+    /// Steps rewritten since, oldest first: what each said and why it
+    /// changed (docs/25, "Checking lessons").
+    #[serde(default)]
+    pub revisions: Vec<Revision>,
+    /// The background check, once it has run.
+    #[serde(default)]
+    pub checked: Option<Checked>,
+}
+
+/// A step as it was before it was rewritten.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Revision {
+    /// The step's index, from 0.
+    pub step: usize,
+    pub before: Step,
+    pub reason: String,
+    pub when: u64,
+}
+
+/// What checking a finished lesson did.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Checked {
+    pub when: u64,
+    /// Steps it rewrote.
+    pub changed: u32,
+    pub cost: f64,
+    /// The reviewer's last line.
+    #[serde(default)]
+    pub note: String,
 }
 
 impl Lesson {
@@ -524,6 +553,8 @@ impl Lesson {
             next: Vec::new(),
             conversation: String::new(),
             finished: false,
+            revisions: Vec::new(),
+            checked: None,
         }
     }
 }
@@ -560,6 +591,32 @@ impl Lesson {
             if let Some(p) = &s.picture {
                 o.push_str(&format!("   [picture {p}]\n"));
             }
+            for r in self.revisions.iter().filter(|r| r.step == i) {
+                let was: String = r.before.body.chars().take(240).collect();
+                o.push_str(&format!(
+                    "   [revised: {}]\n   [it said: {}{}]\n",
+                    r.reason,
+                    was.replace('\n', " "),
+                    if r.before.body.chars().count() > 240 {
+                        "…"
+                    } else {
+                        ""
+                    }
+                ));
+            }
+        }
+        if let Some(c) = &self.checked {
+            o.push_str(&format!(
+                "\nChecked: {} step{} rewritten, ${:.4}{}\n",
+                c.changed,
+                if c.changed == 1 { "" } else { "s" },
+                c.cost,
+                if c.note.is_empty() {
+                    String::new()
+                } else {
+                    format!(": {}", c.note)
+                }
+            ));
         }
         for n in &self.next {
             o.push_str(&format!(
@@ -770,6 +827,45 @@ impl LessonStore {
     pub fn load(&self, id: &str) -> Result<Lesson, StoreError> {
         let b = std::fs::read(self.path(id)?)?;
         serde_json::from_slice(&b).map_err(|e| StoreError::Bad(id.into(), e.to_string()))
+    }
+
+    /// Replaces step `step` (from 0) of a finished lesson, keeping what it
+    /// said and why it changed in the lesson's revisions. Its focus and
+    /// picture stay.
+    pub fn revise(&self, id: &str, step: usize, new: Step, reason: &str) -> Result<Lesson, String> {
+        let mut l = self.load(id).map_err(|e| e.to_string())?;
+        if !l.finished {
+            return Err(format!(
+                "{id} is still being written; change it with lesson_step"
+            ));
+        }
+        let Some(old) = l.steps.get(step).cloned() else {
+            return Err(format!("{id} has steps 1 to {}", l.steps.len()));
+        };
+        let new = Step {
+            focus: old.focus.clone(),
+            picture: old.picture.clone(),
+            ..new
+        };
+        if new == old {
+            return Err("that is the step as it is".into());
+        }
+        l.revisions.push(Revision {
+            step,
+            before: old,
+            reason: reason.to_owned(),
+            when: now(),
+        });
+        l.steps[step] = new;
+        self.save(&l, &[]).map_err(|e| e.to_string())?;
+        Ok(l)
+    }
+
+    /// Records that the lesson has been checked.
+    pub fn set_checked(&self, id: &str, checked: Checked) -> Result<(), String> {
+        let mut l = self.load(id).map_err(|e| e.to_string())?;
+        l.checked = Some(checked);
+        self.save(&l, &[]).map_err(|e| e.to_string())
     }
 
     /// A picture a lesson's step shows.
@@ -985,6 +1081,92 @@ mod tests {
         store.mark_known("dma", None).unwrap();
         assert_eq!(store.learner().level("dma"), 0);
         assert_eq!(store.list().len(), 2);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_rewritten_step_keeps_what_it_said() {
+        let root = scratch("revise");
+        let store = LessonStore::new(&root);
+        let mut l = Lesson::new("DMA", (1, 3), vec![("dma".into(), 3)]);
+        l.steps.push(Step {
+            title: "The cost".into(),
+            predict: None,
+            body: "About 8 CPU cycles a byte.".into(),
+            focus: Some(Focus::Address {
+                start: 0x8052,
+                end: 0x806B,
+            }),
+            picture: Some("draw-1".into()),
+        });
+        store.save(&l, &[]).unwrap();
+        let fixed = Step {
+            title: "The cost".into(),
+            predict: None,
+            body: "8 master cycles a byte.".into(),
+            focus: None,
+            picture: None,
+        };
+        // Only a finished lesson is revised, and only a step it has.
+        assert!(
+            store
+                .revise(&l.id, 0, fixed.clone(), "units")
+                .unwrap_err()
+                .contains("still being written")
+        );
+        l.finished = true;
+        store.save(&l, &[]).unwrap();
+        assert!(store.revise(&l.id, 3, fixed.clone(), "units").is_err());
+        let r = store
+            .revise(
+                &l.id,
+                0,
+                fixed,
+                "DMA takes 8 master cycles a byte, not CPU cycles",
+            )
+            .unwrap();
+        assert_eq!(r.steps[0].body, "8 master cycles a byte.");
+        // Its focus and picture stay; the old words are kept with the reason.
+        assert_eq!(r.steps[0].picture.as_deref(), Some("draw-1"));
+        assert!(r.steps[0].focus.is_some());
+        assert_eq!(r.revisions[0].before.body, "About 8 CPU cycles a byte.");
+        store
+            .set_checked(
+                &l.id,
+                Checked {
+                    when: 1,
+                    changed: 1,
+                    cost: 0.02,
+                    note: "Fixed the units.".into(),
+                },
+            )
+            .unwrap();
+        let back = store.load(&l.id).unwrap();
+        assert_eq!(
+            back,
+            Lesson {
+                checked: back.checked.clone(),
+                ..r
+            }
+        );
+        let text = back.describe();
+        assert!(
+            text.contains("[revised: DMA takes 8 master cycles"),
+            "{text}"
+        );
+        assert!(
+            text.contains("[it said: About 8 CPU cycles a byte.]"),
+            "{text}"
+        );
+        assert!(
+            text.contains("Checked: 1 step rewritten, $0.0200: Fixed the units."),
+            "{text}"
+        );
+        // A lesson saved before revisions existed still reads.
+        let old =
+            r#"{"id":"l1-aaaaa","title":"Old","created":1,"levels":[1,1],"concepts":[["cpu",1]]}"#;
+        let parsed: Lesson = serde_json::from_str(old).unwrap();
+        assert!(parsed.revisions.is_empty() && parsed.checked.is_none());
         let _ = std::fs::remove_dir_all(root);
     }
 }

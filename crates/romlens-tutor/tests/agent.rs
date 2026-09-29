@@ -517,3 +517,61 @@ fn other_tools_drop_the_old_thinking_once() {
         "the summary stays shown"
     );
 }
+
+/// Checking a lesson (docs/25) runs on a copy: the conversation is left as it
+/// was, the request carries the same prefix and the question, and the
+/// reviewer's last words and cost come back.
+#[test]
+fn a_review_runs_on_a_copy() {
+    let t = FakeTransport::new(vec![
+        Ok(stream("anthropic_text.sse")),
+        Ok(stream("anthropic_tool_round.sse")),
+        Ok(stream("anthropic_text.sse")),
+    ]);
+    let tools = Fake::default();
+    let quiet = |_: Event| {};
+    let cancel = Cancel::new();
+    let d = Deps {
+        transport: &t,
+        credentials: &Key,
+        tools: &tools,
+        events: &quiet,
+        approver: &AcceptAll,
+        cancel: &cancel,
+    };
+    let mut s = session();
+    s.ask(Turn::user_text("Teach me DMA."), &d).unwrap();
+    let before = s.clone();
+    let (last, cost) = s
+        .review(
+            "l1-abcde (level 3): DMA\n1. The cost",
+            "- $00:8052 is LDX #$1809, not LDA",
+            &d,
+        )
+        .unwrap();
+    assert!(last.contains("native mode"), "{last}");
+    assert!(cost > 0.0);
+    assert_eq!(
+        s.turns.len(),
+        before.turns.len(),
+        "the conversation is untouched"
+    );
+    assert_eq!(s.cost(), before.cost());
+    let sent = t.sent();
+    assert_eq!(sent.len(), 3);
+    let first: Value = serde_json::from_slice(&sent[0].body).unwrap();
+    let review: Value = serde_json::from_slice(&sent[1].body).unwrap();
+    assert_eq!(first["system"], review["system"]);
+    assert_eq!(first["tools"], review["tools"]);
+    let asked = review["messages"]
+        .as_array()
+        .unwrap()
+        .last()
+        .unwrap()
+        .to_string();
+    assert!(
+        asked.contains("strict reviewer") && asked.contains("l1-abcde"),
+        "{asked}"
+    );
+    assert!(asked.contains("Romlens found"), "{asked}");
+}

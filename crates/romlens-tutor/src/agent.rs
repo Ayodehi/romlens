@@ -315,6 +315,13 @@ const ATTEMPTS: u32 = 4;
 /// What naming a conversation asks (`Session::name`).
 pub const NAME_PROMPT: &str = "Name this conversation for the student's list of past conversations: two to four words saying what it is about, such as \"RESET's WRAM routine\" or \"Sharing the NMI's tail\". Do not call tools. Reply with the name alone.";
 
+/// What checking a finished lesson asks (`Session::review`, docs/25,
+/// "Checking lessons"). The lesson's id and Romlens's own findings follow.
+pub const REVIEW_PROMPT: &str = "[Romlens asks you to check a lesson you wrote; the student does not see this.] Check the lesson below as a strict reviewer, one step at a time. Check every fact about this ROM with the tools (listing, read_bytes, decompile, reference), every fact about the hardware against the primer and `reference`, and every number, unit and cycle count. Code a step shows must be the ROM's. Where a step is wrong, imprecise, or claims more than the tools show, call `revise_lesson_step` with the corrected step: the same level, the same teaching and about the same length, the mistake fixed and nothing else changed. Leave correct steps alone and do not restyle them. Make no other changes. End with one line: what you corrected and why, or \"No changes.\"";
+
+/// The most one lesson's check may cost, on top of the conversation.
+pub const REVIEW_CAP: f64 = 0.5;
+
 impl Session {
     pub fn new(id: &str, endpoint: Endpoint, model: &str) -> Session {
         // Only the two providers' own endpoints must have a key.
@@ -389,6 +396,38 @@ impl Session {
             .collect();
         let name = tidy_name(&text).ok_or(AskError::Stream(StreamError::Truncated))?;
         Ok((name, cost))
+    }
+
+    /// Checks lesson `lesson` (its text, and `found`, what Romlens's own
+    /// checks found) on a copy of the conversation, so the prefix is read
+    /// from the cache; the copy's turns are dropped and this session is
+    /// left as it was. Returns the reviewer's last words and what it cost.
+    /// It runs read-only, within `REVIEW_CAP`; the tools decide what a
+    /// review may call.
+    pub fn review(&self, lesson: &str, found: &str, d: &Deps) -> Result<(String, f64), AskError> {
+        let mut r = self.clone();
+        let before = r.cost();
+        r.mode = Mode::ReadOnly;
+        r.cost_cap = Some(
+            r.cost_cap
+                .map_or(before + REVIEW_CAP, |c| c.min(before + REVIEW_CAP)),
+        );
+        let start = r.turns.len();
+        let mut text = format!("{REVIEW_PROMPT}\n\n{lesson}");
+        if !found.is_empty() {
+            text.push_str(&format!("\n\nRomlens found:\n{found}"));
+        }
+        let result = r.ask(Turn::user_text(&text), d);
+        let cost = r.cost() - before;
+        result?;
+        let last = r.turns[start..]
+            .iter()
+            .rev()
+            .filter(|t| t.role == Role::Assistant)
+            .map(Turn::text)
+            .find(|t| !t.trim().is_empty())
+            .unwrap_or_default();
+        Ok((last.trim().to_owned(), cost))
     }
 
     /// Asks `question` and runs the loop until the model stops.
