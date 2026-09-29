@@ -10,16 +10,15 @@ options:
 packages:
   RomlensKit:
     path: ../../bindings/swift/RomlensKit
+# Signing: ad-hoc unless this Mac's Local.xcconfig names a team.
+configFiles:
+  Debug: Signing.xcconfig
+  Release: Signing.xcconfig
 settings:
   base:
     SWIFT_VERSION: "6.0"
     SWIFT_STRICT_CONCURRENCY: complete
     MACOSX_DEPLOYMENT_TARGET: "27.0"
-    # Ad-hoc signing until the GitHub account and Apple team are chosen;
-    # sandboxed, ad-hoc signed apps run locally. Release builds set a team.
-    CODE_SIGN_STYLE: Manual
-    CODE_SIGN_IDENTITY: "-"
-    DEVELOPMENT_TEAM: ""
 targets:
   Romlens:
     type: application

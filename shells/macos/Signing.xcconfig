@@ -1,0 +1,13 @@
+// How the macOS shell is signed. Ad-hoc by default, which runs locally and
+// in CI. A Local.xcconfig beside this file (git-ignored, one per Mac) can
+// name a signing identity and team instead: every build is then the same app
+// to the Keychain, so it stops asking again for the tutor's keys after each
+// rebuild.
+//
+//     CODE_SIGN_IDENTITY = Apple Development
+//     DEVELOPMENT_TEAM = <your team id>
+CODE_SIGN_STYLE = Manual
+CODE_SIGN_IDENTITY = -
+DEVELOPMENT_TEAM =
+
+#include? "Local.xcconfig"
