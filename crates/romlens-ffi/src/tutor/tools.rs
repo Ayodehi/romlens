@@ -343,7 +343,7 @@ fn code_specs() -> Vec<ToolSpec> {
         ),
         spec(
             "reference",
-            "Reference pages. detail: a mnemonic for 65816_instruction and spc700_instruction, an address or name for register and dsp_register, ppu/cpu/dma/apu for registers.",
+            "Reference pages. detail: a mnemonic for 65816_instruction and spc700_instruction, an address or name for register and dsp_register, ppu/cpu/dma/apu for registers, a term such as HDMA for glossary (none: every term).",
             &[
                 ("topic", choice(reference::TOPICS, "")),
                 ("detail", nullable(string(""))),

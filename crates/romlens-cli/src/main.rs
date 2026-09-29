@@ -409,6 +409,14 @@ enum Command {
         #[command(subcommand)]
         what: SpcCommand,
     },
+    /// The SNES's acronyms and initialisms spelt out (docs/27); with a
+    /// term, its entry.
+    Glossary {
+        term: Option<String>,
+        /// List the hardware and S-DSP registers too.
+        #[arg(long)]
+        registers: bool,
+    },
     /// The built-in hardware register names; with an address, what its bits
     /// mean, and with `--value` what that value would do.
     Registers {
@@ -1951,6 +1959,9 @@ fn run() -> Result<()> {
                 walk,
             }),
         },
+        Command::Glossary { term, registers } => {
+            commands::glossary::run(term.as_deref(), registers)
+        }
         Command::Registers {
             address,
             value,

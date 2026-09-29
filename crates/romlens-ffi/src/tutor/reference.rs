@@ -18,6 +18,7 @@ pub const TOPICS: &[&str] = &[
     "spc700_io",
     "spc700_instruction",
     "idioms",
+    "glossary",
 ];
 
 /// A page, or why there is none.
@@ -53,10 +54,28 @@ pub fn page(topic: &str, detail: Option<&str>) -> Result<String, String> {
             .map(|(t, w)| format!("## {t}\n{w}"))
             .collect::<Vec<_>>()
             .join("\n\n")),
+        "glossary" => glossary(d),
         other => Err(format!(
             "no page named {other}; the topics are {}",
             TOPICS.join(", ")
         )),
+    }
+}
+
+/// A term's entry, or every general term: what the student sees when
+/// they click one in an answer.
+fn glossary(term: Option<&str>) -> Result<String, String> {
+    let line = |e: &explain::glossary::Entry| format!("{} ({}): {}", e.term, e.words, e.about);
+    match term {
+        Some(t) => explain::glossary::lookup(t)
+            .map(|e| line(&e))
+            .ok_or_else(|| format!("{t} is not in the glossary")),
+        None => Ok(explain::glossary::entries()
+            .iter()
+            .filter(|e| e.kind == explain::glossary::Kind::Term)
+            .map(line)
+            .collect::<Vec<_>>()
+            .join("\n")),
     }
 }
 
@@ -276,6 +295,12 @@ mod tests {
         let mov = page("spc700_instruction", Some("MOV")).unwrap();
         assert!(mov.contains("$E8  MOV A,#imm"), "{mov}");
         assert!(page("idioms", None).unwrap().contains("## DMA"));
+        let hdma = page("glossary", Some("HDMA")).unwrap();
+        assert!(hdma.starts_with("HDMA (Horizontal-blank DMA): "), "{hdma}");
+        let all = page("glossary", None).unwrap();
+        assert!(all.contains("OAM (Object Attribute Memory)"), "{all}");
+        assert!(!all.contains("VMAIN"), "registers are their own pages");
+        assert!(page("glossary", Some("XYZZY")).is_err());
         assert!(page("65816_instruction", None).is_err());
         assert!(
             page("nonsense", None)

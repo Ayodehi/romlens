@@ -280,3 +280,43 @@ impl From<romlens_core::explain::screen::ScreenSetup> for ScreenSetupInfo {
         }
     }
 }
+
+/// What kind of term a glossary entry is (docs/27).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum GlossaryKindInfo {
+    Term,
+    Register,
+    DspRegister,
+}
+
+/// A glossary entry: a term spelt out, and a sentence or two on it.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct GlossaryEntryInfo {
+    pub term: String,
+    /// Other spellings that mean the same.
+    pub also: Vec<String>,
+    pub words: String,
+    pub about: String,
+    pub kind: GlossaryKindInfo,
+}
+
+/// Every glossary entry: the SNES's acronyms and initialisms, then the
+/// hardware and S-DSP registers.
+#[uniffi::export]
+pub fn glossary() -> Vec<GlossaryEntryInfo> {
+    use explain::glossary::Kind;
+    explain::glossary::entries()
+        .into_iter()
+        .map(|e| GlossaryEntryInfo {
+            term: e.term,
+            also: e.also,
+            words: e.words,
+            about: e.about,
+            kind: match e.kind {
+                Kind::Term => GlossaryKindInfo::Term,
+                Kind::Register => GlossaryKindInfo::Register,
+                Kind::DspRegister => GlossaryKindInfo::DspRegister,
+            },
+        })
+        .collect()
+}

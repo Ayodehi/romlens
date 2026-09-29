@@ -7,6 +7,7 @@
 //! say the same thing.
 
 pub mod fields;
+pub mod glossary;
 pub mod idioms;
 pub mod screen;
 pub mod setup;

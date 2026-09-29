@@ -12,6 +12,7 @@ pub mod disasm;
 pub mod draw;
 pub mod explain;
 pub mod export;
+pub mod glossary;
 pub mod graph;
 pub mod graphics;
 pub mod heuristics;
