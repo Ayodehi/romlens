@@ -6,7 +6,7 @@ import SwiftUI
 /// and the concept map shaded by how far they have got.
 struct LessonsSheet: View {
     let tutor: TutorModel
-    enum Tab: Hashable { case lessons, map }
+    enum Tab: Hashable { case lessons, map, progress }
     @State var tab: Tab
     @Environment(\.dismiss) private var dismiss
 
@@ -15,13 +15,15 @@ struct LessonsSheet: View {
             Picker("", selection: $tab) {
                 Text("Lessons").tag(Tab.lessons)
                 Text("What you know").tag(Tab.map)
+                Text("Progress").tag(Tab.progress)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(maxWidth: 280)
+            .frame(maxWidth: 400)
             switch tab {
             case .lessons: LessonLibrary(tutor: tutor)
             case .map: ConceptMap(tutor: tutor)
+            case .progress: ProgressPane(tutor: tutor)
             }
             HStack {
                 Spacer()

@@ -376,6 +376,31 @@ import Testing
         // Nothing is due yet, so a review says so.
         r.tutor.run(command: "/review")
         #expect(r.tutor.error?.contains("Nothing is due") == true)
+
+        // The proof earned points and a banner; the Progress tab lays out.
+        try await Fixture.settle(timeout: 5) { r.tutor.banner != nil }
+        #expect(r.tutor.banner?.lines.contains("Proven: Sprites, level 1") == true)
+        let p = try #require(r.tutor.progress)
+        #expect(p.xp >= 50 && p.rank == "Reset")
+        #expect(p.achievements.contains { $0.id == "first_proof" && $0.unlocked != nil })
+        r.tutor.run(command: "/progress")
+        guard case .progress = r.tutor.sheet else { Issue.record("the progress sheet opens"); return }
+        let host = NSHostingController(rootView: LessonsSheet(tutor: r.tutor, tab: .progress))
+        host.view.frame = NSRect(x: 0, y: 0, width: 720, height: 560)
+        host.view.layoutSubtreeIfNeeded()
+
+        // With points hidden, nothing is announced.
+        r.tutor.banner = nil
+        r.tutor.settings.showProgress = false
+        let practice = try #require(try? session.startQuiz(concept: "sprites", level: 2, purpose: .prove, tutor: false))
+        r.tutor.quiz = practice
+        for (q, a) in zip(practice.questions, tutorTestQuizAnswers(session: session, quiz: practice.id)) {
+            r.tutor.answer(q.id, a)
+        }
+        r.tutor.finishQuiz()
+        Fixture.spin(0.5)
+        #expect(r.tutor.banner == nil, "no banner with points hidden")
+        #expect(r.tutor.learner.concepts.first { $0.id == "sprites" }?.proven == 2, "but the proof counts")
     }
 
     @Test func glossaryTermsAreLinkedTheFirstTimeOnly() {

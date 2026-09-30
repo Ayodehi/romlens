@@ -110,6 +110,9 @@ final class TutorSettings {
         /// A quiz gets up to two of the tutor's questions about the game,
         /// each checked by Romlens (docs/28).
         var tutorQuizQuestions = true
+        /// Points, the rank, achievements and their banners (docs/28). Off,
+        /// the map still shows what is proven and due.
+        var showProgress = true
         /// Where `generate_image` draws: an endpoint that speaks OpenAI's
         /// Images API, or none.
         var imageEndpoint: String?
@@ -128,6 +131,7 @@ final class TutorSettings {
             showWork = try c.decodeIfPresent(Bool.self, forKey: .showWork) ?? false
             checkLessons = try c.decodeIfPresent(Bool.self, forKey: .checkLessons) ?? true
             tutorQuizQuestions = try c.decodeIfPresent(Bool.self, forKey: .tutorQuizQuestions) ?? true
+            showProgress = try c.decodeIfPresent(Bool.self, forKey: .showProgress) ?? true
             imageEndpoint = try c.decodeIfPresent(String.self, forKey: .imageEndpoint)
             imageModel = try c.decodeIfPresent(String.self, forKey: .imageModel) ?? "gpt-image-1"
         }
@@ -205,6 +209,11 @@ final class TutorSettings {
     var tutorQuizQuestions: Bool {
         get { stored.tutorQuizQuestions }
         set { stored.tutorQuizQuestions = newValue; save() }
+    }
+
+    var showProgress: Bool {
+        get { stored.showProgress }
+        set { stored.showProgress = newValue; save() }
     }
 
     /// The endpoint pictures are drawn at, if one is chosen and still there.

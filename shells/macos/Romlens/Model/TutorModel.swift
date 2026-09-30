@@ -52,7 +52,7 @@ final class TutorModel {
     }
 
     enum Sheet: Identifiable {
-        case resume, rewind, model, help, lessons, map, quiz
+        case resume, rewind, model, help, lessons, map, quiz, progress
         var id: Self { self }
     }
 
@@ -301,15 +301,18 @@ final class TutorModel {
             if !busy { cost = total }
         case .ended:
             finish(error: nil)
+            // A name the tutor gave, or a lesson ended, may be a milestone.
+            _ = session?.checkMilestones()
+            refreshProgress()
             // A lesson this turn finished is being checked now.
             for id in Array(lessonCache.keys) { reloadLesson(id) }
         case .failed(let message):
             finish(error: message)
         case .quizChanged(let id):
             if quiz?.id == id { reloadQuiz() }
-        case .progress:
-            // Points and achievements (docs/28): shown from Q10.
-            break
+        case .progress(let gained, let proven, let unlocked, let rank):
+            refreshProgress()
+            earned(gained: gained, proven: proven, unlocked: unlocked, rank: rank)
         }
     }
 
@@ -544,6 +547,7 @@ final class TutorModel {
         Command(name: "/lessons", about: "Your lessons, to read again"),
         Command(name: "/quiz", about: "/quiz <topic>: prove what you know, with questions Romlens checks"),
         Command(name: "/review", about: "A quiz on what is due for review"),
+        Command(name: "/progress", about: "Your points, rank, achievements and reviews due"),
         Command(name: "/map", about: "What you have learned, concept by concept"),
         Command(name: "/help", about: "What the tutor can do and the keys it takes"),
     ]
@@ -612,6 +616,10 @@ final class TutorModel {
             startQuiz(arg)
         case "/review":
             startQuiz(nil, purpose: .review)
+        case "/progress":
+            _ = session?.checkMilestones()
+            refreshProgress()
+            sheet = .progress
         case "/map":
             sheet = .map
         case "/explain":
@@ -723,6 +731,42 @@ final class TutorModel {
     func finishQuiz() {
         guard let q = quiz, let s = session else { return }
         quiz = (try? s.finishQuiz(quiz: q.id)) ?? quiz
+        refreshProgress()
+    }
+
+    // MARK: Progress (docs/28)
+
+    /// Points, rank, achievements and reviews due, as last worked out.
+    private(set) var progress: ProgressInfo?
+
+    func refreshProgress() {
+        progress = ensureSession().progress()
+    }
+
+    /// Reviews due now.
+    var dueCount: Int { progress?.due.count ?? 0 }
+
+    /// What was just earned, shown for a few seconds at the top of the
+    /// window; never shown with points hidden.
+    struct Banner: Equatable {
+        let points: UInt32
+        let lines: [String]
+    }
+
+    var banner: Banner?
+
+    private func earned(gained: UInt32, proven: [String], unlocked: [String], rank: String?) {
+        guard settings.showProgress else { return }
+        var lines = proven.map { "Proven: \($0)" }
+        lines += unlocked.map { "Earned: \($0)" }
+        if let rank { lines.append("New rank: \(rank)") }
+        // A right answer alone is quiet: the quiz sheet shows it.
+        guard !lines.isEmpty else { return }
+        let b = Banner(points: gained, lines: lines)
+        banner = b
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
+            if self?.banner == b { self?.banner = nil }
+        }
     }
 
     func result(_ question: String) -> AnswerResultInfo? {

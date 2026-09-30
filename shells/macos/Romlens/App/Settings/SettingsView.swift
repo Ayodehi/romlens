@@ -248,6 +248,10 @@ struct TutorPane: View {
                 get: { settings.tutorQuizQuestions },
                 set: { settings.tutorQuizQuestions = $0 }))
             Text("Up to two a quiz, each checked by Romlens before it is asked; a written answer is marked by the model. Their cost is added to the conversation's.").font(.caption).foregroundStyle(.secondary)
+            Toggle("Show points and achievements", isOn: Binding(
+                get: { settings.showProgress },
+                set: { settings.showProgress = $0 }))
+            Text("Points, your rank, achievements and the banner when you earn them. Off, the map still shows what you have proven and what is ready to review.").font(.caption).foregroundStyle(.secondary)
         }
         .formStyle(.grouped)
     }

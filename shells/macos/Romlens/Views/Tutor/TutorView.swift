@@ -15,6 +15,15 @@ struct TutorView: View {
             ComposerArea(tutor: tutor)
             StatusLine(tutor: tutor)
         }
+        .overlay(alignment: .top) {
+            if let b = tutor.banner {
+                EarnedBanner(banner: b)
+                    .padding(.top, 10)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .onTapGesture { tutor.banner = nil }
+            }
+        }
+        .animation(.easeOut(duration: 0.25), value: tutor.banner)
         .frame(minWidth: 380, minHeight: 360)
         .environment(\.openURL, OpenURLAction { url in
             if let e = Glossary.entry(for: url) {
@@ -35,12 +44,14 @@ struct TutorView: View {
             case .help: HelpSheet()
             case .lessons: LessonsSheet(tutor: tutor, tab: .lessons)
             case .quiz: QuizSheet(tutor: tutor)
+            case .progress: LessonsSheet(tutor: tutor, tab: .progress)
             case .map: LessonsSheet(tutor: tutor, tab: .map)
             }
         }
         .onAppear {
             _ = tutor.ensureSession()
             tutor.refresh()
+            tutor.refreshProgress()
         }
     }
 
@@ -571,6 +582,22 @@ struct StatusLine: View {
             }
             Text(String(format: "$%.3f", tutor.cost)).help("What this conversation has cost")
             Spacer()
+            // Quizzes (docs/28): reviews due are learning, shown always;
+            // points only when the student wants them.
+            if tutor.dueCount > 0 {
+                Button { tutor.startQuiz(nil, purpose: .review) } label: {
+                    Label("\(tutor.dueCount)", systemImage: "clock.badge.checkmark")
+                }
+                .buttonStyle(.plain)
+                .help("\(tutor.dueCount) ready to review (/review)")
+            }
+            if tutor.settings.showProgress, let p = tutor.progress {
+                Button { tutor.sheet = .progress } label: {
+                    Text("\(p.xp) XP").monospacedDigit()
+                }
+                .buttonStyle(.plain)
+                .help("\(p.rank): your points, rank and achievements (/progress)")
+            }
             Button { tutor.sheet = .resume } label: {
                 Label("Conversations", systemImage: "clock.arrow.circlepath").labelStyle(.iconOnly)
             }
@@ -602,5 +629,27 @@ struct StatusLine: View {
         .foregroundStyle(.secondary)
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
+    }
+}
+
+/// What was just earned (docs/28), for a few seconds: the points, and a
+/// level proven, an achievement or a rank.
+struct EarnedBanner: View {
+    let banner: TutorModel.Banner
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "star.circle.fill").font(.title2).foregroundStyle(.yellow)
+            VStack(alignment: .leading, spacing: 1) {
+                ForEach(banner.lines, id: \.self) { Text($0).font(.callout.bold()) }
+            }
+            if banner.points > 0 {
+                Text("+\(banner.points)").font(.callout.monospacedDigit()).foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 8)
+        .background(Capsule().fill(.regularMaterial))
+        .overlay(Capsule().stroke(Color.secondary.opacity(0.25)))
+        .shadow(radius: 4, y: 2)
     }
 }
