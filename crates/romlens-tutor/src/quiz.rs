@@ -79,10 +79,18 @@ pub enum Claim {
     },
     /// A number from the facts table.
     Fact { id: String, expect: u32 },
+    /// A statement from the facts table: its answer is `expect`.
+    Said { id: String, expect: String },
     /// A glossary term stands for `expect`.
     Term { term: String, expect: String },
-    /// A concept on the map is described by `expect`, its line.
+    /// A concept on the map is `expect`: its name, or its line.
     Concept { id: String, expect: String },
+    /// A concept rests directly on the one named `expect`.
+    Needs { id: String, expect: String },
+    /// What an instruction does: `expect` is its description.
+    Mnemonic { mnemonic: String, expect: String },
+    /// Opcode byte `opcode` uses addressing mode `expect`.
+    OpcodeMode { opcode: u8, expect: String },
     /// The opcode byte of `mnemonic` in addressing mode `mode` is `expect`.
     Opcode {
         mnemonic: String,
@@ -112,8 +120,12 @@ impl Claim {
             | Claim::RegisterJob { expect, .. }
             | Claim::Dma { expect, .. }
             | Claim::DspField { expect, .. }
+            | Claim::Said { expect, .. }
             | Claim::Term { expect, .. }
             | Claim::Concept { expect, .. }
+            | Claim::Needs { expect, .. }
+            | Claim::Mnemonic { expect, .. }
+            | Claim::OpcodeMode { expect, .. }
             | Claim::Mapping { expect }
             | Claim::IdiomAt { expect, .. } => expect.clone(),
             Claim::RegisterAddress { expect, .. } | Claim::AddressOf { expect, .. } => {
@@ -140,8 +152,12 @@ impl Claim {
             | Claim::RegisterJob { expect, .. }
             | Claim::Dma { expect, .. }
             | Claim::DspField { expect, .. }
+            | Claim::Said { expect, .. }
             | Claim::Term { expect, .. }
             | Claim::Concept { expect, .. }
+            | Claim::Needs { expect, .. }
+            | Claim::Mnemonic { expect, .. }
+            | Claim::OpcodeMode { expect, .. }
             | Claim::Mapping { expect }
             | Claim::IdiomAt { expect, .. } => *expect = text(),
             Claim::RegisterAddress { expect, .. } | Claim::AddressOf { expect, .. } => {

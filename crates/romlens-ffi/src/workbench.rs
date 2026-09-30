@@ -1847,6 +1847,11 @@ impl Workbench {
         (Arc::clone(&self.rom), Arc::clone(&self.lock().snapshot))
     }
 
+    /// The explanations as they are now (docs/20), for the quiz's claims.
+    pub(crate) fn explanations(&self) -> Arc<Explanations> {
+        Arc::clone(&self.lock().explain)
+    }
+
     pub(crate) fn parts(&self) -> (romlens_core::RomImage, Project, Arc<AnalysisSnapshot>) {
         let inner = self.lock();
         (

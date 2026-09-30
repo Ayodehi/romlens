@@ -11,6 +11,7 @@ mod future;
 pub mod graphics;
 pub mod graphs;
 pub mod live;
+pub mod quiz;
 pub mod records;
 pub mod source;
 pub mod tutor;
