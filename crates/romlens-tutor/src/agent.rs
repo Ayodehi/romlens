@@ -322,6 +322,42 @@ pub const REVIEW_PROMPT: &str = "[Romlens asks you to check a lesson you wrote; 
 /// The most one lesson's check may cost, on top of the conversation.
 pub const REVIEW_CAP: f64 = 0.5;
 
+/// What writing a quiz's questions asks (`Session::write_quiz`, docs/28).
+/// The quiz's concept, level and the questions it has follow.
+pub const QUIZ_PROMPT: &str = "[Romlens asks you to write quiz questions; the student does not see this.] Write the questions asked below with `quiz_question`, one call each, about this game where the level is 3 or more. First find the facts with the tools. Every question except a written one carries a claim Romlens checks against its own data before it is asked; if a claim is refused, the reply says what is so: fix the question or drop it. Ask about understanding, not trivia, and make the explanation teach. Don't repeat a question the quiz has. End with one line: what you asked.";
+
+/// What marking a written answer asks (`Session::grade`, docs/28).
+pub const GRADE_PROMPT: &str = "[Romlens asks you to mark a student's written quiz answer; the student sees only your line.] Do not call tools. Mark the answer against what a good answer says: all of it right is 1, part of it 0.5, wrong or empty 0. Reply with one line: `CREDIT 1`, `CREDIT 0.5` or `CREDIT 0`, a colon, and one sentence to the student saying what was right or missing.";
+
+/// The most writing one quiz's questions may cost.
+pub const QUIZ_CAP: f64 = 0.10;
+/// The most marking one written answer may cost.
+pub const GRADE_CAP: f64 = 0.02;
+
+/// A mark's line, `CREDIT 0.5: …`: the credit and what it says to the
+/// student. A line without one is 0, and says so.
+pub fn read_credit(line: &str) -> (f32, String) {
+    let upper = line.to_uppercase();
+    let Some(at) = upper.find("CREDIT") else {
+        return (0.0, "The answer couldn't be marked.".into());
+    };
+    let rest = line[at + "CREDIT".len()..].trim_start();
+    let num: String = rest
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || *c == '.')
+        .collect();
+    let credit = match num.parse::<f32>() {
+        Ok(c) if c >= 0.75 => 1.0,
+        Ok(c) if c >= 0.25 => 0.5,
+        _ => 0.0,
+    };
+    let said = rest[num.len()..]
+        .trim_start_matches([':', ' ', '-', '—'])
+        .trim()
+        .to_owned();
+    (credit, said)
+}
+
 impl Session {
     pub fn new(id: &str, endpoint: Endpoint, model: &str) -> Session {
         // Only the two providers' own endpoints must have a key.
@@ -405,19 +441,47 @@ impl Session {
     /// It runs read-only, within `REVIEW_CAP`; the tools decide what a
     /// review may call.
     pub fn review(&self, lesson: &str, found: &str, d: &Deps) -> Result<(String, f64), AskError> {
-        let mut r = self.clone();
-        let before = r.cost();
-        r.mode = Mode::ReadOnly;
-        r.cost_cap = Some(
-            r.cost_cap
-                .map_or(before + REVIEW_CAP, |c| c.min(before + REVIEW_CAP)),
-        );
-        let start = r.turns.len();
         let mut text = format!("{REVIEW_PROMPT}\n\n{lesson}");
         if !found.is_empty() {
             text.push_str(&format!("\n\nRomlens found:\n{found}"));
         }
-        let result = r.ask(Turn::user_text(&text), d);
+        self.side(&text, REVIEW_CAP, d)
+    }
+
+    /// Writes a quiz's questions (docs/28) on a copy of the conversation,
+    /// as `review` checks a lesson: `quiz` says what to ask, and the tools
+    /// take each question. Returns the last line and the cost.
+    pub fn write_quiz(&self, quiz: &str, d: &Deps) -> Result<(String, f64), AskError> {
+        self.side(&format!("{QUIZ_PROMPT}\n\n{quiz}"), QUIZ_CAP, d)
+    }
+
+    /// Marks a written answer on a copy: the credit (0, 0.5 or 1), the
+    /// line to the student, and the cost.
+    pub fn grade(
+        &self,
+        question: &str,
+        good: &str,
+        answer: &str,
+        d: &Deps,
+    ) -> Result<(f32, String, f64), AskError> {
+        let text = format!(
+            "{GRADE_PROMPT}\n\nThe question: {question}\nWhat a good answer says: {good}\nThe student's answer: {answer}"
+        );
+        let (line, cost) = self.side(&text, GRADE_CAP, d)?;
+        let (credit, said) = read_credit(&line);
+        Ok((credit, said, cost))
+    }
+
+    /// One turn on a copy of the conversation, read-only and within `cap`
+    /// of what it has cost: the prefix is read from the cache, the copy's
+    /// turns are dropped, and this session is left as it was.
+    fn side(&self, text: &str, cap: f64, d: &Deps) -> Result<(String, f64), AskError> {
+        let mut r = self.clone();
+        let before = r.cost();
+        r.mode = Mode::ReadOnly;
+        r.cost_cap = Some(r.cost_cap.map_or(before + cap, |c| c.min(before + cap)));
+        let start = r.turns.len();
+        let result = r.ask(Turn::user_text(text), d);
         let cost = r.cost() - before;
         result?;
         let last = r.turns[start..]

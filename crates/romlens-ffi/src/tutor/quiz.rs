@@ -188,6 +188,9 @@ pub struct Quizzes {
     offset: Mutex<i32>,
     /// Quizzes the tutor is writing questions for.
     pub writing: Mutex<std::collections::HashSet<String>>,
+    /// The conversation a quiz's tutor parts run on a copy of: its model
+    /// and prefix.
+    pub writer: Mutex<Option<romlens_tutor::agent::Session>>,
 }
 
 impl Quizzes {
@@ -198,6 +201,7 @@ impl Quizzes {
             journal: Journal::new(&root),
             offset: Mutex::new(0),
             writing: Mutex::new(Default::default()),
+            writer: Mutex::new(None),
         }
     }
 
@@ -667,4 +671,275 @@ pub fn record_milestones(q: &Quizzes, wb: &Workbench, rom: &str, rom_title: &str
         }
     }
     out
+}
+
+// ---- The tutor's questions (docs/28, Q6) --------------------------------
+
+use romlens_tutor::agent;
+use romlens_tutor::quiz::{Claim, Source};
+
+use super::session::{TutorEventInfo, TutorListener};
+use super::tools::{RomTools, nullable, spec, string};
+use crate::quiz::World;
+
+pub const QUESTION_TOOL: &str = "quiz_question";
+
+/// The most questions the tutor writes for one quiz.
+pub const TUTOR_QUESTIONS: usize = 2;
+
+pub fn specs() -> Vec<romlens_tutor::provider::ToolSpec> {
+    vec![spec(
+        QUESTION_TOOL,
+        "Adds a question to the quiz Romlens asked you to write (only then). kind: choice (choices and the answer's index), number (the answer; hex for addresses), bits (the answer's bit numbers, with a register_bits claim), text (a written answer the model marks; explanation says what a good answer says). claim, a JSON object Romlens checks before the question is asked, one of: {kind: register_field, register, value, field, expect}, {kind: register_bits, register, field}, {kind: register_address, register, expect}, {kind: address_of, what: vector:nmi|vector:reset|vector:irq|label:NAME|idiom:dma, expect}, {kind: instruction_at, address, mnemonic, operand}, {kind: value_reaching, address, register, value}, {kind: write_means, address, register, field, expect}, {kind: dma, at, field: channel|destination|source|size|cycles|fits, expect}, {kind: dsp_field, register, value, field, expect}, {kind: width, address, register: a|x, bits}, {kind: length, address, expect}, {kind: idiom_at, address, expect}, {kind: mapping, expect}. Addresses are 24-bit numbers. The answer must be the claim's, and no other choice may pass it.",
+        &[
+            (
+                "quiz",
+                string("the quiz's id; empty for the one being written"),
+            ),
+            ("prompt", string("")),
+            (
+                "kind",
+                super::tools::choice(&["choice", "number", "bits", "text"], ""),
+            ),
+            (
+                "choices",
+                nullable(serde_json::json!({"type": "array", "items": {"type": "string"}})),
+            ),
+            (
+                "answer",
+                nullable(super::tools::integer("a choice's index, or the number")),
+            ),
+            (
+                "bits",
+                nullable(serde_json::json!({"type": "array", "items": {"type": "integer"}})),
+            ),
+            ("claim", nullable(string("the claim, as a JSON object"))),
+            (
+                "explanation",
+                string("what the answer teaches, shown once it is given"),
+            ),
+            ("hint", nullable(string(""))),
+        ],
+    )]
+}
+
+/// What the writer may call: every read, and `quiz_question`, which adds
+/// a checked question to the quiz; nothing that edits or teaches. The list
+/// is the conversation's, so the cache holds.
+pub struct QuizTools<'a> {
+    pub tools: &'a RomTools,
+    pub world: &'a World<'a>,
+    pub quizzes: &'a Quizzes,
+    pub listener: &'a dyn TutorListener,
+    pub quiz: String,
+    pub added: Mutex<usize>,
+}
+
+impl agent::Tools for QuizTools<'_> {
+    fn specs(&self) -> Vec<romlens_tutor::provider::ToolSpec> {
+        self.tools.specs()
+    }
+
+    fn kind(&self, name: &str) -> agent::ToolKind {
+        self.tools.kind(name)
+    }
+
+    fn run(
+        &self,
+        id: &str,
+        name: &str,
+        input: &serde_json::Value,
+        cx: &agent::ToolContext,
+    ) -> agent::ToolOutput {
+        if name == QUESTION_TOOL {
+            return match self.add(input) {
+                Ok(s) => agent::ToolOutput::text(s),
+                Err(e) => agent::ToolOutput::error(e),
+            };
+        }
+        let building = [
+            "begin_lesson",
+            "lesson_step",
+            "end_lesson",
+            "revise_lesson_step",
+            "generate_image",
+        ];
+        if super::edits::NAMES.contains(&name) || building.contains(&name) {
+            return agent::ToolOutput::error(format!(
+                "{name} is not for writing a quiz: read, and add questions with quiz_question"
+            ));
+        }
+        self.tools.run(id, name, input, cx)
+    }
+}
+
+/// A claim the model sent, as an object or as its JSON.
+fn read_claim(v: &serde_json::Value) -> Result<Option<Claim>, String> {
+    let v = match v {
+        serde_json::Value::Null => return Ok(None),
+        serde_json::Value::String(s) if s.trim().is_empty() => return Ok(None),
+        serde_json::Value::String(s) => {
+            serde_json::from_str(s).map_err(|e| format!("the claim isn't JSON: {e}"))?
+        }
+        other => other.clone(),
+    };
+    serde_json::from_value(v)
+        .map(Some)
+        .map_err(|e| format!("the claim doesn't read: {e}"))
+}
+
+impl QuizTools<'_> {
+    fn add(&self, v: &serde_json::Value) -> Result<String, String> {
+        let asked = v["quiz"].as_str().unwrap_or("");
+        if !asked.is_empty() && asked != self.quiz {
+            return Err(format!("you are writing quiz {}", self.quiz));
+        }
+        let mut added = self.added.lock().unwrap_or_else(|e| e.into_inner());
+        if *added >= TUTOR_QUESTIONS {
+            return Err(format!(
+                "the quiz has its {TUTOR_QUESTIONS} questions from you; stop here"
+            ));
+        }
+        let mut quiz = self
+            .quizzes
+            .store
+            .load(&self.quiz)
+            .map_err(|e| e.to_string())?;
+        let text = |k: &str| v[k].as_str().unwrap_or("").trim().to_owned();
+        let (prompt, explanation) = (text("prompt"), text("explanation"));
+        let claim = read_claim(&v["claim"])?;
+        let ask = match v["kind"].as_str().unwrap_or("") {
+            "choice" => Ask::Choice {
+                choices: v["choices"]
+                    .as_array()
+                    .ok_or("a choice question needs choices")?
+                    .iter()
+                    .filter_map(|c| c.as_str().map(str::to_owned))
+                    .collect(),
+                answer: v["answer"]
+                    .as_u64()
+                    .ok_or("give the right choice's index")? as usize,
+            },
+            "number" => Ask::Number {
+                answer: v["answer"].as_u64().ok_or("give the number")? as u32,
+                hex: matches!(
+                    claim,
+                    Some(
+                        Claim::RegisterAddress { .. }
+                            | Claim::AddressOf { .. }
+                            | Claim::ValueReaching { .. }
+                    )
+                ),
+            },
+            "bits" => {
+                let Some(Claim::RegisterBits { register, .. }) = &claim else {
+                    return Err("a bits question needs a register_bits claim".into());
+                };
+                Ask::Bits {
+                    register: register.clone(),
+                    width: claims::register(register).map_or(8, |r| r.width),
+                    answer: v["bits"]
+                        .as_array()
+                        .ok_or("give the bits")?
+                        .iter()
+                        .filter_map(|b| b.as_u64().map(|b| b as u8))
+                        .collect(),
+                }
+            }
+            "text" => {
+                let certain = quiz.questions.iter().filter(|q| q.source.certain()).count();
+                if certain < 3 {
+                    return Err("a written question comes after three that Romlens marks".into());
+                }
+                Ask::Text {
+                    rubric: explanation.clone(),
+                }
+            }
+            other => {
+                return Err(format!(
+                    "{other} is not a kind; use choice, number, bits or text"
+                ));
+            }
+        };
+        let source = match (&ask, claim) {
+            (Ask::Text { .. }, _) => Source::TutorMarked,
+            (_, Some(c)) => Source::Tutor { claim: c },
+            (_, None) => return Err("give the claim Romlens checks the answer against".into()),
+        };
+        let q = Question {
+            id: format!("{}-t{}", self.quiz, *added),
+            concept: quiz.concept.clone(),
+            level: quiz.level,
+            prompt,
+            ask,
+            explanation,
+            cite: Vec::new(),
+            hint: v["hint"]
+                .as_str()
+                .filter(|h| !h.trim().is_empty())
+                .map(str::to_owned),
+            source,
+            focus: None,
+        };
+        claims::validate(self.world, &q)?;
+        if quiz
+            .questions
+            .iter()
+            .any(|x| claims::same(&x.prompt, &q.prompt))
+        {
+            return Err("the quiz asks that already".into());
+        }
+        quiz.questions.push(q);
+        self.quizzes.store.save(&quiz).map_err(|e| e.to_string())?;
+        *added += 1;
+        self.listener.on_event(TutorEventInfo::QuizChanged {
+            quiz: self.quiz.clone(),
+        });
+        Ok(format!("Added ({} of {TUTOR_QUESTIONS}).", *added))
+    }
+}
+
+/// What the writer is asked: the quiz's concept and level, and the
+/// questions it has.
+pub fn brief(quiz: &Quiz) -> String {
+    let c = concept(&quiz.concept);
+    let mut s = format!(
+        "Quiz {}: up to {TUTOR_QUESTIONS} questions on {} ({}) at level {}, {}.",
+        quiz.id,
+        c.map_or(quiz.concept.as_str(), |c| c.name),
+        c.map_or("", |c| c.line),
+        quiz.level,
+        level_name(quiz.level)
+    );
+    s.push_str("\nIt asks already:");
+    for q in &quiz.questions {
+        s.push_str(&format!("\n- {}", q.prompt));
+    }
+    s
+}
+
+/// Tools for marking: the conversation's list, so the cache holds, but
+/// every call refused.
+pub struct NoTools<'a>(pub &'a RomTools);
+
+impl agent::Tools for NoTools<'_> {
+    fn specs(&self) -> Vec<romlens_tutor::provider::ToolSpec> {
+        self.0.specs()
+    }
+
+    fn kind(&self, name: &str) -> agent::ToolKind {
+        self.0.kind(name)
+    }
+
+    fn run(
+        &self,
+        _: &str,
+        name: &str,
+        _: &serde_json::Value,
+        _: &agent::ToolContext,
+    ) -> agent::ToolOutput {
+        agent::ToolOutput::error(format!(
+            "{name}: no tools while marking; reply with the mark"
+        ))
+    }
 }

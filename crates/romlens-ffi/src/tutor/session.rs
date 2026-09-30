@@ -1743,6 +1743,93 @@ impl TutorSession {
         });
     }
 
+    /// The tutor's questions for quiz `id`, written on a copy of `w`.
+    fn write_quiz(self: &Arc<Self>, w: &Session, id: &str) {
+        let held = crate::quiz::Held::of(&self.wb);
+        let world = held.world();
+        let tools = super::quiz::QuizTools {
+            tools: self.tools.as_ref(),
+            world: &world,
+            quizzes: &self.quizzes,
+            listener: self.listener.as_ref(),
+            quiz: id.to_owned(),
+            added: Mutex::new(0),
+        };
+        let keys = Keys(Arc::clone(&self.keys));
+        let quiet = |_: agent::Event| {};
+        let d = Deps {
+            tools: &tools,
+            ..self.deps(&keys, &quiet)
+        };
+        let brief = self
+            .quizzes
+            .store
+            .load(id)
+            .map(|q| super::quiz::brief(&q))
+            .unwrap_or_default();
+        let cost = w.write_quiz(&brief, &d).map_or(0.0, |(_, c)| c);
+        if let Ok(mut q) = self.quizzes.store.load(id) {
+            q.cost += cost;
+            let _ = self.quizzes.store.save(&q);
+        }
+        if cost > 0.0 {
+            self.charge(w, cost);
+        }
+        self.quizzes
+            .writing
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(id);
+        self.listener.on_event(TutorEventInfo::QuizChanged {
+            quiz: id.to_owned(),
+        });
+    }
+
+    /// The model's mark for a written answer.
+    fn grade(self: &Arc<Self>, quiz: &str, question: &str) {
+        let writer = self
+            .quizzes
+            .writer
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        let Some(w) = writer.or_else(|| self.lock().session.clone()) else {
+            return;
+        };
+        let Ok(q) = self.quizzes.store.load(quiz) else {
+            return;
+        };
+        let (Some(asked), Some(a)) = (q.question(question), q.attempt(question)) else {
+            return;
+        };
+        let romlens_tutor::quiz::Given::Text(answer) = &a.given else {
+            return;
+        };
+        let keys = Keys(Arc::clone(&self.keys));
+        let quiet = |_: agent::Event| {};
+        // No tools: a mark needs none.
+        let none = super::quiz::NoTools(self.tools.as_ref());
+        let d = Deps {
+            tools: &none,
+            ..self.deps(&keys, &quiet)
+        };
+        let (credit, said, cost) = w
+            .grade(&asked.prompt, &asked.explanation, answer, &d)
+            .unwrap_or_else(|e| (0.0, format!("The answer couldn't be marked: {e}"), 0.0));
+        if let Ok(mut q) = self.quizzes.store.load(quiz) {
+            let _ = q.mark(question, credit, &said);
+            q.cost += cost;
+            let _ = self.quizzes.store.save(&q);
+        }
+        if cost > 0.0 {
+            self.charge(&w, cost);
+        }
+        self.listener.on_event(TutorEventInfo::QuizChanged {
+            quiz: quiz.to_owned(),
+        });
+        self.announce();
+    }
+
     fn load_quiz(&self, id: &str) -> Result<romlens_tutor::quiz::Quiz, RomlensError> {
         self.quizzes.store.load(id).map_err(err)
     }
@@ -1769,11 +1856,17 @@ impl TutorSession {
     /// Starts a quiz of Romlens's questions: to prove a concept at a level
     /// (the next one to prove when none is given), to practise, or to
     /// review what is due.
+    ///
+    /// With `tutor`, and a conversation open, the tutor adds up to two
+    /// questions about the game in the background (`QuizChanged` as each
+    /// comes), each checked by Romlens, its cost added to the
+    /// conversation's.
     pub fn start_quiz(
-        &self,
+        self: Arc<Self>,
         concept: Option<String>,
         level: Option<u8>,
         purpose: super::quiz::QuizPurposeInfo,
+        tutor: bool,
     ) -> Result<super::quiz::QuizInfo, RomlensError> {
         use romlens_tutor::quiz::Purpose;
         let store = self.learner_store()?;
@@ -1806,6 +1899,26 @@ impl TutorSession {
         {
             self.announce();
         }
+        // The conversation, as the tutor's parts of the quiz start from.
+        let writer = {
+            let st = self.lock();
+            if st.busy { None } else { st.session.clone() }
+        };
+        *self
+            .quizzes
+            .writer
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = writer.clone();
+        if let (true, Some(w)) = (tutor, writer) {
+            self.quizzes
+                .writing
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(quiz.id.clone());
+            let me = Arc::clone(&self);
+            let id = quiz.id.clone();
+            std::thread::spawn(move || me.write_quiz(&w, &id));
+        }
         Ok(self.quiz_record(&quiz))
     }
 
@@ -1821,8 +1934,10 @@ impl TutorSession {
     }
 
     /// Answers a question and marks it: the right answer and why come back.
+    /// A written answer is marked by the model in the background: its
+    /// credit is none until `QuizChanged`.
     pub fn answer_question(
-        &self,
+        self: Arc<Self>,
         quiz: String,
         question: String,
         given: super::quiz::GivenInfo,
@@ -1836,7 +1951,13 @@ impl TutorSession {
         let g = super::quiz::given(&ask, given).map_err(err)?;
         q.answer(&question, g).map_err(err)?;
         self.quizzes.store.save(&q).map_err(err)?;
-        self.announce();
+        if q.attempt(&question).is_some_and(|a| a.credit.is_none()) {
+            let me = Arc::clone(&self);
+            let (quiz, question) = (quiz.clone(), question.clone());
+            std::thread::spawn(move || me.grade(&quiz, &question));
+        } else {
+            self.announce();
+        }
         super::quiz::result_info(&q, &question).ok_or_else(|| err("no answer"))
     }
 
@@ -2015,8 +2136,13 @@ mod tests {
         use super::super::quiz::QuizPurposeInfo;
         let (t, rx, _local, root, _wb) = setup("quiz", vec![]);
         t.set_utc_offset(0);
-        let info = t
-            .start_quiz(Some("Sprites".into()), Some(1), QuizPurposeInfo::Prove)
+        let info = Arc::clone(&t)
+            .start_quiz(
+                Some("Sprites".into()),
+                Some(1),
+                QuizPurposeInfo::Prove,
+                false,
+            )
             .unwrap();
         assert_eq!(
             (info.concept.as_str(), info.level, info.questions.len()),
@@ -2029,19 +2155,20 @@ mod tests {
         );
         let quiz = t.quizzes.store.load(&info.id).unwrap();
         for q in &quiz.questions {
-            let r = t
+            let r = Arc::clone(&t)
                 .answer_question(info.id.clone(), q.id.clone(), right(q))
                 .unwrap();
             assert_eq!(r.credit, Some(1.0), "{}", q.prompt);
             assert!(!r.explanation.is_empty());
         }
         assert!(
-            t.answer_question(
-                info.id.clone(),
-                quiz.questions[0].id.clone(),
-                right(&quiz.questions[0])
-            )
-            .is_err()
+            Arc::clone(&t)
+                .answer_question(
+                    info.id.clone(),
+                    quiz.questions[0].id.clone(),
+                    right(&quiz.questions[0])
+                )
+                .is_err()
         );
         let done = t.finish_quiz(info.id.clone()).unwrap();
         assert!(done.outcome.passed && done.finished, "{:?}", done.outcome);
@@ -2090,36 +2217,157 @@ mod tests {
     fn a_hint_halves_the_answer_and_too_few_questions_is_said() {
         use super::super::quiz::QuizPurposeInfo;
         let (t, _rx, _local, root, _wb) = setup("hint", vec![]);
-        let info = t
-            .start_quiz(Some("ppu".into()), Some(2), QuizPurposeInfo::Practice)
+        let info = Arc::clone(&t)
+            .start_quiz(
+                Some("ppu".into()),
+                Some(2),
+                QuizPurposeInfo::Practice,
+                false,
+            )
             .unwrap();
-        let quiz = t.quizzes.store.load(&info.id).unwrap();
-        let q = quiz
-            .questions
-            .iter()
-            .find(|q| q.hint.is_some())
-            .expect("a register's address has a hint");
+        // Which five questions a quiz asks depends on its seed: give the
+        // first a hint.
+        let mut quiz = t.quizzes.store.load(&info.id).unwrap();
+        quiz.questions[0].hint = Some("Look near $2100.".into());
+        t.quizzes.store.save(&quiz).unwrap();
+        let q = &quiz.questions[0];
+
         assert!(
             t.question_hint(info.id.clone(), q.id.clone())
                 .unwrap()
                 .contains("$2100")
         );
-        let r = t
+        let r = Arc::clone(&t)
             .answer_question(info.id.clone(), q.id.clone(), right(q))
             .unwrap();
         assert_eq!(r.credit, Some(0.5));
         // Compression at level 4 has no questions in this game.
-        let e = t
-            .start_quiz(Some("compression".into()), Some(4), QuizPurposeInfo::Prove)
+        let e = Arc::clone(&t)
+            .start_quiz(
+                Some("compression".into()),
+                Some(4),
+                QuizPurposeInfo::Prove,
+                false,
+            )
             .unwrap_err();
         assert!(
             e.to_string().contains("can't be proven in this game yet"),
             "{e}"
         );
         assert!(
-            t.start_quiz(None, None, QuizPurposeInfo::Review).is_err(),
+            Arc::clone(&t)
+                .start_quiz(None, None, QuizPurposeInfo::Review, false)
+                .is_err(),
             "nothing is due"
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_tutor_adds_checked_questions_and_the_model_marks_writing() {
+        use super::super::quiz::{GivenInfo, QuizPurposeInfo};
+        let field = |expect: &str| {
+            serde_json::json!({"kind": "register_field", "register": "INIDISP", "value": 0x80,
+                "field": "Forced blank", "expect": expect})
+            .to_string()
+        };
+        let question = |claim: Option<String>, kind: &str| {
+            call_reply(
+                "quiz_question",
+                serde_json::json!({"quiz": "", "prompt": format!("Writing $80 to INIDISP: forced blank? ({kind})"),
+                    "kind": kind, "choices": ["forced blank", "display on"], "answer": 0, "bits": null,
+                    "claim": claim, "explanation": "Bit 7 of INIDISP is forced blank: the screen is black and VRAM can be written.",
+                    "hint": null}),
+            )
+        };
+        let (t, rx, local, root, _wb) = setup(
+            "tutorquiz",
+            vec![
+                // A false claim: refused, with what is so.
+                question(Some(field("display on")), "choice"),
+                question(Some(field("forced blank")), "choice"),
+                question(None, "text"),
+                text_reply("Asked two."),
+                text_reply("CREDIT 1: Right, the PPU leaves VRAM alone then."),
+            ],
+        );
+        t.new_conversation(local, "qwen3".into(), None, TutorMode::ReadOnly, None)
+            .unwrap();
+        let turns = t.transcript().len();
+        let info = Arc::clone(&t)
+            .start_quiz(
+                Some("forced_blank".into()),
+                Some(2),
+                QuizPurposeInfo::Prove,
+                true,
+            )
+            .unwrap();
+        assert!(info.writing);
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        loop {
+            let q = t.quiz(info.id.clone()).unwrap();
+            if !q.writing {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "the writer ends");
+            let _ = rx.recv_timeout(Duration::from_millis(100));
+        }
+        let quiz = t.quizzes.store.load(&info.id).unwrap();
+        let theirs: Vec<_> = quiz
+            .questions
+            .iter()
+            .filter(|q| q.id.contains("-t"))
+            .collect();
+        assert_eq!(theirs.len(), 2, "the refused one is not in the quiz");
+        assert_eq!(theirs[0].source.label(), "By the tutor, checked by Romlens");
+        assert!(!theirs[1].source.certain());
+        assert_eq!(t.transcript().len(), turns, "the conversation is untouched");
+        // The written answer, marked by the model.
+        let written = theirs[1].id.clone();
+        let r = Arc::clone(&t)
+            .answer_question(
+                info.id.clone(),
+                written.clone(),
+                GivenInfo::Text {
+                    text: "VRAM is free then".into(),
+                },
+            )
+            .unwrap();
+        assert_eq!(r.credit, None, "marked in the background");
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        let marked = loop {
+            let q = t.quizzes.store.load(&info.id).unwrap();
+            if let Some(c) = q.attempt(&written).and_then(|a| a.credit) {
+                break (c, q.attempt(&written).unwrap().feedback.clone());
+            }
+            assert!(std::time::Instant::now() < deadline, "the mark comes");
+            let _ = rx.recv_timeout(Duration::from_millis(100));
+        };
+        assert_eq!(marked.0, 1.0);
+        assert!(marked.1.unwrap().contains("VRAM alone"));
+        let o = t.quizzes.store.load(&info.id).unwrap().outcome();
+        assert_eq!(o.certain_right, 0, "the model's mark is never certain");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn quiz_question_is_refused_outside_a_quiz_and_the_tools_stay_the_same() {
+        use romlens_tutor::agent::Tools;
+        let (t, _rx, _local, root, _wb) = setup("quiztool", vec![]);
+        let names: Vec<String> = t.tools.specs().into_iter().map(|s| s.name).collect();
+        assert!(names.iter().any(|n| n == "quiz_question"));
+        let held = crate::quiz::Held::of(&t.wb);
+        let world = held.world();
+        let q = super::super::quiz::QuizTools {
+            tools: t.tools.as_ref(),
+            world: &world,
+            quizzes: &t.quizzes,
+            listener: t.listener.as_ref(),
+            quiz: "q1-00000".into(),
+            added: Mutex::new(0),
+        };
+        let same: Vec<String> = q.specs().into_iter().map(|s| s.name).collect();
+        assert_eq!(names, same, "the writer's list is the conversation's");
         let _ = std::fs::remove_dir_all(&root);
     }
 

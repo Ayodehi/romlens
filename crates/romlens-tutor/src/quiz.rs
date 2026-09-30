@@ -789,6 +789,18 @@ mod tests {
     }
 
     #[test]
+    fn a_mark_is_read_from_its_line() {
+        use crate::agent::read_credit;
+        assert_eq!(read_credit("CREDIT 1: Right."), (1.0, "Right.".into()));
+        assert_eq!(
+            read_credit("credit 0.5 — half of it"),
+            (0.5, "half of it".into())
+        );
+        assert_eq!(read_credit("CREDIT 0: no").0, 0.0);
+        assert_eq!(read_credit("I think it's fine").0, 0.0, "no mark is none");
+    }
+
+    #[test]
     fn the_hint_halves_a_right_answer() {
         let mut q = quiz(vec![question(
             "a",

@@ -223,6 +223,7 @@ pub fn specs() -> Vec<ToolSpec> {
     v.extend(super::edits::specs());
     v.extend(super::lessons::specs());
     v.extend(super::draw::specs());
+    v.extend(super::quiz::specs());
     v.push(spec(
         "generate_image",
         "Draw a teaching picture with an image model, when the student asks. It gets only your words, so describe everything; say the picture is generated.",
@@ -371,8 +372,12 @@ impl Tools for RomTools {
     fn kind(&self, name: &str) -> ToolKind {
         if super::edits::NAMES.contains(&name) {
             ToolKind::Edit
-        } else if name == "generate_image" || super::lessons::BUILDING.contains(&name) {
-            // A lesson's steps go in the order they were written.
+        } else if name == "generate_image"
+            || super::lessons::BUILDING.contains(&name)
+            || name == super::quiz::QUESTION_TOOL
+        {
+            // A lesson's steps, and a quiz's questions, go in the order
+            // they were written.
             ToolKind::Visual
         } else {
             ToolKind::Read
@@ -382,6 +387,12 @@ impl Tools for RomTools {
     fn run(&self, id: &str, name: &str, input: &Value, cx: &ToolContext) -> ToolOutput {
         if name == "generate_image" {
             return self.generate_image(input, cx);
+        }
+        if name == super::quiz::QUESTION_TOOL {
+            // Only Romlens's quiz writer takes questions (`QuizTools`).
+            return ToolOutput::error(
+                "quiz_question is only for a quiz Romlens asks you to write; the student starts one with /quiz",
+            );
         }
         let place = |t: &str| self.rom_place(t);
         if super::lessons::NAMES.contains(&name) {
