@@ -141,7 +141,14 @@ Romlens stores the merged log in the project package as
   without a type. This outranks the sweep, operand hints and heuristics, but
   not code, resolved tables, the header or the user.
 - **Dispatch tables read.** The ROM a `JMP (abs,X)` or `JSR (abs,X)` was seen
-  to read its target from is painted as that dispatcher's table.
+  to read its target from is painted as that dispatcher's table (95%). An
+  entry the game did not read, between two it did, joins the table at 80%
+  when each word names a routine in the dispatcher's bank: one the log saw
+  run, or bytes that decode as one under the dispatcher's flags. At most 32
+  entries are filled this way, and never across a word that points outside
+  the ROM. The routine it names is walked and referenced from its entry, as
+  a resolved table's are, so the entry reads as its label. Entries before
+  the first or after the last one read are left alone.
 
 On Super Metroid, a 67-second log took cross-references from 14,722 to
 59,653, and code seen by the descent includes routines no static walk

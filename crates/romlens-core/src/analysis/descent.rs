@@ -542,6 +542,32 @@ impl<'a> Walk<'a> {
         // Soft, like a user mark: a walk that already covered the address is
         // the better answer, and an observation should never become a conflict
         // report.
+        // The routines a dispatch table names in the entries the game did
+        // not read, between ones it did (`observed`): walked, and referenced
+        // from their entry, though no one saw them run.
+        if let Some(log) = &self.project.exec_log {
+            for e in crate::analysis::observed::unread_entries_of(self.rom, log) {
+                let Some(to) = self.rom.file_offset_for(e.target) else {
+                    continue;
+                };
+                self.xrefs.push((
+                    XRef {
+                        from: FileOffset(e.slot),
+                        to: Project::canonical(self.rom, e.target),
+                        to_offset: Some(to),
+                        kind: if e.call {
+                            XRefKind::Call
+                        } else {
+                            XRefKind::Jump
+                        },
+                        certain: false,
+                        observed: false,
+                    },
+                    true,
+                ));
+                self.push_entry(e.target, e.flags, 0, true, true, WidthTrust::default());
+            }
+        }
         if let Some(coverage) = &self.project.coverage {
             let starts: Vec<u32> = coverage.opcode_start.iter().collect();
             for off in starts {

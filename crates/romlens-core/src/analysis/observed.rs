@@ -12,6 +12,7 @@
 //! - **dispatch tables read**: the ROM a `JMP (abs,X)` or `JSR (abs,X)` was
 //!   seen to read its target from.
 
+use crate::cpu65816::FlagState;
 use crate::memory::address::{FileOffset, SnesAddress};
 use crate::model::exec_log::{Access, ExecLog, FlowKind, MemKind};
 use crate::model::project::Project;
@@ -150,10 +151,12 @@ pub fn dma_spans(log: &ExecLog, rom_len: u32) -> Vec<Span> {
     out
 }
 
-/// The ROM each observed `JMP (abs,X)` and `JSR (abs,X)` read its target
-/// from: the table entries the game actually used.
-pub fn jump_table_spans(rom: &RomImage, log: &ExecLog) -> Vec<Span> {
-    let mut out = Vec::new();
+/// A dispatcher's address, opcode, and the `(start, len)` runs it read.
+type Dispatch = (u32, u8, Vec<(u32, u32)>);
+
+/// Each observed `JMP (abs,X)` (`$7C`) or `JSR (abs,X)` (`$FC`) in ROM: its
+/// address, its opcode, and the ROM it read its targets from, in order.
+fn dispatches(rom: &RomImage, log: &ExecLog) -> Vec<Dispatch> {
     let mut sites: Vec<u32> = log
         .flows
         .iter()
@@ -161,6 +164,7 @@ pub fn jump_table_spans(rom: &RomImage, log: &ExecLog) -> Vec<Span> {
         .map(|f| f.from)
         .collect();
     sites.dedup();
+    let mut out = Vec::new();
     for pc in sites {
         let Some(off) = log.rom_offset(pc) else {
             continue;
@@ -170,26 +174,201 @@ pub fn jump_table_spans(rom: &RomImage, log: &ExecLog) -> Vec<Span> {
             continue;
         }
         let first = log.accesses.partition_point(|a| a.pc < pc);
-        for a in log.accesses[first..].iter().take_while(|a| a.pc == pc) {
-            if a.access != Access::Read || a.kind != MemKind::PrgRom || a.abs < 0 {
-                continue;
-            }
+        let mut read: Vec<(u32, u32)> = log.accesses[first..]
+            .iter()
+            .take_while(|a| a.pc == pc)
+            .filter(|a| a.access == Access::Read && a.kind == MemKind::PrgRom && a.abs >= 0)
+            .map(|a| (a.abs as u32, a.len.min(rom.len() as u32 - a.abs as u32)))
+            .collect();
+        read.sort_unstable();
+        out.push((pc, opcode, read));
+    }
+    out
+}
+
+/// The gaps between entries a dispatcher read that are more of its table.
+fn unread_gaps(rom: &RomImage, log: &ExecLog, pc: u32, read: &[(u32, u32)]) -> Vec<(u32, u32)> {
+    read.windows(2)
+        .map(|w| (w[0].0 + w[0].1, w[1].0))
+        .filter(|(from, to)| unread_entries(rom, log, pc, *from, *to))
+        .collect()
+}
+
+/// The flags a dispatcher ran with, which its targets start with.
+fn dispatch_flags(log: &ExecLog, pc: u32) -> FlagState {
+    log.insn(pc)
+        .and_then(|i| i.flag_states().next())
+        .unwrap_or(FlagState::NATIVE_VECTOR)
+}
+
+/// The ROM each observed `JMP (abs,X)` and `JSR (abs,X)` read its target
+/// from: the table entries the game actually used, and the entries between
+/// them it did not, when they too name routines (a little less sure).
+pub fn jump_table_spans(rom: &RomImage, log: &ExecLog) -> Vec<Span> {
+    let mut out = Vec::new();
+    for (pc, opcode, read) in dispatches(rom, log) {
+        let by = if opcode == 0x7C {
+            "JMP (abs,X)"
+        } else {
+            "JSR (abs,X)"
+        };
+        for &(start, len) in &read {
             out.push(Span {
-                start: a.abs as u32,
-                len: a.len.min(rom.len() as u32 - a.abs as u32),
+                start,
+                len,
                 kind: crate::analysis::JUMP_TABLE_KIND,
                 confidence: 95,
+                what: format!("dispatch table: entries read by {by} at {}", fmt(pc)),
+            });
+        }
+        for (from, to) in unread_gaps(rom, log, pc, &read) {
+            out.push(Span {
+                start: from,
+                len: to - from,
+                kind: crate::analysis::JUMP_TABLE_KIND,
+                confidence: 80,
                 what: format!(
-                    "dispatch table: entries read by {} at {}",
-                    if opcode == 0x7C {
-                        "JMP (abs,X)"
-                    } else {
-                        "JSR (abs,X)"
-                    },
+                    "dispatch table: entries between those read by {by} at {}, not seen read",
                     fmt(pc)
                 ),
             });
         }
     }
     out
+}
+
+/// An entry the game did not read, between ones it did: where it is, the
+/// routine it names, the flags that routine starts with, and whether the
+/// dispatcher calls (`JSR`) rather than jumps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UnreadEntry {
+    pub slot: u32,
+    pub target: SnesAddress,
+    pub flags: FlagState,
+    pub call: bool,
+}
+
+/// Every such entry, so the descent walks the routines they name.
+pub fn unread_entries_of(rom: &RomImage, log: &ExecLog) -> Vec<UnreadEntry> {
+    let mut out = Vec::new();
+    for (pc, opcode, read) in dispatches(rom, log) {
+        let bank = (pc >> 16) as u8;
+        for (from, to) in unread_gaps(rom, log, pc, &read) {
+            for slot in (from..to).step_by(2) {
+                let b = rom.bytes();
+                let word = u16::from_le_bytes([b[slot as usize], b[slot as usize + 1]]);
+                out.push(UnreadEntry {
+                    slot,
+                    target: SnesAddress::new(bank, word),
+                    flags: dispatch_flags(log, pc),
+                    call: opcode == 0xFC,
+                });
+            }
+        }
+    }
+    out
+}
+
+/// Whether `[from, to)`, between two entries the dispatcher at `pc` read, is
+/// more of its table: whole entries, a few, each the address of a routine in
+/// the dispatcher's bank. A routine is one the game ran, or bytes that
+/// decode as one under the flags the dispatcher ran with.
+fn unread_entries(rom: &RomImage, log: &ExecLog, pc: u32, from: u32, to: u32) -> bool {
+    const MOST: u32 = 32;
+    let n = to.saturating_sub(from);
+    if n == 0 || !n.is_multiple_of(2) || n / 2 > MOST {
+        return false;
+    }
+    let bank = (pc >> 16) as u8;
+    let flags = dispatch_flags(log, pc);
+    (from..to).step_by(2).all(|e| {
+        let word = u16::from_le_bytes([rom.bytes()[e as usize], rom.bytes()[e as usize + 1]]);
+        let target = SnesAddress::new(bank, word);
+        let Some(off) = rom.file_offset_for(target) else {
+            return false;
+        };
+        log.insn(target.as_u24()).is_some()
+            || crate::analysis::jumptable::plausible_entry(rom, off.0, flags)
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fixtures;
+    use crate::memory::map::MappingMode;
+    use crate::model::exec_log::{AccessRun, ExecInsn, Flow, FlowKind};
+
+    /// `JSR ($8010,X)` at `$80:8000` and four entries at `$8010`, of which
+    /// the game read the first and the last.
+    fn table(entry2: u16) -> (RomImage, ExecLog) {
+        let mut code = vec![0u8; 0x40];
+        code[0..3].copy_from_slice(&[0xFC, 0x10, 0x80]);
+        for (i, e) in [0x8020u16, 0x8024, entry2, 0x802C].iter().enumerate() {
+            code[0x10 + i * 2..0x12 + i * 2].copy_from_slice(&e.to_le_bytes());
+        }
+        for at in [0x20, 0x24, 0x28, 0x2C] {
+            code[at] = 0x60; // RTS
+        }
+        let rom = RomImage::from_bytes(
+            fixtures::build_with_code(MappingMode::LoRom, 0x8000, false, &code, "TABLE"),
+            "t.sfc",
+        )
+        .unwrap();
+        let read = |abs: i32| AccessRun {
+            pc: 0x80_8000,
+            addr: 0x80_8000 + abs as u32,
+            abs,
+            len: 2,
+            access: Access::Read,
+            kind: MemKind::PrgRom,
+            count: 1,
+        };
+        let log = ExecLog {
+            rom_crc32: 0,
+            rom_size: rom.len() as u32,
+            insns: vec![ExecInsn {
+                pc: 0x80_8000,
+                abs: 0,
+                kind: MemKind::PrgRom,
+                states: 1 << 3,
+                count: 2,
+            }],
+            accesses: vec![read(0x10), read(0x16)],
+            flows: vec![Flow {
+                from: 0x80_8000,
+                to: 0x80_8020,
+                kind: FlowKind::IndirectCall,
+                count: 1,
+            }],
+            dma: Vec::new(),
+        };
+        (rom, log)
+    }
+
+    #[test]
+    fn entries_between_those_read_join_the_table() {
+        let (rom, log) = table(0x8028);
+        let spans = jump_table_spans(&rom, &log);
+        let gap: Vec<_> = spans.iter().filter(|s| s.confidence == 80).collect();
+        assert_eq!(gap.len(), 1, "{spans:?}");
+        assert_eq!((gap[0].start, gap[0].len), (0x12, 4));
+        assert!(gap[0].what.contains("not seen read"), "{}", gap[0].what);
+
+        // One of them points into RAM: not a table the game could use.
+        let unread = unread_entries_of(&rom, &log);
+        assert_eq!(
+            unread
+                .iter()
+                .map(|e| (e.slot, e.target.as_u24()))
+                .collect::<Vec<_>>(),
+            [(0x12, 0x80_8024), (0x14, 0x80_8028)]
+        );
+        assert!(unread.iter().all(|e| e.call && e.flags.m && e.flags.x));
+
+        let (rom, log) = table(0x1234);
+        let spans = jump_table_spans(&rom, &log);
+        assert!(spans.iter().all(|s| s.confidence == 95), "{spans:?}");
+        assert!(unread_entries_of(&rom, &log).is_empty());
+    }
 }
