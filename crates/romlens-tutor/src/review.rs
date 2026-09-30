@@ -308,6 +308,7 @@ mod tests {
             body: "OBSEL picks the sizes.".into(),
             focus: Some(Focus::Register { address: 0x2101 }),
             picture: None,
+            predict_answer: None,
         });
         l.finished = true;
         store.save(&l, &[]).unwrap();

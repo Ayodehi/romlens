@@ -141,6 +141,12 @@ pub struct LessonStepInfo {
     /// The focus in words: `$00:8000`, `frame 12, oam`.
     pub focus_text: Option<String>,
     pub picture: Option<String>,
+    /// Romlens can check a guess at the predict question (docs/28).
+    pub checks_guess: bool,
+    /// The student's first guess, and whether it was right when it could
+    /// be checked.
+    pub guessed: Option<String>,
+    pub guess_right: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
@@ -225,6 +231,9 @@ fn lesson_info(l: &romlens_tutor::lesson::Lesson, rom: &str) -> LessonInfo {
                 focus: s.focus.as_ref().map(focus_link),
                 focus_text: s.focus.as_ref().map(|f| f.text()),
                 picture: s.picture.clone(),
+                checks_guess: s.predict_answer.is_some(),
+                guessed: None,
+                guess_right: None,
             })
             .collect(),
         next: l
@@ -1348,14 +1357,20 @@ impl TutorSession {
                 .open_lesson(&id)
                 .or_else(|| self.tools.lessons.store()?.load(&id).ok())?;
             let s = l.steps.get(step as usize)?;
-            Some(format!(
+            let mut note = format!(
                 "[The student is at step {} of {} of lesson {} \"{}\": \"{}\"]",
                 step + 1,
                 l.steps.len(),
                 l.id,
                 l.title,
                 s.title
-            ))
+            );
+            // What they guessed at its question, so a wrong idea can be
+            // taken up (docs/28).
+            if let Some(g) = self.guess(&l.id, step) {
+                note.push_str(&format!("\n[The student guessed: \"{g}\"]"));
+            }
+            Some(note)
         });
     }
 
@@ -1366,9 +1381,13 @@ impl TutorSession {
             .lessons
             .open_lesson(&id)
             .or_else(|| self.tools.lessons.store()?.load(&id).ok())
-            .map(|l| LessonInfo {
-                checking: self.lock().checking.contains(&l.id),
-                ..lesson_info(&l, &rom)
+            .map(|l| {
+                let mut info = LessonInfo {
+                    checking: self.lock().checking.contains(&l.id),
+                    ..lesson_info(&l, &rom)
+                };
+                self.add_guesses(&mut info);
+                info
             })
     }
 
@@ -1868,6 +1887,45 @@ impl TutorSession {
         self.announce();
     }
 
+    /// The first guess at a lesson step's predict question.
+    fn guess(&self, lesson: &str, step: u32) -> Option<String> {
+        use romlens_tutor::progress::Fact;
+        self.quizzes
+            .journal
+            .read()
+            .into_iter()
+            .find_map(|f| match f {
+                Fact::PredictAnswered {
+                    lesson: l,
+                    step: s,
+                    guess,
+                    ..
+                } if l == lesson && s == step => Some(guess),
+                _ => None,
+            })
+    }
+
+    /// Each step's first guess, from the journal.
+    fn add_guesses(&self, info: &mut LessonInfo) {
+        use romlens_tutor::progress::Fact;
+        for f in self.quizzes.journal.read() {
+            if let Fact::PredictAnswered {
+                lesson,
+                step,
+                guess,
+                right,
+                ..
+            } = f
+                && lesson == info.id
+                && let Some(s) = info.steps.get_mut(step as usize)
+                && s.guessed.is_none()
+            {
+                s.guessed = Some(guess);
+                s.guess_right = right;
+            }
+        }
+    }
+
     fn load_quiz(&self, id: &str) -> Result<romlens_tutor::quiz::Quiz, RomlensError> {
         self.quizzes.store.load(id).map_err(err)
     }
@@ -2045,6 +2103,55 @@ impl TutorSession {
             self.announce();
         }
         got
+    }
+
+    /// A guess at a lesson step's predict question, before Show. The first
+    /// guess at a step is kept and earns its points; where the step carries
+    /// a claim and the guess reads as its answer, Romlens says whether it is
+    /// right (`right` is none when it can't tell).
+    pub fn answer_predict(
+        &self,
+        lesson: String,
+        step: u32,
+        guess: String,
+    ) -> Result<super::quiz::PredictResultInfo, RomlensError> {
+        let guess = guess.trim().to_owned();
+        if guess.chars().count() < 3 {
+            return Err(err("a guess of a few words or a number"));
+        }
+        let l = self
+            .tools
+            .lessons
+            .open_lesson(&lesson)
+            .or_else(|| self.tools.lessons.store()?.load(&lesson).ok())
+            .ok_or_else(|| err(format!("no lesson {lesson}")))?;
+        let s = l
+            .steps
+            .get(step as usize)
+            .filter(|s| s.predict.is_some())
+            .ok_or_else(|| err("that step asks nothing"))?;
+        let right = s.predict_answer.as_ref().and_then(|c| {
+            let alt = c.with_expected(&guess)?;
+            let held = crate::quiz::Held::of(&self.wb);
+            Some(crate::quiz::claims::check(&held.world(), &alt).is_ok())
+        });
+        let first = self.guess(&lesson, step).is_none();
+        if first {
+            self.quizzes
+                .journal
+                .append(&romlens_tutor::progress::Fact::PredictAnswered {
+                    lesson: lesson.clone(),
+                    step,
+                    guess,
+                    right,
+                    when: now(),
+                })
+                .map_err(err)?;
+            self.announce();
+        }
+        // The next question says what they guessed.
+        self.set_lesson_step(Some(lesson), step);
+        Ok(super::quiz::PredictResultInfo { right, first })
     }
 
     /// Removes every quiz and the journal: points, proofs, streaks and
@@ -2407,6 +2514,91 @@ mod tests {
         };
         let same: Vec<String> = q.specs().into_iter().map(|s| s.name).collect();
         assert_eq!(names, same, "the writer's list is the conversation's");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_guess_is_kept_once_checked_and_told_to_the_tutor() {
+        use romlens_tutor::lesson::{Lesson, Step};
+        let (t, _rx, _local, root, _wb) = setup("guess", vec![]);
+        let store = t.tools.lessons.store().unwrap();
+        let step = |predict: Option<&str>, claim: Option<romlens_tutor::quiz::Claim>| Step {
+            title: "Where".into(),
+            predict: predict.map(str::to_owned),
+            body: "At $2100.".into(),
+            focus: None,
+            picture: None,
+            predict_answer: claim,
+        };
+        let lesson = Lesson {
+            id: "l1-00000".into(),
+            title: "The screen".into(),
+            rom: None,
+            created: 1,
+            levels: (2, 2),
+            concepts: vec![("forced_blank".into(), 2)],
+            builds_on: vec![],
+            steps: vec![
+                step(
+                    Some("Where is INIDISP?"),
+                    Some(romlens_tutor::quiz::Claim::RegisterAddress {
+                        register: "INIDISP".into(),
+                        expect: 0x2100,
+                    }),
+                ),
+                step(Some("Why black?"), None),
+                step(None, None),
+            ],
+            next: vec![],
+            conversation: String::new(),
+            finished: true,
+            revisions: vec![],
+            checked: None,
+        };
+        store.save(&lesson, &[]).unwrap();
+        let r = t
+            .answer_predict(lesson.id.clone(), 0, " $2100 ".into())
+            .unwrap();
+        assert_eq!((r.right, r.first), (Some(true), true));
+        let again = t
+            .answer_predict(lesson.id.clone(), 0, "$2105".into())
+            .unwrap();
+        assert_eq!(
+            (again.right, again.first),
+            (Some(false), false),
+            "checked, but only the first counts"
+        );
+        let unchecked = t
+            .answer_predict(lesson.id.clone(), 1, "the PPU stops".into())
+            .unwrap();
+        assert_eq!(unchecked.right, None, "no claim, nothing marked");
+        assert!(
+            t.answer_predict(lesson.id.clone(), 2, "anything".into())
+                .is_err(),
+            "no question"
+        );
+        assert!(
+            t.answer_predict(lesson.id.clone(), 1, "no".into()).is_err(),
+            "too short"
+        );
+        let info = t.lesson(lesson.id.clone()).unwrap();
+        assert_eq!(info.steps[0].guessed.as_deref(), Some("$2100"));
+        assert_eq!(info.steps[0].guess_right, Some(true));
+        assert!(info.steps[0].checks_guess && !info.steps[1].checks_guess);
+        // The next question tells the tutor.
+        t.set_lesson_step(Some(lesson.id.clone()), 1);
+        let note = t.lock().at_step.clone().unwrap();
+        assert!(
+            note.contains("The student guessed: \"the PPU stops\""),
+            "{note}"
+        );
+        // Points: 3 + 2 for the first, 3 for the second, and the lesson's own.
+        let p = t.progress().unwrap();
+        assert!(
+            p.recent
+                .iter()
+                .any(|l| l.why.contains("predict") && l.points == 5)
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -92,16 +92,18 @@ struct LessonCard: View {
         let s = lesson.steps[i]
         VStack(alignment: .leading, spacing: 8) {
             Text(s.title).font(.callout.bold())
-            if let q = s.predict, !tutor.isRevealed(lesson.id, i) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Label(q, systemImage: "questionmark.bubble")
-                        .font(.callout).italic()
-                    Text("Think about it, then:").font(.caption).foregroundStyle(.secondary)
-                    Button("Show") { tutor.reveal(lesson.id, i) }.controlSize(.small)
-                }
+            if let q = s.predict, !tutor.isRevealed(lesson.id, i), s.guessed == nil {
+                Guess(tutor: tutor, lesson: lesson.id, step: i, question: q, checks: s.checksGuess)
             } else {
                 if let q = s.predict {
                     Label(q, systemImage: "questionmark.bubble").font(.caption).italic().foregroundStyle(.secondary)
+                    if let g = s.guessed {
+                        Label(
+                            "You guessed “\(g)”" + (s.guessRight == true ? ": right" : s.guessRight == false ? ": not quite" : ""),
+                            systemImage: s.guessRight == true ? "checkmark.circle" : s.guessRight == false ? "xmark.circle" : "text.bubble")
+                            .font(.caption)
+                            .foregroundStyle(s.guessRight == true ? Color.green : s.guessRight == false ? Color.orange : Color.secondary)
+                    }
                 }
                 MessageText(tutor: tutor, text: s.body)
                 if let p = s.picture { LessonPicture(tutor: tutor, lesson: lesson.id, id: p) }
@@ -159,5 +161,41 @@ struct LessonPicture: View {
                 Text(caption).font(.caption2).foregroundStyle(.tertiary)
             }
         }
+    }
+}
+
+/// A predict question, and a guess before Show (docs/28): the first guess
+/// at a step earns points, and where the step says its answer, Romlens
+/// checks it.
+private struct Guess: View {
+    let tutor: TutorModel
+    let lesson: String
+    let step: Int
+    let question: String
+    let checks: Bool
+    @State private var guess = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label(question, systemImage: "questionmark.bubble")
+                .font(.callout).italic()
+            HStack(spacing: 6) {
+                TextField(checks ? "Your guess (Romlens checks it)" : "Your guess", text: $guess)
+                    .textFieldStyle(.roundedBorder)
+                    .controlSize(.small)
+                    .frame(maxWidth: 260)
+                    .onSubmit(check)
+                Button("Check", action: check)
+                    .controlSize(.small)
+                    .disabled(guess.trimmingCharacters(in: .whitespaces).count < 3)
+                Button("Show") { tutor.reveal(lesson, step) }.controlSize(.small)
+            }
+            Text("Guess first, or just show it.").font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private func check() {
+        guard guess.trimmingCharacters(in: .whitespaces).count >= 3 else { return }
+        tutor.answerPredict(lesson, step, guess)
     }
 }

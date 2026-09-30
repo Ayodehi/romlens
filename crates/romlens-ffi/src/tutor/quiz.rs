@@ -181,6 +181,16 @@ pub struct ProgressInfo {
     pub recent: Vec<XpLineInfo>,
 }
 
+/// A predict question's guess, marked where Romlens could.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct PredictResultInfo {
+    /// Right or not; none when the step has no claim, or the guess isn't
+    /// the kind of answer it has.
+    pub right: Option<bool>,
+    /// The step's first guess, which earns its points.
+    pub first: bool,
+}
+
 /// Where the quizzes and the journal are, and the local time.
 pub struct Quizzes {
     pub store: QuizStore,
@@ -775,7 +785,7 @@ impl agent::Tools for QuizTools<'_> {
 }
 
 /// A claim the model sent, as an object or as its JSON.
-fn read_claim(v: &serde_json::Value) -> Result<Option<Claim>, String> {
+pub fn read_claim(v: &serde_json::Value) -> Result<Option<Claim>, String> {
     let v = match v {
         serde_json::Value::Null => return Ok(None),
         serde_json::Value::String(s) if s.trim().is_empty() => return Ok(None),

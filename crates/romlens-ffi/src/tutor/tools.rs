@@ -395,6 +395,20 @@ impl Tools for RomTools {
             );
         }
         let place = |t: &str| self.rom_place(t);
+        if name == "lesson_step" {
+            // A predict question's answer must be true before the student
+            // can be told a guess is right (docs/28).
+            match super::quiz::read_claim(&input["predict_answer"]) {
+                Ok(Some(c)) => {
+                    let held = crate::quiz::Held::of(&self.wb);
+                    if let Err(e) = crate::quiz::claims::check(&held.world(), &c) {
+                        return ToolOutput::error(format!("predict_answer: {e}"));
+                    }
+                }
+                Ok(None) => {}
+                Err(e) => return ToolOutput::error(format!("predict_answer: {e}")),
+            }
+        }
         if super::lessons::NAMES.contains(&name) {
             let resolve = |t: &str| {
                 self.place(t)

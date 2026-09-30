@@ -729,6 +729,18 @@ final class TutorModel {
         quiz?.results.first { $0.question == question }
     }
 
+    /// A guess at a step's predict question: kept, checked where it can
+    /// be, and the step shown.
+    func answerPredict(_ lesson: String, _ step: Int, _ guess: String) {
+        do {
+            _ = try ensureSession().answerPredict(lesson: lesson, step: UInt32(step), guess: guess)
+        } catch {
+            self.error = Self.message(error)
+        }
+        reloadLesson(lesson)
+        reveal(lesson, step)
+    }
+
     func isRevealed(_ lesson: String, _ step: Int) -> Bool { revealed.contains("\(lesson)#\(step)") }
 
     func reveal(_ lesson: String, _ step: Int) { revealed.insert("\(lesson)#\(step)") }

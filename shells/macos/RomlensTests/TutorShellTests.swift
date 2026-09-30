@@ -116,8 +116,11 @@ import Testing
         r.tutor.show(step: 1, of: lesson)
         #expect(r.rom.editorTab == .c)
         #expect(!r.tutor.isRevealed(lesson.id, 1))
-        r.tutor.reveal(lesson.id, 1)
+        // A guess first (docs/28): kept, and the step shown.
+        r.tutor.answerPredict(lesson.id, 1, "The PPU draws")
         #expect(r.tutor.isRevealed(lesson.id, 1))
+        let guessed = try #require(r.tutor.lesson(lesson.id)?.steps[1])
+        #expect(guessed.guessed == "The PPU draws" && guessed.guessRight == nil && !guessed.checksGuess)
         r.tutor.show(step: 5, of: lesson)
         #expect(r.tutor.step(of: lesson.id) == 1, "past the end stays put")
 

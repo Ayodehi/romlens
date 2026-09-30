@@ -69,6 +69,12 @@ pub fn specs() -> Vec<ToolSpec> {
                 ("lesson", string("Its id; empty for the one being written.")),
                 ("title", string("")),
                 ("predict", nullable(string(""))),
+                (
+                    "predict_answer",
+                    nullable(string(
+                        "the predict question's answer as a claim Romlens can check a guess against: a JSON object, one of quiz_question's claim kinds",
+                    )),
+                ),
                 ("body", string("")),
                 ("focus_address", nullable(string(""))),
                 ("focus_end", nullable(string(""))),
@@ -413,6 +419,13 @@ impl Lessons {
             .map(str::trim)
             .filter(|p| !p.is_empty())
             .map(str::to_owned);
+        // Checked against the ROM by `RomTools` before the step comes here.
+        let predict_answer = super::quiz::read_claim(&v["predict_answer"])?;
+        if predict_answer.is_some() && predict.is_none() {
+            return Err(
+                "predict_answer is the answer to a predict question: give the question".into(),
+            );
+        }
         let mut open = lock(&self.open);
         let l = open
             .get_mut(id)
@@ -423,6 +436,7 @@ impl Lessons {
             body,
             focus,
             picture,
+            predict_answer,
         });
         Ok(format!("Step {} of {id} added.", l.steps.len()))
     }
@@ -520,6 +534,7 @@ fn revise(store: &LessonStore, v: &Value, cx: &ToolContext) -> Result<String, St
         body,
         focus: None,
         picture: None,
+        predict_answer: None,
     };
     store.revise(id, n - 1, step, &reason)?;
     Ok(format!("Step {n} of {id} rewritten."))
@@ -630,6 +645,47 @@ mod tests {
             v[k] = x.clone();
         }
         v
+    }
+
+    #[test]
+    fn a_predict_answer_must_be_true() {
+        let (t, root) = fixture("predict");
+        let begun = text(&call(
+            &t,
+            "begin_lesson",
+            json!({"title": "The screen", "from_level": 2, "to_level": 2,
+            "concepts": [{"id": "forced_blank", "level": 2}], "builds_on": []}),
+        ));
+        assert!(begun.contains("begun"), "{begun}");
+        let claim = |expect: u32| {
+            json!({"kind": "register_address", "register": "INIDISP", "expect": expect}).to_string()
+        };
+        let asked = |c: String| {
+            step(
+                "",
+                "Where",
+                json!({"predict": "Where is INIDISP?", "predict_answer": c}),
+            )
+        };
+        let bad = call(&t, "lesson_step", asked(claim(0x2105)));
+        assert!(
+            bad.is_error && text(&bad).contains("$2100"),
+            "{}",
+            text(&bad)
+        );
+        let ok = call(&t, "lesson_step", asked(claim(0x2100)));
+        assert!(!ok.is_error, "{}", text(&ok));
+        let no_question = call(
+            &t,
+            "lesson_step",
+            step("", "No question", json!({"predict_answer": claim(0x2100)})),
+        );
+        assert!(no_question.is_error, "an answer needs its question");
+        let open = t.lessons.open.lock().unwrap();
+        let l = open.values().next().unwrap();
+        assert!(l.steps[0].predict_answer.is_some());
+        drop(open);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -813,6 +869,7 @@ mod tests {
             body: "```asm\n$00:8052  LDX #$1809   ; DMAP0\n$00:8055  A2 00 43  STA $4300\n$00:8060  LDA #$00\n```\nThen `$2118 VMDATAL` and `$2118 CGDATA` and $4300 DMAP0.".into(),
             focus: None,
             picture: None,
+            predict_answer: None,
         });
         let insn_at = |a: u32| match a {
             0x8052 => Some(("LDX".to_string(), "#$1809".to_string())),

@@ -474,6 +474,10 @@ pub struct Step {
     pub focus: Option<Focus>,
     #[serde(default)]
     pub picture: Option<String>,
+    /// What the predict question's answer is, as a claim Romlens can check
+    /// a guess against (docs/28).
+    #[serde(default)]
+    pub predict_answer: Option<crate::quiz::Claim>,
 }
 
 /// "Go deeper": what a next lesson would teach.
@@ -882,6 +886,7 @@ impl LessonStore {
         let new = Step {
             focus: old.focus.clone(),
             picture: old.picture.clone(),
+            predict_answer: old.predict_answer.clone(),
             ..new
         };
         if new == old {
@@ -1099,6 +1104,7 @@ mod tests {
                 view: "oam".into(),
             }),
             picture: Some("tool-ab".into()),
+            predict_answer: None,
         });
         // Not finished: it counts for nothing.
         store
@@ -1163,6 +1169,7 @@ mod tests {
                 end: 0x806B,
             }),
             picture: Some("draw-1".into()),
+            predict_answer: None,
         });
         store.save(&l, &[]).unwrap();
         let fixed = Step {
@@ -1171,6 +1178,7 @@ mod tests {
             body: "8 master cycles a byte.".into(),
             focus: None,
             picture: None,
+            predict_answer: None,
         };
         // Only a finished lesson is revised, and only a step it has.
         assert!(
