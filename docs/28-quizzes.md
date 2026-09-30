@@ -8,7 +8,7 @@ that tracks progress against it.
 | Task | State |
 |---|---|
 | Q0 this document, the pointers from `06`, `24` and `25`, the checklist rows | done, 30 September 2026 |
-| Q1 `romlens-tutor::quiz`: the quiz format, claims as data, grading, the store; the journal | planned |
+| Q1 `romlens-tutor::quiz`: the quiz format, claims as data, grading, the store; the journal | done, 30 September 2026: `quiz`: `Quiz` (concept, level, purpose Prove, Review or Practice, a review's targets, the seed from the id, questions, answers, hints shown, cost, the conversation), `Question` (prompt, how it's answered, explanation, sources, hint, focus, and where it came from: Romlens with its claim, the tutor with its claim, or the tutor marked by the model), `Ask` (choice, number, bits, a listing's line, text), `Given`, `Attempt`, `Claim` (19 kinds, each with the field that is its answer: `expected`, and `with_expected` for what a wrong choice claims), `grade`, `parse_number` (`$`, `0x`, a bank's colon), `Quiz::answer`, `hint` (halves the credit), `mark` (the model's 0, ½ or 1), `outcome` (passed at 80% with three certain right without the hint; the model's marks never count as certain), `QuizStore` in `<root>/Learner/quizzes/`. `progress::Journal`: `journal.jsonl`, appended and synced, a torn last line skipped. Older files load |
 | Q2 `romlens-tutor::progress`: proofs, reviews, XP, streaks, ranks, achievements, all derived | planned |
 | Q3 FFI `quiz`: the claim checks, the facts, the level 1–2 generators, coverage | planned |
 | Q4 the level 3–5 generators, from the game's analysis | planned |
