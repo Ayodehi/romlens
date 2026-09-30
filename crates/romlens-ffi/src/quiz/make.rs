@@ -110,7 +110,7 @@ fn near(a: u32) -> Vec<u32> {
 }
 
 /// `bit 7` or `bits 0–3`.
-fn bits_of(f: &romlens_core::explain::fields::Field) -> String {
+pub(super) fn bits_of(f: &romlens_core::explain::fields::Field) -> String {
     if f.hi == f.lo {
         format!("bit {}", f.lo)
     } else {
@@ -123,7 +123,7 @@ fn bits_are(f: &romlens_core::explain::fields::Field) -> String {
     format!("{} {}", bits_of(f), if f.hi == f.lo { "is" } else { "are" })
 }
 
-fn capital(s: &str) -> String {
+pub(super) fn capital(s: &str) -> String {
     let mut c = s.chars();
     c.next()
         .map_or_else(String::new, |f| f.to_uppercase().chain(c).collect())

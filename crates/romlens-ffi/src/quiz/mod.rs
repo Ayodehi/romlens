@@ -4,7 +4,7 @@
 //! core.
 
 pub mod claims;
-mod claims_rom;
+pub mod claims_rom;
 pub mod facts;
 mod make;
 mod make_rom;
@@ -189,7 +189,7 @@ mod tests {
         let w = h.world();
         for seed in 0..20 {
             for c in CONCEPTS {
-                for level in 1..=2 {
+                for level in 1..=5 {
                     for q in make::all(&w, &mut Rng::new(seed), c.id, level) {
                         claims::validate(&w, &q).unwrap_or_else(|e| panic!("{}: {e}", q.prompt));
                         let claim = q.source.claim().expect("Romlens's questions have claims");
@@ -208,6 +208,49 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    #[test]
+    fn the_game_is_asked_about_what_its_analysis_finds() {
+        let h = testing::held();
+        let w = h.world();
+        let row = |id: &str| coverage(&w).into_iter().find(|(c, _)| *c == id).unwrap().1;
+        // The test program sends DMA to VRAM, waits for vertical blank,
+        // writes INIDISP and sets its data bank through the stack.
+        for (c, level) in [
+            ("dma", 3),
+            ("dma", 4),
+            ("dma", 5),
+            ("vram", 3),
+            ("vblank", 3),
+            ("forced_blank", 3),
+            ("reset", 3),
+            ("banks", 3),
+            ("widths", 4),
+            ("assembly", 5),
+        ] {
+            assert!(row(c)[level - 1] > 0, "{c} at level {level}");
+        }
+        // A program with nothing in it: no idiom, no store, no question
+        // about them.
+        let rom = RomImage::from_bytes(romlens_core::fixtures::minimal_lorom(), "m.sfc").unwrap();
+        let project = Project::new(&rom);
+        let snap = romlens_core::analysis::analyze(
+            &rom,
+            &project,
+            &romlens_core::analysis::AnalysisControl::silent(),
+        )
+        .unwrap();
+        let explain = Explanations::build(&rom, &project, &snap);
+        let bare = World {
+            rom: &rom,
+            project: &project,
+            snap: &snap,
+            explain: &explain,
+        };
+        for c in ["dma", "vram", "math_hw", "apu_ports"] {
+            assert!(candidates(&bare, &mut Rng::new(1), c, 3).is_empty(), "{c}");
         }
     }
 

@@ -63,6 +63,14 @@ pub enum Claim {
         register: String,
         value: u32,
     },
+    /// The store at `address` writes a value to `register` that makes its
+    /// `field` `expect`.
+    WriteMeans {
+        address: u32,
+        register: String,
+        field: String,
+        expect: String,
+    },
     /// A DMA the game starts at `at`: its `field` (channel, source,
     /// destination or size) is `expect`.
     Dma {
@@ -117,6 +125,7 @@ impl Claim {
     pub fn expected(&self) -> Option<String> {
         Some(match self {
             Claim::RegisterField { expect, .. }
+            | Claim::WriteMeans { expect, .. }
             | Claim::RegisterJob { expect, .. }
             | Claim::Dma { expect, .. }
             | Claim::DspField { expect, .. }
@@ -149,6 +158,7 @@ impl Claim {
         let mut c = self.clone();
         match &mut c {
             Claim::RegisterField { expect, .. }
+            | Claim::WriteMeans { expect, .. }
             | Claim::RegisterJob { expect, .. }
             | Claim::Dma { expect, .. }
             | Claim::DspField { expect, .. }
@@ -272,7 +282,7 @@ impl Question {
     pub fn answer_text(&self) -> String {
         match &self.ask {
             Ask::Choice { choices, answer } => choices.get(*answer).cloned().unwrap_or_default(),
-            Ask::Number { answer, hex: true } => format!("${answer:X}"),
+            Ask::Number { answer, hex: true } => hex(*answer),
             Ask::Number { answer, hex: false } => answer.to_string(),
             Ask::Bits { answer, .. } => bits_text(answer),
             Ask::Line { lines, answer } => {
@@ -280,6 +290,16 @@ impl Question {
             }
             Ask::Text { rubric } => rubric.clone(),
         }
+    }
+}
+
+/// A number as hex, padded to a byte, a word or an address: `$0F`,
+/// `$2100`, `$7E0DAE`.
+pub fn hex(v: u32) -> String {
+    match v {
+        0..=0xFF => format!("${v:02X}"),
+        0x100..=0xFFFF => format!("${v:04X}"),
+        _ => format!("${v:06X}"),
     }
 }
 
