@@ -173,13 +173,20 @@ fn idioms(rng: &mut Rng, w: &World, c: &Concept, out: &mut Vec<Question>) {
             continue;
         };
         let a = a.as_u24();
-        let wrong = TITLES
+        // Every idiom the code here is part of is right: none is a wrong
+        // choice.
+        let here: Vec<IdiomKind> = w
+            .explain
+            .idioms_at(i.first())
             .iter()
-            .filter(|k| **k != i.kind)
+            .map(|x| x.kind)
+            .collect();
+        let mut wrong = TITLES
+            .iter()
+            .filter(|k| !here.contains(k))
             .filter_map(|k| idiom_title(*k))
             .map(str::to_owned)
             .collect::<Vec<_>>();
-        let mut wrong = wrong;
         rng.shuffle(&mut wrong);
         let Some(ask) = choice(rng, title.into(), wrong) else {
             continue;
@@ -508,6 +515,13 @@ fn listing(w: &World, c: &Concept, out: &mut Vec<Question>) {
         }
         let t = text(w, &i);
         let (m, operand) = t.split_once(' ').unwrap_or((t.as_str(), ""));
+        // A register written twice here (CGDATA's two bytes) has two right
+        // lines: not a question.
+        let also =
+            |l: &(u32, String)| l.0 != a && l.1.split_once(' ').is_some_and(|(_, o)| o == operand);
+        if lines.iter().any(also) {
+            continue;
+        }
         let mut q = question(
             c,
             4,

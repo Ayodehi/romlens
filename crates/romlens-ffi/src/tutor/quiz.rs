@@ -392,9 +392,10 @@ pub fn start(
     purpose: Purpose,
     rom: &str,
     rom_title: &str,
+    seed: Option<u64>,
 ) -> Result<Quiz, String> {
     let id = new_quiz_id();
-    let seed = seed_for(&id);
+    let seed = seed.unwrap_or_else(|| seed_for(&id));
     let held = Held::of(wb);
     let w = held.world();
     let (concept_id, level, targets, questions) = match purpose {

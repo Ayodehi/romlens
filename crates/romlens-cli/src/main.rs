@@ -804,8 +804,62 @@ enum DrawCheck {
     },
 }
 
+#[derive(clap::Args)]
+#[command(args_conflicts_with_subcommands = true)]
+struct QuizCli {
+    #[command(subcommand)]
+    coverage: Option<QuizCoverage>,
+    rom: Option<PathBuf>,
+    /// The concept, by its id or name (`sprites`, "The NMI").
+    concept: Option<String>,
+    /// The level to prove (default: the next one to prove).
+    #[arg(long)]
+    level: Option<u8>,
+    /// Review the proofs that are due instead.
+    #[arg(long, conflicts_with = "practice")]
+    review: bool,
+    /// Practise: points, but no proof.
+    #[arg(long)]
+    practice: bool,
+    #[arg(long)]
+    project: Option<PathBuf>,
+    /// The same questions for the same seed.
+    #[arg(long)]
+    seed: Option<u64>,
+    /// The answers, separated by `;` (a choice's letter, a number, bits
+    /// such as `0-3`, a line's number; empty skips), instead of asking.
+    #[arg(long)]
+    answers: Option<String>,
+    #[arg(long)]
+    dir: Option<PathBuf>,
+}
+
+#[derive(Subcommand)]
+enum QuizCoverage {
+    /// How many questions Romlens can ask about each concept at each level
+    /// in a game.
+    Coverage {
+        rom: PathBuf,
+        #[arg(long)]
+        project: Option<PathBuf>,
+    },
+}
+
 #[derive(Subcommand)]
 enum TutorCommand {
+    /// A quiz of Romlens's own questions (docs/28): prove a concept at a
+    /// level, practise, or review what is due.
+    Quiz(Box<QuizCli>),
+    /// Points, rank, streak, what is proven, reviews due and achievements.
+    Progress {
+        #[arg(long)]
+        dir: Option<PathBuf>,
+        /// Every point and its cause.
+        #[arg(long)]
+        ledger: bool,
+        #[arg(long)]
+        json: bool,
+    },
     /// Ask a question about a ROM; the answer streams to stdout, the
     /// thinking and the tool log to stderr.
     Ask(Box<TutorAsk>),
@@ -1901,6 +1955,31 @@ fn run() -> Result<()> {
                 base_url: at.base_url.as_deref(),
                 responses: at.responses,
             }),
+            TutorCommand::Quiz(q) => match q.coverage {
+                Some(QuizCoverage::Coverage { rom, project }) => {
+                    commands::quiz::quiz_coverage(&rom, project.as_deref())
+                }
+                None => {
+                    let rom = q
+                        .rom
+                        .as_ref()
+                        .ok_or_else(|| anyhow::anyhow!("name the ROM"))?;
+                    commands::quiz::quiz(&commands::quiz::QuizArgs {
+                        rom,
+                        project: q.project.as_deref(),
+                        concept: q.concept.as_deref(),
+                        level: q.level,
+                        review: q.review,
+                        practice: q.practice,
+                        seed: q.seed,
+                        answers: q.answers.as_deref(),
+                        dir: q.dir.as_deref(),
+                    })
+                }
+            },
+            TutorCommand::Progress { dir, ledger, json } => {
+                commands::quiz::progress(dir.as_deref(), ledger, json)
+            }
             TutorCommand::Sessions { dir } => commands::tutor::sessions(dir.as_deref()),
             TutorCommand::Lessons { dir } => commands::tutor::lessons(dir.as_deref()),
             TutorCommand::Lesson { which, dir } => commands::tutor::lesson(&which, dir.as_deref()),

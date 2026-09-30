@@ -1424,3 +1424,47 @@ fn draw() {
     check("draw-lorom", &log);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// A quiz of Romlens's questions (docs/28): what the test program lets it
+/// ask, a level proven from set answers and a seed, and the points.
+#[test]
+fn tutor_quiz_commands() {
+    let dir = temp_dir("quiz");
+    let rom = dir.join("explain.sfc");
+    std::fs::write(&rom, fixtures::explain_lorom()).unwrap();
+    let rom = rom.to_string_lossy().into_owned();
+    let learner = dir.join("tutor");
+    let learner = learner.to_string_lossy().into_owned();
+    let coverage = run(&["tutor", "quiz", "coverage", &rom]);
+    let wrong = run_with(
+        &[
+            "tutor",
+            "quiz",
+            &rom,
+            "forced_blank",
+            "--level",
+            "2",
+            "--seed",
+            "7",
+        ],
+        &["--answers", "A;B;C;A;B", "--dir", &learner],
+    );
+    let right = run_with(
+        &[
+            "tutor",
+            "quiz",
+            &rom,
+            "forced_blank",
+            "--level",
+            "2",
+            "--seed",
+            "7",
+        ],
+        &["--answers", "B;$2100;B;7;0-3", "--dir", &learner],
+    );
+    let progress = run(&["tutor", "progress", "--ledger", "--dir", &learner]);
+    check(
+        "tutor-quiz-lorom",
+        &redact_tmp(&dir, &format!("{coverage}\n{wrong}\n{right}\n{progress}")),
+    );
+}

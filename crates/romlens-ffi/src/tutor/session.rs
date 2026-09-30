@@ -1886,6 +1886,7 @@ impl TutorSession {
             purpose,
             &self.wb.rom_identity().sha256,
             &self.rom_title(),
+            None,
         )
         .map_err(err)?;
         quiz.conversation = self.conversation_id().unwrap_or_default();

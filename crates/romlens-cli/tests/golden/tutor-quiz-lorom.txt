@@ -1,0 +1,135 @@
+Questions Romlens can ask in this game, by level (a proof takes 5):
+concept            1   2   3   4   5
+cpu                5   3   0   0   0
+ppu                4  32   2   4   4
+apu                5   3   0   0   0
+memory_map         7   3   0   0   0
+rom                6   3   1   0   0
+mapping            7   3   1   0   0
+wram               6   6   1   0   0
+hw_registers       6  16   6  12  12
+tiles              6  16   0   0   0
+palettes           6   6   0   0   0
+vram               5  14   5   4   4
+backgrounds        6  32   0   0   0
+tilemaps           4  16   0   0   0
+bg_modes           4  15   0   0   0
+sprites            6  13   0   0   0
+oam                5  11   0   0   0
+scrolling          4   5   0   0   0
+mode7              6  13   0   0   0
+color_math         4  38   0   0   0
+compression        4   3   0   0   0
+frame              8   3   0   0   1
+vblank             6  14   1   0   2
+forced_blank       4   7   2   4   4
+nmi                6  16   7   4   0
+irq                5  17   7   4   4
+dma                6  20   6   6   6
+hdma               6  15   4   2   2
+main_loop          4   4   1   0   2
+shadows            4   3   0   0   0
+assembly           4   5   0   0  12
+cpu_registers      7   6   0   6   0
+widths             4   5   0   6   6
+addressing         5   9   0   0  12
+banks              6   8   1   0   4
+stack              5   7   0   0   6
+flags_branches     5   9   1   0   6
+jump_tables        4   4   0   0   0
+reset              4   7   1   0  10
+math_hw            5  10   1   4   4
+joypads            5  22   6   4   4
+objects            4   3   0   0   0
+spc700             6   3   0   0   0
+apu_ports          4   7   1   0   0
+dsp                6   9   0   0   0
+brr                6   3   0   0   0
+sound_driver       4   6   0   0   0
+81 of 230 concept-levels can be proven here.
+
+Proving Forced blank, level 2 (The hardware): 5 questions from Romlens's tables.
+
+1. What else does INIDISP set besides forced blank?
+   A) The sprite size
+   B) The screen's brightness
+   C) The scroll
+   D) The background mode
+   Not quite: the answer is The screen's brightness.
+   Bits 0–3 of INIDISP are the brightness, 0 to 15.
+
+2. At which address is INIDISP?
+   (a hex number)
+   Not quite: the answer is $2100.
+   INIDISP ($2100): Screen display: force blank and brightness. Turns the picture on or off and sets its brightness.
+
+3. A game writes $80 to INIDISP. What does that say about “Forced blank”?
+   A) display on
+   B) forced blank
+   Not quite: the answer is forced blank.
+   Bit 7 of $80 is 1, so Forced blank is forced blank. Turns the picture on or off and sets its brightness.
+
+4. Which bits of INIDISP are “Forced blank”?
+   (bits of INIDISP, such as 0-3 or 7)
+   Not quite: it is bit 7.
+   INIDISP ($2100): bit 7 is Forced blank. Turns the picture on or off and sets its brightness.
+
+5. Which bits of INIDISP are “Brightness”?
+   (bits of INIDISP, such as 0-3 or 7)
+   Not quite: it is bits 0–3.
+   INIDISP ($2100): bits 0–3 are Brightness. Turns the picture on or off and sets its brightness.
+
+0 of 5 (0 certain right).
+Not proven yet: it takes 4 of 5, with 3 of Romlens's questions right without a hint.
++5 points.
+
+Proving Forced blank, level 2 (The hardware): 5 questions from Romlens's tables.
+
+1. What else does INIDISP set besides forced blank?
+   A) The sprite size
+   B) The screen's brightness
+   C) The scroll
+   D) The background mode
+   Right.
+   Bits 0–3 of INIDISP are the brightness, 0 to 15.
+
+2. At which address is INIDISP?
+   (a hex number)
+   Right.
+   INIDISP ($2100): Screen display: force blank and brightness. Turns the picture on or off and sets its brightness.
+
+3. A game writes $80 to INIDISP. What does that say about “Forced blank”?
+   A) display on
+   B) forced blank
+   Right.
+   Bit 7 of $80 is 1, so Forced blank is forced blank. Turns the picture on or off and sets its brightness.
+
+4. Which bits of INIDISP are “Forced blank”?
+   (bits of INIDISP, such as 0-3 or 7)
+   Right.
+   INIDISP ($2100): bit 7 is Forced blank. Turns the picture on or off and sets its brightness.
+
+5. Which bits of INIDISP are “Brightness”?
+   (bits of INIDISP, such as 0-3 or 7)
+   Right.
+   INIDISP ($2100): bits 0–3 are Brightness. Turns the picture on or off and sets its brightness.
+
+5 of 5 (5 certain right).
+Proven: Forced blank, level 2. It comes back for review tomorrow.
++110 points.
+
+115 points. Rank: Reset.
+Next: First frame (Prove every concept of the machine at level 1).
+Proven: 2 of 230 levels across the map.
+Streak: 1 day (best 1 day).
+Proven levels:
+- Forced blank 2
+Achievements: 3 of 19: Proven, Clean sheet, Tested out
+Points:
+     2  A right answer
+     2  A right answer
+     2  A right answer
+     2  A right answer
+     2  A right answer
+   100  Proved Forced blank, level 2
+     5  The day's first

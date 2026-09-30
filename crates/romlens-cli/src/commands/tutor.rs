@@ -298,7 +298,7 @@ pub fn ask(w: &Where, a: &Ask) -> Result<()> {
     Ok(())
 }
 
-fn root(dir: Option<&Path>) -> Result<std::path::PathBuf> {
+pub(crate) fn root(dir: Option<&Path>) -> Result<std::path::PathBuf> {
     dir.map(Path::to_path_buf)
         .or_else(romlens_tutor::review::default_root)
         .ok_or_else(|| anyhow!("no folder of conversations; name one with --dir"))

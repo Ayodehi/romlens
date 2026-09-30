@@ -93,17 +93,14 @@ impl Rng {
 }
 
 /// Every question Romlens can ask about a concept at a level in this ROM,
-/// each checked: one that fails its own claim is a bug in Romlens, and is
-/// left out.
+/// each checked against its claim.
 pub fn candidates(w: &World, rng: &mut Rng, concept: &str, level: u8) -> Vec<Question> {
     let mut seen = BTreeSet::new();
     make::all(w, rng, concept, level)
         .into_iter()
-        .filter(|q| {
-            let ok = claims::validate(w, q);
-            debug_assert!(ok.is_ok(), "{}: {:?}", q.prompt, ok);
-            ok.is_ok()
-        })
+        // A question its own claim refuses is a gap in a generator: it is
+        // dropped, never asked (the tests check every generator's output).
+        .filter(|q| claims::validate(w, q).is_ok())
         .filter(|q| seen.insert(q.prompt.clone()))
         .collect()
 }

@@ -731,8 +731,10 @@ impl Progress {
             }
         }
 
+        // In time, and within a second by what they were for, so the order
+        // never depends on ids.
         p.ledger
-            .sort_by(|a, b| a.when.cmp(&b.when).then(a.from.cmp(&b.from)));
+            .sort_by(|a, b| a.when.cmp(&b.when).then(a.why.cmp(&b.why)));
         p.xp = p.ledger.iter().map(|l| l.points).sum();
         p.unlocked.sort_by_key(|u| u.when);
         let highest = p.highest();
