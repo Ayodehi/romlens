@@ -18,7 +18,7 @@ use crate::quiz::{Purpose, Quiz};
 use crate::store::StoreError;
 
 /// A fact with no other file, one JSON object a line.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Fact {
     /// A lesson step's predict question, guessed before Show; `right` when
@@ -29,6 +29,15 @@ pub enum Fact {
         guess: String,
         #[serde(default)]
         right: Option<bool>,
+        when: u64,
+    },
+    /// The tutor's mark for a guess Romlens couldn't check: 1, 0.5 or 0,
+    /// and its line to the student.
+    GuessMarked {
+        lesson: String,
+        step: u32,
+        credit: f32,
+        said: String,
         when: u64,
     },
     /// A milestone reached in a game (`reset_named`, `routines_50`, …).
@@ -43,7 +52,9 @@ pub enum Fact {
 impl Fact {
     pub fn when(&self) -> u64 {
         match self {
-            Fact::PredictAnswered { when, .. } | Fact::Milestone { when, .. } => *when,
+            Fact::PredictAnswered { when, .. }
+            | Fact::GuessMarked { when, .. }
+            | Fact::Milestone { when, .. } => *when,
         }
     }
 }
@@ -636,6 +647,20 @@ impl Progress {
 
         // The journal: guesses and milestones, each once.
         let mut guessed: BTreeSet<(String, u32)> = BTreeSet::new();
+        // Guesses already right by their claim: the tutor's mark adds nothing.
+        let mut marked_right: BTreeSet<(String, u32)> = i
+            .journal
+            .iter()
+            .filter_map(|f| match f {
+                Fact::PredictAnswered {
+                    lesson,
+                    step,
+                    right: Some(true),
+                    ..
+                } => Some((lesson.clone(), *step)),
+                _ => None,
+            })
+            .collect();
         let mut reached: BTreeSet<(String, String)> = BTreeSet::new();
         let mut journal: Vec<&Fact> = i.journal.iter().collect();
         journal.sort_by_key(|f| f.when());
@@ -667,6 +692,23 @@ impl Progress {
                     active(*when, lesson);
                     if guessed.len() == 10 {
                         unlock(&mut p, "predictor", *when);
+                    }
+                }
+                Fact::GuessMarked {
+                    lesson,
+                    step,
+                    credit,
+                    when,
+                    ..
+                } => {
+                    if *credit >= 1.0 && marked_right.insert((lesson.clone(), *step)) {
+                        earn(
+                            &mut p,
+                            *when,
+                            xp::GUESS_RIGHT,
+                            "A predict question guessed right".into(),
+                            lesson,
+                        );
                     }
                 }
                 Fact::Milestone {

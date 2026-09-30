@@ -143,10 +143,16 @@ pub struct LessonStepInfo {
     pub picture: Option<String>,
     /// Romlens can check a guess at the predict question (docs/28).
     pub checks_guess: bool,
-    /// The student's first guess, and whether it was right when it could
-    /// be checked.
+    /// The student's first guess, and whether it was right: checked by
+    /// Romlens where the step has a claim, else marked by the tutor.
     pub guessed: Option<String>,
     pub guess_right: Option<bool>,
+    /// The tutor's mark (1, 0.5 or 0) and its line, for a guess Romlens
+    /// couldn't check.
+    pub guess_credit: Option<f32>,
+    pub guess_note: Option<String>,
+    /// The tutor is marking the guess now.
+    pub guess_marking: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
@@ -234,6 +240,9 @@ fn lesson_info(l: &romlens_tutor::lesson::Lesson, rom: &str) -> LessonInfo {
                 checks_guess: s.predict_answer.is_some(),
                 guessed: None,
                 guess_right: None,
+                guess_credit: None,
+                guess_note: None,
+                guess_marking: false,
             })
             .collect(),
         next: l
@@ -394,6 +403,11 @@ pub enum TutorEventInfo {
     /// a question for it, or the model marked an answer.
     QuizChanged {
         quiz: String,
+    },
+    /// The tutor marked a guess at a lesson step's predict question.
+    GuessMarked {
+        lesson: String,
+        step: u32,
     },
     /// Points gained, and what else is new: levels proven ("Sprites, level
     /// 2"), achievements and milestones earned, a new rank.
@@ -1909,21 +1923,95 @@ impl TutorSession {
     fn add_guesses(&self, info: &mut LessonInfo) {
         use romlens_tutor::progress::Fact;
         for f in self.quizzes.journal.read() {
-            if let Fact::PredictAnswered {
-                lesson,
-                step,
-                guess,
-                right,
-                ..
-            } = f
-                && lesson == info.id
-                && let Some(s) = info.steps.get_mut(step as usize)
-                && s.guessed.is_none()
-            {
-                s.guessed = Some(guess);
-                s.guess_right = right;
+            match f {
+                Fact::PredictAnswered {
+                    lesson,
+                    step,
+                    guess,
+                    right,
+                    ..
+                } if lesson == info.id => {
+                    if let Some(s) = info.steps.get_mut(step as usize)
+                        && s.guessed.is_none()
+                    {
+                        s.guessed = Some(guess);
+                        s.guess_right = right;
+                    }
+                }
+                Fact::GuessMarked {
+                    lesson,
+                    step,
+                    credit,
+                    said,
+                    ..
+                } if lesson == info.id => {
+                    if let Some(s) = info.steps.get_mut(step as usize)
+                        && s.guess_credit.is_none()
+                    {
+                        s.guess_credit = Some(credit);
+                        s.guess_note = Some(said);
+                        if s.guess_right.is_none() && credit != 0.5 {
+                            s.guess_right = Some(credit >= 1.0);
+                        }
+                    }
+                }
+                _ => {}
             }
         }
+        let marking = self
+            .quizzes
+            .marking
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        for (k, s) in info.steps.iter_mut().enumerate() {
+            s.guess_marking = marking.contains(&(info.id.clone(), k as u32));
+        }
+    }
+
+    /// The tutor's mark for a guess Romlens couldn't check, on a copy of
+    /// the conversation: the step's own text is what a good guess says.
+    fn mark_guess(
+        self: &Arc<Self>,
+        w: &Session,
+        lesson: &str,
+        step: u32,
+        question: &str,
+        answer: &str,
+        guess: &str,
+    ) {
+        let keys = Keys(Arc::clone(&self.keys));
+        let quiet = |_: agent::Event| {};
+        let none = super::quiz::NoTools(self.tools.as_ref());
+        let d = Deps {
+            tools: &none,
+            ..self.deps(&keys, &quiet)
+        };
+        let asked = format!("{question} (a guess made before reading the step; mark it kindly)");
+        if let Ok((credit, said, cost)) = w.grade(&asked, answer, guess, &d) {
+            let _ = self
+                .quizzes
+                .journal
+                .append(&romlens_tutor::progress::Fact::GuessMarked {
+                    lesson: lesson.to_owned(),
+                    step,
+                    credit,
+                    said,
+                    when: now(),
+                });
+            if cost > 0.0 {
+                self.charge(w, cost);
+            }
+        }
+        self.quizzes
+            .marking
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&(lesson.to_owned(), step));
+        self.listener.on_event(TutorEventInfo::GuessMarked {
+            lesson: lesson.to_owned(),
+            step,
+        });
+        self.announce();
     }
 
     fn load_quiz(&self, id: &str) -> Result<romlens_tutor::quiz::Quiz, RomlensError> {
@@ -2110,7 +2198,7 @@ impl TutorSession {
     /// a claim and the guess reads as its answer, Romlens says whether it is
     /// right (`right` is none when it can't tell).
     pub fn answer_predict(
-        &self,
+        self: Arc<Self>,
         lesson: String,
         step: u32,
         guess: String,
@@ -2136,22 +2224,46 @@ impl TutorSession {
             Some(crate::quiz::claims::check(&held.world(), &alt).is_ok())
         });
         let first = self.guess(&lesson, step).is_none();
+        // Romlens can't judge it: the tutor marks it, with a conversation
+        // open to mark it from.
+        let marker = if first && right.is_none() {
+            let st = self.lock();
+            if st.busy { None } else { st.session.clone() }
+        } else {
+            None
+        };
         if first {
             self.quizzes
                 .journal
                 .append(&romlens_tutor::progress::Fact::PredictAnswered {
                     lesson: lesson.clone(),
                     step,
-                    guess,
+                    guess: guess.clone(),
                     right,
                     when: now(),
                 })
                 .map_err(err)?;
             self.announce();
         }
+        let marking = marker.is_some();
+        if let Some(w) = marker {
+            self.quizzes
+                .marking
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert((lesson.clone(), step));
+            let me = Arc::clone(&self);
+            let (question, answer) = (s.predict.clone().unwrap_or_default(), s.body.clone());
+            let id = lesson.clone();
+            std::thread::spawn(move || me.mark_guess(&w, &id, step, &question, &answer, &guess));
+        }
         // The next question says what they guessed.
         self.set_lesson_step(Some(lesson), step);
-        Ok(super::quiz::PredictResultInfo { right, first })
+        Ok(super::quiz::PredictResultInfo {
+            right,
+            first,
+            marking,
+        })
     }
 
     /// Removes every quiz and the journal: points, proofs, streaks and
@@ -2556,11 +2668,11 @@ mod tests {
             checked: None,
         };
         store.save(&lesson, &[]).unwrap();
-        let r = t
+        let r = Arc::clone(&t)
             .answer_predict(lesson.id.clone(), 0, " $2100 ".into())
             .unwrap();
         assert_eq!((r.right, r.first), (Some(true), true));
-        let again = t
+        let again = Arc::clone(&t)
             .answer_predict(lesson.id.clone(), 0, "$2105".into())
             .unwrap();
         assert_eq!(
@@ -2568,17 +2680,20 @@ mod tests {
             (Some(false), false),
             "checked, but only the first counts"
         );
-        let unchecked = t
+        let unchecked = Arc::clone(&t)
             .answer_predict(lesson.id.clone(), 1, "the PPU stops".into())
             .unwrap();
         assert_eq!(unchecked.right, None, "no claim, nothing marked");
         assert!(
-            t.answer_predict(lesson.id.clone(), 2, "anything".into())
+            Arc::clone(&t)
+                .answer_predict(lesson.id.clone(), 2, "anything".into())
                 .is_err(),
             "no question"
         );
         assert!(
-            t.answer_predict(lesson.id.clone(), 1, "no".into()).is_err(),
+            Arc::clone(&t)
+                .answer_predict(lesson.id.clone(), 1, "no".into())
+                .is_err(),
             "too short"
         );
         let info = t.lesson(lesson.id.clone()).unwrap();
@@ -2598,6 +2713,67 @@ mod tests {
             p.recent
                 .iter()
                 .any(|l| l.why.contains("predict") && l.points == 5)
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_tutor_marks_a_guess_romlens_cannot_check() {
+        use romlens_tutor::lesson::{Lesson, Step};
+        let (t, rx, local, root, _wb) = setup(
+            "markguess",
+            vec![text_reply("CREDIT 1: Right, the PPU does the drawing.")],
+        );
+        t.new_conversation(local, "qwen3".into(), None, TutorMode::ReadOnly, None)
+            .unwrap();
+        let lesson = Lesson {
+            id: "l2-00000".into(),
+            title: "Two chips".into(),
+            rom: None,
+            created: 1,
+            levels: (1, 1),
+            concepts: vec![("ppu".into(), 1)],
+            builds_on: vec![],
+            steps: vec![Step {
+                title: "Who draws".into(),
+                predict: Some("Which chip draws the picture?".into()),
+                body: "The PPU draws; the CPU only sets it up.".into(),
+                focus: None,
+                picture: None,
+                predict_answer: None,
+            }],
+            next: vec![],
+            conversation: String::new(),
+            finished: true,
+            revisions: vec![],
+            checked: None,
+        };
+        t.tools.lessons.store().unwrap().save(&lesson, &[]).unwrap();
+        let r = Arc::clone(&t)
+            .answer_predict(lesson.id.clone(), 0, "the PPU".into())
+            .unwrap();
+        assert!(r.marking && r.right.is_none());
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        loop {
+            match rx.recv_timeout(Duration::from_millis(200)) {
+                Ok(TutorEventInfo::GuessMarked { lesson: l, step: 0 }) if l == lesson.id => break,
+                _ => assert!(std::time::Instant::now() < deadline, "the mark comes"),
+            }
+        }
+        let s = &t.lesson(lesson.id.clone()).unwrap().steps[0];
+        assert_eq!((s.guess_right, s.guess_credit), (Some(true), Some(1.0)));
+        assert!(
+            s.guess_note
+                .as_deref()
+                .unwrap()
+                .contains("PPU does the drawing")
+        );
+        assert!(!s.guess_marking);
+        let p = t.progress().unwrap();
+        assert!(
+            p.recent
+                .iter()
+                .any(|l| l.why == "A predict question guessed right")
         );
         let _ = std::fs::remove_dir_all(&root);
     }

@@ -310,6 +310,8 @@ final class TutorModel {
             finish(error: message)
         case .quizChanged(let id):
             if quiz?.id == id { reloadQuiz() }
+        case .guessMarked(let lesson, _):
+            reloadLesson(lesson)
         case .progress(let gained, let proven, let unlocked, let rank):
             refreshProgress()
             earned(gained: gained, proven: proven, unlocked: unlocked, rank: rank)

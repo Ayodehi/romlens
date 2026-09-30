@@ -98,11 +98,7 @@ struct LessonCard: View {
                 if let q = s.predict {
                     Label(q, systemImage: "questionmark.bubble").font(.caption).italic().foregroundStyle(.secondary)
                     if let g = s.guessed {
-                        Label(
-                            "You guessed “\(g)”" + (s.guessRight == true ? ": right" : s.guessRight == false ? ": not quite" : ""),
-                            systemImage: s.guessRight == true ? "checkmark.circle" : s.guessRight == false ? "xmark.circle" : "text.bubble")
-                            .font(.caption)
-                            .foregroundStyle(s.guessRight == true ? Color.green : s.guessRight == false ? Color.orange : Color.secondary)
+                        GuessVerdict(step: s, guess: g)
                     }
                 }
                 MessageText(tutor: tutor, text: s.body)
@@ -197,5 +193,54 @@ private struct Guess: View {
     private func check() {
         guard guess.trimmingCharacters(in: .whitespaces).count >= 3 else { return }
         tutor.answerPredict(lesson, step, guess)
+    }
+}
+
+/// What became of a guess: Romlens's check, the tutor's mark and its line,
+/// the mark on its way, or, with neither, the answer to compare it with.
+private struct GuessVerdict: View {
+    let step: LessonStepInfo
+    let guess: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Label("You guessed “\(guess)”\(verdict)", systemImage: icon)
+                .foregroundStyle(colour)
+            if step.guessMarking {
+                Label("The tutor is marking your guess…", systemImage: "hourglass").foregroundStyle(.secondary)
+            } else if let note = step.guessNote {
+                Text(note).italic().foregroundStyle(.secondary)
+            } else if step.guessRight == nil {
+                Text("Compare it with the answer below.").foregroundStyle(.secondary)
+            }
+        }
+        .font(.caption)
+    }
+
+    private var verdict: String {
+        switch (step.guessRight, step.guessCredit) {
+        case (true?, _): ": right"
+        case (false?, _): ": not quite"
+        case (nil, 0.5?): ": partly right"
+        default: ""
+        }
+    }
+
+    private var icon: String {
+        switch (step.guessRight, step.guessCredit) {
+        case (true?, _): "checkmark.circle.fill"
+        case (false?, _): "xmark.circle"
+        case (nil, 0.5?): "circle.lefthalf.filled"
+        default: "text.bubble"
+        }
+    }
+
+    private var colour: Color {
+        switch (step.guessRight, step.guessCredit) {
+        case (true?, _): .green
+        case (false?, _): .orange
+        case (nil, 0.5?): .yellow
+        default: .secondary
+        }
     }
 }

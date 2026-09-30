@@ -189,6 +189,9 @@ pub struct PredictResultInfo {
     pub right: Option<bool>,
     /// The step's first guess, which earns its points.
     pub first: bool,
+    /// Romlens couldn't check it, and the tutor is marking it
+    /// (`GuessMarked` when done).
+    pub marking: bool,
 }
 
 /// Where the quizzes and the journal are, and the local time.
@@ -201,6 +204,8 @@ pub struct Quizzes {
     /// The conversation a quiz's tutor parts run on a copy of: its model
     /// and prefix.
     pub writer: Mutex<Option<romlens_tutor::agent::Session>>,
+    /// Guesses the tutor is marking: lesson and step.
+    pub marking: Mutex<std::collections::HashSet<(String, u32)>>,
 }
 
 impl Quizzes {
@@ -212,6 +217,7 @@ impl Quizzes {
             offset: Mutex::new(0),
             writing: Mutex::new(Default::default()),
             writer: Mutex::new(None),
+            marking: Mutex::new(Default::default()),
         }
     }
 
