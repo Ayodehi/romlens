@@ -303,6 +303,9 @@ final class TutorModel {
             for id in Array(lessonCache.keys) { reloadLesson(id) }
         case .failed(let message):
             finish(error: message)
+        case .quizChanged, .progress:
+            // Quizzes and progress (docs/28): shown from Q8.
+            break
         }
     }
 

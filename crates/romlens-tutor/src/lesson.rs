@@ -823,6 +823,12 @@ impl LessonStore {
         }
     }
 
+    /// The folder the student's record is in: quizzes and the journal are
+    /// kept beside the lessons (docs/28).
+    pub fn root(&self) -> PathBuf {
+        self.dir.parent().unwrap_or(&self.dir).to_path_buf()
+    }
+
     fn lessons_dir(&self) -> PathBuf {
         self.dir.join("lessons")
     }

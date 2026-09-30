@@ -8,6 +8,7 @@ pub mod edits;
 pub mod lessons;
 pub mod media;
 pub mod png;
+pub mod quiz;
 pub mod reference;
 pub mod session;
 pub mod tools;

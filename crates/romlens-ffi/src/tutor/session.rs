@@ -170,9 +170,13 @@ pub struct ConceptInfo {
     pub level: u8,
     pub marked: bool,
     pub lesson: Option<String>,
+    /// The highest level a quiz proved (docs/28), 0 for none.
+    pub proven: u8,
+    /// When that proof comes up for review.
+    pub due: Option<u64>,
 }
 
-fn focus_url(f: &romlens_tutor::lesson::Focus) -> String {
+pub(crate) fn focus_link(f: &romlens_tutor::lesson::Focus) -> String {
     use romlens_tutor::lesson::Focus;
     match f {
         Focus::Address { start, .. } => format!("romlens://a/{start:06X}"),
@@ -218,7 +222,7 @@ fn lesson_info(l: &romlens_tutor::lesson::Lesson, rom: &str) -> LessonInfo {
                 title: s.title.clone(),
                 predict: s.predict.clone(),
                 body: s.body.clone(),
-                focus: s.focus.as_ref().map(focus_url),
+                focus: s.focus.as_ref().map(focus_link),
                 focus_text: s.focus.as_ref().map(|f| f.text()),
                 picture: s.picture.clone(),
             })
@@ -376,6 +380,19 @@ pub enum TutorEventInfo {
         changed: u32,
         cost: f64,
         total: f64,
+    },
+    /// A quiz changed off the window's own calls (docs/28): the tutor wrote
+    /// a question for it, or the model marked an answer.
+    QuizChanged {
+        quiz: String,
+    },
+    /// Points gained, and what else is new: levels proven ("Sprites, level
+    /// 2"), achievements and milestones earned, a new rank.
+    Progress {
+        gained: u32,
+        proven: Vec<String>,
+        unlocked: Vec<String>,
+        rank: Option<String>,
     },
 }
 
@@ -698,6 +715,9 @@ pub struct TutorSession {
     transport: UreqTransport,
     cards: Arc<Cards>,
     state: Mutex<State>,
+    quizzes: super::quiz::Quizzes,
+    /// Progress as last announced, to tell the window what is new.
+    announced: Mutex<Option<romlens_tutor::progress::Progress>>,
 }
 
 fn err(msg: impl ToString) -> RomlensError {
@@ -835,6 +855,8 @@ impl TutorSession {
                     }));
                 }
             }
+            // A finished lesson earns points; say so.
+            me.announce();
             if let Some(n) = namer {
                 me.name(&n, &keys);
             }
@@ -1035,12 +1057,12 @@ impl TutorSession {
         let tools = RomTools::new(Arc::clone(&workbench));
         // The student's lessons, beside the conversations: one record for
         // every ROM.
-        tools
-            .lessons
-            .set_store(Some(romlens_tutor::lesson::LessonStore::new(
-                &PathBuf::from(&root),
-            )));
+        let lessons = romlens_tutor::lesson::LessonStore::new(&PathBuf::from(&root));
+        let quizzes = super::quiz::Quizzes::new(&lessons);
+        tools.lessons.set_store(Some(lessons));
         Arc::new(TutorSession {
+            quizzes,
+            announced: Mutex::new(None),
             tools: Arc::new(tools),
             store: Store::new(&PathBuf::from(root), &sha),
             wb: workbench,
@@ -1407,6 +1429,8 @@ impl TutorSession {
                         level: r.map_or(0, |r| r.level),
                         marked: r.is_some_and(|r| r.marked),
                         lesson: r.and_then(|r| r.lesson.clone()),
+                        proven: r.map_or(0, |r| r.proven),
+                        due: r.and_then(|r| r.due),
                     }
                 })
                 .collect(),
@@ -1664,6 +1688,215 @@ pub fn tutor_test_diagram_id(kind: String, spec: String) -> String {
         .unwrap_or_default()
 }
 
+impl TutorSession {
+    fn learner_store(&self) -> Result<Arc<romlens_tutor::lesson::LessonStore>, RomlensError> {
+        self.tools
+            .lessons
+            .store()
+            .ok_or_else(|| err("no learner record here"))
+    }
+
+    fn rom_title(&self) -> String {
+        let t = self.wb.rom().info().title;
+        if t.trim().is_empty() {
+            "this game".into()
+        } else {
+            t.trim().to_owned()
+        }
+    }
+
+    /// Tells the window what is new since progress was last worked out:
+    /// points, proofs, achievements, a rank. The first time only notes it.
+    fn announce(&self) {
+        let Ok(store) = self.learner_store() else {
+            return;
+        };
+        let now = self.quizzes.progress(&store);
+        let mut last = self.announced.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(before) = last.replace(now.clone()) else {
+            return;
+        };
+        let g = now.diff(&before);
+        if g.xp == 0 && g.proofs.is_empty() && g.unlocked.is_empty() && g.rank.is_none() {
+            return;
+        }
+        let name = |id: &str| {
+            romlens_tutor::lesson::concept(id).map_or(id.to_owned(), |c| c.name.to_owned())
+        };
+        let title = |u: &romlens_tutor::progress::Unlocked| {
+            romlens_tutor::progress::ACHIEVEMENTS
+                .iter()
+                .find(|a| a.id == u.id)
+                .map(|a| a.title.to_owned())
+                .or_else(|| romlens_tutor::progress::milestone(u.id).map(|m| m.title.to_owned()))
+                .unwrap_or_else(|| u.id.to_owned())
+        };
+        self.listener.on_event(TutorEventInfo::Progress {
+            gained: g.xp,
+            proven: g
+                .proofs
+                .iter()
+                .map(|(c, l)| format!("{}, level {l}", name(c)))
+                .collect(),
+            unlocked: g.unlocked.iter().map(title).collect(),
+            rank: g.rank.map(str::to_owned),
+        });
+    }
+
+    fn load_quiz(&self, id: &str) -> Result<romlens_tutor::quiz::Quiz, RomlensError> {
+        self.quizzes.store.load(id).map_err(err)
+    }
+
+    fn quiz_record(&self, q: &romlens_tutor::quiz::Quiz) -> super::quiz::QuizInfo {
+        let writing = self
+            .quizzes
+            .writing
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains(&q.id);
+        super::quiz::quiz_info(q, writing)
+    }
+}
+
+/// Quizzes and progress (docs/28).
+#[uniffi::export]
+impl TutorSession {
+    /// Days are counted in local time: the offset from UTC in seconds.
+    pub fn set_utc_offset(&self, seconds: i32) {
+        self.quizzes.set_offset(seconds);
+    }
+
+    /// Starts a quiz of Romlens's questions: to prove a concept at a level
+    /// (the next one to prove when none is given), to practise, or to
+    /// review what is due.
+    pub fn start_quiz(
+        &self,
+        concept: Option<String>,
+        level: Option<u8>,
+        purpose: super::quiz::QuizPurposeInfo,
+    ) -> Result<super::quiz::QuizInfo, RomlensError> {
+        use romlens_tutor::quiz::Purpose;
+        let store = self.learner_store()?;
+        let progress = self.quizzes.progress(&store);
+        let learner = store.learner();
+        let purpose = match purpose {
+            super::quiz::QuizPurposeInfo::Prove => Purpose::Prove,
+            super::quiz::QuizPurposeInfo::Review => Purpose::Review,
+            super::quiz::QuizPurposeInfo::Practice => Purpose::Practice,
+        };
+        let mut quiz = super::quiz::start(
+            &self.wb,
+            &progress,
+            &|id| learner.level(id),
+            concept.as_deref(),
+            level,
+            purpose,
+            &self.wb.rom_identity().sha256,
+            &self.rom_title(),
+        )
+        .map_err(err)?;
+        quiz.conversation = self.conversation_id().unwrap_or_default();
+        self.quizzes.store.save(&quiz).map_err(err)?;
+        // A baseline for what the quiz will earn.
+        if self
+            .announced
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_none()
+        {
+            self.announce();
+        }
+        Ok(self.quiz_record(&quiz))
+    }
+
+    pub fn quiz(&self, id: String) -> Option<super::quiz::QuizInfo> {
+        self.load_quiz(&id).ok().map(|q| self.quiz_record(&q))
+    }
+
+    /// Every quiz, the latest first.
+    pub fn quizzes(&self) -> Vec<super::quiz::QuizInfo> {
+        let mut all = self.quizzes.store.list();
+        all.reverse();
+        all.iter().map(|q| self.quiz_record(q)).collect()
+    }
+
+    /// Answers a question and marks it: the right answer and why come back.
+    pub fn answer_question(
+        &self,
+        quiz: String,
+        question: String,
+        given: super::quiz::GivenInfo,
+    ) -> Result<super::quiz::AnswerResultInfo, RomlensError> {
+        let mut q = self.load_quiz(&quiz)?;
+        let ask = q
+            .question(&question)
+            .ok_or_else(|| err(format!("{question} is not a question of this quiz")))?
+            .ask
+            .clone();
+        let g = super::quiz::given(&ask, given).map_err(err)?;
+        q.answer(&question, g).map_err(err)?;
+        self.quizzes.store.save(&q).map_err(err)?;
+        self.announce();
+        super::quiz::result_info(&q, &question).ok_or_else(|| err("no answer"))
+    }
+
+    /// A question's hint; it halves what the answer earns.
+    pub fn question_hint(&self, quiz: String, question: String) -> Result<String, RomlensError> {
+        let mut q = self.load_quiz(&quiz)?;
+        let h = q.hint(&question).map_err(err)?;
+        self.quizzes.store.save(&q).map_err(err)?;
+        Ok(h)
+    }
+
+    /// Ends a quiz: what it proved, and its review, now count.
+    pub fn finish_quiz(&self, quiz: String) -> Result<super::quiz::QuizInfo, RomlensError> {
+        let mut q = self.load_quiz(&quiz)?;
+        if q.finished.is_none() {
+            q.finished = Some(romlens_tutor::store::now());
+            self.quizzes.store.save(&q).map_err(err)?;
+        }
+        self.announce();
+        Ok(self.quiz_record(&q))
+    }
+
+    /// Points, rank, streak, achievements, this game's milestones and the
+    /// reviews due.
+    pub fn progress(&self) -> Option<super::quiz::ProgressInfo> {
+        let store = self.learner_store().ok()?;
+        let p = self.quizzes.progress(&store);
+        Some(super::quiz::progress_info(
+            &p,
+            &store,
+            &self.wb.rom_identity().sha256,
+            &self.rom_title(),
+        ))
+    }
+
+    /// Checks this game's milestones against the project now, keeps those
+    /// newly met, and returns their titles.
+    pub fn check_milestones(&self) -> Vec<String> {
+        let got = super::quiz::record_milestones(
+            &self.quizzes,
+            &self.wb,
+            &self.wb.rom_identity().sha256,
+            &self.rom_title(),
+        );
+        if !got.is_empty() {
+            self.announce();
+        }
+        got
+    }
+
+    /// Removes every quiz and the journal: points, proofs, streaks and
+    /// achievements start again. Lessons and marks stay.
+    pub fn reset_progress(&self) -> Result<(), RomlensError> {
+        self.quizzes.store.reset().map_err(err)?;
+        self.quizzes.journal.reset().map_err(err)?;
+        *self.announced.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1748,6 +1981,178 @@ mod tests {
             vision: false,
         };
         (t, rx, local, root, wb)
+    }
+
+    /// The right answer to a question, as the window would send it.
+    fn right(q: &romlens_tutor::quiz::Question) -> super::super::quiz::GivenInfo {
+        use super::super::quiz::GivenInfo;
+        use romlens_tutor::quiz::Ask;
+        match &q.ask {
+            Ask::Choice { answer, .. } => GivenInfo::Choice {
+                index: *answer as u32,
+            },
+            Ask::Number { answer, hex } => GivenInfo::Number {
+                text: if *hex {
+                    format!("${answer:X}")
+                } else {
+                    answer.to_string()
+                },
+            },
+            Ask::Bits { answer, .. } => GivenInfo::Bits {
+                bits: answer.clone(),
+            },
+            Ask::Line { answer, .. } => GivenInfo::Line {
+                index: *answer as u32,
+            },
+            Ask::Text { .. } => GivenInfo::Text {
+                text: "because".into(),
+            },
+        }
+    }
+
+    #[test]
+    fn a_quiz_proves_a_level_with_no_model() {
+        use super::super::quiz::QuizPurposeInfo;
+        let (t, rx, _local, root, _wb) = setup("quiz", vec![]);
+        t.set_utc_offset(0);
+        let info = t
+            .start_quiz(Some("Sprites".into()), Some(1), QuizPurposeInfo::Prove)
+            .unwrap();
+        assert_eq!(
+            (info.concept.as_str(), info.level, info.questions.len()),
+            ("sprites", 1, 5)
+        );
+        assert!(
+            info.questions
+                .iter()
+                .all(|q| q.certain && q.source == "From Romlens's tables")
+        );
+        let quiz = t.quizzes.store.load(&info.id).unwrap();
+        for q in &quiz.questions {
+            let r = t
+                .answer_question(info.id.clone(), q.id.clone(), right(q))
+                .unwrap();
+            assert_eq!(r.credit, Some(1.0), "{}", q.prompt);
+            assert!(!r.explanation.is_empty());
+        }
+        assert!(
+            t.answer_question(
+                info.id.clone(),
+                quiz.questions[0].id.clone(),
+                right(&quiz.questions[0])
+            )
+            .is_err()
+        );
+        let done = t.finish_quiz(info.id.clone()).unwrap();
+        assert!(done.outcome.passed && done.finished, "{:?}", done.outcome);
+        // The window hears what it earned.
+        let mut proven = Vec::new();
+        while let Ok(e) = rx.recv_timeout(Duration::from_millis(200)) {
+            if let TutorEventInfo::Progress {
+                proven: p, gained, ..
+            } = e
+            {
+                assert!(gained > 0);
+                proven.extend(p);
+            }
+        }
+        assert_eq!(proven, vec!["Sprites, level 1".to_string()]);
+        let sprites = t
+            .learner()
+            .concepts
+            .into_iter()
+            .find(|c| c.id == "sprites")
+            .unwrap();
+        assert_eq!(
+            (sprites.level, sprites.proven),
+            (1, 1),
+            "a proven level is a level reached"
+        );
+        assert!(sprites.due.is_some());
+        let p = t.progress().unwrap();
+        assert!(p.xp >= 50, "{}", p.xp);
+        assert_eq!(p.rank, "Reset");
+        assert!(
+            p.achievements
+                .iter()
+                .any(|a| a.id == "first_proof" && a.unlocked.is_some())
+        );
+        assert!(
+            p.achievements
+                .iter()
+                .any(|a| a.game && a.rom_title.is_some()),
+            "this game's milestones are listed"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_hint_halves_the_answer_and_too_few_questions_is_said() {
+        use super::super::quiz::QuizPurposeInfo;
+        let (t, _rx, _local, root, _wb) = setup("hint", vec![]);
+        let info = t
+            .start_quiz(Some("ppu".into()), Some(2), QuizPurposeInfo::Practice)
+            .unwrap();
+        let quiz = t.quizzes.store.load(&info.id).unwrap();
+        let q = quiz
+            .questions
+            .iter()
+            .find(|q| q.hint.is_some())
+            .expect("a register's address has a hint");
+        assert!(
+            t.question_hint(info.id.clone(), q.id.clone())
+                .unwrap()
+                .contains("$2100")
+        );
+        let r = t
+            .answer_question(info.id.clone(), q.id.clone(), right(q))
+            .unwrap();
+        assert_eq!(r.credit, Some(0.5));
+        // Compression at level 4 has no questions in this game.
+        let e = t
+            .start_quiz(Some("compression".into()), Some(4), QuizPurposeInfo::Prove)
+            .unwrap_err();
+        assert!(
+            e.to_string().contains("can't be proven in this game yet"),
+            "{e}"
+        );
+        assert!(
+            t.start_quiz(None, None, QuizPurposeInfo::Review).is_err(),
+            "nothing is due"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_milestone_once_met_is_kept() {
+        let (t, _rx, _local, root, wb) = setup("milestone", vec![]);
+        assert!(t.check_milestones().is_empty());
+        wb.execute(crate::records::Command::SetLabel {
+            address: 0x8000,
+            name: Some("Boot".into()),
+        })
+        .unwrap();
+        // The test program's reset routine also waits for vertical blank
+        // and sends DMA to VRAM: naming it meets all three.
+        assert_eq!(
+            t.check_milestones(),
+            vec!["Where it all starts", "Round and round", "Pictures in"]
+        );
+        assert!(t.check_milestones().is_empty(), "once");
+        wb.execute(crate::records::Command::SetLabel {
+            address: 0x8000,
+            name: None,
+        })
+        .unwrap();
+        let p = t.progress().unwrap();
+        let m = p
+            .achievements
+            .iter()
+            .find(|a| a.id == "reset_named")
+            .unwrap();
+        assert!(m.unlocked.is_some(), "a name taken away takes nothing back");
+        assert!(p.xp >= 20);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
