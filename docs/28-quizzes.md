@@ -9,7 +9,7 @@ that tracks progress against it.
 |---|---|
 | Q0 this document, the pointers from `06`, `24` and `25`, the checklist rows | done, 30 September 2026 |
 | Q1 `romlens-tutor::quiz`: the quiz format, claims as data, grading, the store; the journal | done, 30 September 2026: `quiz`: `Quiz` (concept, level, purpose Prove, Review or Practice, a review's targets, the seed from the id, questions, answers, hints shown, cost, the conversation), `Question` (prompt, how it's answered, explanation, sources, hint, focus, and where it came from: Romlens with its claim, the tutor with its claim, or the tutor marked by the model), `Ask` (choice, number, bits, a listing's line, text), `Given`, `Attempt`, `Claim` (19 kinds, each with the field that is its answer: `expected`, and `with_expected` for what a wrong choice claims), `grade`, `parse_number` (`$`, `0x`, a bank's colon), `Quiz::answer`, `hint` (halves the credit), `mark` (the model's 0, ½ or 1), `outcome` (passed at 80% with three certain right without the hint; the model's marks never count as certain), `QuizStore` in `<root>/Learner/quizzes/`. `progress::Journal`: `journal.jsonl`, appended and synced, a torn last line skipped. Older files load |
-| Q2 `romlens-tutor::progress`: proofs, reviews, XP, streaks, ranks, achievements, all derived | planned |
+| Q2 `romlens-tutor::progress`: proofs, reviews, XP, streaks, ranks, achievements, all derived | done, 30 September 2026: `Progress::derive(Inputs { lessons, quizzes, journal, marks, now, offset })`: lessons in order (20 points, and 5 for each concept-level newly taught), each certain answer, proofs (the first passing Prove quiz at a concept and level; 50 × the level), reviews (the boxes of 1, 3, 7, 21 and 60 days: all right moves up, none moves back to the first, else it stays), each step's first guess, each game's milestones once, the day's first activity, streaks over local days with one missed day bridged in seven (7 and 30 days earn points). `xp`, `MILESTONES` (9), `ACHIEVEMENTS` (19), `RANKS` (9, from the highest level proven of each concept), the ledger (every point with its cause, summing to `xp`), `highest`, `due` (only a concept's highest proven level), `diff` for the banner. `Learner::with_proofs`: a level proven is reached; `Reached` has `proven` and `due`; the prompt's summary says what quizzes proved. `LessonStore::progress(now, offset)` reads the quizzes and the journal beside the lessons |
 | Q3 FFI `quiz`: the claim checks, the facts, the level 1–2 generators, coverage | planned |
 | Q4 the level 3–5 generators, from the game's analysis | planned |
 | Q5 `TutorSession`: the quiz API, records and events, exploration milestones | planned |
@@ -208,7 +208,8 @@ Disassembler (15 at level 4), Cycle counter (10 at level 5), ROM reader
 (all 46 at level 3), Hardware sage (all at level 5). Each group has a
 standing, the lowest level proven across it ("Graphics 2").
 
-**Achievements** (26), each a rule over the same inputs:
+**Achievements** (28: 19, and 9 for each game), each a rule over the same
+inputs:
 
 - Lessons: the first; five; Predictor (ten guesses before Show); Down to
   the metal (a lesson at level 4).

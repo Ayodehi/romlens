@@ -691,6 +691,10 @@ pub struct Reached {
     /// The lesson that took it there; `None` where the student marked it.
     pub lesson: Option<String>,
     pub marked: bool,
+    /// The highest level a quiz proved (docs/28), 0 for none.
+    pub proven: u8,
+    /// When that proof's review is due.
+    pub due: Option<u64>,
 }
 
 /// What the student knows: each concept reached, and the latest lessons.
@@ -713,6 +717,8 @@ impl Learner {
                     when: *when,
                     lesson: None,
                     marked: true,
+                    proven: 0,
+                    due: None,
                 },
             );
         }
@@ -729,6 +735,8 @@ impl Learner {
                             when: l.created,
                             lesson: Some(l.id.clone()),
                             marked: false,
+                            proven: 0,
+                            due: None,
                         },
                     );
                 }
@@ -743,6 +751,26 @@ impl Learner {
         Learner { concepts, recent }
     }
 
+    /// Adds what quizzes proved. A level proven is a level reached, so a
+    /// student who tests out has learned it.
+    pub fn with_proofs(mut self, progress: &crate::progress::Progress) -> Learner {
+        for (id, level) in progress.highest() {
+            let proof = &progress.proofs[&(id.to_owned(), level)];
+            let r = self.concepts.entry(id.to_owned()).or_insert(Reached {
+                level,
+                when: proof.proved,
+                lesson: None,
+                marked: false,
+                proven: 0,
+                due: None,
+            });
+            r.level = r.level.max(level);
+            r.proven = level;
+            r.due = Some(proof.due);
+        }
+        self
+    }
+
     pub fn level(&self, id: &str) -> u8 {
         self.concepts.get(id).map_or(0, |r| r.level)
     }
@@ -754,11 +782,14 @@ impl Learner {
         }
         let mut o = String::from("What the student has reached (concept, level):\n");
         for (id, r) in &self.concepts {
-            let how = match (&r.lesson, r.marked) {
+            let mut how = match (&r.lesson, r.marked) {
                 (_, true) => " (marked known)".to_owned(),
                 (Some(l), _) => format!(" (lesson {l})"),
                 _ => String::new(),
             };
+            if r.proven > 0 {
+                how.push_str(&format!(" (proven to level {} in a quiz)", r.proven));
+            }
             o.push_str(&format!("- {id} {}{how}\n", r.level));
         }
         if !self.recent.is_empty() {
@@ -938,9 +969,37 @@ impl LessonStore {
         Ok(())
     }
 
-    /// What the student knows now.
+    /// What the student knows now: the lessons, the marks and the proofs.
     pub fn learner(&self) -> Learner {
-        Learner::from(&self.list(), &self.marks())
+        let lessons = self.list();
+        let marks = self.marks();
+        Learner::from(&lessons, &marks).with_proofs(&self.progress_with(&lessons, &marks, now(), 0))
+    }
+
+    /// Points, proofs, streak and achievements now (docs/28), with days
+    /// counted in the local time `offset` seconds from UTC.
+    pub fn progress(&self, now: u64, offset: i32) -> crate::progress::Progress {
+        self.progress_with(&self.list(), &self.marks(), now, offset)
+    }
+
+    fn progress_with(
+        &self,
+        lessons: &[Lesson],
+        marks: &Marks,
+        now: u64,
+        offset: i32,
+    ) -> crate::progress::Progress {
+        let root = self.dir.parent().unwrap_or(&self.dir);
+        let quizzes = crate::quiz::QuizStore::new(root).list();
+        let journal = crate::progress::Journal::new(root).read();
+        crate::progress::Progress::derive(&crate::progress::Inputs {
+            lessons,
+            quizzes: &quizzes,
+            journal: &journal,
+            marks,
+            now,
+            offset,
+        })
     }
 }
 
