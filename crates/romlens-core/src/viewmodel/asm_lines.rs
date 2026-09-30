@@ -184,8 +184,14 @@ impl LineIndex {
         let mut has_content = false;
         let mut rec_i = 0usize;
         let recs = &snap.instructions;
+        // Where the last line ended: padding shown on an instruction's line
+        // can run into the regions after it.
+        let mut done = 0u32;
+        // The end and size of the last padded line: the next entry of the
+        // same table is padded to the same size.
+        let mut table: Option<(u32, u8)> = None;
         for region in &snap.regions {
-            let mut pos = region.start.0;
+            let mut pos = region.start.0.max(done);
             let end = region.end();
             let class = (region.kind.code(), confidence_class(region.confidence));
             while pos < end {
@@ -252,15 +258,19 @@ impl LineIndex {
                 }
                 let rec = recs.get(rec_i).filter(|r| r.offset == pos).copied();
                 if let Some(r) = rec {
+                    let entry = table.filter(|(end, _)| *end == r.offset).map(|(_, n)| n);
+                    let pad =
+                        padding_after(rom, snap, project, &splits, &r, recs.get(rec_i + 1), entry);
+                    table = (pad > 0).then_some((r.end() + pad as u32, r.len + pad));
                     lines.push(LineRef {
                         offset: pos,
                         kind: LineKind::Instruction,
-                        sub: r.len,
+                        sub: r.len + pad,
                     });
                     prev_block_end = crate::cpu65816::OPCODES[r.opcode as usize]
                         .mnemonic
                         .is_block_end();
-                    pos = r.end();
+                    pos = r.end() + pad as u32;
                     rec_i += 1;
                 } else {
                     let mut len = row_len(region.kind).min(end - pos);
@@ -283,6 +293,7 @@ impl LineIndex {
                 }
                 has_content = true;
             }
+            done = done.max(pos);
         }
         Self { lines, explain }
     }
@@ -354,6 +365,62 @@ impl LineIndex {
             }
         }
         out
+    }
+}
+
+/// How many `NOP`s (`$EA`) after `r` are filler, shown on its line: after a
+/// jump or a return, never run, with no label, reference or comment on them,
+/// unclassified or only guessed at (below 50%) and not in a region the user
+/// set; and with code straight after, or as the next entry of a table
+/// whose last entry was padded to `entry` bytes. A table of three-byte
+/// `JMP`s padded to four bytes each reads as one line per entry.
+fn padding_after(
+    rom: &RomImage,
+    snap: &AnalysisSnapshot,
+    project: &Project,
+    splits: &[u32],
+    r: &crate::analysis::snapshot::InsnRecord,
+    next: Option<&crate::analysis::snapshot::InsnRecord>,
+    entry: Option<u8>,
+) -> u8 {
+    use crate::cpu65816::Mnemonic;
+    let m = crate::cpu65816::OPCODES[r.opcode as usize].mnemonic;
+    if !m.is_block_end() || m == Mnemonic::BRK {
+        return 0;
+    }
+    let start = r.end();
+    let bank = bank_size(rom);
+    let filler = |stop: u32| {
+        stop > start
+            && (stop - start) as usize + r.len as usize <= 16
+            && start / bank == (stop - 1) / bank
+            && next.is_none_or(|n| n.offset >= stop)
+            && (start..stop).all(|off| {
+                rom.bytes().get(off as usize) == Some(&0xEA)
+                    && splits.binary_search(&off).is_err()
+                    && snap
+                        .region_at(FileOffset(off))
+                        .is_some_and(|g| g.kind == RegionKind::Unknown || g.confidence < 0.5)
+                    && project.region_override_at(FileOffset(off)).is_none()
+            })
+    };
+    let to_code = next.map(|n| n.offset);
+    let to_entry = entry
+        .filter(|n| *n > r.len)
+        .map(|n| start + (n - r.len) as u32);
+    [to_code, to_entry]
+        .into_iter()
+        .flatten()
+        .find(|s| filler(*s))
+        .map_or(0, |s| (s - start) as u8)
+}
+
+/// The line's comment for its padding.
+fn padded(n: u8) -> String {
+    if n == 1 {
+        "padded with a NOP".to_string()
+    } else {
+        format!("padded with {n} NOPs")
     }
 }
 
@@ -642,9 +709,11 @@ pub fn line_text(
             let explained = explain
                 .and_then(|x| x.write_at(FileOffset(line.offset)))
                 .map(|e| e.short());
+            let mut padding = 0u8;
             let auto_comment = if let Some(rec) = snap.instruction_at(FileOffset(line.offset))
                 && let Some(insn) = snap.decode_at(rom, rec)
             {
+                padding = line.sub.saturating_sub(rec.len);
                 let f = format_instruction(&insn, symbols);
                 out.text = f.text;
                 out.tokens = f.tokens;
@@ -658,6 +727,11 @@ pub fn line_text(
                 explained.or_else(|| f.register.map(|r| r.name.to_owned()))
             } else {
                 None
+            };
+            let auto_comment = match (auto_comment, padding) {
+                (c, 0) => c,
+                (Some(c), n) => Some(format!("{c}; {}", padded(n))),
+                (None, n) => Some(padded(n)),
             };
             let user = canonical.and_then(|a| project.comment_at(a, CommentKind::Line));
             let (comment, kind) = match (user, auto_comment) {

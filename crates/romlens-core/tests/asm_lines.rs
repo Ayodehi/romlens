@@ -310,3 +310,81 @@ fn text_formatter_shape() {
     );
     assert_eq!(file, "0x000001  18           CLC\n");
 }
+
+/// A table of `JMP`s padded to four bytes with `NOP`s: each entry is one
+/// line, its padding in its bytes, when code follows or the entry before
+/// was padded the same; not when the NOP is labelled or stands alone.
+#[test]
+fn nop_padding_joins_the_jump_before_it() {
+    let mut code = vec![0u8; 0x40];
+    let mut put = |at: usize, bytes: &[u8]| code[at..at + bytes.len()].copy_from_slice(bytes);
+    for (i, to) in [0x8010u16, 0x8014, 0x8020, 0x8024].iter().enumerate() {
+        let [lo, hi] = to.to_le_bytes();
+        put(i * 3, &[0x20, lo, hi]); // JSR
+    }
+    put(0x0C, &[0x80, 0xFE]); // BRA $800C
+    put(0x10, &[0x4C, 0x30, 0x80, 0xEA]); // JMP $8030 and padding, code after
+    put(0x14, &[0x4C, 0x30, 0x80, 0xEA]); // the table's last entry, bytes after
+    put(0x20, &[0x4C, 0x30, 0x80, 0xEA]); // its NOP labelled
+    put(0x24, &[0x4C, 0x30, 0x80, 0xEA]); // alone, bytes after
+    put(0x30, &[0x60]); // RTS
+    let bytes = fixtures::build_with_code(
+        romlens_core::MappingMode::LoRom,
+        0x8000,
+        false,
+        &code,
+        "PADDING",
+    );
+    let rom = RomImage::from_bytes(bytes, "p.sfc").unwrap();
+    let mut project = Project::new(&rom);
+    project
+        .apply(
+            &rom,
+            Command::SetLabel {
+                address: SnesAddress::new(0, 0x8023),
+                name: Some("Spare".into()),
+            },
+        )
+        .unwrap();
+    let snap = analyze(&rom, &project, &AnalysisControl::silent()).unwrap();
+    let idx = LineIndex::build(&rom, &snap, &project);
+    let line = |off: u32| idx.lines[idx.line_for_offset(off).unwrap()];
+    assert_eq!(line(0x10).kind, LineKind::Instruction);
+    assert_eq!(line(0x10).sub, 4, "the NOP is in the JMP's line");
+    assert_eq!(line(0x13).offset, 0x10, "and selecting it selects the JMP");
+    assert_eq!(line(0x14).sub, 4, "the next entry is padded the same");
+    assert_eq!(line(0x20).sub, 3, "a labelled NOP stays its own line");
+    assert_eq!(line(0x23).kind, LineKind::Data);
+    assert_eq!(
+        line(0x24).sub,
+        3,
+        "alone and with no code after, not padding"
+    );
+    let text = format_lines_text(
+        &rom,
+        &snap,
+        &project,
+        &idx,
+        0,
+        idx.len() as u32,
+        TextOptions {
+            style: AddressStyle::Snes,
+            verbose: false,
+        },
+    );
+    let jmp = text
+        .lines()
+        .find(|l| l.contains("$00:8010"))
+        .unwrap_or_default();
+    assert!(jmp.contains("4C 30 80 EA"), "{jmp}");
+    assert!(jmp.ends_with("; padded with a NOP"), "{jmp}");
+    let from_jmp: Vec<&str> = text
+        .lines()
+        .skip_while(|l| !l.contains("$00:8010"))
+        .take(4)
+        .collect();
+    assert!(
+        from_jmp.iter().all(|l| !l.contains("----")),
+        "no section for the padding: {from_jmp:?}"
+    );
+}

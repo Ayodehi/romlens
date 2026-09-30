@@ -17,8 +17,8 @@ Calls between columns, most first:
 0x000003  $00:8003   2 bytes  instruction in code
 0x000005  $00:8005   3 bytes  instruction in code
 0x000008  $00:8008   3 bytes  instruction in code
-0x00000B  $00:800B   2 bytes  instruction in code
-0x00000D  $00:800D   1 byte  row of unknown
+0x00000B  $00:800B   3 bytes  instruction in code
+0x00000E  $00:800E   1 byte  instruction in code
 (more items in the window)
 {
   "romBytes": 32768,
