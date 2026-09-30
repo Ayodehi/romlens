@@ -244,6 +244,10 @@ struct TutorPane: View {
                 get: { settings.checkLessons },
                 set: { settings.checkLessons = $0; TutorModel.checkLessonsChanged($0) }))
             Text("Once a lesson ends, the same model checks it against the ROM and corrects its steps. What it costs is shown on the lesson.").font(.caption).foregroundStyle(.secondary)
+            Toggle("Add the tutor's questions about the game to quizzes", isOn: Binding(
+                get: { settings.tutorQuizQuestions },
+                set: { settings.tutorQuizQuestions = $0 }))
+            Text("Up to two a quiz, each checked by Romlens before it is asked; a written answer is marked by the model. Their cost is added to the conversation's.").font(.caption).foregroundStyle(.secondary)
         }
         .formStyle(.grouped)
     }

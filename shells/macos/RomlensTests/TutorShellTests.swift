@@ -306,7 +306,7 @@ import Testing
         let r = try await rig([])
         defer { try? FileManager.default.removeItem(at: r.root) }
         r.tutor.composer = "/re"
-        #expect(r.tutor.matchingCommands.map(\.name) == ["/resume", "/rewind"])
+        #expect(r.tutor.matchingCommands.map(\.name) == ["/resume", "/rewind", "/review"])
         r.tutor.composer = "/mode accept"
         r.tutor.submit()
         #expect(r.tutor.mode == .acceptEdits && r.tutor.composer.isEmpty)
@@ -338,6 +338,41 @@ import Testing
         let plain = String(p.characters)
         #expect(plain == "Why\n• one $00:8000")
         #expect(p.runs.contains { $0.link == URL(string: "romlens://a/008000") })
+    }
+
+    @Test func aQuizProvesALevelAndTheMapShowsIt() async throws {
+        let r = try await rig([])
+        defer { try? FileManager.default.removeItem(at: r.root) }
+        r.tutor.run(command: "/quiz")
+        #expect(r.tutor.error?.contains("/quiz sprites") == true, "a quiz needs a topic")
+        r.tutor.run(command: "/quiz sprites")
+        let quiz = try #require(r.tutor.quiz)
+        guard case .quiz = r.tutor.sheet else { Issue.record("the quiz sheet opens"); return }
+        #expect(quiz.conceptName == "Sprites" && quiz.level == 1 && quiz.questions.count == 5)
+        #expect(quiz.questions.allSatisfy { $0.certain })
+
+        // The sheet lays out on its first question.
+        let sheet = NSHostingView(rootView: QuizSheet(tutor: r.tutor))
+        sheet.frame = NSRect(x: 0, y: 0, width: 580, height: 560)
+        sheet.layoutSubtreeIfNeeded()
+        #expect(sheet.fittingSize.width > 0)
+
+        // Right answers, then the quiz is done and the level proven.
+        let session = try #require(r.tutor.session)
+        let answers = tutorTestQuizAnswers(session: session, quiz: quiz.id)
+        for (q, a) in zip(quiz.questions, answers) {
+            r.tutor.answer(q.id, a)
+            #expect(r.tutor.result(q.id)?.credit == 1, "\(q.prompt)")
+        }
+        r.tutor.finishQuiz()
+        #expect(r.tutor.quiz?.outcome.passed == true)
+        let sprites = r.tutor.learner.concepts.first { $0.id == "sprites" }
+        #expect(sprites?.proven == 1 && sprites?.level == 1, "proven is learned, and the chip rings")
+        #expect(sprites?.due != nil)
+
+        // Nothing is due yet, so a review says so.
+        r.tutor.run(command: "/review")
+        #expect(r.tutor.error?.contains("Nothing is due") == true)
     }
 
     @Test func glossaryTermsAreLinkedTheFirstTimeOnly() {

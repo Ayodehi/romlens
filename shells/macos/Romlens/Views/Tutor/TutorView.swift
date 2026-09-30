@@ -34,6 +34,7 @@ struct TutorView: View {
             case .model: ModelSheet(tutor: tutor)
             case .help: HelpSheet()
             case .lessons: LessonsSheet(tutor: tutor, tab: .lessons)
+            case .quiz: QuizSheet(tutor: tutor)
             case .map: LessonsSheet(tutor: tutor, tab: .map)
             }
         }

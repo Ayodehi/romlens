@@ -1688,6 +1688,44 @@ pub fn tutor_test_diagram_id(kind: String, spec: String) -> String {
         .unwrap_or_default()
 }
 
+/// For shell tests: the right answer to each question of a quiz, as the
+/// window would send it. The window itself is never told them.
+#[uniffi::export]
+pub fn tutor_test_quiz_answers(
+    session: Arc<TutorSession>,
+    quiz: String,
+) -> Vec<super::quiz::GivenInfo> {
+    use super::quiz::GivenInfo;
+    use romlens_tutor::quiz::Ask;
+    let Ok(q) = session.quizzes.store.load(&quiz) else {
+        return Vec::new();
+    };
+    q.questions
+        .iter()
+        .map(|x| match &x.ask {
+            Ask::Choice { answer, .. } => GivenInfo::Choice {
+                index: *answer as u32,
+            },
+            Ask::Number { answer, hex } => GivenInfo::Number {
+                text: if *hex {
+                    format!("${answer:X}")
+                } else {
+                    answer.to_string()
+                },
+            },
+            Ask::Bits { answer, .. } => GivenInfo::Bits {
+                bits: answer.clone(),
+            },
+            Ask::Line { answer, .. } => GivenInfo::Line {
+                index: *answer as u32,
+            },
+            Ask::Text { .. } => GivenInfo::Text {
+                text: "an answer".into(),
+            },
+        })
+        .collect()
+}
+
 impl TutorSession {
     fn learner_store(&self) -> Result<Arc<romlens_tutor::lesson::LessonStore>, RomlensError> {
         self.tools

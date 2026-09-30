@@ -52,7 +52,7 @@ final class TutorModel {
     }
 
     enum Sheet: Identifiable {
-        case resume, rewind, model, help, lessons, map
+        case resume, rewind, model, help, lessons, map, quiz
         var id: Self { self }
     }
 
@@ -113,6 +113,8 @@ final class TutorModel {
         bridge.model = self
         self.bridge = bridge
         s.setCheckLessons(on: settings.checkLessons)
+        // Streaks count the student's own days.
+        s.setUtcOffset(seconds: Int32(TimeZone.current.secondsFromGMT()))
         session = s
         Self.open.append(WeakTutor(self))
         history = s.promptHistory(limit: 500)
@@ -303,8 +305,10 @@ final class TutorModel {
             for id in Array(lessonCache.keys) { reloadLesson(id) }
         case .failed(let message):
             finish(error: message)
-        case .quizChanged, .progress:
-            // Quizzes and progress (docs/28): shown from Q8.
+        case .quizChanged(let id):
+            if quiz?.id == id { reloadQuiz() }
+        case .progress:
+            // Points and achievements (docs/28): shown from Q10.
             break
         }
     }
@@ -538,6 +542,8 @@ final class TutorModel {
         Command(name: "/learn", about: "/learn <topic>: a lesson about it, as deep as you have got"),
         Command(name: "/explain", about: "Answer with lessons, or not (Explain mode)"),
         Command(name: "/lessons", about: "Your lessons, to read again"),
+        Command(name: "/quiz", about: "/quiz <topic>: prove what you know, with questions Romlens checks"),
+        Command(name: "/review", about: "A quiz on what is due for review"),
         Command(name: "/map", about: "What you have learned, concept by concept"),
         Command(name: "/help", about: "What the tutor can do and the keys it takes"),
     ]
@@ -598,6 +604,14 @@ final class TutorModel {
             }
         case "/lessons":
             sheet = .lessons
+        case "/quiz":
+            guard !arg.isEmpty else {
+                error = "Name what to be quizzed on: /quiz sprites, /quiz the NMI. The map lists the concepts."
+                return
+            }
+            startQuiz(arg)
+        case "/review":
+            startQuiz(nil, purpose: .review)
         case "/map":
             sheet = .map
         case "/explain":
@@ -659,6 +673,60 @@ final class TutorModel {
         if let f = lesson.steps[i].focus, let url = URL(string: f) {
             _ = follow(url, raise: false)
         }
+    }
+
+    // MARK: Quizzes (docs/28)
+
+    /// The quiz in the quiz sheet.
+    var quiz: QuizInfo?
+    /// What went wrong in the quiz sheet.
+    var quizError: String?
+
+    /// Starts a quiz: to prove a concept at a level (the next one to prove
+    /// when none is given), to practise, or to review what is due. With a
+    /// conversation open, the tutor may add questions about the game.
+    func startQuiz(_ concept: String?, level: UInt8? = nil, purpose: QuizPurposeInfo = .prove) {
+        let s = ensureSession()
+        let tutor = settings.tutorQuizQuestions && s.conversationId() != nil
+        do {
+            quiz = try s.startQuiz(concept: concept, level: level, purpose: purpose, tutor: tutor)
+            quizError = nil
+            sheet = .quiz
+        } catch {
+            self.error = Self.message(error)
+        }
+    }
+
+    func reloadQuiz() {
+        guard let id = quiz?.id else { return }
+        quiz = session?.quiz(id: id)
+    }
+
+    /// Answers a question; the result is in the quiz's results.
+    func answer(_ question: String, _ given: GivenInfo) {
+        guard let q = quiz, let s = session else { return }
+        do {
+            _ = try s.answerQuestion(quiz: q.id, question: question, given: given)
+            quizError = nil
+        } catch {
+            quizError = Self.message(error)
+        }
+        reloadQuiz()
+    }
+
+    func questionHint(_ question: String) -> String? {
+        guard let q = quiz, let s = session else { return nil }
+        defer { reloadQuiz() }
+        return try? s.questionHint(quiz: q.id, question: question)
+    }
+
+    func finishQuiz() {
+        guard let q = quiz, let s = session else { return }
+        quiz = (try? s.finishQuiz(quiz: q.id)) ?? quiz
+    }
+
+    func result(_ question: String) -> AnswerResultInfo? {
+        quiz?.results.first { $0.question == question }
     }
 
     func isRevealed(_ lesson: String, _ step: Int) -> Bool { revealed.contains("\(lesson)#\(step)") }

@@ -122,16 +122,34 @@ struct ConceptMap: View {
     }
 
     private func chip(_ c: ConceptInfo, _ l: LearnerInfo) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(c.name).font(.callout).lineLimit(1)
-            Text(c.level == 0 ? "not yet" : "\(c.level) · \(l.levels[Int(c.level) - 1])\(c.marked ? " (marked)" : "")")
+        let due = c.due.map { $0 <= UInt64(Date().timeIntervalSince1970) } ?? false
+        return VStack(alignment: .leading, spacing: 1) {
+            HStack(spacing: 4) {
+                Text(c.name).font(.callout).lineLimit(1)
+                Spacer(minLength: 0)
+                if due {
+                    Image(systemName: "clock").font(.caption2).help("Ready to review")
+                }
+            }
+            Text(c.level == 0 ? "not yet" : "\(c.level) · \(l.levels[Int(c.level) - 1])\(c.marked ? " (marked)" : "")\(c.proven > 0 ? " · proven \(c.proven)" : "")")
                 .font(.caption2).foregroundStyle(c.level >= 4 ? Color.white : Color.secondary)
         }
         .padding(.horizontal, 8).padding(.vertical, 5)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 6).fill(Self.shade(c.level)))
-        .help(c.line + (c.needs.isEmpty ? "" : "\nRests on: " + c.needs.joined(separator: ", ")))
+        // A ring: the level a quiz proved (docs/28).
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.accentColor, lineWidth: c.proven > 0 ? 1.5 + Double(c.proven) * 0.3 : 0))
+        .help(c.line + (c.needs.isEmpty ? "" : "\nRests on: " + c.needs.joined(separator: ", ")) + (c.proven > 0 ? "\nProven to level \(c.proven) in a quiz." : ""))
         .contextMenu {
+            Button(c.proven >= 5 ? "Practise Level 5…" : "Prove the Next Level…") {
+                tutor.startQuiz(c.id, level: c.proven >= 5 ? 5 : nil, purpose: c.proven >= 5 ? .practice : .prove)
+            }
+            Menu("Practise") {
+                ForEach(1...5, id: \.self) { n in
+                    Button("\(n) · \(l.levels[n - 1])") { tutor.startQuiz(c.id, level: UInt8(n), purpose: .practice) }
+                }
+            }
+            Divider()
             Menu("Mark as Known") {
                 ForEach(1...5, id: \.self) { n in
                     Button("\(n) · \(l.levels[n - 1])") {
