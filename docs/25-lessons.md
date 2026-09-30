@@ -229,7 +229,8 @@ so every finished lesson is checked in the background and corrected.
 
 ## What is cut for now
 
-- Quiz mode with checked answers (predict questions are not graded).
+- Quiz mode with checked answers (predict questions are not graded), now
+  planned in `28-quizzes.md`, with predict questions answered before Show.
 - Scenes: animation, camera moves, video export. Lessons are their drafts.
 - Lessons shared between students, or exported as documents.
 - Diagrams drawn by Romlens itself, planned in `26-diagrams.md` (until

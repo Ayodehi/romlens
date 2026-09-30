@@ -460,7 +460,7 @@ Each task is one or more commits, pushed.
 ## What is cut for now
 
 - The Explain and Quiz modes and scene drafts (Phase 4). Explain mode is
-  planned in `25-lessons.md`.
+  planned in `25-lessons.md`, Quiz mode in `28-quizzes.md`.
 - Making media or videos from C versions. The versions are kept for it.
 - Sending game assets to an image model, and editing pictures.
 - Diagrams drawn from text in the chat. Diagrams Romlens draws itself, and

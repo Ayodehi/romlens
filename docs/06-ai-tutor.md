@@ -204,7 +204,7 @@ Student: "Which code moves Samus horizontally?"
 | 1 | Ask mode over read-only ROM tools. Citations, selection chip, tool log |
 | 2 | Fix mode with proposal cards. `decoder_sanity`, data-type proposals, tile decode |
 | 3 | Investigate mode over recordings. Plans, stop button, `who_writes`, `pixel_provenance` |
-| 4 | Explain mode producing scene drafts (planned in `25-lessons.md`: lessons revealed a step at a time, as deep as the student has reached). Quiz mode with emulator-checked answers |
+| 4 | Explain mode producing scene drafts (planned in `25-lessons.md`: lessons revealed a step at a time, as deep as the student has reached). Quiz mode with checked answers (planned in `28-quizzes.md`: questions from Romlens's tables and the tutor's checked claims, proven levels, reviews, points and achievements) |
 
 ## Risks
 

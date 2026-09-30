@@ -220,6 +220,7 @@ Written from `24-tutor.md` on 27 September 2026; it replaces rows 3.19–3.21.
 | 6.9 | Lessons (`25-lessons.md`) | Explain mode and `/learn`: a lesson card stepped with Back and Next, predict questions behind Show, each step pointing the main window at its place without bringing it forward, offers to go deeper; the lesson library and the map of concepts shaded by level reached; each finished lesson checked in the background and corrected | `romlens tutor lessons`; `romlens tutor lesson show <id>` (with each step's revisions) | ⬜ | ⬜ | ⬜ |
 | 6.10 | Diagrams (`26-diagrams.md`) | The tutor draws register fields, memory maps, the machine's parts, a frame's timeline and a byte's way to the screen from the core's own data, and checks its own SVG; shown large in answers and in lesson steps | `romlens draw <rom> <kind> <spec>`; `romlens draw check <svg>` | ⬜ | ⬜ | ⬜ |
 | 6.11 | The glossary (`27-glossary.md`) | Each acronym, initialism and register in an answer or a lesson step is linked the first time it appears; a click shows a bubble spelling it out, with a sentence or two and a button to ask the tutor about it | `romlens glossary [TERM] [--registers]`; the tutor's `reference` topic `glossary` | ⬜ | ⬜ | ⬜ |
+| 6.12 | Quizzes and progress (`28-quizzes.md`) | `/quiz` asks checked questions (Romlens's, and the tutor's with claims Romlens verifies); passing proves a level, shown on the map beside the level learned; proven levels come due for review; points, a rank from what is proven, streaks and achievements, including finds in the game; predict questions guessed before Show; a setting hides the scores | `romlens tutor quiz <rom> [concept]`; `romlens tutor quiz coverage <rom>`; `romlens tutor progress [--ledger]` | ⬜ | ⬜ | ⬜ |
 
 ## Manual pass, macOS (to repeat before each release)
 
@@ -511,3 +512,17 @@ Glossary additions (`27-glossary.md`, still to run):
 69. Registers and lessons (6.11): a register such as `VMAIN` in a lesson
     step shows its bubble with its address; stepping through a lesson
     leaves the tutor window in front.
+
+Quiz additions (`28-quizzes.md`, still to run):
+
+70. A proof (6.12): with no model set up, `/quiz sprites` asks five
+    questions; four right, three of them Romlens's, says "Proven: Sprites,
+    level 1", the chip gains its ring, and Progress shows the points.
+71. The tutor's questions (6.12): with a model, a level 3 quiz on a real
+    game gains up to two questions about it, each labelled; `romlens tutor
+    show latest` shows any claim refused and corrected.
+72. A review (6.12): a proof comes due after a day; two right moves it to
+    the next box, and the count in the status line falls.
+73. Guesses and the setting (6.12): a predict question guessed before Show
+    earns its points once; with Show points and achievements off, no
+    points, rank or toasts show, but the map still shows proven and due.
