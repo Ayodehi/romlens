@@ -357,9 +357,10 @@ pub fn refresh(aram: &[u8], known: &Driver) -> Option<Driver> {
     let here = &aram[at..at + plain.len()];
     let same = here == &plain[..] || here.iter().zip(&plain).all(|(a, b)| *a == b + 1);
     if let (true, Some(t)) = (same, known.song_table) {
+        let mut reads = Reads::new(aram, known.dialect);
         let songs: Vec<u16> = (0..known.songs.len().max(1) + 8)
             .map(|i| word(aram, t as usize + i * 2))
-            .take_while(|w| song_list(aram, known.dialect, *w).is_some())
+            .take_while(|w| reads.song_list(*w).is_some())
             .collect();
         if !songs.is_empty() {
             return Some(Driver {
@@ -419,57 +420,137 @@ pub fn block_tracks(aram: &[u8], block: u16) -> [u16; 8] {
 /// The song list at `at`, to its end or its jump, if it reads as one:
 /// every block's tracks in RAM and each track parsing to its end.
 pub fn song_list(aram: &[u8], dialect: Dialect, at: u16) -> Option<Vec<ListEntry>> {
-    if !in_ram(at) {
-        return None;
+    Reads::new(aram, dialect).song_list(at)
+}
+
+/// What song lists are made of, each read once: whether a block's tracks
+/// are in RAM and end, and where the track from an address ends. A song
+/// table's lists share their blocks, lists starting inside one another
+/// share all but their first entries, and a track starting inside
+/// another ends where it does, so reading each again would take time
+/// growing with the square of their lengths.
+struct Reads<'a> {
+    aram: &'a [u8],
+    dialect: Dialect,
+    blocks: std::collections::HashMap<u16, bool>,
+    /// By address: where the events from there reach an end byte,
+    /// without the 4,096-byte limit; `NO_END` for an invalid byte or
+    /// the end of RAM first, `UNREAD` not followed yet.
+    ends: Vec<u32>,
+    /// Events decoded, for the tests.
+    decoded: usize,
+}
+
+const UNREAD: u32 = u32::MAX;
+const NO_END: u32 = u32::MAX - 1;
+
+impl<'a> Reads<'a> {
+    fn new(aram: &'a [u8], dialect: Dialect) -> Self {
+        Reads {
+            aram,
+            dialect,
+            blocks: std::collections::HashMap::new(),
+            ends: vec![UNREAD; 0x10000],
+            decoded: 0,
+        }
     }
-    let mut out = Vec::new();
-    let mut p = at;
-    for _ in 0..256 {
-        let w = word(aram, p as usize);
-        if w == 0 {
-            out.push(ListEntry::End { at: p });
-            break;
-        }
-        if w < 0x0100 {
-            let to = word(aram, p as usize + 2);
-            // A repeat or a jump goes back into the list.
-            if !(at..=p).contains(&to) {
-                return None;
+
+    /// Whether [`track`] from `at` reaches its end byte: the events from
+    /// there end inside its 4,096 bytes.
+    fn track_ends(&mut self, at: u16) -> bool {
+        let mut path = Vec::new();
+        let mut p = at as usize;
+        let end = loop {
+            if p >= 0xFFC0 {
+                break NO_END;
             }
-            let count = w as u8;
-            if count >= 0x80 {
-                out.push(ListEntry::Jump { at: p, to });
-                break;
+            if self.ends[p] != UNREAD {
+                break self.ends[p];
             }
-            out.push(ListEntry::Repeat { at: p, count, to });
-            p = p.wrapping_add(4);
-            continue;
+            path.push(p);
+            self.decoded += 1;
+            match event(self.aram, self.dialect, p) {
+                (EventKind::End, _) => break p as u32,
+                (EventKind::Invalid, _) => break NO_END,
+                (_, len) => p += len,
+            }
+        };
+        for q in path {
+            self.ends[q] = end;
         }
-        let tracks = block_tracks(aram, w);
-        if !in_ram(w) || tracks.iter().all(|t| *t == 0) {
+        end != NO_END && (end as usize) < at as usize + 4096
+    }
+
+    /// Whether the block at `block` plays: in RAM, a track or more, and
+    /// every track in RAM and ending.
+    fn block_plays(&mut self, block: u16) -> bool {
+        if let Some(&plays) = self.blocks.get(&block) {
+            return plays;
+        }
+        let tracks = block_tracks(self.aram, block);
+        let plays = in_ram(block)
+            && tracks.iter().any(|t| *t != 0)
+            && tracks
+                .iter()
+                .filter(|t| **t != 0)
+                .all(|t| in_ram(*t) && self.track_ends(*t));
+        self.blocks.insert(block, plays);
+        plays
+    }
+
+    fn song_list(&mut self, at: u16) -> Option<Vec<ListEntry>> {
+        if !in_ram(at) {
             return None;
         }
-        for t in tracks.iter().filter(|t| **t != 0) {
-            if !in_ram(*t) || !track(aram, dialect, *t).ends() {
+        let aram = self.aram;
+        let mut out = Vec::new();
+        let mut p = at;
+        for _ in 0..256 {
+            let w = word(aram, p as usize);
+            if w == 0 {
+                out.push(ListEntry::End { at: p });
+                break;
+            }
+            if w < 0x0100 {
+                let to = word(aram, p as usize + 2);
+                // A repeat or a jump goes back into the list.
+                if !(at..=p).contains(&to) {
+                    return None;
+                }
+                let count = w as u8;
+                if count >= 0x80 {
+                    out.push(ListEntry::Jump { at: p, to });
+                    break;
+                }
+                out.push(ListEntry::Repeat { at: p, count, to });
+                p = p.wrapping_add(4);
+                continue;
+            }
+            if !self.block_plays(w) {
                 return None;
             }
+            out.push(ListEntry::Block { at: p, block: w });
+            p = p.wrapping_add(2);
         }
-        out.push(ListEntry::Block { at: p, block: w });
-        p = p.wrapping_add(2);
+        out.iter()
+            .any(|e| matches!(e, ListEntry::Block { .. }))
+            .then_some(out)
     }
-    out.iter()
-        .any(|e| matches!(e, ListEntry::Block { .. }))
-        .then_some(out)
 }
 
 /// The longest run of pointers to song lists: the song table.
 fn find_song_table(aram: &[u8], dialect: Dialect) -> Option<(u16, Vec<u16>)> {
+    find_song_table_in(&mut Reads::new(aram, dialect))
+}
+
+fn find_song_table_in(reads: &mut Reads) -> Option<(u16, Vec<u16>)> {
+    let aram = reads.aram;
     // Every address that starts a song list, remembered.
     let mut valid = std::collections::HashMap::new();
     let mut is_list = |a: u16| {
         *valid
             .entry(a)
-            .or_insert_with(|| song_list(aram, dialect, a).is_some())
+            .or_insert_with(|| reads.song_list(a).is_some())
     };
     let mut best: Option<(u16, Vec<u16>)> = None;
     let mut at = 0x0200usize;
@@ -620,60 +701,11 @@ pub fn note_name(dialect: Dialect, semitone: u8) -> String {
 /// Decode the track at `at` to its end byte, at most 4,096 bytes; an
 /// invalid byte stops it.
 pub fn track(aram: &[u8], dialect: Dialect, at: u16) -> Track {
-    let (notes, tie, rest, drums) = dialect.notes();
     let mut events = Vec::new();
     let mut p = at as usize;
     let end = at as usize + 4096;
     while p < end && p < 0xFFC0 {
-        let b = aram[p];
-        let (kind, len) = match b {
-            0x00 => (EventKind::End, 1),
-            0x01..=0x7F => {
-                let next = aram[(p + 1) & 0xFFFF];
-                if next < 0x80 && next != 0 {
-                    (
-                        EventKind::Length {
-                            ticks: b,
-                            quantize: Some(next >> 4 & 7),
-                            velocity: Some(next & 0xF),
-                        },
-                        2,
-                    )
-                } else {
-                    (
-                        EventKind::Length {
-                            ticks: b,
-                            quantize: None,
-                            velocity: None,
-                        },
-                        1,
-                    )
-                }
-            }
-            n if notes.contains(&n) => (
-                EventKind::Note {
-                    semitone: n - 0x80,
-                    name: note_name(dialect, n - 0x80),
-                },
-                1,
-            ),
-            n if n == tie => (EventKind::Tie, 1),
-            n if n == rest => (EventKind::Rest, 1),
-            0xC8..=0xCF if dialect == Dialect::Old => (EventKind::Rest, 1),
-            n if drums.contains(&n) => (EventKind::Percussion(n - drums.start()), 1),
-            n => match dialect.command(n) {
-                Some(command) => {
-                    let params = (1..=command.params as usize)
-                        .map(|i| aram[(p + i) & 0xFFFF])
-                        .collect();
-                    (
-                        EventKind::Command { command, params },
-                        1 + command.params as usize,
-                    )
-                }
-                None => (EventKind::Invalid, 1),
-            },
-        };
+        let (kind, len) = event(aram, dialect, p);
         let stop = matches!(kind, EventKind::End | EventKind::Invalid);
         events.push(TrackEvent {
             at: p as u16,
@@ -686,6 +718,60 @@ pub fn track(aram: &[u8], dialect: Dialect, at: u16) -> Track {
         p += len;
     }
     Track { at, events }
+}
+
+/// The event a track has at `p`, and its length in bytes.
+fn event(aram: &[u8], dialect: Dialect, p: usize) -> (EventKind, usize) {
+    let (notes, tie, rest, drums) = dialect.notes();
+    let b = aram[p];
+    match b {
+        0x00 => (EventKind::End, 1),
+        0x01..=0x7F => {
+            let next = aram[(p + 1) & 0xFFFF];
+            if next < 0x80 && next != 0 {
+                (
+                    EventKind::Length {
+                        ticks: b,
+                        quantize: Some(next >> 4 & 7),
+                        velocity: Some(next & 0xF),
+                    },
+                    2,
+                )
+            } else {
+                (
+                    EventKind::Length {
+                        ticks: b,
+                        quantize: None,
+                        velocity: None,
+                    },
+                    1,
+                )
+            }
+        }
+        n if notes.contains(&n) => (
+            EventKind::Note {
+                semitone: n - 0x80,
+                name: note_name(dialect, n - 0x80),
+            },
+            1,
+        ),
+        n if n == tie => (EventKind::Tie, 1),
+        n if n == rest => (EventKind::Rest, 1),
+        0xC8..=0xCF if dialect == Dialect::Old => (EventKind::Rest, 1),
+        n if drums.contains(&n) => (EventKind::Percussion(n - drums.start()), 1),
+        n => match dialect.command(n) {
+            Some(command) => {
+                let params = (1..=command.params as usize)
+                    .map(|i| aram[(p + i) & 0xFFFF])
+                    .collect();
+                (
+                    EventKind::Command { command, params },
+                    1 + command.params as usize,
+                )
+            }
+            None => (EventKind::Invalid, 1),
+        },
+    }
 }
 
 /// Where the driver is now: the song, the block it is in, and each
@@ -708,8 +794,9 @@ pub struct Playing {
 /// `$30–$3F`. `None` when they do not point into a song this driver has.
 pub fn playing(aram: &[u8], driver: &Driver) -> Option<Playing> {
     let next = word(aram, 0x40);
+    let mut reads = Reads::new(aram, driver.dialect);
     let (number, list, entries) = driver.songs.iter().enumerate().find_map(|(i, &s)| {
-        let l = song_list(aram, driver.dialect, s)?;
+        let l = reads.song_list(s)?;
         let last = l.last()?.at();
         (s..=last.wrapping_add(2))
             .contains(&next)
@@ -741,4 +828,67 @@ pub fn playing(aram: &[u8], driver: &Driver) -> Option<Playing> {
         tracks,
         positions,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A standard driver with `n` songs that are all one list read from
+    /// further in: the table at `$8000` points to each entry of the list
+    /// at `$0200`, which plays the block at `$4000` `n` times; its eight
+    /// tracks start inside one track of 4,095 rests and its end.
+    fn nested(n: usize) -> Vec<u8> {
+        let mut aram = vec![0u8; 0x10000];
+        let lengths: Vec<u8> = STANDARD_COMMANDS.iter().map(|c| c.params).collect();
+        aram[0xF000..0xF000 + lengths.len()].copy_from_slice(&lengths);
+        let put = |aram: &mut [u8], at: usize, w: u16| {
+            aram[at..at + 2].copy_from_slice(&w.to_le_bytes());
+        };
+        for k in 0..n {
+            put(&mut aram, 0x0200 + k * 2, 0x4000);
+            put(&mut aram, 0x8000 + k * 2, 0x0200 + k as u16 * 2);
+        }
+        for i in 0..8 {
+            put(&mut aram, 0x4000 + i * 2, 0x5000 + i as u16);
+        }
+        aram[0x5000..0x5FFF].fill(0xC8);
+        // Read as a block, the track's rests point here: not a track, so
+        // the list at $0200 is not a table of songs at $4000.
+        aram[0xC8C8] = 0xFF;
+        aram
+    }
+
+    #[test]
+    fn a_song_table_of_nested_lists_reads_each_track_once() {
+        let n = 128;
+        let aram = nested(n);
+        let mut reads = Reads::new(&aram, Dialect::Standard);
+        let (at, songs) = find_song_table_in(&mut reads).unwrap();
+        assert_eq!((at, songs.len()), (0x8000, n));
+        // Each track byte decoded once, not once for every list and block
+        // that leads to it (128 × 128 / 2 × 8 × 4,096 before).
+        assert!(reads.decoded <= 4096 + 16, "{} events", reads.decoded);
+        let d = recognise(&aram).unwrap();
+        assert_eq!((d.song_table, d.songs.len()), (Some(0x8000), n));
+        let list = song_list(&aram, Dialect::Standard, 0x0200).unwrap();
+        assert_eq!(list.len(), n + 1);
+    }
+
+    #[test]
+    fn a_track_read_once_still_ends_within_its_own_limit() {
+        // 4,096 rests then the end: from the first the end is past the
+        // 4,096 bytes a track reads, from the second it is the last.
+        let mut aram = vec![0u8; 0x10000];
+        aram[0x5000..0x6000].fill(0xC8);
+        let mut reads = Reads::new(&aram, Dialect::Standard);
+        for at in [0x5000, 0x5001, 0x5000, 0x6000, 0xFFBF] {
+            assert_eq!(
+                reads.track_ends(at),
+                track(&aram, Dialect::Standard, at).ends(),
+                "${at:04X}"
+            );
+        }
+        assert!(!reads.track_ends(0x5000) && reads.track_ends(0x5001));
+    }
 }
