@@ -47,6 +47,8 @@ final class GraphModel {
     private(set) var calls: CallNeighbourhoodInfo?
     /// Bumped whenever `blocks` or `calls` changes.
     private(set) var resultGeneration = 0
+    /// The listing generation the shown result was built against.
+    var shownGeneration: Int? { shown?.generation }
     /// The routine shown (or being built), by entry address.
     private(set) var entry: UInt32?
     /// The block holding each instruction, by file offset.
@@ -143,7 +145,11 @@ final class GraphModel {
             guard let self else { return }
             self.task = nil
             guard let key = self.key else { return }
-            if key.entry == run.entry, key.mode == run.mode {
+            // Blocks built against an older listing name that listing's line
+            // numbers, which the current one may not have: build again. The
+            // calls hold only addresses and can show while the next builds.
+            if key.entry == run.entry, key.mode == run.mode,
+               key.generation == run.generation || run.mode == .calls {
                 switch outcome {
                 case .success(let built):
                     self.install(built, for: run)

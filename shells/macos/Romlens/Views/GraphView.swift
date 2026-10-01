@@ -505,7 +505,11 @@ enum GraphSceneBuilder {
             var lines: [GraphScene.Line] = []
             if let first = b.firstLine {
                 for n in first..<first + b.lineCount {
-                    let r = model.asmBatch(containingLine: n).record(line: n)
+                    // A graph from an older listing can name lines this one
+                    // lacks; the rebuild that follows shows them.
+                    let batch = model.asmBatch(containingLine: n)
+                    guard batch.contains(line: n) else { continue }
+                    let r = batch.record(line: n)
                     if r.kind == .blank || r.kind == .section { continue }
                     let offset = r.kind.isContent ? r.fileOffset : b.offsets.first
                     lines.append(.init(text: CTLineCreateWithAttributedString(text(for: r, metrics: m)), offset: offset))

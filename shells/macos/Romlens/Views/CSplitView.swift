@@ -538,12 +538,19 @@ extension CPaneController: NSMenuDelegate {
     /// The version's lines anchored to the selected instruction.
     private func highlightVersion(_ v: CVersionInfo) {
         guard let a = model.selectedAddress else { return }
-        let lines = v.anchors.filter { $0.start <= a && a <= $0.end }
-            .flatMap { Int($0.first) - 1...Int($0.last) - 1 }
+        let lines = Self.anchoredLines(v.anchors, at: a)
         if lines != highlighted {
             setHighlight(lines)
             if !selectingFromText, let first = lines.first { scrollToLine(first) }
         }
+    }
+
+    /// The zero-based lines of the anchors holding `address`. Lines count
+    /// from one; an anchor that ends before it starts, or names line 0, is
+    /// one a project file got wrong and is skipped rather than trusted.
+    static func anchoredLines(_ anchors: [CAnchorInfo], at address: UInt32) -> [Int] {
+        anchors.filter { $0.start <= address && address <= $0.end && $0.first >= 1 && $0.first <= $0.last }
+            .flatMap { Int($0.first) - 1...Int($0.last) - 1 }
     }
 
     private func followVersionLine(_ line: Int) {

@@ -42,6 +42,18 @@ import Testing
         #expect(m.activeSheet == .cEdit && m.cEdit == .local(routine: 0x00_8020, local: "x"))
     }
 
+    /// An anchor that ends before it starts, or names line 0, is skipped
+    /// rather than turned into a range that traps.
+    @Test func badAnchorsAreSkipped() {
+        let anchors = [
+            CAnchorInfo(first: 5, last: 3, start: 0x00_8020, end: 0x00_8027),
+            CAnchorInfo(first: 0, last: 2, start: 0x00_8020, end: 0x00_8027),
+            CAnchorInfo(first: 2, last: 3, start: 0x00_8020, end: 0x00_8027),
+            CAnchorInfo(first: 7, last: 7, start: 0x00_8030, end: 0x00_8031),
+        ]
+        #expect(CPaneController.anchoredLines(anchors, at: 0x00_8022) == [1, 2])
+    }
+
     @Test func aPictureIsDrawnForTheTutor() async throws {
         let m = try await Fixture.analyzedModel(rom: try Fixture.smallRom())
         let image = NSImage(size: NSSize(width: 4, height: 4))
