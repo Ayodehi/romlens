@@ -199,3 +199,22 @@ fn a_shared_call_is_repeated_not_jumped_to() {
     assert!(!text.contains("goto"), "{text}");
     assert_eq!(text.matches("SUB_008080();").count(), 2, "{text}");
 }
+
+/// `CMP; BCC skip` is the commonest test there is; its condition reads as
+/// the carry, not `!!c`.
+#[test]
+fn a_carry_skip_is_not_negated_twice() {
+    let mut code = vec![0u8; 0x40];
+    code[..fixtures::BOOT_CODE.len()].copy_from_slice(&fixtures::BOOT_CODE);
+    // SEP #$30; LDA $10; CMP #$20; BCC +2; STZ $12; RTI
+    code[0x20..0x2D].copy_from_slice(&[
+        0xE2, 0x30, 0xA5, 0x10, 0xC9, 0x20, 0x90, 0x02, 0x64, 0x12, 0x40, 0x00, 0x00,
+    ]);
+    let mut vectors = fixtures::DEFAULT_VECTORS;
+    vectors[3] = 0x8020;
+    let bytes = fixtures::build_custom(MappingMode::LoRom, 0x8000, false, &code, "CARRY", vectors);
+    let rom = RomImage::from_bytes(bytes, "c.sfc").unwrap();
+    let text = c(&Project::new(&rom), &rom);
+    assert!(!text.contains("!!"), "{text}");
+    assert!(text.contains("if (c)") || text.contains("if (C)"), "{text}");
+}
