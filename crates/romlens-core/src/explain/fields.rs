@@ -491,8 +491,9 @@ fn obj_gap(v: u32) -> String {
     format!("second table ${:04X} words on", (v + 1) << 12)
 }
 
+/// VRAM word addresses here and below drop bit 15, as the hardware does.
 fn obj_base(v: u32) -> String {
-    format!("sprite tiles at VRAM ${:04X}", v << 13)
+    format!("sprite tiles at VRAM ${:04X}", (v << 13) & 0x7FFF)
 }
 
 fn mosaic_size(v: u32) -> String {
@@ -504,11 +505,11 @@ fn mosaic_size(v: u32) -> String {
 }
 
 fn tilemap_base(v: u32) -> String {
-    format!("tilemap at VRAM ${:04X}", v << 10)
+    format!("tilemap at VRAM ${:04X}", (v << 10) & 0x7FFF)
 }
 
 fn char_base(v: u32) -> String {
-    format!("tiles at ${:04X}", v << 12)
+    format!("tiles at ${:04X}", (v << 12) & 0x7FFF)
 }
 
 /// VRAM is 64 KB, so address bit 15 has no effect.
@@ -601,8 +602,15 @@ fn byte_count(v: u32) -> String {
     format!("{n} bytes (or an HDMA address)")
 }
 
+/// The HDMA line counter. Bit 7 is tested after the count goes down, so
+/// $01-$80 are 1-128 lines written once and $81-$FF are 1-127 lines
+/// written on every line; $00 ends the table.
 fn line_count(v: u32) -> String {
-    format!("{v} lines")
+    match v {
+        0 => "the table ends".to_owned(),
+        1..=0x80 => format!("{v} lines, written once"),
+        _ => format!("{} lines, written on every one", v - 0x80),
+    }
 }
 
 fn bank(v: u32) -> String {
@@ -1319,10 +1327,7 @@ static LAYOUTS: &[Layout] = &[
     settings(
         0x430A,
         "HDMA's line counter: how many lines are left for the current table entry, and whether it writes on every one of them.",
-        &[
-            flag(7, "Repeat", "write every line", "write once"),
-            number(6, 0, "Lines", line_count),
-        ],
+        &[number(7, 0, "Lines", line_count)],
     ),
 ];
 
@@ -1373,6 +1378,21 @@ mod tests {
             short(0x2121, 0x81, 1),
             "CGADD = $81: colour 129 (sprite palette 0, entry 1)"
         );
+    }
+
+    #[test]
+    fn hdma_line_counts_and_vram_bases_read_as_the_hardware_does() {
+        assert_eq!(
+            short(0x430A, 0x80, 1),
+            "NTRL0 = $80: 128 lines, written once"
+        );
+        assert_eq!(
+            short(0x430A, 0x85, 1),
+            "NTRL0 = $85: 5 lines, written on every one"
+        );
+        assert_eq!(short(0x430A, 0x00, 1), "NTRL0 = $00: the table ends");
+        assert!(short(0x2107, 0xFC, 1).contains("tilemap at VRAM $7C00"));
+        assert!(short(0x210B, 0x88, 1).contains("tiles at $0000"));
     }
 
     #[test]

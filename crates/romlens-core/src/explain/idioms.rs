@@ -1413,7 +1413,7 @@ fn destination(bbad: Val, w: &Written, offsets: &mut Vec<FileOffset>, name: Name
     match bbad {
         Val::Known(0x18 | 0x19) => at(
             &[0x2116, 0x2117],
-            &|a| format!("VRAM word ${a:04X}"),
+            &|a| format!("VRAM word ${:04X}", a & 0x7FFF),
             "VRAM",
         ),
         Val::Known(0x22) => at(

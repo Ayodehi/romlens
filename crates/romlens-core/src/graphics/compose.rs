@@ -719,7 +719,7 @@ fn bg_pixel(
     Some((
         BgPixel {
             layer,
-            map_word: map as u16,
+            map_word: (map & 0x7FFF) as u16,
             entry,
             tile,
             tile_word: tile_word as u16,
@@ -828,8 +828,11 @@ fn sprite_line(
     let mut in_range: Vec<&crate::graphics::oam::OamEntry> = Vec::with_capacity(32);
     for k in 0..128 {
         let s = &sprites[(first + k) & 0x7F];
-        let (_, h) = obsel.size_of(s.large);
-        if (y.wrapping_sub(u32::from(s.y)) & 0xFF) < u32::from(h) {
+        let (w, h) = obsel.size_of(s.large);
+        // A sprite wholly off the left edge is not in range and does not
+        // count toward the 32, except at X = -256 (bsnes, Mesen).
+        let off_left = s.x != -256 && s.x + i16::from(w) <= 0;
+        if !off_left && (y.wrapping_sub(u32::from(s.y)) & 0xFF) < u32::from(h) {
             if in_range.len() == 32 {
                 break;
             }
@@ -1052,6 +1055,25 @@ mod tests {
         vram[at..at + 2].copy_from_slice(&hi.to_le_bytes());
         let f = compose(&vram, &cg, &oam, Lines::Frame(&ppu));
         assert!(matches!(f.winner(18, 10), Some(Winner::Bg(_))));
+    }
+
+    /// Sprites parked wholly off the left edge are not in range, so 32 of
+    /// them do not push a later visible sprite past the per-line limit.
+    #[test]
+    fn sprites_off_the_left_edge_do_not_count_toward_the_32() {
+        let (vram, cg, mut oam, ppu) = machine();
+        oam[13] = 240; // sprite 3 away
+        for i in 0..32 {
+            oam[i * 4] = 0xC0; // X = -64 with bit 8 set below
+            oam[i * 4 + 1] = 8;
+            oam[512 + i / 4] |= 1 << ((i % 4) * 2);
+        }
+        oam[400..404].copy_from_slice(&[16, 8, 0, 0x20]); // sprite 100 at (16, 8)
+        let f = compose(&vram, &cg, &oam, Lines::Frame(&ppu));
+        let Some(Winner::Sprite(s)) = f.winner(18, 10) else {
+            panic!("{:?}", f.winner(18, 10))
+        };
+        assert_eq!(s.sprite, 100);
     }
 
     #[test]
