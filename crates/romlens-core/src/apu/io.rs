@@ -21,7 +21,8 @@ pub struct Timer {
 impl Timer {
     /// One SPC700 cycle; the clock ticks every `period` of them.
     fn cycle(&mut self, period: u8) {
-        self.phase += 1;
+        // A phase past the period (from a recording) ticks at once.
+        self.phase = self.phase.saturating_add(1);
         if self.phase < period {
             return;
         }
@@ -30,7 +31,8 @@ impl Timer {
             self.counter = self.counter.wrapping_add(1);
             if self.counter == self.divider {
                 self.counter = 0;
-                self.output = (self.output + 1) & 0xF;
+                // Four bits: it wraps at 16.
+                self.output = self.output.wrapping_add(1) & 0xF;
             }
         }
     }
@@ -93,5 +95,29 @@ impl Io {
             self.from_cpu[3] = 0;
         }
         self.rom_enabled = v & 0x80 != 0;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_timer_out_of_range_from_a_recording_runs_on() {
+        // A phase past the period ticks at once; a count past 15 keeps
+        // its low four bits.
+        let mut t = Timer {
+            enabled: true,
+            divider: 1,
+            counter: 0,
+            output: 0xFF,
+            phase: 0xFF,
+        };
+        t.cycle(128);
+        assert_eq!((t.phase, t.counter, t.output), (0, 0, 0));
+        for _ in 0..128 {
+            t.cycle(128);
+        }
+        assert_eq!(t.output, 1);
     }
 }

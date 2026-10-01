@@ -74,6 +74,10 @@ pub struct Voice {
     pub mode: EnvelopeMode,
     /// 11 bits.
     pub envelope: u16,
+    /// The envelope's last step before clamping, worked out every sample
+    /// whether or not its rate let it in (blargg's `hidden_env`): the
+    /// bent line reads it.
+    pub hidden: i32,
     /// The sample after the envelope, 15 bits: what OUTX shows the top of
     /// and what the next voice's pitch modulation reads.
     pub output: i32,
@@ -103,8 +107,10 @@ pub struct Dsp {
     pub counter: u16,
     /// KON is polled on every other sample.
     pub even: bool,
-    /// Voices keyed on since the last poll.
+    /// KON as last written, and the voices the last poll took from it:
+    /// a poll first clears from the latch the voices it took before.
     pub kon_latch: u8,
+    pub kon_taken: u8,
     /// The noise generator's 15 bits.
     pub noise: u16,
     /// Where in the echo buffer, in bytes, and how long the buffer is.
@@ -129,6 +135,7 @@ impl Default for Dsp {
             counter: 0,
             even: false,
             kon_latch: 0,
+            kon_taken: 0,
             noise: 0x4000,
             echo_offset: 0,
             echo_length: 0,
@@ -158,9 +165,10 @@ impl Dsp {
         period != 0 && (self.counter + rate_offset(rate)).is_multiple_of(period)
     }
 
-    /// The SPC700 wrote KON: the voices key on at the next poll.
+    /// The SPC700 wrote KON: the voices key on at the next poll. A write
+    /// replaces the one before (blargg's `new_kon = data`).
     pub fn write_kon(&mut self, value: u8) {
-        self.kon_latch |= value;
+        self.kon_latch = value;
     }
 
     /// One sample: the 32 steps at once.
@@ -210,20 +218,23 @@ impl Dsp {
             self.counter - 1
         };
         let flg = regs[0x6C];
-        // KON and KOFF on every other sample.
+        // KON and KOFF on every other sample. The latch keeps what was
+        // written until the poll after the one that took it, so a voice
+        // written again before then is not keyed twice.
         self.even = !self.even;
         if self.even {
+            self.kon_latch &= !self.kon_taken;
+            self.kon_taken = self.kon_latch;
             let koff = regs[0x5C];
             for v in 0..8 {
                 let bit = 1 << v;
                 if koff & bit != 0 {
                     self.voices[v].mode = EnvelopeMode::Release;
                 }
-                if self.kon_latch & bit != 0 {
+                if self.kon_taken & bit != 0 {
                     self.key_on(v, regs, aram);
                 }
             }
-            self.kon_latch = 0;
         }
         if self.fires(flg & 0x1F) {
             let feedback = (self.noise ^ (self.noise >> 1)) & 1;
@@ -249,14 +260,15 @@ impl Dsp {
                 i16::from_le_bytes([aram[a as usize], aram[a.wrapping_add(1) as usize]]) as i32;
             self.fir[side][self.fir_at] = sample >> 1;
             // FIR0 on the oldest; the first seven add up wrapping in 16
-            // bits, the last is clamped.
+            // bits, the last is clamped, and the low bit dropped.
             let mut sum = 0i32;
             for tap in 0..7 {
                 let h = self.fir[side][(self.fir_at + 1 + tap) & 7];
                 sum += (h * regs[tap << 4 | 0xF] as i8 as i32) >> 6;
             }
             sum = sum as i16 as i32;
-            *out = clamp16(sum + ((self.fir[side][self.fir_at] * regs[0x7F] as i8 as i32) >> 6));
+            *out =
+                clamp16(sum + ((self.fir[side][self.fir_at] * regs[0x7F] as i8 as i32) >> 6)) & !1;
         }
         let mvol = [regs[0x0C] as i8 as i32, regs[0x1C] as i8 as i32];
         let evol = [regs[0x2C] as i8 as i32, regs[0x3C] as i8 as i32];
@@ -273,7 +285,7 @@ impl Dsp {
                 aram[a.wrapping_add(1) as usize] = hi;
             }
         }
-        self.echo_offset += 4;
+        self.echo_offset = self.echo_offset.wrapping_add(4);
         if self.echo_offset >= self.echo_length {
             self.echo_offset = 0;
         }
@@ -285,10 +297,14 @@ impl Dsp {
     fn key_on(&mut self, v: usize, regs: &mut [u8; 128], aram: &[u8]) {
         let entry = dir_entry(regs, aram, v);
         let voice = &mut self.voices[v];
+        // The decoder's history stays: the new sample's first block
+        // filters from what the voice decoded last.
         *voice = Voice {
             block: entry.0,
             delay: KEY_ON_DELAY,
             mode: EnvelopeMode::Attack,
+            p1: voice.p1,
+            p2: voice.p2,
             ..Voice::default()
         };
         regs[0x7C] &= !(1 << v);
@@ -297,7 +313,9 @@ impl Dsp {
     /// One voice's sample: its output after the envelope (15 bits).
     fn run_voice(&mut self, v: usize, regs: &mut [u8; 128], aram: &[u8], previous: i32) -> i32 {
         let noise_on = regs[0x3D] & (1 << v) != 0;
-        let pmon = v > 0 && regs[0x2D] & (1 << v) != 0 && !noise_on;
+        // Pitch modulation applies with noise on too: it moves the pitch
+        // counter, which still runs.
+        let pmon = v > 0 && regs[0x2D] & (1 << v) != 0;
         let pitch = u16::from_le_bytes([vreg(regs, v, 2), vreg(regs, v, 3)]) & 0x3FFF;
         let noise = ((self.noise << 1) as i16 >> 1) as i32;
 
@@ -374,14 +392,11 @@ impl Dsp {
         if voice.nibble == 0 {
             voice.header = aram[voice.block as usize];
             let h = Header::from_byte(voice.header);
-            if h.end {
-                // Set as the block starts; one that does not loop also
-                // ends the note there.
-                regs[0x7C] |= 1 << v;
-                if !h.loops {
-                    voice.mode = EnvelopeMode::Release;
-                    voice.envelope = 0;
-                }
+            if h.end && !h.loops {
+                // An end block that does not loop ends the note as it
+                // starts.
+                voice.mode = EnvelopeMode::Release;
+                voice.envelope = 0;
             }
         }
         let h = Header::from_byte(voice.header);
@@ -415,6 +430,9 @@ impl Dsp {
         if voice.nibble == 16 {
             voice.nibble = 0;
             voice.block = if h.end {
+                // ENDX as the decoder moves past an end block's last
+                // sample, to the loop point (blargg's `t_looped`).
+                regs[0x7C] |= 1 << v;
                 dir_entry(regs, aram, v).1
             } else {
                 voice.block.wrapping_add(9)
@@ -422,63 +440,73 @@ impl Dsp {
         }
     }
 
+    /// One sample of the envelope, as blargg's `run_envelope`: the step
+    /// is worked out and the phases move on every sample, and the level
+    /// takes the step only when the rate lets it.
     fn envelope(&mut self, v: usize, regs: &[u8; 128]) {
         let adsr1 = vreg(regs, v, 5);
         let adsr2 = vreg(regs, v, 6);
         let gain = vreg(regs, v, 7);
-        let mode = self.voices[v].mode;
-        let env = self.voices[v].envelope as i32;
-        let exp = |e: i32| e - (((e - 1) >> 8) + 1);
-        let (rate, next) = if mode == EnvelopeMode::Release {
-            (31, env - 8)
-        } else if adsr1 & 0x80 != 0 {
-            match mode {
+        let mut voice = self.voices[v];
+        let env = voice.envelope as i32;
+        if voice.mode == EnvelopeMode::Release {
+            self.voices[v].envelope = (env - 8).max(0) as u16;
+            return;
+        }
+        let exp = |e: i32| {
+            let e = e - 1;
+            e - (e >> 8)
+        };
+        // The step, its rate, and the register whose top three bits are
+        // the sustain level (ADSR2, or GAIN under a gain mode).
+        let (rate, mut next, data) = if adsr1 & 0x80 != 0 {
+            match voice.mode {
                 EnvelopeMode::Attack => {
-                    let a = adsr1 & 0xF;
-                    if a == 0xF {
-                        (31, env + 1024)
-                    } else {
-                        (a * 2 + 1, env + 32)
-                    }
+                    let rate = (adsr1 & 0xF) * 2 + 1;
+                    (rate, env + if rate < 31 { 0x20 } else { 0x400 }, adsr2)
                 }
-                EnvelopeMode::Decay => (((adsr1 >> 4) & 7) * 2 + 16, exp(env)),
-                _ => (adsr2 & 0x1F, exp(env)),
+                EnvelopeMode::Decay => (((adsr1 >> 4) & 7) * 2 + 16, exp(env), adsr2),
+                _ => (adsr2 & 0x1F, exp(env), adsr2),
             }
         } else if gain & 0x80 == 0 {
-            // Direct: the level is set, whatever the rate.
-            self.voices[v].envelope = (gain as u16 & 0x7F) << 4;
-            return;
+            // Direct: the level is set at once.
+            (31, gain as i32 * 0x10, gain)
         } else {
             let r = gain & 0x1F;
-            match (gain >> 5) & 3 {
-                0 => (r, env - 32),
-                1 => (r, exp(env)),
-                2 => (r, env + 32),
-                _ => (r, env + if env < 0x600 { 32 } else { 8 }),
-            }
-        };
-        if !self.fires(rate) {
-            return;
-        }
-        let e = next.clamp(0, 0x7FF);
-        let voice = &mut self.voices[v];
-        voice.envelope = e as u16;
-        // The ADSR's phases move on as the level passes their marks, in
-        // gain modes too (fullsnes, "Gain Notes").
-        match voice.mode {
-            EnvelopeMode::Attack if next >= 0x7E0 => voice.mode = EnvelopeMode::Decay,
-            EnvelopeMode::Decay => {
-                let level = if adsr1 & 0x80 != 0 {
-                    adsr2 >> 5
-                } else {
-                    gain >> 5
-                };
-                if e <= (level as i32 + 1) * 0x100 {
-                    voice.mode = EnvelopeMode::Sustain;
+            let next = match (gain >> 5) & 3 {
+                0 => env - 0x20,
+                1 => exp(env),
+                2 => env + 0x20,
+                // The bent line: slower once the step before reached $600
+                // (unsigned, so one gone below zero counts too).
+                _ => {
+                    env + if voice.hidden as u32 >= 0x600 {
+                        8
+                    } else {
+                        0x20
+                    }
                 }
-            }
-            _ => {}
+            };
+            (r, next, gain)
+        };
+        // Decay gives way to sustain when the step's top bits are the
+        // sustain level, in gain modes too (fullsnes, "Gain Notes").
+        if voice.mode == EnvelopeMode::Decay && next >> 8 == (data >> 5) as i32 {
+            voice.mode = EnvelopeMode::Sustain;
         }
+        voice.hidden = next;
+        // Out of 11 bits either way (unsigned): clipped, and an attack is
+        // over.
+        if next as u32 > 0x7FF {
+            next = if next < 0 { 0 } else { 0x7FF };
+            if voice.mode == EnvelopeMode::Attack {
+                voice.mode = EnvelopeMode::Decay;
+            }
+        }
+        if self.fires(rate) {
+            voice.envelope = next as u16;
+        }
+        self.voices[v] = voice;
     }
 }
 
@@ -567,12 +595,16 @@ impl Dsp {
     ) -> (Dsp, u8) {
         let s = inside.step & 31;
         let mut d = Dsp {
-            counter: inside.counter,
+            // In range whatever the recording says.
+            counter: inside.counter % COUNTER_WRAP,
             // Romlens keys a voice on at the poll, where the chip keys
             // voices 1-7 on in the sample after; polling on the chip's other
             // samples makes up for it (the phase A8 measured from rest).
             even: !inside.polls,
-            kon_latch: inside.kon_written & !inside.kon_taken,
+            // The chip's own latches: Romlens's poll clears and takes as
+            // the chip's does.
+            kon_latch: inside.kon_written,
+            kon_taken: inside.kon_taken,
             noise: inside.noise & 0x7FFF,
             echo_offset: inside.echo_offset,
             echo_length: if inside.echo_length == 0 {
@@ -617,7 +649,7 @@ impl Dsp {
                     let edl = regs[0x7D] & 0xF;
                     d.echo_length = if edl == 0 { 4 } else { edl as u16 * 2048 };
                 }
-                d.echo_offset += 4;
+                d.echo_offset = d.echo_offset.wrapping_add(4);
                 if d.echo_offset >= d.echo_length {
                     d.echo_offset = 0;
                 }
@@ -683,7 +715,7 @@ fn resume_voice(
     Voice {
         block,
         header: aram[block as usize],
-        nibble: (v.data_byte.saturating_sub(1) * 2) & 15,
+        nibble: (v.data_byte.saturating_sub(1) & 7) * 2,
         p1: ring(11),
         p2: ring(10),
         window: [ring(skip), ring(skip + 1), ring(skip + 2), ring(skip + 3)],
@@ -691,6 +723,7 @@ fn resume_voice(
         delay: 0,
         mode,
         envelope: v.envelope & 0x7FF,
+        hidden: v.unclamped as i32,
         output: 0,
         queue,
         queued: queued as u8,
@@ -850,6 +883,45 @@ mod tests {
         // Between voice 1's envelope (step 1) and its pitch counter (2).
         let (d, _) = Dsp::resume(&inside_with(v, 2), &regs, &aram);
         assert!(d.voices[1].stepped && !d.voices[2].stepped);
+    }
+
+    #[test]
+    fn a_resume_keeps_the_chips_kon_latches_and_its_hidden_envelope() {
+        // KON written as $03 with $01 taken at the last poll: the next poll
+        // keys voice 1 alone, as the chip's would.
+        let v = VoiceInside {
+            unclamped: -3,
+            ..VoiceInside::default()
+        };
+        let mut inside = inside_with(v, 10);
+        (inside.kon_written, inside.kon_taken, inside.polls) = (0x03, 0x01, true);
+        let mut regs = [0u8; 128];
+        let mut aram = vec![0u8; 0x10000];
+        let (mut d, clock) = Dsp::resume(&inside, &regs, &aram);
+        assert_eq!(
+            (d.kon_latch, d.kon_taken, d.voices[1].hidden),
+            (0x03, 0x01, -3)
+        );
+        for t in clock..32 {
+            d.step(t, &mut regs, &mut aram);
+        }
+        assert_eq!((d.voices[0].delay, d.voices[1].delay), (0, KEY_ON_DELAY));
+    }
+
+    #[test]
+    fn a_resume_from_values_out_of_range_does_not_overflow() {
+        let v = VoiceInside {
+            data_byte: 200,
+            ..VoiceInside::default()
+        };
+        let mut inside = inside_with(v, 29);
+        (inside.counter, inside.echo_offset) = (0xFFFF, 0xFFFE);
+        let mut regs = [0u8; 128];
+        let mut aram = vec![0u8; 0x10000];
+        let (mut d, _) = Dsp::resume(&inside, &regs, &aram);
+        assert_eq!(d.voices[1].nibble, 14, "the data byte's low three bits");
+        assert!(d.counter < 0x7800);
+        d.sample(&mut regs, &mut aram);
     }
 
     #[test]

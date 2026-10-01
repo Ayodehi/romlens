@@ -14,8 +14,8 @@ what the bytes are, once the driver has run a second (booted straight into it by
 
 sound commands: 0 constants the code sends the driver
 the driver from $00:D000 booted by Romlens, 0=$01 sent, 0.20 s: 6400 samples
-  digest 4cb16907524ed3ea808ae12bac90f4c303431e046505f4ca4ebb108558bf2b0f
-  left peak 20162, RMS 18476; right peak 20162, RMS 18476 (of 32767)
+  digest 9ad77d339b616fd4c1bf4b3857fa05237b5547323982518e80b401876f3c0a32
+  left peak 20162, RMS 18549; right peak 20162, RMS 18549 (of 32767)
   voice 0  peak 10240, sounding 100% of the time
   voice 1  silent
   voice 2  silent
