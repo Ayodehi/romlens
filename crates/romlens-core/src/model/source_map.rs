@@ -83,7 +83,7 @@ impl SourceMap {
             .filter_map(|l| {
                 l.ranges
                     .iter()
-                    .find(|(s, n)| offset.0 >= s.0 && offset.0 < s.0 + n)
+                    .find(|(s, n)| offset.0 >= s.0 && offset.0 - s.0 < *n)
                     .map(|(_, n)| (l, *n))
             })
             .collect();
@@ -128,7 +128,7 @@ impl SourceMap {
         let mut ranges: Vec<(u32, u32)> = self
             .lines
             .iter()
-            .flat_map(|l| l.ranges.iter().map(|(s, n)| (s.0, s.0 + n)))
+            .flat_map(|l| l.ranges.iter().map(|(s, n)| (s.0, s.0.saturating_add(*n))))
             .collect();
         ranges.sort_unstable();
         let (mut total, mut end) = (0u64, 0u32);

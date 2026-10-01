@@ -372,12 +372,14 @@ fn coalesce<T: Run>(runs: Vec<T>, same: impl Fn(&T, &T) -> bool) -> Vec<T> {
         if let Some(last) = out.last_mut()
             && same(last, &r)
             && r.addr() >= last.addr()
-            && r.addr() <= last.addr() + last.len()
+            && r.addr() <= last.addr().saturating_add(last.len())
             && (last.abs() < 0 && r.abs() < 0
                 || last.abs() >= 0
                     && r.abs() as i64 - last.abs() as i64 == r.addr() as i64 - last.addr() as i64)
         {
-            let end = (last.addr() + last.len()).max(r.addr() + r.len());
+            // Saturating: a damaged log's lengths can reach past 4 GiB.
+            let end =
+                (last.addr().saturating_add(last.len())).max(r.addr().saturating_add(r.len()));
             last.set_len(end - last.addr());
             last.add_count(r.count());
             continue;

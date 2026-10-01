@@ -161,7 +161,7 @@ pub fn export_asar(
 ) {
     let symbols = Symbols::new(rom, project, &snap.auto_labels);
     let (start, len) = options.range.unwrap_or((0, rom.len() as u32));
-    let end = (start + len).min(rom.len() as u32);
+    let end = start.saturating_add(len).min(rom.len() as u32);
     let bank = bank_size(rom);
     let h = rom.header();
     let _ = writeln!(out, "; Romlens export of {:?}", h.title);

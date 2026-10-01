@@ -80,6 +80,13 @@ impl RomImage {
     /// Read and identify a `.sfc`/`.smc` file.
     pub fn load(path: impl AsRef<Path>) -> Result<Self, RomError> {
         let path = path.as_ref();
+        // Too large even with a copier header: refused before it is read.
+        let len = std::fs::metadata(path)?.len();
+        if len > (MAX_ROM_LEN + COPIER_HEADER_LEN) as u64 {
+            return Err(RomError::TooLarge {
+                len: usize::try_from(len).unwrap_or(usize::MAX),
+            });
+        }
         let bytes = std::fs::read(path)?;
         let name = path
             .file_name()

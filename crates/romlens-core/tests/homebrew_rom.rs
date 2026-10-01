@@ -75,6 +75,19 @@ fn size_limits() {
         RomImage::from_bytes(vec![0; 0x80_0000 + 1024], "l.sfc"),
         Err(RomError::TooLarge { .. })
     ));
+    // A file too large is refused by its size, before it is read: 4 GiB
+    // here, sparse, so the test writes nothing.
+    let path = std::env::temp_dir().join(format!("romlens-huge-{}.sfc", std::process::id()));
+    std::fs::File::create(&path)
+        .unwrap()
+        .set_len(1 << 32)
+        .unwrap();
+    let loaded = RomImage::load(&path);
+    std::fs::remove_file(&path).unwrap();
+    assert!(matches!(
+        loaded,
+        Err(RomError::TooLarge { len: 0x1_0000_0000 })
+    ));
     // 512 + 32 KB: a copier header on a minimal image is stripped, not rejected.
     let mut smc = vec![0u8; 512];
     smc.extend(fixtures::minimal_lorom());
