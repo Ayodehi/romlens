@@ -38,6 +38,16 @@ final class ProjectDocumentController: NSDocumentController {
         return doc
     }
 
+    /// The test suite runs inside the app, so the files it opens and saves
+    /// in the temporary directory would fill the user's Open Recent and
+    /// Dock menus. NSDocument's own save path also comes through here.
+    override func noteNewRecentDocumentURL(_ url: URL) {
+        if Self.isTestHost { return }
+        super.noteNewRecentDocumentURL(url)
+    }
+
+    private static let isTestHost = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+
     override func documentClass(forType typeName: String) -> AnyClass? {
         ProjectDocument.self
     }

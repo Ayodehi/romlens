@@ -202,6 +202,8 @@ final class StubLocator: RomLocator {
         #expect(doc.fileType == Fixture.projectType)
         let (second, _) = try await controller.openDocument(withContentsOf: url, display: false)
         #expect(second === first, "the same ROM (by hash) reuses the document")
+        #expect(!controller.recentDocumentURLs.contains { $0.lastPathComponent == url.lastPathComponent },
+                "the test host keeps its files out of Open Recent")
         doc.close()
     }
 }
