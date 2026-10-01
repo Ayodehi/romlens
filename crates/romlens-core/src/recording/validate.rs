@@ -21,6 +21,7 @@
 //! | `P` | payloads: they decompress, to the length the directory gives |
 //! | `L` | layers: the header's bits against the chunks, `WLOG` bodies |
 //! | `W` | WRAM against the keyframe-only flag |
+//! | `C` | the SPC700's clock: it runs forward, a frame's worth or so each frame |
 //! | `M` | the ROM the recording was made from, when one is given |
 //! | `S` | sampled frames rebuilt, with `changes` checked against the truth |
 
@@ -336,8 +337,9 @@ pub fn validate(mut file: Box<dyn ReadSeek>, options: ValidateOptions) -> Valida
         }
     };
 
-    // T, K, D, R, P, L, W: walk every chunk from the header to the index.
+    // T, K, D, R, P, L, W, C: walk every chunk from the header to the index.
     let mut seen: Vec<Seen> = Vec::new();
+    let mut spc_cycle: Option<u64> = None;
     let mut wlog_chunks = 0u32;
     let mut other_layers = [false; 6];
     let mut at = header_len as u64;
@@ -380,7 +382,9 @@ pub fn validate(mut file: Box<dyn ReadSeek>, options: ValidateOptions) -> Valida
         let chunk = read_at(&mut *file, at, (8 + body_len) as usize).unwrap_or_default();
         if &magic == FRAME_MAGIC {
             let n = seen.len() as u64;
-            check_frame(&mut out, &header, &chunk, n, interval, &whole);
+            let cycle = check_frame(&mut out, &header, &chunk, n, interval, &whole);
+            check_spc_clock(&mut out, n, spc_cycle, cycle);
+            spc_cycle = cycle;
             let frame = if chunk.len() >= 16 {
                 u64_at(&chunk, 8)
             } else {
@@ -526,7 +530,7 @@ fn check_frame(
     n: u64,
     interval: u64,
     regions: &[StateRegion],
-) {
+) -> Option<u64> {
     let f = Some(n);
     let head = match FrameHead::decode(chunk) {
         Ok(h) => h,
@@ -536,9 +540,12 @@ fn check_frame(
                 f,
                 format!("frame {n}'s directory cannot be read: {e}"),
             );
-            return;
+            return None;
         }
     };
+    // The SPC700's clock, when the frame carries its registers (always
+    // whole, so every frame does).
+    let mut spc_cycle = None;
     // K: numbering and keyframes.
     if head.frame != n {
         out.error(
@@ -687,10 +694,14 @@ fn check_frame(
                     d.region.name()
                 ),
             );
-            return;
+            return spc_cycle;
         }
-        if let Err(e) = unpack(&chunk[at..end], d.raw_len as usize, header.compression) {
-            out.error("P2", f, format!("frame {n}: {}: {e}", d.region.name()));
+        match unpack(&chunk[at..end], d.raw_len as usize, header.compression) {
+            Err(e) => out.error("P2", f, format!("frame {n}: {}: {e}", d.region.name())),
+            Ok(raw) if d.region == StateRegion::SpcState && stored_whole => {
+                spc_cycle = Some(crate::recording::SpcState::decode(&raw).cycle);
+            }
+            Ok(_) => {}
         }
         at = end;
     }
@@ -701,6 +712,35 @@ fn check_frame(
             format!(
                 "frame {n} has {} bytes after its last payload",
                 chunk.len() - at
+            ),
+        );
+    }
+    spc_cycle
+}
+
+/// C: the SPC700's clock from the frame before to frame `n`. It never runs
+/// back, and a replay runs at most [`MAX_FRAME_CYCLES`] from one frame to
+/// the next, so a gap past that is a damaged clock.
+///
+/// [`MAX_FRAME_CYCLES`]: crate::apu::replay::MAX_FRAME_CYCLES
+fn check_spc_clock(out: &mut Out, n: u64, prev: Option<u64>, now: Option<u64>) {
+    let (Some(prev), Some(now)) = (prev, now) else {
+        return;
+    };
+    if now < prev {
+        out.error(
+            "C1",
+            Some(n),
+            format!("frame {n}'s SPC700 clock runs back from {prev} to {now} cycles"),
+        );
+    } else if now - prev > crate::apu::replay::MAX_FRAME_CYCLES {
+        out.error(
+            "C2",
+            Some(n),
+            format!(
+                "frame {n}'s SPC700 clock jumps {} cycles, more than {} frames' worth",
+                now - prev,
+                crate::apu::replay::MAX_FRAME_CYCLES / 17_000
             ),
         );
     }

@@ -262,3 +262,61 @@ fn a_flood_of_one_problem_is_capped() {
     assert_eq!(k3.len(), 6);
     assert_eq!(k3[5].message, "64 more like this");
 }
+
+#[test]
+fn an_spc700_clock_that_jumps_or_runs_back_is_c2_then_c1() {
+    use romlens_core::recording::mesen::stream::encode::fixture_run_by_apu;
+    use romlens_core::recording::mesen::{PackOptions, pack};
+    use romlens_core::recording::{MachineStateSource, SpcState};
+    let rom_bytes = romlens_core::fixtures::sound::sound_upload_lorom();
+    let rom = romlens_core::RomImage::from_bytes(rom_bytes.clone(), "sound.sfc").unwrap();
+    let mut packed = Cursor::new(Vec::new());
+    pack(
+        fixture_run_by_apu(&rom_bytes, 5).as_slice(),
+        &rom,
+        &mut packed,
+        PackOptions::default(),
+    )
+    .unwrap();
+    let rec = RomrecSource::from_bytes(packed.into_inner(), false).unwrap();
+    // The fixture's frames as they rebuild, WRAM left out: the packer
+    // keeps it in keyframes only.
+    let regions: Vec<StateRegion> = rec
+        .regions()
+        .into_iter()
+        .filter(|r| *r != StateRegion::Wram)
+        .collect();
+    let write = |jump: u64| {
+        let mut w = RomrecWriter::new(
+            Cursor::new(Vec::new()),
+            rec.identity(),
+            &regions,
+            WriterOptions::default(),
+            0,
+        )
+        .unwrap();
+        for f in 0..5 {
+            let mut s = rec.state_at(f).unwrap();
+            s.regions.remove(&StateRegion::Wram);
+            if f == 2 {
+                let spc = s.regions.get_mut(&StateRegion::SpcState).unwrap();
+                let mut st = SpcState::decode(spc);
+                st.cycle += jump;
+                *spc = st.encode().to_vec();
+            }
+            w.write_frame(&s).unwrap();
+        }
+        w.finish().unwrap().into_inner()
+    };
+    assert_eq!(errors(write(0)), Vec::<&str>::new());
+    // One bit flipped high in frame 2's clock: a jump there, and frame 3
+    // runs back from it.
+    let r = check(write(1 << 40), ValidateOptions::default());
+    let c: Vec<_> = r
+        .diagnostics
+        .iter()
+        .filter(|d| d.code.starts_with('C'))
+        .map(|d| (d.code, d.frame))
+        .collect();
+    assert_eq!(c, vec![("C2", Some(2)), ("C1", Some(3))]);
+}

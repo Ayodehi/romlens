@@ -12,6 +12,10 @@ use romlens_core::recording::{
 };
 
 fn recording(options: WriterOptions) -> RomrecSource {
+    RomrecSource::from_bytes(recording_bytes(options), false).unwrap()
+}
+
+fn recording_bytes(options: WriterOptions) -> Vec<u8> {
     let frames = fixtures::frames(70);
     let mut w = RomrecWriter::new(
         Cursor::new(Vec::new()),
@@ -24,7 +28,7 @@ fn recording(options: WriterOptions) -> RomrecSource {
     for f in &frames {
         w.write_frame(f).unwrap();
     }
-    RomrecSource::from_bytes(w.finish().unwrap().into_inner(), false).unwrap()
+    w.finish().unwrap().into_inner()
 }
 
 fn touches(runs: &[Run], offset: u32, len: u32) -> bool {
@@ -142,5 +146,41 @@ fn the_sidecar_round_trips_and_wram_is_left_out_when_sparse() {
             .when(&src, StateRegion::Vram, 0x8000, 1, 69, true)
             .unwrap(),
         Some(0)
+    );
+}
+
+#[test]
+fn a_change_run_past_its_region_is_left_out_of_the_index() {
+    use romlens_core::recording::format::{DIR_ENTRY_LEN, FRAME_HEADER_LEN};
+    let options = WriterOptions {
+        keyframe_interval: 16,
+        ..WriterOptions::default()
+    };
+    let mut bytes = recording_bytes(options);
+    let src = RomrecSource::from_bytes(bytes.clone(), false).unwrap();
+    // Frame 30 rewrites tile 5 in VRAM: move its change run 16 MiB out,
+    // to a block the region's 256 do not reach.
+    let at = src.index()[30].offset as usize;
+    let head = src.frame_head(30).unwrap();
+    let mut run = at + FRAME_HEADER_LEN + head.dir.len() * DIR_ENTRY_LEN;
+    for d in &head.dir {
+        run += d.runs.len() * 8;
+        if d.region == StateRegion::Vram {
+            assert!(!d.changes.is_empty());
+            break;
+        }
+        run += d.changes.len() * 8;
+    }
+    bytes[run..run + 4].copy_from_slice(&0x00FF_FF00u32.to_le_bytes());
+    let src = RomrecSource::from_bytes(bytes, false).unwrap();
+    let index = ChangeIndex::build(&src).unwrap();
+    assert!(
+        !index
+            .candidates(StateRegion::Vram, 0, 0x1_0000)
+            .contains(&30)
+    );
+    assert_eq!(
+        index.candidates(StateRegion::Vram, u32::MAX, u32::MAX),
+        Vec::<u64>::new()
     );
 }

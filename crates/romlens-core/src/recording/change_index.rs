@@ -92,17 +92,20 @@ impl Frames {
     fn list(&self) -> Vec<u64> {
         match self {
             Frames::Sparse { count, bytes } => {
-                let mut out = Vec::with_capacity(*count as usize);
+                // Each entry is a byte at least, whatever a damaged
+                // sidecar's count says.
+                let mut out = Vec::with_capacity((*count as usize).min(bytes.len()));
                 let (mut acc, mut shift, mut prev) = (0u64, 0u32, 0u64);
                 for &b in bytes {
-                    acc |= ((b & 0x7F) as u64) << shift;
+                    // Past ten bytes a varint has no bits left to give.
+                    acc |= ((b & 0x7F) as u64).checked_shl(shift).unwrap_or(0);
                     if b & 0x80 == 0 {
-                        prev += acc;
+                        prev = prev.saturating_add(acc);
                         out.push(prev);
                         acc = 0;
                         shift = 0;
                     } else {
-                        shift += 7;
+                        shift = shift.saturating_add(7);
                     }
                 }
                 out
@@ -139,7 +142,7 @@ pub struct ChangeIndex {
 }
 
 fn overlaps(runs: &[Run], offset: u32, len: u32) -> bool {
-    let end = offset + len.max(1);
+    let end = offset.saturating_add(len.max(1));
     runs.iter().any(|r| r.offset < end && offset < r.end())
 }
 
@@ -164,11 +167,16 @@ impl ChangeIndex {
                     continue;
                 };
                 let runs: &[Run] = if f == 0 { &d.runs } else { &d.changes };
+                // A damaged run can reach past its region: only the blocks
+                // the region has are touched.
+                let blocks = lists[i].len() as u32;
                 let mut touched = Vec::new();
                 for run in runs {
                     let first = run.offset / BLOCK;
-                    let last = (run.end().max(run.offset + 1) - 1) / BLOCK;
-                    touched.extend(first..=last);
+                    let last = (run.end().max(run.offset.saturating_add(1)) - 1) / BLOCK;
+                    if first < blocks {
+                        touched.extend(first..=last.min(blocks - 1));
+                    }
                 }
                 touched.sort_unstable();
                 touched.dedup();
@@ -205,7 +213,7 @@ impl ChangeIndex {
             return Vec::new();
         };
         let first = (offset / BLOCK) as usize;
-        let last = ((offset + len.max(1) - 1) / BLOCK) as usize;
+        let last = ((offset.saturating_add(len.max(1)) - 1) / BLOCK) as usize;
         let mut out: Vec<u64> = ri
             .blocks
             .get(first..=last.min(ri.blocks.len().saturating_sub(1)))
@@ -313,7 +321,9 @@ impl ChangeIndex {
         for _ in 0..u32_(take(4)?) {
             let region = StateRegion::from_id(u32_(take(4)?))?;
             let n = u32_(take(4)?) as usize;
-            let mut blocks = Vec::with_capacity(n);
+            // Each block takes nine bytes at least: a damaged count
+            // cannot ask for more room than the sidecar could fill.
+            let mut blocks = Vec::with_capacity(n.min(b.len() / 9));
             for _ in 0..n {
                 let kind = take(1)?[0];
                 let count = u32_(take(4)?);
