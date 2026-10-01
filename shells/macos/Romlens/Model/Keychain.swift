@@ -40,11 +40,19 @@ struct Keychain: KeyStore {
 
     func setKey(_ key: String?, for endpoint: String) throws {
         let q = query(endpoint)
-        let status = SecItemDelete(q as CFDictionary)
-        guard status == errSecSuccess || status == errSecItemNotFound else { throw KeychainError(status: status) }
-        guard let key, !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        guard let key, !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            let status = SecItemDelete(q as CFDictionary)
+            guard status == errSecSuccess || status == errSecItemNotFound else { throw KeychainError(status: status) }
+            return
+        }
+        let data = Data(key.trimmingCharacters(in: .whitespacesAndNewlines).utf8)
+        // Update in place where there is a key, so a failure keeps the old
+        // one rather than leaving none.
+        let updated = SecItemUpdate(q as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+        if updated == errSecSuccess { return }
+        guard updated == errSecItemNotFound else { throw KeychainError(status: updated) }
         var add = q
-        add[kSecValueData as String] = Data(key.trimmingCharacters(in: .whitespacesAndNewlines).utf8)
+        add[kSecValueData as String] = data
         add[kSecAttrLabel as String] = "Romlens tutor: \(endpoint)"
         add[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlocked
         let added = SecItemAdd(add as CFDictionary, nil)

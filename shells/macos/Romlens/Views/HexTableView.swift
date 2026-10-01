@@ -188,6 +188,7 @@ final class HexCanvasView: NSView {
         for row in rows(in: dirtyRect) {
             let row32 = UInt32(row)
             let batch = model.batch(containingRow: row32)
+            guard batch.contains(row: row32) else { continue }
             let record = batch.record(row: row32)
             let line = batch.line(row: row32, generation: generation, layout: layout)
             var selectedByte: Int?
