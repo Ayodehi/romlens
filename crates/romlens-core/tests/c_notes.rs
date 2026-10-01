@@ -220,6 +220,19 @@ fn the_package_keeps_them() {
         back.c_versions.get(&(at(0x00_8000), "Plain words".into())),
         Some(&v)
     );
+    // A hand-edited anchor whose last line comes before its first is
+    // refused on load, as the edit that made it would have been.
+    let mut bad = files.clone();
+    let text = String::from_utf8(bad["c_versions.json"].clone()).unwrap();
+    assert!(text.contains("\"last\": 3"), "{text}");
+    bad.insert(
+        "c_versions.json".into(),
+        text.replace("\"last\": 3", "\"last\": 1").into_bytes(),
+    );
+    assert!(matches!(
+        from_files(&rom, &bad).unwrap_err(),
+        romlens_core::ProjectError::InvalidC(_)
+    ));
     // A project without them keeps the files it always had.
     let files = to_files(&rom, &Project::new(&rom));
     assert!(!files.contains_key("c_notes.json") && !files.contains_key("c_versions.json"));
