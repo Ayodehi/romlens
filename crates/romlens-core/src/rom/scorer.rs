@@ -53,7 +53,8 @@ pub fn score_slot(payload: &[u8], mode: MappingMode) -> Option<SlotScore> {
 
 /// Pick the mapping. Errors with [`RomError::NoValidHeader`] when nothing
 /// reaches the floor and [`RomError::UnsupportedMapping`] when the winning
-/// header names a mapping Phase 0 does not model.
+/// header names a mapping Phase 0 does not model on a cartridge with a
+/// coprocessor.
 pub fn detect_mapping(payload: &[u8]) -> Result<SlotScore, RomError> {
     let mut scores: Vec<SlotScore> = MappingMode::all()
         .into_iter()
@@ -81,7 +82,11 @@ pub fn detect_mapping(payload: &[u8]) -> Result<SlotScore, RomError> {
     if best.score < SCORE_FLOOR {
         return Err(RomError::NoValidHeader);
     }
-    if best.header.mapping().is_none() {
+    // A cartridge without a coprocessor whose map-mode byte names nothing
+    // Romlens knows (a title one byte too long overwrites it) is mapped by
+    // its slot: the hardware never reads that byte. One with a coprocessor
+    // (SA-1, SDD-1, ...) is reported, since its slot does not decide it.
+    if best.header.mapping().is_none() && best.header.cartridge_type > 0x02 {
         return Err(RomError::UnsupportedMapping(best.header.map_mode));
     }
     Ok(best)

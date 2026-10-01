@@ -154,9 +154,11 @@ impl RomHeader {
         })
     }
 
-    /// Bit 4 of the map-mode byte.
+    /// Bit 4 of the map-mode byte, believed only when the byte is a map
+    /// mode at all (`$2x` or `$3x`): a title one byte too long puts a
+    /// letter there.
     pub const fn is_fast_rom(&self) -> bool {
-        self.map_mode & 0x10 != 0
+        self.map_mode & 0xE0 == 0x20 && self.map_mode & 0x10 != 0
     }
 
     /// Mapping named by the low nibble of the map-mode byte, if it is one
