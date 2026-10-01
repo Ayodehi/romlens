@@ -1087,6 +1087,7 @@ impl<'a> Walk<'a> {
                 history.remove(0);
             }
             flags = after;
+            let (insn_off, insn_addr) = (off, addr);
             off = end;
             addr = next;
             if skip > 0 {
@@ -1110,8 +1111,17 @@ impl<'a> Walk<'a> {
                 off = stop_at;
                 addr = SnesAddress::new(addr.bank(), addr.offset().wrapping_add(skip as u16));
             }
-            // Stepping past $FFFF lands in the next bank's low half, which is
-            // never ROM in the same way; the wrap warning above already fired.
+            // The program counter wraps within its bank: falling off `$FFFF`
+            // goes to `$bb:0000`, not to the next file bank. An instruction
+            // that ends exactly there raised no wrap above, so stop here.
+            if addr.offset() < insn_addr.offset() {
+                self.warn(
+                    insn_off,
+                    WarningKind::BankWrap,
+                    format!("{insn_addr} runs off the end of the bank"),
+                );
+                return;
+            }
             if self.rom.file_offset_for(addr) != Some(FileOffset(off)) {
                 if let Some(a) = self.rom.snes_address_for(FileOffset(off)) {
                     addr = a;

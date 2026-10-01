@@ -28,9 +28,10 @@ impl FlagState {
         c: None,
     };
 
-    /// Entering a native-mode interrupt handler: M = X = 1 is what the
-    /// hardware sets on the way in; DBR and D are whatever the interrupted
-    /// code had.
+    /// Entering a native-mode interrupt handler. The hardware leaves M, X,
+    /// DBR and D as the interrupted code had them, so the widths here are
+    /// an assumption (8-bit, as most handlers set them before relying on
+    /// them); DBR and D are unknown.
     pub const NATIVE_VECTOR: FlagState = FlagState {
         m: true,
         x: true,
@@ -74,8 +75,8 @@ impl FlagState {
             | ((self.dp.is_some() as u8) << 4)
     }
 
-    /// Parse `m1x0e0`, optionally followed by ` dbr=80 dp=0000` style suffixes
-    /// (the CLI's `--flags`). Missing letters keep the `NATIVE_VECTOR` values.
+    /// Parse `m1x0e0` (the CLI's `--flags`). Missing letters keep the
+    /// `NATIVE_VECTOR` values.
     pub fn parse(text: &str) -> Option<FlagState> {
         let mut f = FlagState::NATIVE_VECTOR;
         let mut chars = text.trim().chars().peekable();

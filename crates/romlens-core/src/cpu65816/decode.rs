@@ -340,6 +340,12 @@ fn apply_flag_effects(insn: &Instruction, assumptions: &mut u8) -> FlagState {
             f.c = None;
         }
         PLB => f.dbr = None,
+        // A block move leaves DBR at its destination bank.
+        MVN | MVP => {
+            if let Operand::Move { dst, .. } = insn.operand {
+                f.dbr = Some(dst);
+            }
+        }
         PLD | TCD => f.dp = None,
         ADC | SBC | CMP | CPX | CPY | ASL | LSR | ROL | ROR => f.c = None,
         JSR | JSL => f.c = None,
