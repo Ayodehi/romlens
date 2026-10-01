@@ -2204,8 +2204,8 @@ impl TutorSession {
         guess: String,
     ) -> Result<super::quiz::PredictResultInfo, RomlensError> {
         let guess = guess.trim().to_owned();
-        if guess.chars().count() < 3 {
-            return Err(err("a guess of a few words or a number"));
+        if guess.is_empty() {
+            return Err(err("an empty guess"));
         }
         let l = self
             .tools
@@ -2692,9 +2692,9 @@ mod tests {
         );
         assert!(
             Arc::clone(&t)
-                .answer_predict(lesson.id.clone(), 1, "no".into())
+                .answer_predict(lesson.id.clone(), 1, "  ".into())
                 .is_err(),
-            "too short"
+            "empty"
         );
         let info = t.lesson(lesson.id.clone()).unwrap();
         assert_eq!(info.steps[0].guessed.as_deref(), Some("$2100"));

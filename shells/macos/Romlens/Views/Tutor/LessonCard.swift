@@ -183,7 +183,7 @@ private struct Guess: View {
                     .onSubmit(check)
                 Button("Check", action: check)
                     .controlSize(.small)
-                    .disabled(guess.trimmingCharacters(in: .whitespaces).count < 3)
+                    .disabled(guess.trimmingCharacters(in: .whitespaces).isEmpty)
                 Button("Show") { tutor.reveal(lesson, step) }.controlSize(.small)
             }
             Text("Guess first, or just show it.").font(.caption).foregroundStyle(.secondary)
@@ -191,7 +191,7 @@ private struct Guess: View {
     }
 
     private func check() {
-        guard guess.trimmingCharacters(in: .whitespaces).count >= 3 else { return }
+        guard !guess.trimmingCharacters(in: .whitespaces).isEmpty else { return }
         tutor.answerPredict(lesson, step, guess)
     }
 }
