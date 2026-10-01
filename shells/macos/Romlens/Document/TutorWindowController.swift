@@ -41,4 +41,10 @@ final class TutorWindowController: NSWindowController, NSWindowDelegate {
         get { false }
         set {}
     }
+
+    /// Closing the window stops the turn; the conversation stays for when
+    /// it shows again.
+    func windowWillClose(_ notification: Notification) {
+        tutor.close()
+    }
 }

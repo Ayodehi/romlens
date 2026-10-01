@@ -100,6 +100,14 @@ final class WorkbenchSession {
         analysis = .idle
     }
 
+    /// The document closed: stop the run, and the one waiting to follow
+    /// an edit, so neither works on for a project no one can see.
+    func close() {
+        reanalysisTask?.cancel()
+        reanalysisTask = nil
+        cancelAnalysis()
+    }
+
     /// Re-run after a short pause. A run already under way finishes first
     /// and the new one follows it: cancelling it instead meant that changes
     /// arriving faster than a run takes, as a live session's execution log

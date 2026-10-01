@@ -444,9 +444,29 @@ final class AudioModel {
         ticker = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(66))
-                self?.tick()
+                // The model went with its window: nothing left to move.
+                guard let self else { return }
+                self.tick()
             }
         }
+    }
+
+    /// The project closed: silence, and stop everything still running for
+    /// it.
+    func shutDown() {
+        ticker?.cancel()
+        ticker = nil
+        uploadTask?.cancel()
+        notesTask?.cancel()
+        playing = nil
+        livePlayer = nil
+        samplePlayer = nil
+        output.shutDown()
+    }
+
+    isolated deinit {
+        ticker?.cancel()
+        output.shutDown()
     }
 
     func tick() {

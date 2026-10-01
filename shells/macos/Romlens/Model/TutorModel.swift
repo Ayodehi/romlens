@@ -225,6 +225,17 @@ final class TutorModel {
         session?.cancel()
     }
 
+    /// The tutor's window or its project closed: no one is left to read
+    /// the answer or decide a card, so the turn stops rather than run on
+    /// (and cost) unseen, and every waiting card says no.
+    func close() {
+        acceptRest = false
+        for card in live?.cards ?? [] where card.state == .waiting {
+            answer(card, accept: false)
+        }
+        session?.cancel()
+    }
+
     func answer(_ card: Card, accept: Bool, why: String? = nil, andTheRest: Bool = false) {
         acceptRest = accept && andTheRest
         session?.answer(editId: card.id, accept: accept, why: why)

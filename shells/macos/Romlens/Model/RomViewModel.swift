@@ -346,6 +346,13 @@ final class RomViewModel {
         asmCache.batch(containingRow: line)
     }
 
+    /// The document closed: stop the analysis, the sound and a comparison.
+    func close() {
+        session.close()
+        audio.shutDown()
+        compare.close()
+    }
+
     private func handleChange(_ kind: WorkbenchSession.ChangeKind) {
         switch kind {
         case .snapshot, .view:

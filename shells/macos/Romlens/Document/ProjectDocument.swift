@@ -251,6 +251,16 @@ final class ProjectDocument: NSDocument {
         tutorController?.window?.makeKeyAndOrderFront(nil)
     }
 
+    /// Nothing started for the project outlives it: the tutor's turn, the
+    /// analysis, the sound and a comparison all stop.
+    override func close() {
+        MainActor.assumeIsolated {
+            tutorController?.tutor.close()
+            model?.close()
+        }
+        super.close()
+    }
+
     /// The document's ROM hash, for de-duplication by the controller.
     var sha256: String? { romSha256 }
 }
