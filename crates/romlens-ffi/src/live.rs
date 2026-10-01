@@ -53,7 +53,7 @@ impl LiveEvents for Forward {
     }
     fn status(&self, status: live::LiveStatus) {
         let status: LiveStatus = status.into();
-        *self.last.lock().unwrap() = Some(status.clone());
+        *self.last.lock().unwrap_or_else(|e| e.into_inner()) = Some(status.clone());
         self.listener.on_status(status);
     }
     fn exec_log(&self, log: Vec<u8>) {
@@ -148,14 +148,14 @@ impl LiveSession {
 
     /// Stop listening. The frames already held stay readable.
     pub fn stop(&self) {
-        if let Some(mut server) = self.server.lock().unwrap().take() {
+        if let Some(mut server) = self.server.lock().unwrap_or_else(|e| e.into_inner()).take() {
             server.stop();
         }
     }
 
     /// The last status reported, for a shell attaching after the start.
     pub fn status(&self) -> Option<LiveStatus> {
-        self.last.lock().unwrap().clone()
+        self.last.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// The newest frame received, if any.
@@ -164,7 +164,10 @@ impl LiveSession {
     }
 
     pub fn is_listening(&self) -> bool {
-        self.server.lock().unwrap().is_some()
+        self.server
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_some()
     }
 }
 

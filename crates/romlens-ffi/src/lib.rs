@@ -555,6 +555,21 @@ mod tests {
     }
 
     #[test]
+    fn work_that_panics_completes_its_future_with_a_failure() {
+        use std::sync::atomic::AtomicBool;
+        let flag = || std::sync::Arc::new(AtomicBool::new(false));
+        let f = crate::future::spawn(flag(), || -> Result<u32, RomlensError> {
+            panic!("the work broke")
+        });
+        match block_on(f) {
+            Err(RomlensError::Io { msg }) => assert!(msg.contains("the work broke"), "{msg}"),
+            other => panic!("{other:?}"),
+        }
+        let f = crate::future::spawn(flag(), || -> Option<u32> { panic!("again") });
+        assert_eq!(block_on(f), None);
+    }
+
+    #[test]
     fn decompiles_a_routine() {
         let rom = Rom::from_bytes(make_routines_test_rom(), "r.sfc".into()).unwrap();
         let wb = Workbench::new(rom);
