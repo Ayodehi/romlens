@@ -384,7 +384,11 @@ fn start(s: &Snapshot, (pc, back): (u16, u8)) -> Apu {
         } else {
             // It ticked in those cycles; the count before it is not known
             // exactly, so only the phase goes back.
-            t.phase = t.phase + period - back;
+            // A recorded phase can be out of range; widen so it cannot
+            // overflow.
+            t.phase = (u16::from(t.phase) + u16::from(period))
+                .saturating_sub(u16::from(back))
+                .min(0xFF) as u8;
         }
     }
     apu
