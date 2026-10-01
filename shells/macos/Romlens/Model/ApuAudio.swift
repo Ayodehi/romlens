@@ -7,12 +7,27 @@ import Synchronization
 /// the producer renders on a background queue, the audio thread reads.
 /// Nothing on the audio thread allocates, locks or calls into Rust
 /// (docs/23, A12).
+///
+/// Only the consumer moves `read`. A clear is a request: the main actor
+/// bumps `requested`, and the producer tags what it writes with the
+/// request its player was started under, marking where that player's
+/// samples begin. From the request the consumer plays silence until the
+/// mark, then skips to it, so what an old player rendered is never heard.
 final class SampleRing: @unchecked Sendable {
     /// Frames it holds: 0.25 s at 32 kHz.
     let capacity: Int
     private let buffer: UnsafeMutablePointer<Int16>
     private let written = Atomic<Int>(0)
     private let read = Atomic<Int>(0)
+    /// The latest clear asked for (main actor).
+    private let requested = Atomic<Int>(0)
+    /// Where the samples of generation `startGeneration` begin (producer).
+    private let startAt = Atomic<Int>(0)
+    private let startGeneration = Atomic<Int>(0)
+    /// The generation the producer last wrote (producer only).
+    private let writing = Atomic<Int>(0)
+    /// The generation the consumer plays (consumer only).
+    private let serving = Atomic<Int>(0)
 
     init(capacity: Int = 8192) {
         self.capacity = capacity
@@ -27,9 +42,23 @@ final class SampleRing: @unchecked Sendable {
 
     var space: Int { capacity - available }
 
-    /// Append interleaved left/right samples; what does not fit is dropped.
-    func write(_ interleaved: [Int16]) {
+    /// Frames of `generation` waiting to be read, as the producer sees
+    /// them: an older player's left in the ring do not count.
+    func pending(generation: Int) -> Int {
+        guard generation == writing.load(ordering: .relaxed) else { return 0 }
         let w = written.load(ordering: .relaxed)
+        return w - max(read.load(ordering: .acquiring), startAt.load(ordering: .relaxed))
+    }
+
+    /// Append interleaved left/right samples rendered for `generation`;
+    /// what does not fit is dropped.
+    func write(_ interleaved: [Int16], generation: Int = 0) {
+        let w = written.load(ordering: .relaxed)
+        if generation != writing.load(ordering: .relaxed) {
+            writing.store(generation, ordering: .relaxed)
+            startAt.store(w, ordering: .relaxed)
+            startGeneration.store(generation, ordering: .releasing)
+        }
         let n = min(interleaved.count / 2, capacity - (w - read.load(ordering: .acquiring)))
         guard n > 0 else { return }
         interleaved.withUnsafeBufferPointer { src in
@@ -46,8 +75,21 @@ final class SampleRing: @unchecked Sendable {
     /// silence. Returns the frames that were real.
     @discardableResult
     func read(into left: UnsafeMutablePointer<Float>, _ right: UnsafeMutablePointer<Float>, frames: Int) -> Int {
-        let r = read.load(ordering: .relaxed)
-        let n = min(frames, written.load(ordering: .acquiring) - r)
+        var r = read.load(ordering: .relaxed)
+        var playing = true
+        let want = requested.load(ordering: .acquiring)
+        if want != serving.load(ordering: .relaxed) {
+            if startGeneration.load(ordering: .acquiring) == want {
+                // The new player's first samples: skip what came before.
+                r = max(r, startAt.load(ordering: .relaxed))
+                serving.store(want, ordering: .relaxed)
+            } else {
+                // Cleared, and nothing of the new player yet: drop the old.
+                r = written.load(ordering: .acquiring)
+                playing = false
+            }
+        }
+        let n = playing ? min(frames, written.load(ordering: .acquiring) - r) : 0
         for i in 0..<n {
             let at = (r + i) % capacity
             left[i] = Float(buffer[at * 2]) / 32768
@@ -61,8 +103,11 @@ final class SampleRing: @unchecked Sendable {
         return max(n, 0)
     }
 
-    func clear() {
-        read.store(written.load(ordering: .acquiring), ordering: .releasing)
+    /// Ask the consumer to drop everything written so far; returns the
+    /// generation to render the next player for. Main actor only.
+    @discardableResult
+    func clear() -> Int {
+        requested.add(1, ordering: .releasing).newValue
     }
 }
 
@@ -83,9 +128,13 @@ final class ApuAudio {
     private var engine: AVAudioEngine?
     private let queue = DispatchQueue(label: "romlens.apu.render", qos: .userInteractive)
     private var timer: DispatchSourceTimer?
-    /// The player the queue renders; swapped on the main actor, read on the
-    /// queue under the lock.
-    private let current = Mutex<ApuPlayer?>(nil)
+    /// The player the queue renders, with the ring generation it renders
+    /// for; swapped on the main actor, read on the queue under the lock.
+    private let current = Mutex<(player: ApuPlayer, generation: Int)?>(nil)
+    /// Held for the whole of a fill, so the queue and a test filling by
+    /// hand are never two producers at once. Never taken on the audio
+    /// thread.
+    private let producing = Mutex<Void>(())
     /// Why the output could not start, if it could not.
     private(set) var problem: String?
     /// The output's level, 0–1.
@@ -97,8 +146,10 @@ final class ApuAudio {
 
     /// Play `player` from now, or stop with nil.
     func play(_ player: ApuPlayer?) {
-        current.withLock { $0 = player }
-        ring.clear()
+        // The clear first: a fill under way for the old player writes for
+        // the old generation, which the audio thread skips.
+        let generation = ring.clear()
+        current.withLock { $0 = player.map { ($0, generation) } }
         guard player != nil else {
             stopTimer()
             engine?.pause()
@@ -114,11 +165,15 @@ final class ApuAudio {
     /// Render until the ring holds `lead` frames, on the calling thread.
     /// The render queue calls it; tests call it to play without a device.
     nonisolated func fill() {
-        let player = current.withLock { $0 }
-        guard let player else { return }
-        let need = Self.lead - ring.available
-        guard need > 0 else { return }
-        ring.write(player.render(samples: UInt32(min(need, ring.space))))
+        producing.withLock { _ in
+            guard let (player, generation) = current.withLock({ $0 }) else { return }
+            let need = Self.lead - ring.pending(generation: generation)
+            guard need > 0 else { return }
+            let samples = player.render(samples: UInt32(min(need, ring.space)))
+            // Swapped while rendering: these belong to a player no longer heard.
+            guard current.withLock({ $0?.generation }) == generation else { return }
+            ring.write(samples, generation: generation)
+        }
     }
 
     private func startTimer() {
@@ -180,5 +235,11 @@ final class ApuAudio {
         play(nil)
         engine?.stop()
         engine = nil
+    }
+
+    /// A timer left running would keep firing on the queue.
+    isolated deinit {
+        timer?.cancel()
+        engine?.stop()
     }
 }
