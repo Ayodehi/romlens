@@ -39,6 +39,31 @@ import Testing
         #expect(!this.editorTabs.contains(.compare))
     }
 
+    /// A second comparison started while the first runs is the one shown,
+    /// and a run closed before it lands leaves the tab closed.
+    @Test func aNewerRunWinsAndAClosedOneStaysClosed() async throws {
+        let roms = makeCompareTestRoms()
+        let this = try await Fixture.analyzedModel(rom: try Rom.fromBytes(bytes: roms[1], name: "new.sfc"))
+        let first = Workbench(rom: try Rom.fromBytes(bytes: roms[0], name: "old.sfc"))
+        let second = Workbench(rom: try Rom.fromBytes(bytes: roms[0], name: "older.sfc"))
+        let compare = this.compare
+        let a = Task { await compare.start(this: this.workbench, other: first, name: "first", generation: 0) }
+        try await Fixture.settle(until: { compare.otherName == "first" })
+        let b = Task { await compare.start(this: this.workbench, other: second, name: "second", generation: 0) }
+        await a.value
+        await b.value
+        #expect(compare.state == .ready)
+        #expect(compare.otherName == "second")
+        #expect(compare.other === second)
+
+        let c = Task { await compare.start(this: this.workbench, other: first, name: "first", generation: 0) }
+        try await Fixture.settle(until: { compare.otherName == "first" })
+        compare.close()
+        await c.value
+        #expect(compare.state == .idle)
+        #expect(compare.info == nil && compare.other == nil)
+    }
+
     @Test func theTabDrawsInAWindow() async throws {
         let roms = makeCompareTestRoms()
         let this = try await Fixture.analyzedModel(rom: try Rom.fromBytes(bytes: roms[1], name: "new.sfc"))
