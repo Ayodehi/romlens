@@ -12,7 +12,12 @@ struct EditorView: View {
         switch content {
         case .graphics(let tab): GraphicsEditorView(model: model, tab: tab)
         case .audio(let tab): AudioEditorView(model: model, tab: tab)
-        case .tutor: TutorTabPlaceholder()
+        case .tutor:
+            if let tutor = model.tutor {
+                TutorView(tutor: tutor, minWidth: 320)
+            } else {
+                Color.clear.onAppear { model.ensureTutor() }
+            }
         case .some(let c): textEditor(RomViewModel.EditorTab(content: c) ?? .hex)
         case nil:
             if model.graphicsTab != nil {
@@ -81,13 +86,6 @@ struct EditorView: View {
     }
 }
 
-/// Where the tutor shows as a tab until W9 (docs/29).
-struct TutorTabPlaceholder: View {
-    var body: some View {
-        ContentUnavailableView("Tutor", systemImage: "graduationcap", description: Text("Show the tutor with View › Show Tutor."))
-    }
-}
-
 /// The inspector's drawer (docs/29): Inspector and Tutor as two plain tabs,
 /// and for the tutor a button that opens it as a tab in the editor.
 struct RightPaneView: View {
@@ -107,7 +105,7 @@ struct RightPaneView: View {
                             .lineLimit(1)
                     }
                     Button {
-                        model.show(.tutor)
+                        model.showTutorTab()
                     } label: {
                         Image(systemName: "arrow.up.forward.square")
                     }

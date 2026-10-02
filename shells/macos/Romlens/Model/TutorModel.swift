@@ -512,20 +512,22 @@ final class TutorModel {
         switch url.host() {
         case "a":
             guard let a = UInt32(value, radix: 16) else { return false }
+            // In a code tab, the tutor's own tab staying in view (docs/29).
+            if !rom.showsTextEditor || rom.workspace.focusedItem?.content == .tutor {
+                rom.reveal(.code(.assembly))
+            }
             rom.jump(toSnesAddress: a)
         case "c":
             // A routine's C: the C tab, at the instruction.
             guard let a = UInt32(value, radix: 16) else { return false }
-            rom.graphicsTab = nil
-            rom.audioTab = nil
-            rom.editorTab = .c
+            rom.reveal(.code(.c))
             rom.jump(toSnesAddress: a)
         case "f":
             guard let f = UInt64(value), rom.graphics.hasRecording else { return false }
             rom.graphics.frame = f
             let view = URLComponents(url: url, resolvingAgainstBaseURL: false)?
                 .queryItems?.first { $0.name == "view" }?.value
-            rom.graphicsTab = view.flatMap(GraphicsModel.Tab.init(rawValue:)) ?? .frame
+            rom.reveal(.graphics(view.flatMap(GraphicsModel.Tab.init(rawValue:)) ?? .frame))
         case "r":
             // A register has no place in the ROM to show; the step names it.
             return true

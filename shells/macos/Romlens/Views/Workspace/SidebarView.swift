@@ -175,7 +175,7 @@ struct SidebarView: View {
             NSApp.sendAction(#selector(RomWindowController.showLessons(_:)), to: nil, from: nil)
             return
         case "tutor":
-            NSApp.sendAction(#selector(RomWindowController.showTutor(_:)), to: nil, from: nil)
+            model.showTutorTab()
             return
         default:
             break

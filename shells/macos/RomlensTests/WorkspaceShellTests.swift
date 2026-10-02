@@ -197,4 +197,15 @@ import Testing
         m.rightPane = .inspector
         settle(content)
     }
+
+    @Test func theTutorAsATabBesideTheCode() async throws {
+        let m = try await model()
+        let (controller, content) = try open(m)
+        defer { controller.window?.close() }
+        m.showTutorTab()
+        _ = m.tutor?.follow(URL(string: "romlens://a/008040")!)
+        settle(content)
+        #expect(all(content, TabGroupView.self).filter { $0.window != nil }.count == 2)
+        if let frame = content.superview { try Self.snapshot(frame, "tutor-tab") }
+    }
 }

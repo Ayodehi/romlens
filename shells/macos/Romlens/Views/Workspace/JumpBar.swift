@@ -97,7 +97,7 @@ struct JumpBar: View {
         switch content {
         case .graphics(let t): model.openGraphics(t)
         case .audio(let t): model.openAudio(t)
-        case .tutor: NSApp.sendAction(#selector(RomWindowController.showTutor(_:)), to: nil, from: nil)
+        case .tutor: model.showTutorTab()
         default: model.show(content)
         }
     }
@@ -142,7 +142,7 @@ struct OpenQuicklySheet: View {
                 switch content {
                 case .graphics(let t): model.openGraphics(t)
                 case .audio(let t): model.openAudio(t)
-                case .tutor: NSApp.sendAction(#selector(RomWindowController.showTutor(_:)), to: nil, from: nil)
+                case .tutor: model.showTutorTab()
                 default: model.show(content)
                 }
             }

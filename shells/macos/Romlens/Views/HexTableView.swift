@@ -37,6 +37,7 @@ final class HexPaneController {
     let header: HexColumnHeaderView
     private var lineGeneration = -1
     private var highlighted: Range<UInt32>?
+    private var citedShown: [Range<UInt32>] = []
     private var lastScrollId = 0
     /// The tab this pane is in, if any (docs/29).
     let item: UUID?
@@ -74,6 +75,11 @@ final class HexPaneController {
         let generation = model.lineGeneration
         let range = model.highlightedRange
         let scroll = model.scrollRequest
+        let cited = model.citationHighlight
+        if cited != citedShown {
+            citedShown = cited
+            canvas.needsDisplay = true
+        }
 
         if lineGeneration != generation {
             lineGeneration = generation
@@ -203,6 +209,7 @@ final class HexCanvasView: NSView {
         let selected = model.selectedOffset
         let highlighted = model.highlightedRange
         let focused = window?.firstResponder === self
+        let cited = model.citationHighlight
         for row in rows(in: dirtyRect) {
             let row32 = UInt32(row)
             let batch = model.batch(containingRow: row32)
@@ -223,6 +230,13 @@ final class HexCanvasView: NSView {
                 highlighted: rowRange, selectedByte: selectedByte, focused: focused,
                 in: rect(ofRow: row), context: context
             )
+            let rowStart = row32 * 16
+            if cited.contains(where: { $0.lowerBound < rowStart + 16 && $0.upperBound > rowStart }) {
+                // A row a citation names (docs/29).
+                context.setStrokeColor(NSColor.controlAccentColor.cgColor)
+                context.setLineWidth(1.5)
+                context.stroke(rect(ofRow: row).insetBy(dx: 1, dy: 1))
+            }
         }
     }
 

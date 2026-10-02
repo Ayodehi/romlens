@@ -33,6 +33,7 @@ final class AsmPaneController {
     let scrollView: NSScrollView
     private var asmGeneration = -1
     private var selectedOffset: UInt32?
+    private var citedShown: [Range<UInt32>] = []
     private var lastScrollId = 0
     /// The tab this pane is in, if any (docs/29).
     let item: UUID?
@@ -68,6 +69,11 @@ final class AsmPaneController {
         let generation = model.asmGeneration
         let selected = model.selectedOffset
         let scroll = model.scrollRequest
+        let cited = model.citationHighlight
+        if cited != citedShown {
+            citedShown = cited
+            canvas.needsDisplay = true
+        }
         if asmGeneration != generation {
             asmGeneration = generation
             canvas.layoutDidChange()
@@ -206,6 +212,7 @@ final class AsmCanvasView: NSView {
         let gen = generation
         let selectedLine = model.selectedOffset.flatMap { model.workbench.lineForOffset(fileOffset: $0) }
         let focused = window?.firstResponder === self
+        let cited = model.citationHighlight
         for line in lines(in: dirtyRect) {
             let line32 = UInt32(line)
             let batch = model.asmBatch(containingLine: line32)
@@ -217,7 +224,17 @@ final class AsmCanvasView: NSView {
                 selected: selectedLine == line32, focused: focused,
                 in: rect(ofLine: line), context: context
             )
+            if cited.contains(where: { $0.contains(record.fileOffset) }) {
+                outline(rect(ofLine: line), context)
+            }
         }
+    }
+
+    /// A line a citation names (docs/29).
+    private func outline(_ r: NSRect, _ context: CGContext) {
+        context.setStrokeColor(NSColor.controlAccentColor.cgColor)
+        context.setLineWidth(1.5)
+        context.stroke(r.insetBy(dx: 1, dy: 1))
     }
 
     /// The line under a point.

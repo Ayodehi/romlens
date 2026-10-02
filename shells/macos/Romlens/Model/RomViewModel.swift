@@ -107,6 +107,60 @@ final class RomViewModel {
         return t
     }
 
+    /// The tutor as a tab (docs/29): the sidebar's Tutor, Open Quickly and
+    /// the drawer's button.
+    func showTutorTab() {
+        ensureTutor()
+        show(.tutor)
+        if rightPane == .tutor { rightPane = .inspector }
+    }
+
+    /// What the student is pointing at in an answer: the lines its
+    /// citations name, outlined in every Assembly and Hex tab.
+    private(set) var citationHighlight: [Range<UInt32>] = []
+
+    func pointAtCitations(_ snesAddresses: [UInt32]) {
+        let ranges: [Range<UInt32>] = snesAddresses.compactMap { a in
+            guard let offset = rom.fileOffsetFor(snesAddress: a) else { return nil }
+            let len = UInt32(workbench.instructionAt(fileOffset: offset)?.len ?? 1)
+            return offset..<offset + max(1, len)
+        }
+        if ranges != citationHighlight { citationHighlight = ranges }
+    }
+
+    /// Shows `content` for a citation without hiding the tutor's tab: with
+    /// the tutor focused, in another group (the one already showing it, or
+    /// the first other), or in a new group beside it.
+    func reveal(_ content: EditorContent) {
+        guard workspace.focusedItem?.content == .tutor else {
+            openForCitation(content)
+            return
+        }
+        let tutorGroup = workspace.focusedGroup
+        let others = workspace.layout.groups.filter { $0.id != tutorGroup }
+        if let existing = workspace.layout.existing(content), workspace.layout.group(containing: existing.id)?.id != tutorGroup {
+            focus(item: existing.id)
+        } else if case .code = content,
+                  let code = others.compactMap(\.selectedItem).first(where: { if case .code = $0.content { true } else { false } }) {
+            focus(item: code.id)
+            openForCitation(content)
+        } else if let other = others.first {
+            focusGroup(other.id)
+            openForCitation(content)
+        } else if let id = workspace.open(content, in: tutorGroup) {
+            workspace.split(tutorGroup, .right, with: id)
+            focus(item: id)
+        }
+    }
+
+    private func openForCitation(_ content: EditorContent) {
+        switch content {
+        case .graphics(let t): graphicsTab = t
+        case .audio(let t): audioTab = t
+        default: show(content)
+        }
+    }
+
     /// View › Show Tutor (⌥⌘T): the drawer, on its Tutor tab.
     func showTutorInDrawer() {
         ensureTutor()

@@ -14,9 +14,16 @@ struct MessageText: View {
             ForEach(Array(Self.rendered(text).enumerated()), id: \.offset) { _, s in
                 switch s {
                 case .prose(let p):
+                    let cited = Self.citedAddresses(p)
                     Text(p)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        // Pointing at a paragraph outlines the lines it
+                        // cites in every Assembly and Hex tab (docs/29).
+                        .onHover { inside in
+                            guard !cited.isEmpty else { return }
+                            tutor.rom.pointAtCitations(inside ? cited : [])
+                        }
                 case .code(let lang, let body):
                     CodeBlock(tutor: tutor, language: lang, code: body)
                 case .table(let header, let rows):
@@ -25,6 +32,14 @@ struct MessageText: View {
                     Divider()
                 }
             }
+        }
+    }
+
+    /// The SNES addresses a run of text cites, in order.
+    static func citedAddresses(_ text: AttributedString) -> [UInt32] {
+        text.runs.compactMap { run in
+            guard let url = run.link, url.scheme == "romlens", url.host() == "a" || url.host() == "c" else { return nil }
+            return UInt32(url.lastPathComponent, radix: 16)
         }
     }
 
