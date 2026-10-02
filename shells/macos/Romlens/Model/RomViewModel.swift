@@ -261,6 +261,114 @@ final class RomViewModel {
         refreshDecompile()
     }
 
+    // MARK: Tabs (docs/29)
+
+    /// The routine each code tab was last on, by the label at or before it.
+    private(set) var codeTitles: [UUID: String] = [:]
+    /// Labels by address, for naming a routine; rebuilt after the navigator
+    /// reloads.
+    @ObservationIgnored private var labelIndex: [(address: UInt32, name: String)]?
+
+    /// A tab's name: a code tab by its routine, else by its view.
+    func title(of item: EditorItem) -> String {
+        switch item.content {
+        case .code(let r): codeTitles[item.id] ?? r.title
+        case .atlas: "Atlas"
+        case .compare: "Compare"
+        case .source: "Source"
+        case .graphics(let t): t.title
+        case .audio(let t): t.title
+        case .tutor: "Tutor"
+        }
+    }
+
+    /// The label at or before `address` in its bank.
+    func routineName(at address: UInt32) -> String? {
+        // Rebuilt when the navigator's list changed size, which is also
+        // what happens when it first loads.
+        if labelIndex?.count != navigator.labels.count {
+            labelIndex = navigator.labels.map { ($0.address, $0.name) }.sorted { $0.address < $1.address }
+        }
+        guard let index = labelIndex, !index.isEmpty else { return nil }
+        var lo = 0, hi = index.count
+        while lo < hi {
+            let mid = (lo + hi) / 2
+            if index[mid].address <= address { lo = mid + 1 } else { hi = mid }
+        }
+        guard lo > 0 else { return nil }
+        let found = index[lo - 1]
+        return found.address >> 16 == address >> 16 ? found.name : nil
+    }
+
+    /// Name the code tabs on the selection by its routine.
+    private func refreshTitles() {
+        guard let address = selectedAddress, let name = routineName(at: address) else { return }
+        let focused = workspace.focusedItem?.id
+        for item in workspace.layout.items {
+            guard case .code = item.content, item.id == focused || item.followsSelection else { continue }
+            if codeTitles[item.id] != name { codeTitles[item.id] = name }
+        }
+    }
+
+    /// Split Right and Split Down: the focused code tab again in a new group
+    /// on that side, as Visual Studio Code's Split Editor does; a view with
+    /// one tab moves there instead, when its group has others.
+    func splitFocused(_ edge: DropEdge) {
+        guard let item = workspace.focusedItem else { return }
+        let group = workspace.focusedGroup
+        if case .code = item.content {
+            guard let copy = workspace.open(item.content, in: group) else { return }
+            if let title = codeTitles[item.id] { codeTitles[copy] = title }
+            workspace.split(group, edge, with: copy)
+        } else {
+            workspace.split(group, edge, with: item.id)
+        }
+        refreshDecompile()
+    }
+
+    /// Close Tab.
+    func closeFocusedTab() {
+        guard let item = workspace.focusedItem else { return }
+        close(item: item.id)
+    }
+
+    /// Closes a tab, from its close button or Close Tab.
+    func close(item id: UUID) {
+        workspace.close(id)
+        codeTitles[id] = nil
+        refreshDecompile()
+    }
+
+    /// Gives a group focus, as a click in it does.
+    func focusGroup(_ id: UUID) {
+        workspace.focus(group: id)
+        if let item = workspace.focusedItem, let t = EditorTab(content: item.content) { lastTextTab = t }
+        refreshDecompile()
+    }
+
+    /// The representation strip: a code tab shown another way, focused.
+    func setRepresentation(_ r: CodeRepresentation, of id: UUID) {
+        workspace.setRepresentation(r, of: id)
+        focus(item: id)
+    }
+
+    /// Next Tab and Previous Tab, within the focused group, wrapping.
+    func selectAdjacentTab(_ delta: Int) {
+        guard let g = workspace.layout.group(workspace.focusedGroup), g.items.count > 1,
+              let i = g.items.firstIndex(where: { $0.id == g.selected })
+        else { return }
+        let n = g.items.count
+        focus(item: g.items[((i + delta) % n + n) % n].id)
+    }
+
+    /// Focus Group 1 to 4, in reading order.
+    func focusGroup(at index: Int) {
+        let groups = workspace.layout.groups
+        guard groups.indices.contains(index) else { return }
+        workspace.focus(group: groups[index].id)
+        refreshDecompile()
+    }
+
     /// A graphics or sound view was cleared the old way: show the group's
     /// text tab again, opening one if there is none.
     private func leaveViewTab() {
@@ -479,7 +587,11 @@ final class RomViewModel {
                 let generation = asmGeneration
                 Task { await compare.refresh(this: workbench, generation: generation) }
             }
-            Task { await navigator.reload(workbench: workbench, rom: rom) }
+            Task {
+                await navigator.reload(workbench: workbench, rom: rom)
+                labelIndex = nil
+                refreshTitles()
+            }
         case .project:
             break
         }
@@ -619,6 +731,7 @@ final class RomViewModel {
         inspection = rom.inspect(fileOffset: offset)
         refreshSelectionDetails()
         refreshDecompile()
+        refreshTitles()
     }
 
     private func clearDetails() {

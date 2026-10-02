@@ -150,6 +150,22 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
     @objc func toggleFocus(_ sender: Any?) { withAnimation { model.toggleFocus() } }
     @objc func toggleResults(_ sender: Any?) { withAnimation { model.isResultsVisible.toggle() } }
 
+    // MARK: Tabs (docs/29)
+
+    /// Close Tab, or the window when the focused group has no tab left.
+    @objc func closeTab(_ sender: Any?) {
+        if model.workspace.focusedItem != nil { model.closeFocusedTab() } else { window?.performClose(sender) }
+    }
+    @objc func splitRight(_ sender: Any?) { model.splitFocused(.right) }
+    @objc func splitDown(_ sender: Any?) { model.splitFocused(.bottom) }
+    @objc func nextTab(_ sender: Any?) { model.selectAdjacentTab(1) }
+    @objc func previousTab(_ sender: Any?) { model.selectAdjacentTab(-1) }
+    @objc func focusGroupItem(_ sender: NSMenuItem) { model.focusGroup(at: sender.tag) }
+    @objc func applyLayout(_ sender: NSMenuItem) {
+        guard LayoutPreset.allCases.indices.contains(sender.tag) else { return }
+        model.workspace.apply(LayoutPreset.allCases[sender.tag])
+    }
+
     // MARK: Editing
 
     @objc func undo(_ sender: Any?) { model.undo() }
@@ -278,6 +294,13 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
             return model.graphics.hasRecording
         case #selector(toggleLiveSession(_:)):
             item.title = model.graphics.isLive ? "Stop Live Session" : "Start Live Session"
+        case #selector(splitRight(_:)), #selector(splitDown(_:)):
+            return model.workspace.focusedItem != nil
+        case #selector(nextTab(_:)), #selector(previousTab(_:)):
+            return (model.workspace.layout.group(model.workspace.focusedGroup)?.items.count ?? 0) > 1
+        case #selector(focusGroupItem(_:)):
+            item.state = model.workspace.layout.groups.firstIndex { $0.id == model.workspace.focusedGroup } == item.tag ? .on : .off
+            return model.workspace.layout.groups.indices.contains(item.tag)
         case #selector(toggleFocus(_:)):
             item.state = model.isFocused ? .on : .off
         case #selector(toggleNavigator(_:)):

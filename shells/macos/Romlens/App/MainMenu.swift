@@ -63,7 +63,8 @@ enum MainMenu {
             // Rename, Move To and Share; building one here showed it twice.
             item("Open…", #selector(NSDocumentController.openDocument(_:)), "o"),
             .separator(),
-            item("Close", #selector(NSWindow.performClose(_:)), "w"),
+            item("Close Tab", #selector(RomWindowController.closeTab(_:)), "w"),
+            item("Close Window", #selector(NSWindow.performClose(_:)), "w", modifiers: [.command, .shift]),
             item("Save", #selector(NSDocument.save(_:)), "s"),
             item("Save As…", #selector(NSDocument.saveAs(_:)), "S", modifiers: [.command, .shift]),
             item("Duplicate", #selector(NSDocument.duplicate(_:)), "s", modifiers: [.command, .shift, .option]),
@@ -158,6 +159,21 @@ enum MainMenu {
                 item("Echo & Effects", #selector(RomWindowController.showEcho(_:)), ""),
                 item("Scope", #selector(RomWindowController.showScope(_:)), ""),
             ]),
+            .separator(),
+            item("Split Right", #selector(RomWindowController.splitRight(_:)), "\\"),
+            item("Split Down", #selector(RomWindowController.splitDown(_:)), "\\", modifiers: [.command, .option]),
+            submenu("Editor Layout", LayoutPreset.allCases.enumerated().map { i, preset in
+                let item = item(preset.title, #selector(RomWindowController.applyLayout(_:)))
+                item.tag = i
+                return item
+            }),
+            item("Next Tab", #selector(RomWindowController.nextTab(_:)), "}"),
+            item("Previous Tab", #selector(RomWindowController.previousTab(_:)), "{"),
+            submenu("Focus Group", (0..<4).map { i in
+                let item = item("Group \(i + 1)", #selector(RomWindowController.focusGroupItem(_:)), "\(i + 1)", modifiers: [.control])
+                item.tag = i
+                return item
+            }),
             .separator(),
             item("File Offset and SNES Address", #selector(RomWindowController.showBothAddresses(_:)), "1"),
             item("SNES Address Only", #selector(RomWindowController.showSnesAddresses(_:)), "2"),

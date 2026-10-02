@@ -5,12 +5,14 @@ import SwiftUI
 /// views read, then the view.
 struct GraphicsEditorView: View {
     @Bindable var model: RomViewModel
+    /// The view to show; the focused tab's when nil.
+    var tab: GraphicsModel.Tab? = nil
 
     var body: some View {
         VStack(spacing: 0) {
             GraphicsSourceBar(model: model, graphics: model.graphics)
             Divider()
-            switch model.graphicsTab {
+            switch tab ?? model.graphicsTab {
             case .some(let tab) where tab.needsRecording && !model.graphics.hasRecording:
                 NeedsRecording(tab: tab)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)

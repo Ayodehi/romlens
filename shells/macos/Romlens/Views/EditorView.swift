@@ -5,20 +5,29 @@ import SwiftUI
 /// the graphics or sound views.
 struct EditorView: View {
     @Bindable var model: RomViewModel
+    /// What to show: a tab's content (docs/29), or the focused tab's when nil.
+    var content: EditorContent? = nil
 
     var body: some View {
-        if model.graphicsTab != nil {
-            GraphicsEditorView(model: model)
-        } else if model.audioTab != nil {
-            AudioEditorView(model: model)
-        } else {
-            textEditor
+        switch content {
+        case .graphics(let tab): GraphicsEditorView(model: model, tab: tab)
+        case .audio(let tab): AudioEditorView(model: model, tab: tab)
+        case .tutor: TutorTabPlaceholder()
+        case .some(let c): textEditor(RomViewModel.EditorTab(content: c) ?? .hex)
+        case nil:
+            if model.graphicsTab != nil {
+                GraphicsEditorView(model: model)
+            } else if model.audioTab != nil {
+                AudioEditorView(model: model)
+            } else {
+                textEditor(model.editorTab)
+            }
         }
     }
 
     @ViewBuilder
-    private var textEditor: some View {
-        switch model.editorTab {
+    private func textEditor(_ tab: RomViewModel.EditorTab) -> some View {
+        switch tab {
         case .hex:
             HexTableView(model: model)
         case .disassembly:
@@ -69,6 +78,13 @@ struct EditorView: View {
                 Button("Retry") { model.session.startAnalysis() }
             }
         }
+    }
+}
+
+/// Where the tutor shows as a tab until W9 (docs/29).
+struct TutorTabPlaceholder: View {
+    var body: some View {
+        ContentUnavailableView("Tutor", systemImage: "graduationcap", description: Text("Show the tutor with View › Show Tutor."))
     }
 }
 
