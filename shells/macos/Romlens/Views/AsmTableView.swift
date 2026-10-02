@@ -51,7 +51,16 @@ final class AsmPaneController {
         scrollView.horizontalScrollElasticity = .none
         canvas.autoresizingMask = []
         canvas.frame = NSRect(x: 0, y: 0, width: model.asmLayout.totalWidth, height: canvas.documentHeight)
-        (scrollView as? AsmScrollView)?.onLayout = { [weak canvas] in canvas?.fitWidth() }
+        (scrollView as? AsmScrollView)?.onLayout = { [weak self] in
+            guard let self else { return }
+            canvas.fitWidth()
+            // A tab's pane is made before its group is laid out; a scroll
+            // asked for then waits for a real height (docs/29).
+            if let line = pendingLine, scrollView.contentView.bounds.height > 1 {
+                pendingLine = nil
+                scroll(toLine: line)
+            }
+        }
         canvas.onKeyCommand = { [weak self] command in self?.handle(command) }
     }
 
@@ -87,10 +96,16 @@ final class AsmPaneController {
         max(1, Int(scrollView.contentView.bounds.height / canvas.rowHeight) - 1)
     }
 
+    private var pendingLine: Int?
+
     func scroll(toLine line: Int) {
         let rect = canvas.rect(ofLine: line)
         let clip = scrollView.contentView
         let visibleHeight = clip.bounds.height
+        guard visibleHeight > 1 else {
+            pendingLine = line
+            return
+        }
         let y = max(0, min(rect.midY - visibleHeight / 2, canvas.bounds.height - visibleHeight))
         clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: y))
         scrollView.reflectScrolledClipView(clip)

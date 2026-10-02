@@ -201,6 +201,7 @@ enum MainMenu {
             item("Find Next", #selector(RomWindowController.findNext(_:)), "g"),
             item("Find Previous", #selector(RomWindowController.findPrevious(_:)), "G", modifiers: [.command, .shift]),
             .separator(),
+            item("Open Quickly…", #selector(RomWindowController.openQuickly(_:)), "O", modifiers: [.command, .shift]),
             item("Jump to Address…", #selector(RomWindowController.jumpToAddress(_:)), "l"),
             item("Follow Reference", #selector(RomWindowController.followReference(_:)), "\r"),
             item("Find References", #selector(RomWindowController.findReferences(_:)), "F", modifiers: [.command, .shift]),

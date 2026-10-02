@@ -131,6 +131,12 @@ import Testing
         let m = try await model()
         let (controller, _) = try open(m)
         defer { controller.window?.close() }
+        m.editorTab = .disassembly
+        m.jump(to: 0x44)
+        if let frame = controller.window?.contentView?.superview {
+            settle(frame)
+            try Self.snapshot(frame, "window")
+        }
         let toolbar = try #require(controller.window?.toolbar)
         let labels = toolbar.items.map(\.label).filter { !$0.isEmpty }
         for gone in ["Editor", "Graphics", "Audio", "Tutor", "Focus on Code"] {

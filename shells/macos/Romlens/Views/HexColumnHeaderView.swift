@@ -16,6 +16,9 @@ final class HexColumnHeaderView: NSView {
         super.init(frame: .zero)
     }
 
+    /// Right-click the header for the address columns.
+    override func menu(for event: NSEvent) -> NSMenu? { EditorContextMenu.addressMenu() }
+
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not used") }
 
@@ -108,7 +111,10 @@ final class HexPaneView: NSView {
         header.frame = NSRect(x: 0, y: 0, width: bounds.width, height: h)
         scrollView.frame = NSRect(x: 0, y: h, width: bounds.width, height: max(0, bounds.height - h))
         (scrollView.documentView as? HexCanvasView)?.fitWidth()
+        onLayout?()
     }
+
+    var onLayout: (() -> Void)?
 
     func headerHeightDidChange() {
         needsLayout = true

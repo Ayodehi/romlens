@@ -69,7 +69,7 @@ final class RomViewModel {
     }
 
     enum Sheet: Identifiable {
-        case jump, renameLabel, comment, flags, find, dataType, variable, cEdit
+        case jump, renameLabel, comment, flags, find, dataType, variable, cEdit, openQuickly
         var id: Self { self }
     }
 

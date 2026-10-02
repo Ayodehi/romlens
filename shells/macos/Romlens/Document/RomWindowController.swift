@@ -52,6 +52,7 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
     // MARK: Navigation
 
     @objc func jumpToAddress(_ sender: Any?) { model.activeSheet = .jump }
+    @objc func openQuickly(_ sender: Any?) { model.activeSheet = .openQuickly }
     @objc func find(_ sender: Any?) { model.activeSheet = .find }
     @objc func findNext(_ sender: Any?) { model.stepSearch(by: 1) }
     @objc func findPrevious(_ sender: Any?) { model.stepSearch(by: -1) }

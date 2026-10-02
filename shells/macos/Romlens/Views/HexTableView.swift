@@ -60,6 +60,11 @@ final class HexPaneController {
         canvas.frame = NSRect(x: 0, y: 0, width: model.layout.totalWidth, height: canvas.documentHeight)
         header = HexColumnHeaderView(model: model)
         pane = HexPaneView(header: header, scrollView: scrollView)
+        pane.onLayout = { [weak self] in
+            guard let self, let row = pendingRow, scrollView.contentView.bounds.height > 1 else { return }
+            pendingRow = nil
+            scroll(toRow: row)
+        }
         canvas.onKeyCommand = { [weak self] command in self?.handle(command) }
     }
 
@@ -102,10 +107,17 @@ final class HexPaneController {
     }
 
     /// Scroll so the row sits in the middle of the visible area.
+    /// A row asked for before the pane had a height (docs/29).
+    var pendingRow: Int?
+
     func scroll(toRow row: Int) {
         let rowRect = canvas.rect(ofRow: row)
         let clip = scrollView.contentView
         let visibleHeight = clip.bounds.height
+        guard visibleHeight > 1 else {
+            pendingRow = row
+            return
+        }
         let y = max(0, min(rowRect.midY - visibleHeight / 2, canvas.bounds.height - visibleHeight))
         clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: y))
         scrollView.reflectScrolledClipView(clip)
@@ -285,6 +297,26 @@ enum EditorContextMenu {
         menu.addItem(.separator())
         item("Copy Address", #selector(RomWindowController.copyAddress(_:)))
         item("Copy Line", #selector(RomWindowController.copyLine(_:)))
+        menu.addItem(.separator())
+        let addresses = NSMenuItem(title: "Addresses", action: nil, keyEquivalent: "")
+        addresses.submenu = addressMenu()
+        menu.addItem(addresses)
+        return menu
+    }
+
+    /// Which address columns show (docs/29): here, in the column header's
+    /// menu and in the View menu, no longer in the toolbar. Checked by
+    /// `RomWindowController.validateMenuItem`.
+    @MainActor
+    static func addressMenu() -> NSMenu {
+        let menu = NSMenu(title: "Addresses")
+        for (title, action) in [
+            ("File Offset and SNES Address", #selector(RomWindowController.showBothAddresses(_:))),
+            ("SNES Address Only", #selector(RomWindowController.showSnesAddresses(_:))),
+            ("File Offset Only", #selector(RomWindowController.showFileOffsets(_:))),
+        ] {
+            menu.addItem(NSMenuItem(title: title, action: action, keyEquivalent: ""))
+        }
         return menu
     }
 }

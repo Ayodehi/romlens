@@ -60,6 +60,9 @@ struct DocumentView: View {
                 }
                 .help("Show or hide the sidebar (⌘0)")
             }
+            ToolbarItem(placement: .principal) {
+                JumpBar(model: model)
+            }
             ToolbarItemGroup {
                 Button {
                     model.goBack()
@@ -75,6 +78,14 @@ struct DocumentView: View {
                 }
                 .disabled(!model.canGoForward)
                 .help("Forward (⌘])")
+            }
+            ToolbarItem {
+                Button {
+                    model.activeSheet = .openQuickly
+                } label: {
+                    Label("Open Quickly", systemImage: "magnifyingglass")
+                }
+                .help("Open Quickly: a label, variable, address or view (⇧⌘O)")
             }
             ToolbarItem {
                 Button {
@@ -95,6 +106,7 @@ struct DocumentView: View {
             case .dataType: DataTypeSheet(model: model)
             case .variable: VariableSheet(model: model)
             case .cEdit: CEditSheet(model: model)
+            case .openQuickly: OpenQuicklySheet(model: model)
             }
         }
     }
