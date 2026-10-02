@@ -238,7 +238,7 @@ struct HelpSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("The tutor").font(.headline)
-            Text("It reads Romlens's analysis with its tools (the listing, the C, the graphs, registers, tiles, frames, sound) and cites what it finds; click a citation to go there in the main window.")
+            Text("It reads Romlens's analysis with its tools (the listing, the C, the graphs, registers, tiles, frames, sound) and cites what it finds; click a citation to go there in the editor.")
             Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 4) {
                 GridRow { Text("Return").bold(); Text("Send") }
                 GridRow { Text("⇧Return").bold(); Text("A new line") }

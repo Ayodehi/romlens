@@ -233,29 +233,16 @@ final class ProjectDocument: NSDocument {
         addWindowController(RomWindowController(model: model))
     }
 
-    /// The tutor's window (docs/24): a second window of this project, made
-    /// on first use, closing with it.
-    private(set) var tutorController: TutorWindowController?
-
+    /// The tutor in the project's window (docs/29): the inspector's Tutor
+    /// tab. It had a window of its own until then (docs/24).
     func showTutor() {
-        guard let model else { return }
-        if tutorController == nil {
-            let c = TutorWindowController(tutor: TutorModel(rom: model), title: displayName)
-            addWindowController(c)
-            tutorController = c
-        }
-        // Closing the window takes it off the document; showing it again
-        // puts it back, conversation and all.
-        if let c = tutorController, c.document == nil { addWindowController(c) }
-        tutorController?.showWindow(nil)
-        tutorController?.window?.makeKeyAndOrderFront(nil)
+        model?.showTutorInDrawer()
     }
 
     /// Nothing started for the project outlives it: the tutor's turn, the
     /// analysis, the sound and a comparison all stop.
     override func close() {
         MainActor.assumeIsolated {
-            tutorController?.tutor.close()
             model?.close()
         }
         super.close()

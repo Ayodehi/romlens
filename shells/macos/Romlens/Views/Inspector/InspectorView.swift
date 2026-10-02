@@ -12,11 +12,12 @@ struct InspectorView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
                         SelectionHeader(model: model)
-                        if model.instruction != nil {
-                            InstructionSection(model: model)
-                        }
+                        // What the selection does first, then how (docs/29).
                         if let x = model.explanation, x.register != nil || !x.idioms.isEmpty {
                             ExplanationSection(model: model, explanation: x)
+                        }
+                        if model.instruction != nil {
+                            InstructionSection(model: model)
                         }
                         if model.instruction != nil {
                             ScreenSection(model: model)
@@ -230,10 +231,18 @@ struct InstructionSection: View {
                     }
                 }
                 .font(.callout)
-                HStack(spacing: 8) {
-                    FlagsChips(title: "before", flags: insn.flagsBefore)
-                    Image(systemName: "arrow.right").foregroundStyle(.secondary)
-                    FlagsChips(title: "after", flags: insn.flagsAfter)
+                // Side by side where the inspector is wide enough, else one
+                // above the other: squeezed, the chips broke a letter a line.
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 8) {
+                        FlagsChips(title: "before", flags: insn.flagsBefore)
+                        Image(systemName: "arrow.right").foregroundStyle(.secondary)
+                        FlagsChips(title: "after", flags: insn.flagsAfter)
+                    }
+                    VStack(alignment: .leading, spacing: 6) {
+                        FlagsChips(title: "before", flags: insn.flagsBefore)
+                        FlagsChips(title: "after", flags: insn.flagsAfter)
+                    }
                 }
                 ForEach(insn.assumptions, id: \.self) { a in
                     Label(a, systemImage: "questionmark.circle").font(.caption).foregroundStyle(.orange)
@@ -520,11 +529,11 @@ struct FlagsChips: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title).font(.caption2).foregroundStyle(.tertiary)
             HStack(spacing: 3) {
-                InspectorStyle.chip("M\(flags.m ? 1 : 0)", color: flags.m ? .orange : .blue)
-                InspectorStyle.chip("X\(flags.x ? 1 : 0)", color: flags.x ? .orange : .blue)
-                InspectorStyle.chip("E\(flags.e ? 1 : 0)", color: flags.e ? .red : .gray)
-                InspectorStyle.chip(flags.dbr.map { "DBR $" + InspectorStyle.hex(UInt32($0), 2) } ?? "DBR ?", color: .gray)
-                InspectorStyle.chip(flags.dp.map { "DP $" + InspectorStyle.hex(UInt32($0), 4) } ?? "DP ?", color: .gray)
+                InspectorStyle.chip("M\(flags.m ? 1 : 0)", color: flags.m ? .orange : .blue).fixedSize()
+                InspectorStyle.chip("X\(flags.x ? 1 : 0)", color: flags.x ? .orange : .blue).fixedSize()
+                InspectorStyle.chip("E\(flags.e ? 1 : 0)", color: flags.e ? .red : .gray).fixedSize()
+                InspectorStyle.chip(flags.dbr.map { "DBR $" + InspectorStyle.hex(UInt32($0), 2) } ?? "DBR ?", color: .gray).fixedSize()
+                InspectorStyle.chip(flags.dp.map { "DP $" + InspectorStyle.hex(UInt32($0), 4) } ?? "DP ?", color: .gray).fixedSize()
             }
         }
         .font(.caption.monospaced())

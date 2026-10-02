@@ -90,9 +90,28 @@ final class RomViewModel {
         activeSheet = .cEdit
     }
 
-    /// The one-case right pane keeps room for the tutor later.
+    /// The inspector's drawer shows the selection, or the tutor (docs/29).
     enum RightPane: Hashable {
-        case inspector
+        case inspector, tutor
+    }
+
+    /// The tutor, made on first use: one conversation for the drawer and
+    /// the Tutor tab.
+    private(set) var tutor: TutorModel?
+
+    @discardableResult
+    func ensureTutor() -> TutorModel {
+        if let tutor { return tutor }
+        let t = TutorModel(rom: self)
+        tutor = t
+        return t
+    }
+
+    /// View › Show Tutor (⌥⌘T): the drawer, on its Tutor tab.
+    func showTutorInDrawer() {
+        ensureTutor()
+        rightPane = .tutor
+        isInspectorVisible = true
     }
 
     let rom: Rom
@@ -101,9 +120,6 @@ final class RomViewModel {
     let palette: SpanPalette
     let rowCount: UInt32
     let session: WorkbenchSession
-    /// Brings the project's main window to the front: set by its window
-    /// controller, used when the tutor's citation is followed.
-    @ObservationIgnored var bringMainWindowForward: (() -> Void)?
     let navigator = NavigatorModel()
     let search = SearchModel()
     let references = ReferencesModel()
@@ -607,6 +623,7 @@ final class RomViewModel {
 
     /// The document closed: stop the analysis, the sound and a comparison.
     func close() {
+        tutor?.close()
         session.close()
         audio.shutDown()
         compare.close()

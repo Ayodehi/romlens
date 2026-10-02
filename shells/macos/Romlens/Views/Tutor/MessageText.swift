@@ -3,7 +3,7 @@ import RomlensKit
 import SwiftUI
 
 /// An answer's text: Markdown, with each citation (`$BB:AAAA`, `frame N`)
-/// a link into the main window, and code blocks coloured as Romlens colours
+/// a link into the editor, and code blocks coloured as Romlens colours
 /// its own (docs/24, "The transcript").
 struct MessageText: View {
     let tutor: TutorModel
@@ -181,7 +181,7 @@ struct MessageText: View {
         let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
         guard var a = try? AttributedString(markdown: md, options: options) else { return AttributedString(text) }
         // A term's link is marked with a dotted underline, apart from the
-        // links into the main window.
+        // links into the editor.
         for run in a.runs where run.link?.host() == "g" {
             a[run.range].underlineStyle = Text.LineStyle(pattern: .dot)
         }

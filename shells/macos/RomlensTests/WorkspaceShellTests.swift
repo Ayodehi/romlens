@@ -184,4 +184,17 @@ import Testing
         #expect(all(content, RegionStripNSView.self).allSatisfy { $0.window == nil })
         m.toggleFocus()
     }
+
+    @Test func theTutorShowsInTheDrawer() async throws {
+        let m = try await model()
+        let (controller, content) = try open(m)
+        defer { controller.window?.close() }
+        m.isInspectorVisible = false
+        controller.showTutor(nil)
+        settle(content)
+        #expect(m.rightPane == .tutor && m.isInspectorVisible && m.tutor != nil)
+        if let frame = content.superview { try Self.snapshot(frame, "drawer-tutor") }
+        m.rightPane = .inspector
+        settle(content)
+    }
 }

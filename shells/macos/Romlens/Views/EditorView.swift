@@ -88,14 +88,66 @@ struct TutorTabPlaceholder: View {
     }
 }
 
-/// The one-case right pane; the tutor is one more case later.
+/// The inspector's drawer (docs/29): Inspector and Tutor as two plain tabs,
+/// and for the tutor a button that opens it as a tab in the editor.
 struct RightPaneView: View {
-    let model: RomViewModel
+    @Bindable var model: RomViewModel
 
     var body: some View {
-        switch model.rightPane {
-        case .inspector:
-            InspectorView(model: model)
+        VStack(spacing: 0) {
+            HStack(spacing: 16) {
+                tab("Inspector", "info.circle", .inspector)
+                tab("Tutor", "graduationcap", .tutor)
+                Spacer()
+                if model.rightPane == .tutor {
+                    if let title = model.tutor?.title {
+                        Text(title)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Button {
+                        model.show(.tutor)
+                    } label: {
+                        Image(systemName: "arrow.up.forward.square")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Open the tutor as a tab, with more room")
+                    .accessibilityLabel("Open the tutor as a tab")
+                }
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 32)
+            Divider()
+            switch model.rightPane {
+            case .inspector:
+                InspectorView(model: model)
+            case .tutor:
+                if let tutor = model.tutor {
+                    TutorView(tutor: tutor)
+                } else {
+                    Color.clear.onAppear { model.ensureTutor() }
+                }
+            }
         }
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private func tab(_ title: String, _ symbol: String, _ pane: RomViewModel.RightPane) -> some View {
+        Button {
+            if pane == .tutor { model.ensureTutor() }
+            model.rightPane = pane
+        } label: {
+            Label(title, systemImage: symbol)
+                .foregroundStyle(model.rightPane == pane ? .primary : .secondary)
+                .padding(.vertical, 6)
+                .overlay(alignment: .bottom) {
+                    if model.rightPane == pane {
+                        Rectangle().fill(Color.accentColor).frame(height: 2).offset(y: 3)
+                    }
+                }
+        }
+        .buttonStyle(.plain)
+        .font(.callout)
     }
 }

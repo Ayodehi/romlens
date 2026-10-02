@@ -20,7 +20,6 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
         window.tabbingMode = .disallowed
         super.init(window: window)
         shouldCascadeWindows = true
-        model.bringMainWindowForward = { [weak window] in window?.makeKeyAndOrderFront(nil) }
         let hosting = NSHostingController(rootView: DocumentView(model: model))
         hosting.sceneBridgingOptions = [.toolbars]
         // Only the content's minimum: by default the host also sizes the
@@ -146,12 +145,11 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
     // content.
     @objc func toggleNavigator(_ sender: Any?) { withAnimation { model.isNavigatorVisible.toggle() } }
     @objc func toggleInspector(_ sender: Any?) { withAnimation { model.isInspectorVisible.toggle() } }
-    @objc func showTutor(_ sender: Any?) { (document as? ProjectDocument)?.showTutor() }
+    @objc func showTutor(_ sender: Any?) { model.showTutorInDrawer() }
     /// The sidebar's Lessons and Quizzes: the tutor, on its lessons.
     @objc func showLessons(_ sender: Any?) {
-        guard let document = document as? ProjectDocument else { return }
-        document.showTutor()
-        document.tutorController?.tutor.sheet = .lessons
+        model.showTutorInDrawer()
+        model.tutor?.sheet = .lessons
     }
     @objc func toggleStrip(_ sender: Any?) { withAnimation { model.isStripVisible.toggle() } }
     @objc func toggleFocus(_ sender: Any?) { withAnimation { model.toggleFocus() } }
