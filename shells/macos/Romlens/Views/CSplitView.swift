@@ -11,8 +11,8 @@ struct CSplitView: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeNSView(context: Context) -> NSSplitView {
-        let asm = AsmPaneController(model: model)
-        let c = CPaneController(model: model)
+        let asm = AsmPaneController(model: model, item: context.environment.editorItem)
+        let c = CPaneController(model: model, item: context.environment.editorItem)
         let split = CSplitPaneView()
         split.isVertical = true
         split.dividerStyle = .thin
@@ -111,14 +111,20 @@ final class CPaneController: NSObject, NSTextViewDelegate {
     private var shownEntry: UInt32?
     /// A C version shown instead of the generated C, by name (docs/24).
     private(set) var shownVersion: String? {
-        get { model.decompiler.shownVersion }
-        set { model.decompiler.shownVersion = newValue }
+        get { decompiler.shownVersion }
+        set { decompiler.shownVersion = newValue }
     }
     private var shownVersionText: String?
     private let versions = NSPopUpButton(frame: .zero, pullsDown: false)
     private var versionsKey = ""
 
-    init(model: RomViewModel) {
+    /// The tab this pane is in, if any (docs/29).
+    let item: UUID?
+    /// This tab's C.
+    private var decompiler: DecompileModel { model.workspace.decompiler(for: item) }
+
+    init(model: RomViewModel, item: UUID? = nil) {
+        self.item = item
         self.model = model
         textView = CTextView(usingTextLayoutManager: false)
         scrollView = NSScrollView()
@@ -179,7 +185,7 @@ final class CPaneController: NSObject, NSTextViewDelegate {
         numbers.setAccessibilityIdentifier("decompile-numbers")
         if let saved = UserDefaults.standard.string(forKey: Self.numbersKey),
            let style = Self.style(named: saved) {
-            model.decompiler.numbers = style
+            decompiler.numbers = style
         }
         let export = NSButton(title: "Export C…", target: nil, action: #selector(RomWindowController.exportC(_:)))
         export.controlSize = .small
@@ -223,7 +229,7 @@ final class CPaneController: NSObject, NSTextViewDelegate {
     }
 
     func update() {
-        let d = model.decompiler
+        let d = decompiler
         levels.selectedSegment = switch d.level {
         case .lift: 0
         case .clean: 1
@@ -409,13 +415,13 @@ final class CPaneController: NSObject, NSTextViewDelegate {
 
     @objc private func numbersChanged(_ sender: NSSegmentedControl) {
         let i = max(0, min(sender.selectedSegment, Self.styles.count - 1))
-        model.decompiler.numbers = Self.styles[i]
+        decompiler.numbers = Self.styles[i]
         UserDefaults.standard.set(Self.names[i], forKey: Self.numbersKey)
         model.refreshDecompile()
     }
 
     @objc private func levelChanged(_ sender: NSSegmentedControl) {
-        model.decompiler.level = switch sender.selectedSegment {
+        decompiler.level = switch sender.selectedSegment {
         case 0: .lift
         case 1: .clean
         default: .full
@@ -431,7 +437,7 @@ final class CPaneController: NSObject, NSTextViewDelegate {
             return
         }
         let at = textView.selectedRange().location
-        let offsets = model.decompiler.offsets(forLine: line(at: at))
+        let offsets = decompiler.offsets(forLine: line(at: at))
         guard let first = offsets.min() else { return }
         guard first != (model.instruction?.fileOffset ?? model.selectedOffset) else { return }
         selectingFromText = true
@@ -441,7 +447,7 @@ final class CPaneController: NSObject, NSTextViewDelegate {
 
     /// Double-click on a routine's or a label's name goes there.
     private func follow(tokenAt index: Int) {
-        guard let t = model.decompiler.result?.tokens.first(where: {
+        guard let t = decompiler.result?.tokens.first(where: {
             Int($0.start) <= index && index < Int($0.start + $0.len)
         }), let address = t.address else { return }
         switch t.kind {
@@ -456,7 +462,7 @@ final class CPaneController: NSObject, NSTextViewDelegate {
 // MARK: C versions and the C's annotations (docs/24, U10)
 
 extension CPaneController: NSMenuDelegate {
-    private var entry: UInt32? { model.decompiler.result?.entry }
+    private var entry: UInt32? { decompiler.result?.entry }
 
     /// The picker: Generated, each version, then what can be done.
     func refreshVersions() {
@@ -569,13 +575,13 @@ extension CPaneController: NSMenuDelegate {
         guard let entry else { return }
         let point = textView.convert(textView.window?.mouseLocationOutsideOfEventStream ?? .zero, from: nil)
         let index = textView.characterIndexForInsertion(at: point)
-        if shownVersion == nil, let r = model.decompiler.result {
+        if shownVersion == nil, let r = decompiler.result {
             if let t = r.tokens.first(where: { Int($0.start) <= index && index < Int($0.start + $0.len) }), t.kind == .local {
                 let word = (textView.string as NSString).substring(with: NSRange(location: Int(t.start), length: Int(t.len)))
                 let original = model.session.workbench.localNames(routine: entry).first { $0.name == word }?.local ?? word
                 menu.addItem(item("Name “\(word)”…") { [weak self] in self?.model.beginCEdit(.local(routine: entry, local: original)) })
             }
-            let offsets = model.decompiler.offsets(forLine: line(at: index))
+            let offsets = decompiler.offsets(forLine: line(at: index))
             if let first = offsets.min(), let address = model.rom.snesAddressFor(fileOffset: first) {
                 menu.addItem(item("C Comment Here…") { [weak self] in self?.model.beginCEdit(.comment(address: address)) })
             }

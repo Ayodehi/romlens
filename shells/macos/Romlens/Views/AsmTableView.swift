@@ -9,7 +9,7 @@ struct AsmTableView: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let controller = AsmPaneController(model: model)
+        let controller = AsmPaneController(model: model, item: context.environment.editorItem)
         context.coordinator.controller = controller
         return controller.scrollView
     }
@@ -34,9 +34,12 @@ final class AsmPaneController {
     private var asmGeneration = -1
     private var selectedOffset: UInt32?
     private var lastScrollId = 0
+    /// The tab this pane is in, if any (docs/29).
+    let item: UUID?
 
-    init(model: RomViewModel) {
+    init(model: RomViewModel, item: UUID? = nil) {
         self.model = model
+        self.item = item
         canvas = AsmCanvasView(model: model)
         scrollView = AsmScrollView()
         scrollView.documentView = canvas
@@ -70,8 +73,11 @@ final class AsmPaneController {
             selectedOffset = selected
         }
         if let scroll, lastScrollId != scroll.id {
+            // A new pane catches up with the last request, wherever it was
+            // meant: it opens on the selection.
+            let fresh = lastScrollId == 0
             lastScrollId = scroll.id
-            if let line = model.workbench.lineForOffset(fileOffset: scroll.offset) {
+            if fresh || scroll.applies(to: item), let line = model.workbench.lineForOffset(fileOffset: scroll.offset) {
                 self.scroll(toLine: Int(line))
             }
         }

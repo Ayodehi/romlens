@@ -11,7 +11,7 @@ struct HexTableView: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeNSView(context: Context) -> HexPaneView {
-        let controller = HexPaneController(model: model)
+        let controller = HexPaneController(model: model, item: context.environment.editorItem)
         context.coordinator.controller = controller
         return controller.pane
     }
@@ -38,9 +38,12 @@ final class HexPaneController {
     private var lineGeneration = -1
     private var highlighted: Range<UInt32>?
     private var lastScrollId = 0
+    /// The tab this pane is in, if any (docs/29).
+    let item: UUID?
 
-    init(model: RomViewModel) {
+    init(model: RomViewModel, item: UUID? = nil) {
         self.model = model
+        self.item = item
         canvas = HexCanvasView(model: model)
         scrollView = NSScrollView()
         scrollView.documentView = canvas
@@ -79,8 +82,11 @@ final class HexPaneController {
             header.selectedByte = model.selectedOffset.map { Int($0 % 16) }
         }
         if let scroll, lastScrollId != scroll.id {
+            let fresh = lastScrollId == 0
             lastScrollId = scroll.id
-            self.scroll(toRow: Int(scroll.offset / 16))
+            if fresh || scroll.applies(to: item) {
+                self.scroll(toRow: Int(scroll.offset / 16))
+            }
         }
     }
 

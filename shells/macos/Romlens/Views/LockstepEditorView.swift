@@ -9,8 +9,8 @@ struct LockstepEditorView: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeNSView(context: Context) -> LockstepPaneView {
-        let hex = HexPaneController(model: model)
-        let asm = AsmPaneController(model: model)
+        let hex = HexPaneController(model: model, item: context.environment.editorItem)
+        let asm = AsmPaneController(model: model, item: context.environment.editorItem)
         let pane = LockstepPaneView(hex: hex, asm: asm)
         let controller = LockstepController(model: model, hex: hex, asm: asm, pane: pane)
         context.coordinator.controller = controller

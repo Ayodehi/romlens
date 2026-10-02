@@ -12,6 +12,15 @@ final class RomViewModel {
     struct ScrollRequest: Equatable {
         let id: Int
         let offset: UInt32
+        /// The tabs that should scroll: the focused tab and those following
+        /// the selection (docs/29). Nil for every view.
+        var targets: Set<UUID>? = nil
+        /// Whether a view in the tab `item` should act on it. A view that
+        /// names no tab acts on every request.
+        func applies(to item: UUID?) -> Bool {
+            guard let targets, let item else { return true }
+            return targets.contains(item)
+        }
         /// Compatibility for hex-only callers.
         var row: UInt32 { offset / 16 }
     }
@@ -19,6 +28,32 @@ final class RomViewModel {
     enum EditorTab: String, CaseIterable, Identifiable {
         case hex, disassembly, both, c, graph, source, atlas, compare
         var id: String { rawValue }
+        /// What a tab of this shows (docs/29).
+        var content: EditorContent {
+            switch self {
+            case .hex: .code(.hex)
+            case .disassembly: .code(.assembly)
+            case .both: .code(.both)
+            case .c: .code(.c)
+            case .graph: .code(.graph)
+            case .source: .source
+            case .atlas: .atlas
+            case .compare: .compare
+            }
+        }
+        init?(content: EditorContent) {
+            switch content {
+            case .code(.hex): self = .hex
+            case .code(.assembly): self = .disassembly
+            case .code(.both): self = .both
+            case .code(.c): self = .c
+            case .code(.graph): self = .graph
+            case .source: self = .source
+            case .atlas: self = .atlas
+            case .compare: self = .compare
+            default: return nil
+            }
+        }
         var title: String {
             switch self {
             case .hex: "Hex"
@@ -72,9 +107,12 @@ final class RomViewModel {
     let navigator = NavigatorModel()
     let search = SearchModel()
     let references = ReferencesModel()
-    /// The C tab's routine and text (docs/18).
-    let decompiler = DecompileModel()
-    let graph = GraphModel()
+    /// The window's tabs and their layout (docs/29).
+    let workspace = Workspace()
+    /// The C of the focused code tab, or the last one focused (docs/18).
+    var decompiler: DecompileModel { workspace.decompiler(for: nil) }
+    /// The graph of the focused code tab, or the last one focused.
+    var graph: GraphModel { workspace.graph(for: nil) }
     let atlas = AtlasModel()
     let compare = CompareModel()
     /// The Source tab's files, from the project's imported `.dbg` files.
@@ -139,30 +177,100 @@ final class RomViewModel {
     private(set) var warnings: [WarningInfo] = []
     private(set) var flagOverride: FlagOverride?
     private(set) var preview: PreviewInfo?
-    private(set) var history: [UInt32] = []
-    private(set) var forwardHistory: [UInt32] = []
+    /// Where Back goes: an offset, and the tab it was seen in.
+    struct HistoryEntry: Equatable {
+        let offset: UInt32
+        let item: UUID?
+    }
+    private(set) var historyEntries: [HistoryEntry] = []
+    private(set) var forwardEntries: [HistoryEntry] = []
+    var history: [UInt32] { historyEntries.map(\.offset) }
+    var forwardHistory: [UInt32] { forwardEntries.map(\.offset) }
     private(set) var scrollRequest: ScrollRequest?
-    /// Choosing a text tab closes any graphics view, which is how the
-    /// segmented control and the Graphics picker share the editor area.
-    var editorTab: EditorTab = .hex {
-        didSet {
-            graphicsTab = nil
-            audioTab = nil
-            refreshDecompile()
+
+    // MARK: The focused tab, as the one editor it used to be
+
+    /// The text view of the focused tab, or the last text view while a
+    /// graphics, sound or tutor tab has focus. Setting it shows that view in
+    /// the focused group: a code representation changes the focused code
+    /// tab in place, or opens one; the others open or show their one tab.
+    var editorTab: EditorTab {
+        get {
+            if let item = workspace.focusedItem, let t = EditorTab(content: item.content) { return t }
+            return lastTextTab
+        }
+        set { show(newValue.content) }
+    }
+    @ObservationIgnored private var lastTextTab: EditorTab = .hex
+    /// The graphics view in the focused tab, if it is one.
+    var graphicsTab: GraphicsModel.Tab? {
+        get {
+            if case .graphics(let t) = workspace.focusedItem?.content { return t }
+            return nil
+        }
+        set {
+            if let t = newValue { show(.graphics(t)) } else if graphicsTab != nil { leaveViewTab() }
         }
     }
-    /// The graphics view in the editor area, if one is open.
-    var graphicsTab: GraphicsModel.Tab? {
-        didSet { if graphicsTab != nil { audioTab = nil } }
-    }
     let graphics: GraphicsModel
-    /// The sound view in the editor area, if one is open (docs/23).
+    /// The sound view in the focused tab, if it is one (docs/23).
     var audioTab: AudioModel.Tab? {
-        didSet { if audioTab != nil { graphicsTab = nil } }
+        get {
+            if case .audio(let t) = workspace.focusedItem?.content { return t }
+            return nil
+        }
+        set {
+            if let t = newValue { show(.audio(t)) } else if audioTab != nil { leaveViewTab() }
+        }
     }
     let audio: AudioModel
-    /// A text tab has the editor: no graphics or sound view is open.
-    var showsTextEditor: Bool { graphicsTab == nil && audioTab == nil }
+    /// The focused tab is a text view: no graphics, sound or tutor tab.
+    var showsTextEditor: Bool {
+        guard let item = workspace.focusedItem else { return true }
+        return EditorTab(content: item.content) != nil
+    }
+
+    /// Shows `content` in the focused group. A code representation changes
+    /// the focused code tab, else the group's code tab, in place; anything
+    /// else opens, or shows, its tab.
+    func show(_ content: EditorContent) {
+        if case .code(let r) = content {
+            let group = workspace.layout.group(workspace.focusedGroup)
+            let target: EditorItem? = {
+                if let f = workspace.focusedItem, case .code = f.content { return f }
+                return group?.items.first { if case .code = $0.content { true } else { false } }
+            }()
+            if let target {
+                workspace.setRepresentation(r, of: target.id)
+                workspace.focus(item: target.id)
+            } else {
+                workspace.open(content)
+            }
+        } else {
+            workspace.open(content)
+        }
+        if let t = EditorTab(content: content) { lastTextTab = t }
+        refreshDecompile()
+    }
+
+    /// Opens a tab and focuses it: the sidebar, the menus and drops call
+    /// this rather than the workspace, so C and Graph follow.
+    func focus(item id: UUID) {
+        workspace.focus(item: id)
+        if let item = workspace.layout.item(id), let t = EditorTab(content: item.content) { lastTextTab = t }
+        refreshDecompile()
+    }
+
+    /// A graphics or sound view was cleared the old way: show the group's
+    /// text tab again, opening one if there is none.
+    private func leaveViewTab() {
+        let group = workspace.layout.group(workspace.focusedGroup)
+        if let text = group?.items.first(where: { EditorTab(content: $0.content) != nil }) {
+            focus(item: text.id)
+        } else {
+            show(lastTextTab.content)
+        }
+    }
     var activeSheet: Sheet?
     var rightPane: RightPane = .inspector
     var isNavigatorVisible = true
@@ -364,8 +472,7 @@ final class RomViewModel {
             stripGeneration += 1
             refreshSelectionDetails()
             refreshScreen(force: true)
-            decompiler.invalidate()
-            graph.invalidate()
+            workspace.invalidateAll()
             refreshDecompile()
             source.reload(workbench: workbench)
             if compare.state == .ready {
@@ -380,27 +487,40 @@ final class RomViewModel {
 
     // MARK: C and Graph
 
-    /// Keep the C and Graph tabs on the routine at the selection. Only while
-    /// a tab is showing: decompiling costs a summary of every routine the
-    /// first time after an analysis.
-    func refreshDecompile() {
-        refreshGraph()
-        guard editorTab == .c, graphicsTab == nil, hasDisassembly else { return }
-        decompiler.follow(
-            workbench: workbench,
-            instructionStart: instruction?.fileOffset ?? selectedOffset,
-            generation: asmGeneration
-        )
+    /// The code tabs that should be on the routine at the selection: those
+    /// shown, in their groups, that have focus or follow the selection.
+    private func followingCodeTabs(_ r: CodeRepresentation) -> [UUID] {
+        let focused = workspace.focusedItem?.id
+        return workspace.visibleItems
+            .filter { $0.content == .code(r) && ($0.id == focused || $0.followsSelection) }
+            .map(\.id)
     }
 
-    /// Keep the Graph tab on the routine at the selection, while it shows.
+    /// Keep the C tabs on the routine at the selection. Only while one is
+    /// showing: decompiling costs a summary of every routine the first time
+    /// after an analysis.
+    func refreshDecompile() {
+        refreshGraph()
+        guard hasDisassembly else { return }
+        for id in followingCodeTabs(.c) {
+            workspace.decompiler(for: id).follow(
+                workbench: workbench,
+                instructionStart: instruction?.fileOffset ?? selectedOffset,
+                generation: asmGeneration
+            )
+        }
+    }
+
+    /// Keep the Graph tabs on the routine at the selection, while one shows.
     func refreshGraph() {
-        guard editorTab == .graph, graphicsTab == nil, hasDisassembly else { return }
-        graph.follow(
-            workbench: workbench,
-            instructionStart: instruction?.fileOffset ?? selectedOffset,
-            generation: asmGeneration
-        )
+        guard hasDisassembly else { return }
+        for id in followingCodeTabs(.graph) {
+            workspace.graph(for: id).follow(
+                workbench: workbench,
+                instructionStart: instruction?.fileOffset ?? selectedOffset,
+                generation: asmGeneration
+            )
+        }
     }
 
     /// Show Graph: the Graph tab on the routine at the selection.
@@ -583,9 +703,9 @@ final class RomViewModel {
     func jump(to offset: UInt32, recordHistory: Bool = true) {
         guard offset < byteCount else { return }
         if recordHistory, let from = selectedOffset, from != offset {
-            history.append(from)
-            if history.count > 100 { history.removeFirst() }
-            forwardHistory.removeAll()
+            historyEntries.append(HistoryEntry(offset: from, item: workspace.focusedItem?.id))
+            if historyEntries.count > 100 { historyEntries.removeFirst() }
+            forwardEntries.removeAll()
         }
         select(offset: offset)
         requestScroll(toOffset: offset)
@@ -618,15 +738,27 @@ final class RomViewModel {
     }
 
     func goBack() {
-        guard let previous = history.popLast() else { return }
-        if let current = selectedOffset { forwardHistory.append(current) }
-        jump(to: previous, recordHistory: false)
+        guard let previous = historyEntries.popLast() else { return }
+        if let current = selectedOffset {
+            forwardEntries.append(HistoryEntry(offset: current, item: workspace.focusedItem?.id))
+        }
+        revisit(previous)
     }
 
     func goForward() {
-        guard let next = forwardHistory.popLast() else { return }
-        if let current = selectedOffset { history.append(current) }
-        jump(to: next, recordHistory: false)
+        guard let next = forwardEntries.popLast() else { return }
+        if let current = selectedOffset {
+            historyEntries.append(HistoryEntry(offset: current, item: workspace.focusedItem?.id))
+        }
+        revisit(next)
+    }
+
+    /// Back to where an entry was seen: its tab, if it is still open.
+    private func revisit(_ entry: HistoryEntry) {
+        if let item = entry.item, workspace.layout.item(item) != nil, item != workspace.focusedItem?.id {
+            focus(item: item)
+        }
+        jump(to: entry.offset, recordHistory: false)
     }
 
     /// Follow the selected instruction's target (or a pointer's).
@@ -638,8 +770,12 @@ final class RomViewModel {
         }
     }
 
+    /// Scroll the focused tab, and every tab following the selection, to
+    /// `offset`.
     func requestScroll(toOffset offset: UInt32) {
-        scrollRequest = ScrollRequest(id: (scrollRequest?.id ?? 0) + 1, offset: offset)
+        var targets = Set(workspace.layout.items.filter(\.followsSelection).map(\.id))
+        if let focused = workspace.focusedItem?.id { targets.insert(focused) }
+        scrollRequest = ScrollRequest(id: (scrollRequest?.id ?? 0) + 1, offset: offset, targets: targets)
     }
 
     // MARK: Key commands from either canvas

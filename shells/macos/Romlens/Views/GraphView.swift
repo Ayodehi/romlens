@@ -11,7 +11,7 @@ struct GraphView: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeNSView(context: Context) -> NSView {
-        let pane = GraphPaneController(model: model)
+        let pane = GraphPaneController(model: model, item: context.environment.editorItem)
         context.coordinator.pane = pane
         return pane.view
     }
@@ -56,7 +56,13 @@ final class GraphPaneController: NSObject {
     private var selectingFromCanvas = false
     private var zoomId = 0
 
-    init(model: RomViewModel) {
+    /// The tab this pane is in, if any (docs/29).
+    let item: UUID?
+    /// This tab's graph.
+    private var graph: GraphModel { model.workspace.graph(for: item) }
+
+    init(model: RomViewModel, item: UUID? = nil) {
+        self.item = item
         self.model = model
         super.init()
         canvas.metrics = model.metrics
@@ -122,7 +128,7 @@ final class GraphPaneController: NSObject {
     }
 
     func update() {
-        let g = model.graph
+        let g = graph
         modes.selectedSegment = GraphModel.Mode.allCases.firstIndex(of: g.mode) ?? 0
         switch g.state {
         case .idle:
@@ -210,7 +216,7 @@ final class GraphPaneController: NSObject {
     }
 
     @objc private func modeChanged(_ sender: NSSegmentedControl) {
-        model.graph.mode = GraphModel.Mode.allCases[max(0, sender.selectedSegment)]
+        graph.mode = GraphModel.Mode.allCases[max(0, sender.selectedSegment)]
         model.refreshGraph()
     }
 
