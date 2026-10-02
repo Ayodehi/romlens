@@ -79,7 +79,9 @@ import Testing
         #expect(frames.count == 2 && abs(frames[0].width - frames[1].width) < 4)
         #expect(frames[0].maxX <= frames[1].minX + 1)
         // A code tab is named by its routine.
-        #expect(groups.flatMap { $0.tabBar.tabs.map(\.title) } == [routine, routine])
+        // Two Disassembly tabs: each named by its view, and by the routine
+        // to tell them apart.
+        #expect(groups.flatMap { $0.tabBar.tabs.map(\.title) }.filter { $0.hasPrefix("Disassembly") } == ["Disassembly · \(routine)", "Disassembly · \(routine)"])
         try Self.snapshot(content, "two-columns")
     }
 
@@ -239,5 +241,30 @@ import Testing
         let size = try #require(controller.window?.contentLayoutRect.size)
         print("ROMLENS-SIZE \(size)")
         #expect(size.width > 1200, "opened at \(size)")
+    }
+
+    /// Many tabs in one group: squeezed, then scrolled so the shown one is
+    /// in view, with every tab in the overflow menu (the user's report, 2
+    /// October 2026: the newest tab was drawn past the edge, so its view
+    /// seemed to replace another's).
+    @Test func aCrowdedTabBarKeepsTheShownTabInView() async throws {
+        let m = try await model()
+        let (controller, content) = try open(m)
+        defer { controller.window?.close() }
+        for t in GraphicsModel.Tab.allCases { m.openGraphics(t) }
+        for t in AudioModel.Tab.allCases { m.openAudio(t) }
+        settle(content)
+        let bar = try #require(all(content, TabGroupView.self).first?.tabBar)
+        #expect(bar.tabs.count == 14)
+        #expect(bar.isOverflowing)
+        let shown = try #require(bar.tabs.first { $0.item.id == m.workspace.focusedItem?.id })
+        #expect(shown.rect.minX >= -0.5 && shown.rect.maxX <= bar.available + 0.5, "the shown tab is in view: \(shown.rect) of \(bar.available)")
+        // Squeezed no narrower than a short tab's own width.
+        #expect(bar.tabs.allSatisfy { $0.rect.width >= 83.5 })
+        // Back to the first: the bar scrolls back.
+        m.focus(item: bar.tabs[0].item.id)
+        settle(content)
+        #expect(abs(bar.tabs[0].rect.minX) < 0.5)
+        try Self.snapshot(content, "crowded")
     }
 }

@@ -14,6 +14,17 @@ enum CodeRepresentation: String, Codable, CaseIterable, Identifiable, Sendable {
         case .both: "Both"
         }
     }
+
+    /// The view's name, as the sidebar and a tab say it.
+    var viewTitle: String {
+        switch self {
+        case .assembly: "Disassembly"
+        case .c: "Pseudo-C"
+        case .graph: "Graph"
+        case .hex: "Hex"
+        case .both: "Hex and Disassembly"
+        }
+    }
 }
 
 /// What a tab shows. Code may be open in several tabs; everything else has
@@ -21,6 +32,9 @@ enum CodeRepresentation: String, Codable, CaseIterable, Identifiable, Sendable {
 /// comparison behind it are the document's (docs/29, scope decisions).
 enum EditorContent: Hashable, Codable, Sendable {
     case code(CodeRepresentation)
+    /// The cartridge header and the vectors (the inspector's summary when
+    /// nothing is selected), as a view of its own.
+    case header
     case atlas
     case compare
     case source
@@ -39,6 +53,7 @@ enum EditorContent: Hashable, Codable, Sendable {
     var singletonKey: String {
         switch self {
         case .code(let r): "code.\(r.rawValue)"
+        case .header: "header"
         case .atlas: "atlas"
         case .compare: "compare"
         case .source: "source"

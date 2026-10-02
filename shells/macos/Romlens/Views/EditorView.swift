@@ -12,6 +12,7 @@ struct EditorView: View {
         switch content {
         case .graphics(let tab): GraphicsEditorView(model: model, tab: tab)
         case .audio(let tab): AudioEditorView(model: model, tab: tab)
+        case .header: HeaderSummaryView(model: model)
         case .tutor:
             if let tutor = model.tutor {
                 TutorView(tutor: tutor, minWidth: 320)

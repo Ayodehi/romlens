@@ -13,13 +13,61 @@ import Testing
         return try await Fixture.analyzedModel(rom: rom)
     }
 
-    @Test func aRepresentationChangesTheFocusedTabInPlace() async throws {
+    /// Each view chosen gets its own tab (the user's report, 2 October
+    /// 2026): choosing C does not turn the Hex tab into C.
+    @Test func aViewChosenGetsItsOwnTab() async throws {
+        let m = try await model()
+        let hex = try #require(m.workspace.focusedItem?.id)
+        m.showTab(.c)
+        let c = try #require(m.workspace.focusedItem?.id)
+        #expect(c != hex)
+        #expect(m.workspace.layout.item(hex)?.content == .code(.hex), "the Hex tab is still Hex")
+        #expect(m.workspace.layout.items.count == 2)
+        // Choosing Hex again shows its tab rather than opening another.
+        m.showTab(.hex)
+        #expect(m.workspace.focusedItem?.id == hex)
+        #expect(m.workspace.layout.items.count == 2)
+        // A view shown in another group is brought forward there.
+        m.workspace.split(m.workspace.focusedGroup, .right, with: c)
+        m.focus(item: hex)
+        m.showTab(.c)
+        #expect(m.workspace.focusedItem?.id == c)
+        #expect(m.workspace.layout.items.count == 2)
+    }
+
+    @Test func theStripChangesItsOwnTabInPlace() async throws {
         let m = try await model()
         let first = try #require(m.workspace.focusedItem?.id)
-        m.showTab(.c)
+        m.setRepresentation(.c, of: first)
         #expect(m.workspace.focusedItem?.id == first)
         #expect(m.workspace.focusedItem?.content == .code(.c))
         #expect(m.workspace.layout.items.count == 1)
+    }
+
+    @Test func aCodeTabIsNamedByItsViewAndTwinsByTheirRoutine() async throws {
+        let m = try await model()
+        try await Fixture.settle { !m.navigator.labels.isEmpty }
+        m.select(offset: 0x44)
+        let hex = try #require(m.workspace.focusedItem)
+        #expect(m.title(of: hex) == "Hex")
+        m.splitFocused(.right)
+        let routine = try #require(m.routineName(at: 0x008044))
+        #expect(m.workspace.layout.items.map { m.title(of: $0) } == ["Hex · \(routine)", "Hex · \(routine)"])
+        // Moving to another routine renames the tab that follows.
+        m.select(offset: 0x22)
+        let other = try #require(m.routineName(at: 0x008022))
+        #expect(other != routine)
+        let first = m.workspace.layout.items.first { $0.followsSelection }
+        let follower = try #require(first)
+        #expect(m.title(of: follower) == "Hex · \(other)")
+    }
+
+    @Test func theHeaderIsAViewOfItsOwn() async throws {
+        let m = try await model()
+        m.show(.header)
+        #expect(m.workspace.focusedItem?.content == .header)
+        #expect(m.title(of: m.workspace.focusedItem!) == "Header and Vectors")
+        #expect(m.workspace.layout.items.count == 2)
     }
 
     @Test func graphicsAndSoundOpenTheirOwnTabsBesideTheCodeTab() async throws {
@@ -31,14 +79,15 @@ import Testing
         #expect(m.editorTab == .disassembly, "the last text view is still what editorTab says")
         m.show(.audio(.voices))
         #expect(m.audioTab == .voices && m.graphicsTab == nil)
-        #expect(m.workspace.layout.items.count == 3)
+        // Hex, Disassembly, Tile Decoder, Voices.
+        #expect(m.workspace.layout.items.count == 4)
         // Choosing a text view again shows the code tab; the others stay.
         m.showTab(.disassembly)
         #expect(m.workspace.focusedItem?.id == code && m.showsTextEditor)
-        #expect(m.workspace.layout.items.count == 3)
+        #expect(m.workspace.layout.items.count == 4)
         // The Tiles tab is shown again rather than opened twice.
         m.show(.graphics(.tiles))
-        #expect(m.workspace.layout.items.count == 3)
+        #expect(m.workspace.layout.items.count == 4)
         // Closing it shows the tab on its right, the sound view.
         m.closeFocusedTab()
         #expect(m.audioTab == .voices)
@@ -47,6 +96,7 @@ import Testing
 
     @Test func aJumpScrollsTheFocusedTabAndTheFollowersOnly() async throws {
         let m = try await model()
+        let hex = try #require(m.workspace.focusedItem?.id)
         m.showTab(.disassembly)
         let a = try #require(m.workspace.focusedItem?.id)
         let group = m.workspace.focusedGroup
@@ -56,7 +106,6 @@ import Testing
         let bItem = try #require(m.workspace.layout.item(b))
         #expect(!bItem.followsSelection)
         m.workspace.split(group, .right, with: b)
-        let hex = try #require(m.workspace.open(.code(.hex)))
         m.focus(item: a)
         m.jump(to: 0x40)
         let request = try #require(m.scrollRequest)

@@ -317,19 +317,20 @@ final class RomViewModel {
         return EditorTab(content: item.content) != nil
     }
 
-    /// Shows `content` in the focused group. A code representation changes
-    /// the focused code tab, else the group's code tab, in place; anything
-    /// else opens, or shows, its tab.
+    /// Shows `content` in a tab of its own (the user's choice, 2 October
+    /// 2026): the focused group's tab of that view, else one showing it in
+    /// another group, else a new tab in the focused group. Choosing a view
+    /// never turns another view's tab into it; the representation strip
+    /// inside a code tab is what does that.
     func show(_ content: EditorContent) {
-        if case .code(let r) = content {
+        if case .code = content {
             let group = workspace.layout.group(workspace.focusedGroup)
-            let target: EditorItem? = {
-                if let f = workspace.focusedItem, case .code = f.content { return f }
-                return group?.items.first { if case .code = $0.content { true } else { false } }
-            }()
-            if let target {
-                workspace.setRepresentation(r, of: target.id)
-                workspace.focus(item: target.id)
+            if workspace.focusedItem?.content == content {
+                // Already showing.
+            } else if let here = group?.items.first(where: { $0.content == content }) {
+                workspace.focus(item: here.id)
+            } else if let shown = workspace.visibleItems.first(where: { $0.content == content }) {
+                workspace.focus(item: shown.id)
             } else {
                 workspace.open(content)
             }
@@ -356,16 +357,22 @@ final class RomViewModel {
     /// reloads.
     @ObservationIgnored private var labelIndex: [(address: UInt32, name: String)]?
 
-    /// A tab's name: a code tab by its routine, else by its view.
+    /// A tab's name: its view's (the user's choice, 2 October 2026), with
+    /// the routine added when two tabs show the same view, to tell them
+    /// apart.
     func title(of item: EditorItem) -> String {
         switch item.content {
-        case .code(let r): codeTitles[item.id] ?? r.title
-        case .atlas: "Atlas"
-        case .compare: "Compare"
-        case .source: "Source"
-        case .graphics(let t): t.title
-        case .audio(let t): t.title
-        case .tutor: "Tutor"
+        case .code(let r):
+            let twins = workspace.layout.items.filter { $0.content == item.content }.count > 1
+            if twins, let routine = codeTitles[item.id] { return "\(r.viewTitle) · \(routine)" }
+            return r.viewTitle
+        case .header: return "Header and Vectors"
+        case .atlas: return "Atlas"
+        case .compare: return "Compare"
+        case .source: return "Source"
+        case .graphics(let t): return t.title
+        case .audio(let t): return t.title
+        case .tutor: return "Tutor"
         }
     }
 
@@ -389,7 +396,10 @@ final class RomViewModel {
 
     /// Name the code tabs on the selection by its routine.
     private func refreshTitles() {
-        guard let address = selectedAddress, let name = routineName(at: address) else { return }
+        guard let address = selectedAddress else { return }
+        // No label before the selection in its bank: no name, rather than
+        // the last one kept.
+        let name = routineName(at: address)
         let focused = workspace.focusedItem?.id
         for item in workspace.layout.items {
             guard case .code = item.content, item.id == focused || item.followsSelection else { continue }

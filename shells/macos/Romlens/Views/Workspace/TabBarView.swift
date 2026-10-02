@@ -28,6 +28,8 @@ final class TabBarView: NSView, NSDraggingSource {
     private var hovered: UUID?
     private let splitRight = NSButton()
     private let splitDown = NSButton()
+    /// Every tab, as a menu, while some do not fit.
+    private let overflow = NSButton()
     private var tracking: NSTrackingArea?
 
     private static let font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize + 1)
@@ -56,7 +58,20 @@ final class TabBarView: NSView, NSDraggingSource {
             button.translatesAutoresizingMaskIntoConstraints = false
             addSubview(button)
         }
+        overflow.image = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: "All tabs")
+        overflow.isBordered = false
+        overflow.bezelStyle = .accessoryBarAction
+        overflow.toolTip = "All tabs in this group"
+        overflow.setAccessibilityLabel("All tabs")
+        overflow.contentTintColor = .secondaryLabelColor
+        overflow.target = self
+        overflow.action = #selector(showOverflow)
+        overflow.isHidden = true
+        overflow.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(overflow)
         NSLayoutConstraint.activate([
+            overflow.trailingAnchor.constraint(equalTo: splitRight.leadingAnchor, constant: -2),
+            overflow.centerYAnchor.constraint(equalTo: centerYAnchor),
             splitDown.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
             splitDown.centerYAnchor.constraint(equalTo: centerYAnchor),
             splitRight.trailingAnchor.constraint(equalTo: splitDown.leadingAnchor, constant: -2),
@@ -83,18 +98,68 @@ final class TabBarView: NSView, NSDraggingSource {
         layoutTabs()
     }
 
-    private var trailingReserve: CGFloat { 64 }
+    /// The width the tabs may use: all but the buttons at the end.
+    private(set) var available: CGFloat = 0
+    /// How far the tabs are scrolled left to keep the shown one in view.
+    private(set) var scroll: CGFloat = 0
+    /// The narrowest a tab gets squeezed before the bar scrolls instead.
+    static let squeezedWidth: CGFloat = 96
 
+    /// Natural widths, squeezed alike when they do not fit; past the
+    /// squeeze, scrolled so the shown tab is in view, with the overflow menu
+    /// offering the rest, as Visual Studio Code's tab bar does.
     private func layoutTabs() {
-        var x: CGFloat = 0
         let attrs: [NSAttributedString.Key: Any] = [.font: Self.font]
+        var widths = tabs.map { tab in
+            let text = (tab.title as NSString).size(withAttributes: attrs).width
+            return min(Self.maxWidth, max(Self.minWidth, text + Self.iconSize + Self.closeSize + 4 * Self.padding))
+        }
+        let buttons: CGFloat = 64
+        var room = max(0, bounds.width - buttons)
+        if widths.reduce(0, +) > room {
+            room = max(0, bounds.width - buttons - 26)
+            let share = room / CGFloat(max(1, widths.count))
+            widths = widths.map { min($0, max(Self.squeezedWidth, share)) }
+        }
+        available = room
+        let total = widths.reduce(0, +)
+        overflow.isHidden = total <= room + 0.5
+        // Keep the shown tab in view.
+        var x: CGFloat = 0
+        var shown: (CGFloat, CGFloat)?
+        for (i, w) in widths.enumerated() {
+            if tabs[i].item.id == selected { shown = (x, x + w) }
+            x += w
+        }
+        if let (lo, hi) = shown {
+            if hi - scroll > room { scroll = hi - room }
+            if lo < scroll { scroll = lo }
+        }
+        scroll = max(0, min(scroll, max(0, total - room)))
+        x = -scroll
         for i in tabs.indices {
-            let text = (tabs[i].title as NSString).size(withAttributes: attrs).width
-            let w = min(Self.maxWidth, max(Self.minWidth, text + Self.iconSize + Self.closeSize + 4 * Self.padding))
+            let w = widths[i]
             tabs[i].rect = NSRect(x: x, y: 0, width: w, height: Self.height)
             tabs[i].close = NSRect(x: x + w - Self.padding - Self.closeSize, y: (Self.height - Self.closeSize) / 2, width: Self.closeSize, height: Self.closeSize)
             x += w
         }
+    }
+
+    /// Some tabs do not fit, and the overflow menu shows.
+    var isOverflowing: Bool { !overflow.isHidden }
+
+    @objc private func showOverflow() {
+        let menu = NSMenu()
+        for tab in tabs {
+            let item = ClosureMenuItem(title: tab.title, action: #selector(ClosureMenuItem.fire), keyEquivalent: "")
+            item.target = item
+            let id = tab.item.id
+            item.handler = { [weak self] in self?.model.focus(item: id) }
+            item.state = id == selected ? .on : .off
+            item.image = NSImage(systemSymbolName: tab.item.content.symbol, accessibilityDescription: nil)
+            menu.addItem(item)
+        }
+        menu.popUp(positioning: nil, at: NSPoint(x: overflow.frame.minX, y: overflow.frame.maxY + 2), in: self)
     }
 
     // MARK: Drawing
@@ -102,7 +167,10 @@ final class TabBarView: NSView, NSDraggingSource {
     override func draw(_ dirtyRect: NSRect) {
         NSColor.windowBackgroundColor.setFill()
         bounds.fill()
-        for tab in tabs { draw(tab) }
+        NSGraphicsContext.saveGraphicsState()
+        NSRect(x: 0, y: 0, width: available, height: bounds.height).clip()
+        for tab in tabs where tab.rect.maxX > 0 && tab.rect.minX < available { draw(tab) }
+        NSGraphicsContext.restoreGraphicsState()
         NSColor.separatorColor.setFill()
         NSRect(x: 0, y: bounds.height - 1, width: bounds.width, height: 1).fill()
         if let insertion {
@@ -134,14 +202,17 @@ final class TabBarView: NSView, NSDraggingSource {
 
         let colour: NSColor = isSelected ? .labelColor : .secondaryLabelColor
         var x = r.minX + Self.padding
-        if let icon = NSImage(systemSymbolName: tab.item.content.symbol, accessibilityDescription: nil)?
+        // A squeezed tab gives its icon's room to its name.
+        if r.width >= 120, let icon = NSImage(systemSymbolName: tab.item.content.symbol, accessibilityDescription: nil)?
             .withSymbolConfiguration(.init(pointSize: 11, weight: .regular)) {
             let tinted = icon.tinted(isSelected ? tab.item.content.tint : .secondaryLabelColor)
             let size = tinted.size
             tinted.draw(in: NSRect(x: x, y: (r.height - size.height) / 2, width: size.width, height: size.height))
             x += Self.iconSize + 6
         }
-        let attrs: [NSAttributedString.Key: Any] = [.font: Self.font, .foregroundColor: colour]
+        let style = NSMutableParagraphStyle()
+        style.lineBreakMode = .byTruncatingTail
+        let attrs: [NSAttributedString.Key: Any] = [.font: Self.font, .foregroundColor: colour, .paragraphStyle: style]
         let title = tab.title as NSString
         let textWidth = tab.close.minX - 4 - x
         let size = title.size(withAttributes: attrs)
@@ -182,7 +253,25 @@ final class TabBarView: NSView, NSDraggingSource {
         needsDisplay = true
     }
 
-    func tab(at point: NSPoint) -> Tab? { tabs.first { $0.rect.contains(point) } }
+    func tab(at point: NSPoint) -> Tab? {
+        guard point.x < available else { return nil }
+        return tabs.first { $0.rect.contains(point) }
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        // A sideways scroll, or a wheel, moves through tabs that do not fit.
+        let delta = abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY) ? event.scrollingDeltaX : event.scrollingDeltaY
+        let total = (tabs.last?.rect.maxX ?? 0) + scroll
+        let next = max(0, min(scroll - delta, max(0, total - available)))
+        guard next != scroll else { return }
+        let shift = scroll - next
+        scroll = next
+        for i in tabs.indices {
+            tabs[i].rect.origin.x += shift
+            tabs[i].close.origin.x += shift
+        }
+        needsDisplay = true
+    }
 
     override func mouseDown(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
@@ -318,6 +407,7 @@ extension EditorContent {
         case .code(.graph): "point.3.connected.trianglepath.dotted"
         case .code(.hex): "number"
         case .code(.both): "rectangle.split.2x1"
+        case .header: "doc.text.magnifyingglass"
         case .atlas: "square.grid.2x2"
         case .compare: "rectangle.on.rectangle"
         case .source: "doc.text"
@@ -332,7 +422,7 @@ extension EditorContent {
     var tint: NSColor {
         switch self {
         case .code, .source, .compare: .systemBlue
-        case .graphics, .audio, .atlas: .systemOrange
+        case .graphics, .audio, .atlas, .header: .systemOrange
         case .tutor: .controlAccentColor
         }
     }

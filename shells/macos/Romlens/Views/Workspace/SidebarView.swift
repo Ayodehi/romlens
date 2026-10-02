@@ -37,7 +37,7 @@ struct SidebarView: View {
     static let groups: [Group] = [
         Group(id: "cartridge", title: "Cartridge", entries: [
             Entry("atlas", "Atlas", "square.grid.2x2", .atlas, "⌥⌘A"),
-            Entry("header", "Header and Vectors", "doc.text.magnifyingglass", nil, "⇧⌘H"),
+            Entry("header", "Header and Vectors", "doc.text.magnifyingglass", .header),
             Entry("compare", "Compare", "rectangle.on.rectangle", .compare),
         ]),
         Group(id: "cpu", title: "CPU · 65816", entries: [
@@ -167,10 +167,6 @@ struct SidebarView: View {
     /// A row chosen: its view, or what would make it available.
     private func choose(_ e: Entry) {
         switch e.id {
-        case "header":
-            model.show(.code(.hex))
-            model.jump(to: model.info.headerOffset)
-            return
         case "lessons":
             NSApp.sendAction(#selector(RomWindowController.showLessons(_:)), to: nil, from: nil)
             return
