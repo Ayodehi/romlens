@@ -526,3 +526,22 @@ Quiz additions (`28-quizzes.md`, still to run):
 73. Guesses and the setting (6.12): a predict question guessed before Show
     earns its points once; with Show points and achievements off, no
     points, rank or toasts show, but the map still shows proven and due.
+
+Workspace additions (`29-workspace.md`, still to run):
+
+74. Splitting by dragging (29): drag a tab over another group; the blue
+    overlay fills the middle, then the half nearest each edge as the
+    pointer moves into its outer third; dropping splits that way and the
+    tab opens in the new group.
+75. Tab bars (29): drag a tab over a tab bar; a bar between two tabs marks
+    the place, and dropping inserts it there; within one bar it reorders.
+76. Cancelling (29): press Esc during a drag; nothing moves, and the dimmed
+    tab comes back.
+77. Dividers and empty groups (29): double-click a divider and the groups
+    become equal; drag a group's last tab away and the group closes.
+78. The sidebar (29): drag a row (a routine label, Tilemaps, Tutor) into a
+    group's edge; it opens in a new group there. A view that needs a
+    recording is dimmed and says so.
+79. Closing and reopening (29): arrange three groups, close the project
+    and reopen it; the groups, tabs and focus come back, and the project
+    was not marked edited.

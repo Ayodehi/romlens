@@ -45,6 +45,7 @@ embedded core is the planned next step after that, feeding the same views.
 | [docs/15-conformance-checklist.md](docs/15-conformance-checklist.md) | Frontend conformance checklist: what every shell must expose, with the CLI scenario for each item |
 | [docs/16-phase2-plan.md](docs/16-phase2-plan.md) | Phase 2 implementation plan: jump tables, scored heuristics, trace and symbol imports, graphics decoders, the .romrec format |
 | [docs/17-execution-log.md](docs/17-execution-log.md) | Execution logs (.mxlog) from the MesenCE fork: the format, and the references and data types Romlens takes from them |
+| [docs/29-workspace.md](docs/29-workspace.md) | The workspace window: views in a sidebar, documents in tab groups laid out in a grid, the tutor in the inspector or a tab |
 
 Decisions so far are listed at the end of the interactive proposal and in
 `docs/01-vision-and-roadmap.md` (Phase 0 acceptance criteria and working
