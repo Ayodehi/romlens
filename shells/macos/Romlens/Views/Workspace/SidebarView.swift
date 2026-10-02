@@ -37,7 +37,6 @@ struct SidebarView: View {
     static let groups: [Group] = [
         Group(id: "cartridge", title: "Cartridge", entries: [
             Entry("atlas", "Atlas", "square.grid.2x2", .atlas, "⌥⌘A"),
-            Entry("header", "Header and Vectors", "doc.text.magnifyingglass", .header),
             Entry("compare", "Compare", "rectangle.on.rectangle", .compare),
         ]),
         Group(id: "cpu", title: "CPU · 65816", entries: [

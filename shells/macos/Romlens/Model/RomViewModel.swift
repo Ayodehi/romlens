@@ -172,10 +172,11 @@ final class RomViewModel {
     }
 
     /// Puts a kept window back. A comparison is not kept with the project,
-    /// so a Compare tab is left out.
+    /// so a Compare tab is left out, as is a Header and Vectors tab, which
+    /// is no longer offered.
     func restore(_ record: WorkspaceRecord) {
         var layout = record.layout
-        for item in layout.items where item.content == .compare { layout.close(item.id) }
+        for item in layout.items where item.content == .compare || item.content == .header { layout.close(item.id) }
         workspace.restore(layout, focusedGroup: record.focusedGroup)
         isNavigatorVisible = record.sidebar
         isInspectorVisible = record.inspector

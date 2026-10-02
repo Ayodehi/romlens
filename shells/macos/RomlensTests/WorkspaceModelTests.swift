@@ -62,12 +62,15 @@ import Testing
         #expect(m.title(of: follower) == "Hex · \(other)")
     }
 
-    @Test func theHeaderIsAViewOfItsOwn() async throws {
+    @Test func aSavedHeaderTabIsLeftOutOnReopening() async throws {
         let m = try await model()
-        m.show(.header)
-        #expect(m.workspace.focusedItem?.content == .header)
-        #expect(m.title(of: m.workspace.focusedItem!) == "Header and Vectors")
-        #expect(m.workspace.layout.items.count == 2)
+        let g = m.workspace.focusedGroup
+        m.workspace.open(.header, in: g)
+        let record = m.workspaceRecord
+        let back = try await model()
+        back.restore(record)
+        #expect(!back.workspace.layout.items.contains { $0.content == .header })
+        #expect(!SidebarView.groups.flatMap(\.entries).contains { $0.content == .header }, "not offered in the sidebar")
     }
 
     @Test func graphicsAndSoundOpenTheirOwnTabsBesideTheCodeTab() async throws {

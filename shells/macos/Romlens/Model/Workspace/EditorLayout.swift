@@ -32,8 +32,10 @@ enum CodeRepresentation: String, Codable, CaseIterable, Identifiable, Sendable {
 /// comparison behind it are the document's (docs/29, scope decisions).
 enum EditorContent: Hashable, Codable, Sendable {
     case code(CodeRepresentation)
-    /// The cartridge header and the vectors (the inspector's summary when
-    /// nothing is selected), as a view of its own.
+    /// The cartridge header and vectors as a tab, which only repeated the
+    /// inspector's summary and was taken out of the sidebar (the user's
+    /// choice, 2 October 2026). Kept so a layout saved with one still
+    /// reads; reopening leaves it out.
     case header
     case atlas
     case compare
