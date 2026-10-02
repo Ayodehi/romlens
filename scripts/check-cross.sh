@@ -23,8 +23,20 @@ echo "==> fmt / clippy / test (host)"
 "$CARGO" clippy --workspace --all-targets -- -D warnings
 "$CARGO" test --workspace --quiet
 
+# The tutor's HTTPS (ureq → rustls → ring) compiles C in its build script,
+# even for `check`, so the crates above it need a C compiler for the
+# target. Set CC_<target> (for example CC_x86_64_unknown_linux_gnu) to one
+# to check everything; without one, the crates that need no C are checked
+# and CI's native Linux and Windows jobs cover the rest.
+NO_C=(-p romlens-core -p romlens-draw)
 for target in "${TARGETS[@]}"; do
-  echo "==> cargo check --target $target"
-  "$CARGO" check --workspace --all-targets --target "$target" --quiet
+  cc_var="CC_${target//-/_}"
+  if [ -n "${!cc_var:-}" ] || command -v "${target/-unknown/}-gcc" >/dev/null; then
+    echo "==> cargo check --target $target"
+    "$CARGO" check --workspace --all-targets --target "$target" --quiet
+  else
+    echo "==> cargo check --target $target (romlens-core, romlens-draw: no C compiler for the target, set $cc_var to check all)"
+    "$CARGO" check "${NO_C[@]}" --all-targets --target "$target" --quiet
+  fi
 done
 echo "==> cross-check OK"
