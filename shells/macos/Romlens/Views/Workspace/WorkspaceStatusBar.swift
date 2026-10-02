@@ -1,37 +1,35 @@
 import RomlensKit
 import SwiftUI
 
-/// The band under the toolbar: the whole ROM as a strip, and what the analyzer
-/// made of it.
+/// The bar under the tab groups (docs/29): the whole ROM as a slim strip,
+/// a map of it to click, and what the analyzer made of it.
 ///
-/// The percentages used to be a toolbar item, which was the wrong place twice
-/// over. A toolbar holds *controls*, and a thirty-character readout wedged
-/// between a popup button and the window edge reads as neither a control nor a
-/// label — it just makes the trailing edge look arbitrary. And the numbers are
-/// about the same thing the strip is: what the whole image turned out to be.
-/// Together they explain each other, the swatches doubling as the strip's
-/// legend, and the toolbar is left holding only things you click.
-struct RomHeaderBand: View {
+/// It was a band over the editor, where it sat above every view, the
+/// graphics and sound views too, and said nothing about what they showed.
+/// Under the editor it reads as the window's status, which it is. The
+/// swatches are the strip's legend.
+struct WorkspaceStatusBar: View {
     let model: RomViewModel
 
     private var session: WorkbenchSession { model.session }
 
     var body: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 4) {
             if model.isStripVisible {
                 RegionStripView(model: model)
-                    .frame(height: 20)
-                    .clipShape(RoundedRectangle(cornerRadius: 3))
+                    .frame(height: 10)
+                    .clipShape(RoundedRectangle(cornerRadius: 2))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 3)
+                        RoundedRectangle(cornerRadius: 2)
                             .strokeBorder(.separator, lineWidth: 1)
                     )
                     .help("The whole ROM, one column per pixel. Click to jump.")
             }
             status
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 10)
+        .padding(.top, model.isStripVisible ? 6 : 4)
+        .padding(.bottom, 4)
     }
 
     @ViewBuilder

@@ -167,4 +167,21 @@ import Testing
         #expect(grid.dropTarget(at: NSPoint(x: bar.maxX - 80, y: bar.midY))?.target == .tabBar(index: 2))
         #expect(grid.dropTarget(at: NSPoint(x: bar.minX + 2, y: bar.midY))?.target == .tabBar(index: 0))
     }
+
+    @Test func theStatusBarIsUnderTheGroupsAndFocusHidesIt() async throws {
+        let m = try await model()
+        let (controller, content) = try open(m)
+        defer { controller.window?.close() }
+        let grid = try #require(all(content, EditorGridNSView.self).first)
+        let strip = try #require(all(content, RegionStripNSView.self).first)
+        let g = grid.convert(grid.bounds, to: nil)
+        let s = strip.convert(strip.bounds, to: nil)
+        // Window coordinates: y grows upward, so under means lower.
+        #expect(s.maxY <= g.minY + 1, "the strip is under the tab groups: \(s) \(g)")
+        #expect(s.height < 14, "a slim strip")
+        m.toggleFocus()
+        settle(content)
+        #expect(all(content, RegionStripNSView.self).allSatisfy { $0.window == nil })
+        m.toggleFocus()
+    }
 }

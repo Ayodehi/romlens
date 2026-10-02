@@ -10,8 +10,8 @@ import SwiftUI
 /// capsules that used to choose it there are gone.
 ///
 /// What the analyzer found is not a control, so it is not in the toolbar; it
-/// is in `RomHeaderBand` with the overview strip, which is about the same
-/// thing.
+/// is in `WorkspaceStatusBar` under the editor, with the overview strip,
+/// which is about the same thing.
 struct DocumentView: View {
     @Bindable var model: RomViewModel
 
@@ -30,8 +30,6 @@ struct DocumentView: View {
                     .frame(minWidth: 200, idealWidth: 240, maxWidth: 360, maxHeight: .infinity)
             }
             VStack(spacing: 0) {
-                RomHeaderBand(model: model)
-                Divider()
                 EditorGridView(model: model)
                 if model.isResultsVisible {
                     Divider()
@@ -39,6 +37,10 @@ struct DocumentView: View {
                     case .find: SearchResultsView(model: model)
                     case .references: ReferencesView(model: model)
                     }
+                }
+                if !model.isFocused {
+                    Divider()
+                    WorkspaceStatusBar(model: model)
                 }
             }
             .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
