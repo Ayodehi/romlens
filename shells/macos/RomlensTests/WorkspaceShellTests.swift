@@ -267,4 +267,20 @@ import Testing
         #expect(abs(bar.tabs[0].rect.minX) < 0.5)
         try Self.snapshot(content, "crowded")
     }
+
+    @Test func thePseudoCTabIsAllC() async throws {
+        let m = try await model()
+        try await Fixture.settle { !m.navigator.labels.isEmpty }
+        m.select(offset: 0x22)
+        let (controller, content) = try open(m)
+        defer { controller.window?.close() }
+        m.showTab(.c)
+        try await Fixture.settle(timeout: 20) { m.decompiler.state == .ready }
+        settle(content)
+        // No disassembly in the C tab: only the Hex tab's view is an editor
+        // canvas, and it is hidden behind the C.
+        #expect(all(content, AsmCanvasView.self).allSatisfy { $0.isHiddenOrHasHiddenAncestor })
+        #expect(all(content, CTextView.self).contains { !$0.isHiddenOrHasHiddenAncestor })
+        try Self.snapshot(content, "pseudo-c")
+    }
 }

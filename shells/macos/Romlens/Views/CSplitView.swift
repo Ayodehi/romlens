@@ -42,6 +42,129 @@ struct CSplitView: NSViewRepresentable {
     }
 }
 
+/// The Pseudo-C tab (docs/29): the C across the whole tab, under a bar that
+/// picks the routine from a list (the user's choice, 2 October 2026). The
+/// disassembly beside it is a Disassembly tab of its own now, in a split
+/// if wanted, following the same selection.
+struct CTabView: View {
+    let model: RomViewModel
+    @Environment(\.editorItem) private var item
+
+    var body: some View {
+        VStack(spacing: 0) {
+            RoutineBar(model: model, decompiler: model.workspace.decompiler(for: item), item: item)
+            Divider()
+            CPaneView(model: model)
+        }
+    }
+}
+
+/// The C pane on its own.
+struct CPaneView: NSViewRepresentable {
+    let model: RomViewModel
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeNSView(context: Context) -> NSView {
+        let c = CPaneController(model: model, item: context.environment.editorItem)
+        context.coordinator.c = c
+        return c.view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        context.coordinator.c?.update()
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSView, context: Context) -> CGSize? {
+        proposal.replacingUnspecifiedDimensions(by: CGSize(width: 400, height: 300))
+    }
+
+    @MainActor
+    final class Coordinator {
+        var c: CPaneController?
+    }
+}
+
+/// Which routine the C shows, and a searchable list of every routine to
+/// choose another; choosing one selects its first instruction, so the
+/// Disassembly tabs that follow the selection go there too.
+struct RoutineBar: View {
+    let model: RomViewModel
+    let decompiler: DecompileModel
+    let item: UUID?
+    @State private var choosing = false
+    @State private var filter = ""
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text("Routine").foregroundStyle(.secondary)
+            Button {
+                choosing = true
+            } label: {
+                HStack(spacing: 4) {
+                    Text(decompiler.result?.name ?? "None selected")
+                        .font(.callout.monospaced())
+                        .lineLimit(1)
+                    Image(systemName: "chevron.up.chevron.down").font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            .buttonStyle(.borderless)
+            .help("Choose a routine to read as C")
+            .popover(isPresented: $choosing, arrowEdge: .bottom) {
+                list
+            }
+            if let entry = decompiler.result?.entry {
+                Text(formatSnesAddress(address: entry))
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.tertiary)
+            }
+            Spacer()
+            Text("\(model.routines.count) routines")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+        }
+        .font(.callout)
+        .padding(.horizontal, 12)
+        .frame(height: 30)
+    }
+
+    private var shown: [LabelInfo] {
+        let q = filter.trimmingCharacters(in: .whitespaces)
+        return q.isEmpty ? model.routines : NavigatorModel.filter(model.routines, query: q)
+    }
+
+    private var list: some View {
+        VStack(spacing: 0) {
+            TextField("Filter routines, or $BB:AAAA", text: $filter)
+                .textFieldStyle(.roundedBorder)
+                .padding(8)
+            List(shown, id: \.address) { label in
+                Button {
+                    choose(label)
+                } label: {
+                    HStack {
+                        Text(label.name).font(.callout.monospaced()).lineLimit(1)
+                        Spacer()
+                        Text(formatSnesAddress(address: label.address))
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.tertiary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            .listStyle(.plain)
+        }
+        .frame(width: 340, height: 420)
+    }
+
+    private func choose(_ label: LabelInfo) {
+        choosing = false
+        if let item { model.focus(item: item) }
+        model.jump(toSnesAddress: label.address)
+    }
+}
+
 /// Splits in half the first time it is laid out.
 final class CSplitPaneView: NSSplitView {
     private var placed = false

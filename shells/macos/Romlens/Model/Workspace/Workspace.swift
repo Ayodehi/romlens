@@ -95,14 +95,6 @@ final class Workspace {
         noteFocus()
     }
 
-    /// Changes a code tab's representation in place.
-    func setRepresentation(_ r: CodeRepresentation, of id: UUID) {
-        change { l in
-            var root = l.root
-            Self.updateItem(id, in: &root) { $0.content = .code(r) }
-            l.root = root
-        }
-    }
 
     func setFollowsSelection(_ follows: Bool, of id: UUID) {
         change { l in

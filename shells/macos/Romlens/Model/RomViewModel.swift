@@ -321,8 +321,7 @@ final class RomViewModel {
     /// Shows `content` in a tab of its own (the user's choice, 2 October
     /// 2026): the focused group's tab of that view, else one showing it in
     /// another group, else a new tab in the focused group. Choosing a view
-    /// never turns another view's tab into it; the representation strip
-    /// inside a code tab is what does that.
+    /// never turns another view's tab into it.
     func show(_ content: EditorContent) {
         if case .code = content {
             let group = workspace.layout.group(workspace.focusedGroup)
@@ -376,6 +375,25 @@ final class RomViewModel {
         case .tutor: return "Tutor"
         }
     }
+
+    /// The routines, for the Pseudo-C tab's list: the analysis's routine
+    /// names (SUB and the vectors') and the student's and imported labels
+    /// on code, by address. Rebuilt when the labels change.
+    var routines: [LabelInfo] {
+        let labels = navigator.labels
+        if let cached = routineCache, cached.count == labels.count { return cached.routines }
+        let entryPrefixes: Set<Substring> = ["SUB", "RESET", "NMI", "IRQ", "COP", "BRK", "ABORT"]
+        let found = labels.filter { label in
+            if label.source == .auto {
+                return label.name.split(separator: "_").first.map(entryPrefixes.contains) ?? false
+            }
+            guard let offset = label.fileOffset else { return false }
+            return workbench.regionAt(fileOffset: offset)?.kind == .code
+        }.sorted { $0.address < $1.address }
+        routineCache = (labels.count, found)
+        return found
+    }
+    @ObservationIgnored private var routineCache: (count: Int, routines: [LabelInfo])?
 
     /// The label at or before `address` in its bank.
     func routineName(at address: UInt32) -> String? {
@@ -487,11 +505,6 @@ final class RomViewModel {
         refreshDecompile()
     }
 
-    /// The representation strip: a code tab shown another way, focused.
-    func setRepresentation(_ r: CodeRepresentation, of id: UUID) {
-        workspace.setRepresentation(r, of: id)
-        focus(item: id)
-    }
 
     /// Next Tab and Previous Tab, within the focused group, wrapping.
     func selectAdjacentTab(_ delta: Int) {
@@ -722,6 +735,7 @@ final class RomViewModel {
             Task {
                 await navigator.reload(workbench: workbench, rom: rom)
                 labelIndex = nil
+                routineCache = nil
                 refreshTitles()
             }
         case .project:

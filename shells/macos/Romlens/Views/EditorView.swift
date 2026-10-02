@@ -50,7 +50,7 @@ struct EditorView: View {
             }
         case .c:
             if model.hasDisassembly {
-                CSplitView(model: model)
+                CTabView(model: model)
             } else {
                 analyzing
             }

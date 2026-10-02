@@ -443,77 +443,19 @@ extension NSHostingView: EditorItemHosting where Content == EditorItemBody {
     var itemID: UUID { rootView.itemID }
 }
 
-/// What a tab shows: for code, the strip of representations, then the view.
+/// What a tab shows: its view. Which view is chosen in the sidebar, each
+/// in a tab of its own, so a tab has no strip of representations any more
+/// (the user's choice, 2 October 2026); Follow Selection is in the tab's
+/// menu.
 struct EditorItemBody: View {
     let model: RomViewModel
     let itemID: UUID
 
     var body: some View {
         if let item = model.workspace.layout.item(itemID) {
-            VStack(spacing: 0) {
-                if case .code(let r) = item.content {
-                    RepresentationStrip(model: model, item: item, current: r)
-                    Divider()
-                }
-                EditorView(model: model, content: item.content)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-            .environment(\.editorItem, itemID)
-        }
-    }
-}
-
-/// The representations a code tab offers, as text tabs, and whether it
-/// follows the selection.
-struct RepresentationStrip: View {
-    let model: RomViewModel
-    let item: EditorItem
-    let current: CodeRepresentation
-
-    var body: some View {
-        HStack(spacing: 16) {
-            ForEach(CodeRepresentation.allCases) { r in
-                Button {
-                    model.setRepresentation(r, of: item.id)
-                } label: {
-                    Text(r.title)
-                        .foregroundStyle(r == current ? .primary : .secondary)
-                        .padding(.vertical, 5)
-                        .overlay(alignment: .bottom) {
-                            if r == current {
-                                Rectangle().fill(Color.accentColor).frame(height: 2)
-                            }
-                        }
-                }
-                .buttonStyle(.plain)
-                .help(r.help)
-            }
-            Spacer(minLength: 8)
-            Button {
-                model.workspace.setFollowsSelection(!item.followsSelection, of: item.id)
-            } label: {
-                Image(systemName: item.followsSelection ? "link" : "link.badge.plus")
-                    .foregroundStyle(item.followsSelection ? Color.accentColor : .secondary)
-            }
-            .buttonStyle(.borderless)
-            .help(item.followsSelection
-                ? "Follows the selection made in other tabs. Click to keep this tab where it is."
-                : "Stays where it is. Click to follow the selection made in other tabs.")
-        }
-        .font(.callout)
-        .padding(.horizontal, 12)
-        .frame(height: 28)
-    }
-}
-
-extension CodeRepresentation {
-    var help: String {
-        switch self {
-        case .assembly: "The disassembly (⌥⌘2)"
-        case .c: "The routine as C (⌥⌘8)"
-        case .graph: "The routine as a graph (⌥⌘9)"
-        case .hex: "The bytes (⌥⌘1)"
-        case .both: "Hex and disassembly side by side (⌥⌘3)"
+            EditorView(model: model, content: item.content)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .environment(\.editorItem, itemID)
         }
     }
 }

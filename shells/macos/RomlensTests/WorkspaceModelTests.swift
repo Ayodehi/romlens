@@ -35,15 +35,6 @@ import Testing
         #expect(m.workspace.layout.items.count == 2)
     }
 
-    @Test func theStripChangesItsOwnTabInPlace() async throws {
-        let m = try await model()
-        let first = try #require(m.workspace.focusedItem?.id)
-        m.setRepresentation(.c, of: first)
-        #expect(m.workspace.focusedItem?.id == first)
-        #expect(m.workspace.focusedItem?.content == .code(.c))
-        #expect(m.workspace.layout.items.count == 1)
-    }
-
     @Test func aCodeTabIsNamedByItsViewAndTwinsByTheirRoutine() async throws {
         let m = try await model()
         try await Fixture.settle { !m.navigator.labels.isEmpty }
@@ -208,5 +199,32 @@ import Testing
         let before = m.workspace.layout
         m.drop(.item(a), on: g, at: .zone(.edge(.left)))
         #expect(m.workspace.layout == before)
+    }
+
+    // MARK: The Pseudo-C tab (2 October 2026)
+
+    @Test func theRoutineListHoldsRoutinesNotLoops() async throws {
+        let m = try await model()
+        try await Fixture.settle { !m.navigator.labels.isEmpty }
+        let names = m.routines.map(\.name)
+        #expect(names.contains { $0.hasPrefix("SUB_") })
+        #expect(names.contains { $0.hasPrefix("RESET") })
+        #expect(!names.contains { $0.hasPrefix("LOOP_") || $0.hasPrefix("SKIP_") || $0.hasPrefix("DATA_") }, "\(names)")
+        #expect(m.routines.map(\.address) == m.routines.map(\.address).sorted())
+        // A label of the student's on a routine is listed by that name.
+        m.select(offset: 0x20)
+        try m.setLabel(name: "ClearSlots")
+        try await Fixture.settle { m.navigator.labels.contains { $0.name == "ClearSlots" } }
+        #expect(m.routines.contains { $0.name == "ClearSlots" })
+    }
+
+    @Test func choosingARoutineShowsItsC() async throws {
+        let m = try await model()
+        try await Fixture.settle { !m.navigator.labels.isEmpty }
+        m.showTab(.c)
+        let c = try #require(m.workspace.focusedItem?.id)
+        let sub = try #require(m.routines.first { $0.address == 0x008040 })
+        m.jump(toSnesAddress: sub.address)
+        try await Fixture.settle(timeout: 20) { m.workspace.decompiler(for: c).result?.entry == 0x008040 }
     }
 }
