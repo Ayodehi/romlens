@@ -5,6 +5,9 @@ import RomlensKit
 struct LocalRecord: Codable, Equatable {
     var bookmark: Data?
     var lastPath: String?
+    /// The window's tabs and panels on this machine (docs/29). Absent in
+    /// projects saved before it, which open with one group.
+    var workspace: WorkspaceRecord?
 }
 
 /// Finds the ROM a project belongs to. Injected so tests can stub it.

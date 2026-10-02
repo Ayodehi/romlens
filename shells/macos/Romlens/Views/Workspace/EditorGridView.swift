@@ -54,10 +54,14 @@ final class EditorGridNSView: NSView {
     /// when its shape changed, the tab bars, the shown tab and the fractions
     /// every time.
     func sync(layout: EditorLayout, focused: UUID, titles: [UUID: String]) {
-        let shape = Self.signature(layout.root)
+        last = (layout, focused, titles)
+        // In a narrow window only the focused group shows; the layout is
+        // kept and comes back when the window widens.
+        let shown: LayoutNode = compact ? layout.group(focused).map { .group($0) } ?? layout.root : layout.root
+        let shape = Self.signature(shown) + (compact ? "c" : "")
         if shape != signature {
             signature = shape
-            rebuild(layout.root)
+            rebuild(shown)
         }
         for group in layout.groups {
             groupViews[group.id]?.update(group: group, focused: group.id == focused, titles: titles) { [unowned self] item in
@@ -75,6 +79,24 @@ final class EditorGridNSView: NSView {
     }
 
     /// The view showing a tab, made the first time it is asked for.
+    /// Narrower than this, the window shows one group (docs/29).
+    static let compactWidth: CGFloat = 1100
+    private var last: (EditorLayout, UUID, [UUID: String])?
+
+    private var compact: Bool {
+        (window?.contentLayoutRect.width ?? .greatestFiniteMagnitude) < Self.compactWidth
+    }
+
+    /// The window crossed the compact width: show one group, or all.
+    private func resyncIfCompactChanged() {
+        if signature.hasSuffix("c") != compact, let (l, f, t) = last { sync(layout: l, focused: f, titles: t) }
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        resyncIfCompactChanged()
+    }
+
     private func host(for item: EditorItem) -> NSView {
         if let h = hosts[item.id] { return h }
         let host = NSHostingView(rootView: EditorItemBody(model: model, itemID: item.id))
@@ -135,6 +157,7 @@ final class EditorGridNSView: NSView {
         if let monitor { NSEvent.removeMonitor(monitor) }
         monitor = nil
         guard window != nil else { return }
+        resyncIfCompactChanged()
         // A click anywhere in a group, in its tab bar or in its view, gives
         // the group focus; the event goes on to the view as usual.
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in

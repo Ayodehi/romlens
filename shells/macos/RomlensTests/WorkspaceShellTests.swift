@@ -208,4 +208,24 @@ import Testing
         #expect(all(content, TabGroupView.self).filter { $0.window != nil }.count == 2)
         if let frame = content.superview { try Self.snapshot(frame, "tutor-tab") }
     }
+
+    @Test func aNarrowWindowShowsTheFocusedGroupOnly() async throws {
+        let m = try await model()
+        let (controller, content) = try open(m)
+        defer { controller.window?.close() }
+        m.graphicsTab = .palette
+        m.splitFocused(.right)
+        settle(content)
+        #expect(all(content, TabGroupView.self).filter { $0.window != nil }.count == 2)
+        controller.window?.setContentSize(NSSize(width: 1000, height: 700))
+        settle(content)
+        let shown = all(content, TabGroupView.self).filter { $0.window != nil }
+        #expect(shown.count == 1)
+        #expect(shown.first?.groupID == m.workspace.focusedGroup)
+        #expect(m.workspace.layout.groups.count == 2, "the layout is kept")
+        try Self.snapshot(content, "narrow")
+        controller.window?.setContentSize(NSSize(width: 1440, height: 900))
+        settle(content)
+        #expect(all(content, TabGroupView.self).filter { $0.window != nil }.count == 2)
+    }
 }

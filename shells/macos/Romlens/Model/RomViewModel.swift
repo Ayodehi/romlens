@@ -161,6 +161,37 @@ final class RomViewModel {
         }
     }
 
+    // MARK: Keeping the layout (docs/29, W10)
+
+    /// The window as `local.json` keeps it.
+    var workspaceRecord: WorkspaceRecord {
+        WorkspaceRecord(
+            layout: workspace.layout,
+            focusedGroup: workspace.focusedGroup,
+            sidebar: isNavigatorVisible,
+            inspector: isInspectorVisible,
+            strip: isStripVisible,
+            tutorInDrawer: rightPane == .tutor
+        )
+    }
+
+    /// Puts a kept window back. A comparison is not kept with the project,
+    /// so a Compare tab is left out.
+    func restore(_ record: WorkspaceRecord) {
+        var layout = record.layout
+        for item in layout.items where item.content == .compare { layout.close(item.id) }
+        workspace.restore(layout, focusedGroup: record.focusedGroup)
+        isNavigatorVisible = record.sidebar
+        isInspectorVisible = record.inspector
+        isStripVisible = record.strip
+        if record.tutorInDrawer {
+            ensureTutor()
+            rightPane = .tutor
+        }
+        if let item = workspace.focusedItem, let t = EditorTab(content: item.content) { lastTextTab = t }
+        refreshDecompile()
+    }
+
     /// View › Show Tutor (⌥⌘T): the drawer, on its Tutor tab.
     func showTutorInDrawer() {
         ensureTutor()

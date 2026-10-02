@@ -180,3 +180,14 @@ final class Workspace {
         }
     }
 }
+
+/// What `local.json` keeps of the window (docs/29): the tabs, which group
+/// has focus, which panels show and the drawer's tab.
+struct WorkspaceRecord: Codable, Equatable, Sendable {
+    var layout: EditorLayout
+    var focusedGroup: UUID?
+    var sidebar: Bool = true
+    var inspector: Bool = true
+    var strip: Bool = true
+    var tutorInDrawer: Bool = false
+}

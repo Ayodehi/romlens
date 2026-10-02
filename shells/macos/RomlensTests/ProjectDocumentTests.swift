@@ -247,3 +247,69 @@ final class CloseDelegate: NSObject {
         answer = shouldClose
     }
 }
+
+/// The window's layout in `local.json` (docs/29, W10).
+extension ProjectDocumentTests {
+    @Test func theLayoutRoundTripsThroughThePackage() throws {
+        let stub = StubLocator()
+        stub.bytes = makeTestRom(mapping: .loRom)
+        try withStub(stub) {
+            let doc = ProjectDocument()
+            try doc.read(from: makeTestRom(mapping: .loRom), ofType: Fixture.romType)
+            let m = try #require(doc.model)
+            m.session.cancelAnalysis()
+            m.graphicsTab = .palette
+            m.splitFocused(.right)
+            m.workspace.open(.compare)
+            m.isNavigatorVisible = false
+            m.showTutorInDrawer()
+            let kept = m.workspace.layout
+            let wrapper = try doc.fileWrapper(ofType: Fixture.projectType)
+            let back = ProjectDocument()
+            try back.read(from: wrapper, ofType: Fixture.projectType)
+            let r = try #require(back.model)
+            r.session.cancelAnalysis()
+            // Everything but the Compare tab, which needs a comparison the
+            // project does not keep.
+            #expect(r.workspace.layout.items.map(\.id) == kept.items.filter { $0.content != .compare }.map(\.id))
+            #expect(r.workspace.layout.groups.count == 2)
+            #expect(r.workspace.focusedGroup == m.workspace.focusedGroup || r.workspace.layout.group(m.workspace.focusedGroup) == nil)
+            #expect(!r.isNavigatorVisible && r.rightPane == .tutor)
+            #expect(!back.isDocumentEdited)
+            doc.close()
+            back.close()
+        }
+    }
+
+    @Test func closingKeepsTheLayoutWithoutMarkingTheProjectEdited() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("romlens-layout-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("t.romlens")
+        let doc = ProjectDocument()
+        try doc.read(from: makeTestRom(mapping: .loRom), ofType: Fixture.romType)
+        let m = try #require(doc.model)
+        m.session.cancelAnalysis()
+        var saved: Error?? = .none
+        doc.save(to: url, ofType: Fixture.projectType, for: .saveAsOperation) { saved = .some($0) }
+        try await wait("Save As finishes") { saved != nil }
+        #expect(saved! == nil)
+
+        m.graphicsTab = .tiles
+        m.splitFocused(.bottom)
+        #expect(!doc.isDocumentEdited, "arranging tabs is not an edit")
+        doc.keepWorkspace()
+        let local = try JSONDecoder().decode(LocalRecord.self, from: Data(contentsOf: url.appendingPathComponent(ProjectDocument.localFileName)))
+        #expect(local.workspace?.layout == m.workspace.layout)
+        #expect(!doc.isDocumentEdited)
+        // A save after it is not taken for another app's change.
+        try m.setLabel(name: "Boot")
+        var again: Error?? = .none
+        doc.save(to: url, ofType: Fixture.projectType, for: .saveOperation) { again = .some($0) }
+        try await wait("the save finishes") { again != nil }
+        #expect(again! == nil, "\(String(describing: again!))")
+        let after = try JSONDecoder().decode(LocalRecord.self, from: Data(contentsOf: url.appendingPathComponent(ProjectDocument.localFileName)))
+        #expect(after.workspace?.layout == m.workspace.layout, "the save keeps the layout")
+        doc.close()
+    }
+}
