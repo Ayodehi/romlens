@@ -179,7 +179,7 @@ enum MainMenu {
             item("SNES Address Only", #selector(RomWindowController.showSnesAddresses(_:)), "2"),
             item("File Offset Only", #selector(RomWindowController.showFileOffsets(_:)), "3"),
             .separator(),
-            item("Show Navigator", #selector(RomWindowController.toggleNavigator(_:)), "0"),
+            item("Show Sidebar", #selector(RomWindowController.toggleNavigator(_:)), "0"),
             item("Show Inspector", #selector(RomWindowController.toggleInspector(_:)), "0", modifiers: [.command, .option]),
             item("Show Tutor", #selector(RomWindowController.showTutor(_:)), "t", modifiers: [.command, .option]),
             item("Show Overview Strip", #selector(RomWindowController.toggleStrip(_:)), "0", modifiers: [.command, .shift]),

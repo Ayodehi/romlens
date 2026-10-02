@@ -349,6 +349,23 @@ final class RomViewModel {
                 return
             }
             self.drop(.item(id), on: group, at: target)
+        case .openAt(let r, let address):
+            // Always a new tab, which is what dragging a label out asks for.
+            guard let id = workspace.open(.code(r), in: group) else { return }
+            self.drop(.item(id), on: group, at: target)
+            jump(toSnesAddress: address)
+        }
+    }
+
+    /// Why a view cannot open yet, for the sidebar to say; nil when it can.
+    func unavailableReason(_ content: EditorContent) -> String? {
+        switch content {
+        case .code(.assembly), .code(.c), .code(.graph), .code(.both):
+            hasDisassembly ? nil : "analyzing"
+        case .compare: compare.isActive ? nil : "needs a ROM"
+        case .source: source.hasFiles ? nil : "no sources"
+        case .graphics(let t): t.needsRecording && !graphics.hasRecording ? "needs a recording" : nil
+        default: nil
         }
     }
 

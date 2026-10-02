@@ -444,6 +444,8 @@ struct EditorLayout: Hashable, Codable, Sendable {
 enum TabDrop: Codable, Equatable, Sendable {
     case item(UUID)
     case open(EditorContent)
+    /// A new code tab at a SNES address: a label dragged from the sidebar.
+    case openAt(CodeRepresentation, address: UInt32)
 
     static let pasteboardType = "io.github.ayodehi.romlens.tab"
 }

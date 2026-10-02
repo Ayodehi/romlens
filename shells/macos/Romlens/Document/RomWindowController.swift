@@ -146,6 +146,12 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
     @objc func toggleNavigator(_ sender: Any?) { withAnimation { model.isNavigatorVisible.toggle() } }
     @objc func toggleInspector(_ sender: Any?) { withAnimation { model.isInspectorVisible.toggle() } }
     @objc func showTutor(_ sender: Any?) { (document as? ProjectDocument)?.showTutor() }
+    /// The sidebar's Lessons and Quizzes: the tutor, on its lessons.
+    @objc func showLessons(_ sender: Any?) {
+        guard let document = document as? ProjectDocument else { return }
+        document.showTutor()
+        document.tutorController?.tutor.sheet = .lessons
+    }
     @objc func toggleStrip(_ sender: Any?) { withAnimation { model.isStripVisible.toggle() } }
     @objc func toggleFocus(_ sender: Any?) { withAnimation { model.toggleFocus() } }
     @objc func toggleResults(_ sender: Any?) { withAnimation { model.isResultsVisible.toggle() } }
@@ -304,7 +310,7 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
         case #selector(toggleFocus(_:)):
             item.state = model.isFocused ? .on : .off
         case #selector(toggleNavigator(_:)):
-            item.title = model.isNavigatorVisible ? "Hide Navigator" : "Show Navigator"
+            item.title = model.isNavigatorVisible ? "Hide Sidebar" : "Show Sidebar"
         case #selector(toggleInspector(_:)):
             item.title = model.isInspectorVisible ? "Hide Inspector" : "Show Inspector"
         case #selector(goBack(_:)):

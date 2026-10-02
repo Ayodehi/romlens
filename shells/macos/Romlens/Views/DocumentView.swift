@@ -1,10 +1,10 @@
 import RomlensKit
 import SwiftUI
 
-/// Navigator on the left, the tab groups in the middle, the inspector on
+/// The sidebar on the left, the tab groups in the middle, the inspector on
 /// the right (docs/29).
 ///
-/// The toolbar holds only commands: the navigator, Back and Forward. Which
+/// The toolbar holds only commands: the sidebar, Back and Forward. Which
 /// view shows is chosen in the editor area, from the tab bars, the
 /// representation strip and the View menu, not from the toolbar; the four
 /// capsules that used to choose it there are gone.
@@ -26,7 +26,7 @@ struct DocumentView: View {
         // toolbar one cohesive bar across the window, with the panes under it.
         HSplitView {
             if model.isNavigatorVisible {
-                NavigatorView(model: model)
+                SidebarView(model: model)
                     .frame(minWidth: 200, idealWidth: 240, maxWidth: 360, maxHeight: .infinity)
             }
             VStack(spacing: 0) {
@@ -56,9 +56,9 @@ struct DocumentView: View {
                 Button {
                     withAnimation { model.isNavigatorVisible.toggle() }
                 } label: {
-                    Label("Navigator", systemImage: "sidebar.left")
+                    Label("Sidebar", systemImage: "sidebar.left")
                 }
-                .help("Show or hide the navigator (⌘0)")
+                .help("Show or hide the sidebar (⌘0)")
             }
             ToolbarItemGroup {
                 Button {
