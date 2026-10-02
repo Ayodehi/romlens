@@ -66,7 +66,16 @@ pub struct Store {
     dir: PathBuf,
 }
 
+/// Seconds since 1970. `ROMLENS_NOW`, when set to a number, stands in for
+/// the clock, so tests that write and read back progress give the same
+/// output wherever a second or a day happens to end.
 pub fn now() -> u64 {
+    if let Some(t) = std::env::var("ROMLENS_NOW")
+        .ok()
+        .and_then(|v| v.parse().ok())
+    {
+        return t;
+    }
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
