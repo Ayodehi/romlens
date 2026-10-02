@@ -64,7 +64,7 @@ struct JumpBar: View {
             }
         }
         .padding(.horizontal, 10)
-        .frame(minWidth: 280, idealWidth: 560, maxWidth: 640, minHeight: 26)
+        .frame(minWidth: 140, idealWidth: 560, maxWidth: 640, minHeight: 26)
         .help("Where the focused tab is. Each part is a menu.")
     }
 

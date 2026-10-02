@@ -11,7 +11,7 @@ import Testing
     private func shown() async throws -> (RomViewModel, RomWindowController, AtlasCanvasView) {
         let rom = try Rom.fromBytes(bytes: makeRoutinesTestRom(), name: "r.sfc")
         let m = try await Fixture.analyzedModel(rom: rom)
-        m.editorTab = .atlas
+        m.showTab(.atlas)
         let controller = RomWindowController(model: m)
         controller.window?.orderFront(nil)
         let content = try #require(controller.window?.contentView)

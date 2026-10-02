@@ -17,7 +17,7 @@ import Testing
     @Test func aVersionShowsBesideTheGeneratedC() async throws {
         let m = try await model()
         m.select(offset: 0x22)
-        m.editorTab = .c
+        m.showTab(.c)
         try await Fixture.settle(until: { m.decompiler.result?.name == "SUB_008020" })
         try m.session.execute(.setCVersion(routine: 0x00_8020, name: "Plain", version: CVersionInfo(
             text: "void ClearSlots(void)\n{\n    memset(slots, 0, 16);\n}\n", author: .tutor,

@@ -63,7 +63,7 @@ import Testing
 
     @Test func splittingMakesASecondGroupWithItsOwnView() async throws {
         let m = try await model()
-        m.editorTab = .disassembly
+        m.showTab(.disassembly)
         try await Fixture.settle { !m.navigator.labels.isEmpty }
         m.select(offset: 0x44)
         let routine = try #require(m.routineName(at: 0x008044), "the labels name the routine at $00:8044")
@@ -85,12 +85,12 @@ import Testing
 
     @Test func aTabsViewSurvivesSwitchingTabs() async throws {
         let m = try await model()
-        m.editorTab = .disassembly
+        m.showTab(.disassembly)
         let (controller, content) = try open(m)
         defer { controller.window?.close() }
         let code = try #require(m.workspace.focusedItem?.id)
         let canvas = try #require(all(content, AsmCanvasView.self).first)
-        m.graphicsTab = .palette
+        m.show(.graphics(.palette))
         settle(content)
         #expect(canvas.isHiddenOrHasHiddenAncestor, "the code tab's view is kept, hidden")
         m.focus(item: code)
@@ -103,8 +103,8 @@ import Testing
         let m = try await model()
         let (controller, content) = try open(m)
         defer { controller.window?.close() }
-        m.graphicsTab = .tiles
-        m.audioTab = .voices
+        m.show(.graphics(.tiles))
+        m.show(.audio(.voices))
         let group = m.workspace.focusedGroup
         #expect(m.workspace.layout.group(group)?.items.count == 3)
         controller.previousTab(nil)
@@ -131,7 +131,7 @@ import Testing
         let m = try await model()
         let (controller, _) = try open(m)
         defer { controller.window?.close() }
-        m.editorTab = .disassembly
+        m.showTab(.disassembly)
         m.jump(to: 0x44)
         if let frame = controller.window?.contentView?.superview {
             settle(frame)
@@ -148,7 +148,7 @@ import Testing
         let m = try await model()
         let (controller, content) = try open(m)
         defer { controller.window?.close() }
-        m.graphicsTab = .palette
+        m.show(.graphics(.palette))
         settle(content)
         let grid = try #require(all(content, EditorGridNSView.self).first)
         let group = try #require(all(content, TabGroupView.self).first)
@@ -213,7 +213,7 @@ import Testing
         let m = try await model()
         let (controller, content) = try open(m)
         defer { controller.window?.close() }
-        m.graphicsTab = .palette
+        m.show(.graphics(.palette))
         m.splitFocused(.right)
         settle(content)
         #expect(all(content, TabGroupView.self).filter { $0.window != nil }.count == 2)
@@ -227,5 +227,17 @@ import Testing
         controller.window?.setContentSize(NSSize(width: 1440, height: 900))
         settle(content)
         #expect(all(content, TabGroupView.self).filter { $0.window != nil }.count == 2)
+    }
+
+    @Test func aNewWindowOpensAtItsOwnSize() async throws {
+        let m = try await model()
+        let controller = RomWindowController(model: m)
+        controller.window?.orderFront(nil)
+        defer { controller.window?.close() }
+        let content = try #require(controller.window?.contentView)
+        settle(content)
+        let size = try #require(controller.window?.contentLayoutRect.size)
+        print("ROMLENS-SIZE \(size)")
+        #expect(size.width > 1200, "opened at \(size)")
     }
 }

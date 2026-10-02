@@ -258,7 +258,7 @@ extension ProjectDocumentTests {
             try doc.read(from: makeTestRom(mapping: .loRom), ofType: Fixture.romType)
             let m = try #require(doc.model)
             m.session.cancelAnalysis()
-            m.graphicsTab = .palette
+            m.show(.graphics(.palette))
             m.splitFocused(.right)
             m.workspace.open(.compare)
             m.isNavigatorVisible = false
@@ -295,7 +295,7 @@ extension ProjectDocumentTests {
         try await wait("Save As finishes") { saved != nil }
         #expect(saved! == nil)
 
-        m.graphicsTab = .tiles
+        m.show(.graphics(.tiles))
         m.splitFocused(.bottom)
         #expect(!doc.isDocumentEdited, "arranging tabs is not an edit")
         doc.keepWorkspace()

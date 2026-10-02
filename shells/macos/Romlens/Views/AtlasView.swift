@@ -574,7 +574,7 @@ final class AtlasCanvasView: NSView {
     func click(at p: CGPoint, count: Int = 1) {
         guard let off = offset(at: p) else { return }
         if count >= 2 {
-            model.editorTab = .disassembly
+            model.showTab(.disassembly)
             model.jump(to: off)
         } else {
             selecting = true

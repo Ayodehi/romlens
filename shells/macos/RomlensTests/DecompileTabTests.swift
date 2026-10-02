@@ -17,7 +17,7 @@ import Testing
         let m = try await model()
         m.select(offset: 0x44)
         #expect(m.decompiler.state == .idle, "nothing is decompiled until the tab shows")
-        m.editorTab = .c
+        m.showTab(.c)
         try await Fixture.settle(until: { m.decompiler.state == .ready })
         let d = try #require(m.decompiler.result)
         #expect(d.name == "SUB_008040")
@@ -42,7 +42,7 @@ import Testing
     @Test func newAnalysesKeepTheTextUpAndFinish() async throws {
         let m = try await model()
         m.select(offset: 0x44)
-        m.editorTab = .c
+        m.showTab(.c)
         try await Fixture.settle(until: { m.decompiler.state == .ready })
         let first = m.decompiler.resultGeneration
         // A live session: changes arrive faster than a large routine
@@ -63,14 +63,14 @@ import Testing
 
     @Test func outsideARoutineSaysSo() async throws {
         let m = try await model()
-        m.editorTab = .c
+        m.showTab(.c)
         m.select(offset: 0x7FF0)
         #expect(m.decompiler.state == .notInRoutine)
     }
 
     @Test func aRenameShowsInTheC() async throws {
         let m = try await model()
-        m.editorTab = .c
+        m.showTab(.c)
         m.select(offset: 0x40)
         try await Fixture.settle(until: { m.decompiler.result?.name == "SUB_008040" })
         try m.session.setLabel(address: 0x008040, name: "Larger")
@@ -79,7 +79,7 @@ import Testing
 
     @Test func theSplitShowsTheText() async throws {
         let m = try await model()
-        m.editorTab = .c
+        m.showTab(.c)
         m.select(offset: 0x40)
         let controller = RomWindowController(model: m)
         controller.window?.orderFront(nil)

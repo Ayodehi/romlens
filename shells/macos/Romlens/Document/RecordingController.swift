@@ -116,7 +116,7 @@ enum RecordingController {
         if let reference = session.reference() {
             model.workbench.attachRecording(reference: reference)
         }
-        if model.graphicsTab == nil { model.graphicsTab = .tilemap }
+        if model.graphicsTab == nil { model.show(.graphics(.tilemap)) }
         return true
     }
 

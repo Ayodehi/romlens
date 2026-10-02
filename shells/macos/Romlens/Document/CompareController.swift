@@ -46,7 +46,7 @@ enum CompareController {
     }
 
     static func compare(other: Workbench, name: String, model: RomViewModel) {
-        model.editorTab = .compare
+        model.showTab(.compare)
         Task {
             await model.compare.start(
                 this: model.workbench, other: other, name: name, generation: model.asmGeneration

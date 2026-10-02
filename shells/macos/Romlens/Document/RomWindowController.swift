@@ -28,6 +28,12 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
         // it back.
         hosting.sizingOptions = [.minSize]
         window.contentViewController = hosting
+        // Setting the content view controller shrinks the window to its
+        // minimum, whatever the content rect said; size it again, within
+        // the screen. (It opened at 900 × 480 before docs/29 as well.)
+        let visible = (window.screen ?? NSScreen.main)?.visibleFrame.size ?? NSSize(width: 1440, height: 900)
+        window.setContentSize(NSSize(width: min(1440, visible.width - 40), height: min(860, visible.height - 80)))
+        window.center()
         window.subtitle = Self.subtitle(for: model.info)
         RecordingController.reattach(model: model)
     }
@@ -71,15 +77,15 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
     @objc func showBothAddresses(_ sender: Any?) { model.addressStyle = .both }
     @objc func showSnesAddresses(_ sender: Any?) { model.addressStyle = .snes }
     @objc func showFileOffsets(_ sender: Any?) { model.addressStyle = .file }
-    @objc func showHex(_ sender: Any?) { model.editorTab = .hex }
-    @objc func showDisassembly(_ sender: Any?) { model.editorTab = .disassembly }
-    @objc func showBoth(_ sender: Any?) { model.editorTab = .both }
-    @objc func showC(_ sender: Any?) { model.editorTab = .c }
+    @objc func showHex(_ sender: Any?) { model.showTab(.hex) }
+    @objc func showDisassembly(_ sender: Any?) { model.showTab(.disassembly) }
+    @objc func showBoth(_ sender: Any?) { model.showTab(.both) }
+    @objc func showC(_ sender: Any?) { model.showTab(.c) }
     @objc func decompileRoutine(_ sender: Any?) { model.showDecompiled() }
     @objc func showGraph(_ sender: Any?) { model.showGraph() }
-    @objc func showSource(_ sender: Any?) { model.editorTab = .source }
-    @objc func showAtlas(_ sender: Any?) { model.editorTab = .atlas }
-    @objc func showCompare(_ sender: Any?) { model.editorTab = .compare }
+    @objc func showSource(_ sender: Any?) { model.showTab(.source) }
+    @objc func showAtlas(_ sender: Any?) { model.showTab(.atlas) }
+    @objc func showCompare(_ sender: Any?) { model.showTab(.compare) }
     @objc func compareWith(_ sender: Any?) { CompareController.open(model: model, window: window) }
     /// View › Show Explanations, remembered for the next window.
     @objc func toggleExplanations(_ sender: Any?) {

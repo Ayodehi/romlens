@@ -35,7 +35,7 @@ import Testing
 
     @Test func aLabelDraggedOutOpensANewTabThere() async throws {
         let m = try await model()
-        m.editorTab = .disassembly
+        m.showTab(.disassembly)
         let g = m.workspace.focusedGroup
         m.drop(.openAt(.assembly, address: 0x008040), on: g, at: .zone(.edge(.right)))
         #expect(m.workspace.layout.groups.count == 2)

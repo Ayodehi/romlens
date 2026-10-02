@@ -532,7 +532,7 @@ import Testing
         defer { try? FileManager.default.removeItem(at: r.root) }
         r.rom.select(offset: 0)
         #expect(r.tutor.selectionText()?.contains("C tab") == false)
-        r.rom.editorTab = .c
+        r.rom.showTab(.c)
         try await Fixture.settle(timeout: 20) { r.rom.decompiler.state == .ready }
         let s = try #require(r.tutor.selectionText())
         #expect(s.contains("[The student is reading the C tab:") && s.contains("```c\n"))

@@ -154,11 +154,7 @@ final class RomViewModel {
     }
 
     private func openForCitation(_ content: EditorContent) {
-        switch content {
-        case .graphics(let t): graphicsTab = t
-        case .audio(let t): audioTab = t
-        default: show(content)
-        }
+        show(content)
     }
 
     // MARK: Keeping the layout (docs/29, W10)
@@ -289,40 +285,30 @@ final class RomViewModel {
     var forwardHistory: [UInt32] { forwardEntries.map(\.offset) }
     private(set) var scrollRequest: ScrollRequest?
 
-    // MARK: The focused tab, as the one editor it used to be
+    // MARK: The focused tab
 
     /// The text view of the focused tab, or the last text view while a
-    /// graphics, sound or tutor tab has focus. Setting it shows that view in
-    /// the focused group: a code representation changes the focused code
-    /// tab in place, or opens one; the others open or show their one tab.
+    /// graphics, sound or tutor tab has focus. Read only (docs/29, W11):
+    /// what to show is said with `show(_:)` or `showTab(_:)`, which name the
+    /// group they act on.
     var editorTab: EditorTab {
-        get {
-            if let item = workspace.focusedItem, let t = EditorTab(content: item.content) { return t }
-            return lastTextTab
-        }
-        set { show(newValue.content) }
+        if let item = workspace.focusedItem, let t = EditorTab(content: item.content) { return t }
+        return lastTextTab
     }
+
+    /// View › Hex, Disassembly and the rest: `show(_:)` for a text view.
+    func showTab(_ tab: EditorTab) { show(tab.content) }
     @ObservationIgnored private var lastTextTab: EditorTab = .hex
     /// The graphics view in the focused tab, if it is one.
     var graphicsTab: GraphicsModel.Tab? {
-        get {
-            if case .graphics(let t) = workspace.focusedItem?.content { return t }
-            return nil
-        }
-        set {
-            if let t = newValue { show(.graphics(t)) } else if graphicsTab != nil { leaveViewTab() }
-        }
+        if case .graphics(let t) = workspace.focusedItem?.content { return t }
+        return nil
     }
     let graphics: GraphicsModel
     /// The sound view in the focused tab, if it is one (docs/23).
     var audioTab: AudioModel.Tab? {
-        get {
-            if case .audio(let t) = workspace.focusedItem?.content { return t }
-            return nil
-        }
-        set {
-            if let t = newValue { show(.audio(t)) } else if audioTab != nil { leaveViewTab() }
-        }
+        if case .audio(let t) = workspace.focusedItem?.content { return t }
+        return nil
     }
     let audio: AudioModel
     /// The focused tab is a text view: no graphics, sound or tutor tab.
@@ -513,16 +499,6 @@ final class RomViewModel {
         refreshDecompile()
     }
 
-    /// A graphics or sound view was cleared the old way: show the group's
-    /// text tab again, opening one if there is none.
-    private func leaveViewTab() {
-        let group = workspace.layout.group(workspace.focusedGroup)
-        if let text = group?.items.first(where: { EditorTab(content: $0.content) != nil }) {
-            focus(item: text.id)
-        } else {
-            show(lastTextTab.content)
-        }
-    }
     var activeSheet: Sheet?
     var rightPane: RightPane = .inspector
     var isNavigatorVisible = true
@@ -582,9 +558,9 @@ final class RomViewModel {
         audio = AudioModel(rom: rom, workbench: workbench, graphics: graphics)
         session.onChange = { [weak self] kind in self?.handleChange(kind) }
         graphics.selectBytes = { [weak self] range in self?.selectRange(range) }
-        graphics.revealTile = { [weak self] in self?.graphicsTab = .tiles }
+        graphics.revealTile = { [weak self] in self?.show(.graphics(.tiles)) }
         audio.showInRom = { [weak self] offset in self?.showInRom(offset) }
-        audio.openTab = { [weak self] tab in self?.audioTab = tab }
+        audio.openTab = { [weak self] tab in self?.show(.audio(tab)) }
         // The workbench shows them unless told otherwise.
         if !explanationsShown {
             workbench.setShowExplanations(show: false)
@@ -651,13 +627,13 @@ final class RomViewModel {
             }
             if case .palette(let p) = palette { graphics.palette = .rom(p) }
             graphics.selectedTile = 0
-            graphicsTab = .tiles
+            show(.graphics(.tiles))
         case .tilemap(let rom):
             graphics.romOffset = rom
-            graphicsTab = .tilemap
+            show(.graphics(.tilemap))
         case .palette(let rom):
             graphics.romOffset = rom
-            graphicsTab = .palette
+            show(.graphics(.palette))
         }
     }
 
@@ -782,12 +758,12 @@ final class RomViewModel {
 
     /// Show Graph: the Graph tab on the routine at the selection.
     func showGraph() {
-        editorTab = .graph
+        showTab(.graph)
     }
 
     /// Decompile Routine: the C tab on the routine at the selection.
     func showDecompiled() {
-        editorTab = .c
+        showTab(.c)
     }
 
     // MARK: Selection
@@ -816,19 +792,19 @@ final class RomViewModel {
         } else if graphics.source == .rom, let range = highlightedRange {
             graphics.romOffset = range.lowerBound
         }
-        graphicsTab = tab
+        show(.graphics(tab))
     }
 
     /// Open a sound view, on the recording's sound if it has any, else on
     /// the ROM's upload.
     func openAudio(_ tab: AudioModel.Tab) {
         audio.opened()
-        audioTab = tab
+        show(.audio(tab))
     }
 
     /// Leave the sound view for the listing at a ROM offset.
     func showInRom(_ offset: UInt32) {
-        editorTab = hasDisassembly ? .disassembly : .hex
+        showTab(hasDisassembly ? .disassembly : .hex)
         jump(to: offset)
     }
 
@@ -851,9 +827,9 @@ final class RomViewModel {
         }
         graphics.selectedTile = 0
         switch preview.view {
-        case .tileDecoder: graphicsTab = .tiles
-        case .palette: graphicsTab = .palette
-        case .tilemap: graphicsTab = .tilemap
+        case .tileDecoder: show(.graphics(.tiles))
+        case .palette: show(.graphics(.palette))
+        case .tilemap: show(.graphics(.tilemap))
         }
     }
 

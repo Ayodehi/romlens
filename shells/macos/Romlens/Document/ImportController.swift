@@ -115,7 +115,7 @@ enum ImportController {
                 )
                 if let model = document.model {
                     model.source.reload(workbench: model.workbench)
-                    model.editorTab = .source
+                    model.showTab(.source)
                 }
             }
             document.updateChangeCount(.changeDone)

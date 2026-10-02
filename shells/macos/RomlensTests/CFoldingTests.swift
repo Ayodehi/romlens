@@ -52,7 +52,7 @@ import Testing
         let rom = try Rom.fromBytes(bytes: makeRoutinesTestRom(), name: "r.sfc")
         let m = try await Fixture.analyzedModel(rom: rom)
         m.select(offset: 0x22)
-        m.editorTab = .c
+        m.showTab(.c)
         try await Fixture.settle(until: { m.decompiler.result?.name == "SUB_008020" })
         let pane = CPaneController(model: m)
         pane.update()

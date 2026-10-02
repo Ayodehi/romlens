@@ -100,7 +100,7 @@ import Testing
 
     @Test func playThisCommandBootsTheDriverAndSendsIt() async throws {
         let m = try await model()
-        m.editorTab = .disassembly
+        m.showTab(.disassembly)
         m.openAudio(.voices)
         m.audio.playCommand(port: 0, value: 1)
         #expect(m.audio.isPlaying && m.audio.source == .rom)

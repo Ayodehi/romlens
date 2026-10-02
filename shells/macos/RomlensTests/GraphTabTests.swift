@@ -17,7 +17,7 @@ import Testing
         let m = try await model()
         m.select(offset: 0x22)
         #expect(m.graph.state == .idle, "nothing is built until the tab shows")
-        m.editorTab = .graph
+        m.showTab(.graph)
         try await Fixture.settle(until: { m.graph.state == .ready })
         let g = try #require(m.graph.blocks)
         #expect(g.name == "SUB_008020")
@@ -39,7 +39,7 @@ import Testing
     @Test func changesKeepTheGraphUp() async throws {
         let m = try await model()
         m.select(offset: 0x22)
-        m.editorTab = .graph
+        m.showTab(.graph)
         try await Fixture.settle(until: { m.graph.state == .ready })
         let first = m.graph.resultGeneration
         var sawLoading = false
@@ -55,7 +55,7 @@ import Testing
     @Test func theCanvasDrawsTheLinesAndAClickSelects() async throws {
         let m = try await model()
         m.select(offset: 0x22)
-        m.editorTab = .graph
+        m.showTab(.graph)
         let controller = RomWindowController(model: m)
         controller.window?.orderFront(nil)
         defer { controller.close() }
@@ -87,7 +87,7 @@ import Testing
     @Test func zoomToFitShrinksALargeGraph() async throws {
         let m = try await model()
         m.select(offset: 0x00)
-        m.editorTab = .graph
+        m.showTab(.graph)
         let controller = RomWindowController(model: m)
         controller.window?.setContentSize(NSSize(width: 900, height: 300))
         controller.window?.orderFront(nil)
@@ -120,7 +120,7 @@ import Testing
     @Test func blocksPastTheListingAreSkipped() async throws {
         let m = try await model()
         m.select(offset: 0x22)
-        m.editorTab = .graph
+        m.showTab(.graph)
         try await Fixture.settle(until: { m.graph.state == .ready })
         let g = try #require(m.graph.blocks)
         let past = m.asmLineCount + 1000

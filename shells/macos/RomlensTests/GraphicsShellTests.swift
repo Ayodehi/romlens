@@ -85,7 +85,7 @@ import Testing
         m.openGraphics(.tiles)
         #expect(m.graphicsTab == .tiles)
         #expect(m.graphics.romOffset == 0x1000, "the view reads the bytes at the selection")
-        m.editorTab = .disassembly
+        m.showTab(.disassembly)
         #expect(m.graphicsTab == nil, "choosing a text tab closes the graphics view")
     }
 

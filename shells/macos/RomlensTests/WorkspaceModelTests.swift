@@ -16,37 +16,38 @@ import Testing
     @Test func aRepresentationChangesTheFocusedTabInPlace() async throws {
         let m = try await model()
         let first = try #require(m.workspace.focusedItem?.id)
-        m.editorTab = .c
+        m.showTab(.c)
         #expect(m.workspace.focusedItem?.id == first)
         #expect(m.workspace.focusedItem?.content == .code(.c))
         #expect(m.workspace.layout.items.count == 1)
     }
 
-    @Test func graphicsAndSoundOpenTheirOwnTabsAndLeaveTheCodeTab() async throws {
+    @Test func graphicsAndSoundOpenTheirOwnTabsBesideTheCodeTab() async throws {
         let m = try await model()
-        m.editorTab = .disassembly
+        m.showTab(.disassembly)
         let code = try #require(m.workspace.focusedItem?.id)
-        m.graphicsTab = .tiles
+        m.show(.graphics(.tiles))
         #expect(m.graphicsTab == .tiles && !m.showsTextEditor)
         #expect(m.editorTab == .disassembly, "the last text view is still what editorTab says")
-        m.audioTab = .voices
+        m.show(.audio(.voices))
         #expect(m.audioTab == .voices && m.graphicsTab == nil)
         #expect(m.workspace.layout.items.count == 3)
         // Choosing a text view again shows the code tab; the others stay.
-        m.editorTab = .disassembly
+        m.showTab(.disassembly)
         #expect(m.workspace.focusedItem?.id == code && m.showsTextEditor)
         #expect(m.workspace.layout.items.count == 3)
         // The Tiles tab is shown again rather than opened twice.
-        m.graphicsTab = .tiles
+        m.show(.graphics(.tiles))
         #expect(m.workspace.layout.items.count == 3)
-        // Clearing it the old way goes back to the text tab.
-        m.graphicsTab = nil
-        #expect(m.workspace.focusedItem?.id == code)
+        // Closing it shows the tab on its right, the sound view.
+        m.closeFocusedTab()
+        #expect(m.audioTab == .voices)
+        _ = code
     }
 
     @Test func aJumpScrollsTheFocusedTabAndTheFollowersOnly() async throws {
         let m = try await model()
-        m.editorTab = .disassembly
+        m.showTab(.disassembly)
         let a = try #require(m.workspace.focusedItem?.id)
         let group = m.workspace.focusedGroup
         // A second assembly tab does not follow: it would always show the
@@ -72,7 +73,7 @@ import Testing
     @Test func eachCTabKeepsItsOwnRoutine() async throws {
         let m = try await model()
         m.select(offset: 0x44)
-        m.editorTab = .c
+        m.showTab(.c)
         let a = try #require(m.workspace.focusedItem?.id)
         // A second C tab, beside the first, not following the selection: it
         // opens on the routine at the selection and stays there.
@@ -90,11 +91,11 @@ import Testing
 
     @Test func backGoesToTheTabAPlaceWasSeenIn() async throws {
         let m = try await model()
-        m.editorTab = .disassembly
+        m.showTab(.disassembly)
         let a = try #require(m.workspace.focusedItem?.id)
         m.select(offset: 0x10)
         m.jump(to: 0x20)
-        m.graphicsTab = .tiles
+        m.show(.graphics(.tiles))
         let tiles = try #require(m.workspace.focusedItem?.id)
         m.jump(to: 0x40)
         // 0x20 was left from the Tiles tab, 0x10 from the assembly tab.
