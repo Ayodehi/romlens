@@ -8,7 +8,7 @@ that tracks progress against it.
 | Task | State |
 |---|---|
 | W0 this document, the README row, the pointer from `02`, the checklist rows | done, 1 October 2026 |
-| W1 `EditorItem`, `EditorLayout`, `dropZone`; unit tests | not started |
+| W1 `EditorItem`, `EditorLayout`, `dropZone`; unit tests | done, 1 October 2026: `Model/Workspace/EditorLayout.swift`. `EditorContent` (code in one of five representations, the atlas, compare, source, a graphics or sound view, the tutor; all but code one tab per window, by `singletonKey`), `EditorItem` (id, content, `followsSelection`), `TabGroup`, `LayoutSplit` (axis, children, fractions) and `EditorLayout` with `open` (after the shown tab, or showing the existing one), `select`, `move` (reordering within a group), `split` (a sibling sharing the target's fraction when the parent runs the same way, else a new split; nothing when the target's only tab is dragged onto it), `close` (the right-hand neighbour shown), `equalize`, `setFractions` and `apply` for the four presets, every change leaving no empty group but the last, no split of one and no split inside one along its axis. `dropZone` gives the outer third of each side, the nearer edge in a corner. All `Codable`. Tests: 14 in `EditorLayoutTests`; the app suite is 175 tests |
 | W2 the workspace on `RomViewModel`, targeted scrolling, per-tab models | not started |
 | W3 the grid, tab groups, the representation strip, menus | not started |
 | W4 dragging tabs | not started |
