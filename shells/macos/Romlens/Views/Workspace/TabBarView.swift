@@ -4,7 +4,7 @@ import AppKit
 /// below it and, while the group has focus, edged in the accent colour
 /// (docs/29). Split Right and Split Down sit at the trailing end.
 @MainActor
-final class TabBarView: NSView {
+final class TabBarView: NSView, NSDraggingSource {
     static let height: CGFloat = 30
     let model: RomViewModel
     let groupID: UUID
@@ -17,6 +17,12 @@ final class TabBarView: NSView {
     }
 
     private(set) var tabs: [Tab] = []
+    /// The tab being dragged, anywhere: dimmed where it was until the drop.
+    static var dragging: UUID?
+    /// Where a dragged tab would be inserted in this bar, while one is over it.
+    var insertion: Int? {
+        didSet { if insertion != oldValue { needsDisplay = true } }
+    }
     private var selected: UUID?
     private var focused = false
     private var hovered: UUID?
@@ -99,11 +105,24 @@ final class TabBarView: NSView {
         for tab in tabs { draw(tab) }
         NSColor.separatorColor.setFill()
         NSRect(x: 0, y: bounds.height - 1, width: bounds.width, height: 1).fill()
+        if let insertion {
+            let x = insertion < tabs.count ? tabs[insertion].rect.minX : (tabs.last?.rect.maxX ?? 0)
+            NSColor.controlAccentColor.setFill()
+            NSRect(x: max(0, x - 1), y: 3, width: 2, height: bounds.height - 6).fill()
+        }
     }
 
     private func draw(_ tab: Tab) {
         let isSelected = tab.item.id == selected
         let r = tab.rect
+        if Self.dragging == tab.item.id {
+            // Where the dragged tab was: an outline until the drop.
+            NSColor.separatorColor.setStroke()
+            let outline = NSBezierPath(roundedRect: r.insetBy(dx: 2, dy: 4), xRadius: 4, yRadius: 4)
+            outline.lineWidth = 1
+            outline.stroke()
+            return
+        }
         if isSelected {
             NSColor.textBackgroundColor.setFill()
             r.fill()
@@ -180,6 +199,61 @@ final class TabBarView: NSView {
     /// For dragging (W4): where a press on a tab began.
     var mouseDownTab: UUID?
     var mouseDownPoint: NSPoint = .zero
+
+    /// The index a tab dropped at `x` goes to: before the first tab whose
+    /// middle is right of it.
+    func insertionIndex(at x: CGFloat) -> Int {
+        tabs.firstIndex { $0.rect.midX > x } ?? tabs.count
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let id = mouseDownTab, let tab = tabs.first(where: { $0.item.id == id }) else { return }
+        let p = convert(event.locationInWindow, from: nil)
+        guard hypot(p.x - mouseDownPoint.x, p.y - mouseDownPoint.y) > 4 else { return }
+        mouseDownTab = nil
+        guard let data = try? JSONEncoder().encode(TabDrop.item(id)) else { return }
+        let pasteboardItem = NSPasteboardItem()
+        pasteboardItem.setData(data, forType: NSPasteboard.PasteboardType(TabDrop.pasteboardType))
+        let dragItem = NSDraggingItem(pasteboardWriter: pasteboardItem)
+        dragItem.setDraggingFrame(tab.rect, contents: image(of: tab))
+        Self.dragging = id
+        needsDisplay = true
+        beginDraggingSession(with: [dragItem], event: event, source: self)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        mouseDownTab = nil
+    }
+
+    /// The tab as it looks, for the drag.
+    private func image(of tab: Tab) -> NSImage {
+        let saved = Self.dragging
+        Self.dragging = nil
+        defer { Self.dragging = saved }
+        guard let rep = bitmapImageRepForCachingDisplay(in: tab.rect) else { return NSImage(size: tab.rect.size) }
+        cacheDisplay(in: tab.rect, to: rep)
+        let image = NSImage(size: tab.rect.size)
+        image.addRepresentation(rep)
+        return image
+    }
+
+    func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
+        context == .withinApplication ? .move : []
+    }
+
+    func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
+        // Dropped, or cancelled with Esc: either way the outline goes.
+        Self.dragging = nil
+        window?.contentView.map(Self.redrawAll)
+    }
+
+    static func redrawAll(in view: NSView) {
+        if let bar = view as? TabBarView {
+            bar.insertion = nil
+            bar.needsDisplay = true
+        }
+        view.subviews.forEach(redrawAll)
+    }
 
     override func otherMouseDown(with event: NSEvent) {
         // A middle click closes, as in every tabbed editor.

@@ -137,4 +137,28 @@ import Testing
             #expect(!labels.contains(gone), "\(gone) is still in the toolbar: \(labels)")
         }
     }
+
+    @Test func whereADragWouldLand() async throws {
+        let m = try await model()
+        let (controller, content) = try open(m)
+        defer { controller.window?.close() }
+        m.graphicsTab = .palette
+        settle(content)
+        let grid = try #require(all(content, EditorGridNSView.self).first)
+        let group = try #require(all(content, TabGroupView.self).first)
+        let view = group.content.convert(group.content.bounds, to: grid)
+        // The right edge: the right half previews.
+        let right = try #require(grid.dropTarget(at: NSPoint(x: view.maxX - 10, y: view.midY)))
+        #expect(right.target == .zone(.edge(.right)))
+        #expect(abs(right.preview.minX - (view.midX + 4)) < 1 && abs(right.preview.maxX - (view.maxX - 4)) < 1)
+        // The top: the top half (this view is flipped, so minY is the top).
+        let top = try #require(grid.dropTarget(at: NSPoint(x: view.midX, y: view.minY + 10)))
+        #expect(top.target == .zone(.edge(.top)) && top.preview.maxY < view.midY + 1)
+        // The middle: the whole view.
+        #expect(grid.dropTarget(at: NSPoint(x: view.midX, y: view.midY))?.target == .zone(.center))
+        // The tab bar, right of both tabs: inserted at the end.
+        let bar = group.tabBar.convert(group.tabBar.bounds, to: grid)
+        #expect(grid.dropTarget(at: NSPoint(x: bar.maxX - 80, y: bar.midY))?.target == .tabBar(index: 2))
+        #expect(grid.dropTarget(at: NSPoint(x: bar.minX + 2, y: bar.midY))?.target == .tabBar(index: 0))
+    }
 }

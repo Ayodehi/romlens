@@ -326,6 +326,32 @@ final class RomViewModel {
         refreshDecompile()
     }
 
+    /// A drop in the editor area (docs/29, W4), the one entry point the drop
+    /// handler and the tests both use. A tab moves, or splits off on an
+    /// edge; something to open opens there, or in a new group on the edge.
+    func drop(_ drop: TabDrop, on group: UUID, at target: DropTarget) {
+        guard workspace.layout.group(group) != nil else { return }
+        switch drop {
+        case .item(let id):
+            guard workspace.layout.item(id) != nil else { return }
+            switch target {
+            case .tabBar(let index): workspace.move(id, to: group, at: index)
+            case .zone(.center): workspace.move(id, to: group)
+            case .zone(.edge(let edge)): workspace.split(group, edge, with: id)
+            }
+            focus(item: id)
+        case .open(let content):
+            // Opened in the group, or, for a view with one tab elsewhere,
+            // shown there; then placed as a dragged tab would be.
+            guard let id = workspace.open(content, in: group) else { return }
+            if case .zone(.center) = target, workspace.layout.group(containing: id)?.id == group {
+                focus(item: id)
+                return
+            }
+            self.drop(.item(id), on: group, at: target)
+        }
+    }
+
     /// Close Tab.
     func closeFocusedTab() {
         guard let item = workspace.focusedItem else { return }

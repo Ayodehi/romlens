@@ -105,4 +105,55 @@ import Testing
         m.goForward()
         #expect(m.selectedOffset == 0x20)
     }
+
+    // MARK: Drops (W4)
+
+    @Test func droppingATabMovesSplitsOrInserts() async throws {
+        let m = try await model()
+        let a = try #require(m.workspace.focusedItem?.id)
+        let left = m.workspace.focusedGroup
+        let b = try #require(m.workspace.open(.atlas))
+        let c = try #require(m.workspace.open(.graphics(.palette)))
+        // On the right edge: a new group there, holding the tab.
+        m.drop(.item(c), on: left, at: .zone(.edge(.right)))
+        let right = try #require(m.workspace.layout.group(containing: c)?.id)
+        #expect(right != left && m.workspace.layout.groups.count == 2)
+        #expect(m.workspace.focusedGroup == right)
+        // In the middle of the other group: moved there, shown.
+        m.drop(.item(b), on: right, at: .zone(.center))
+        #expect(m.workspace.layout.group(right)?.items.map(\.id) == [c, b])
+        #expect(m.workspace.layout.group(right)?.selected == b)
+        // On a tab bar: inserted at that place.
+        m.drop(.item(a), on: right, at: .tabBar(index: 1))
+        #expect(m.workspace.layout.group(right)?.items.map(\.id) == [c, a, b])
+        // The left group lost its last tab, so it went.
+        #expect(m.workspace.layout.groups.count == 1)
+    }
+
+    @Test func droppingSomethingToOpenOpensItThere() async throws {
+        let m = try await model()
+        let left = m.workspace.focusedGroup
+        m.drop(.open(.graphics(.tilemap)), on: left, at: .zone(.edge(.bottom)))
+        #expect(m.workspace.layout.groups.count == 2)
+        #expect(m.graphicsTab == .tilemap)
+        let bottom = m.workspace.focusedGroup
+        #expect(bottom != left)
+        // A view with one tab, dropped on another group, comes to it.
+        m.drop(.open(.graphics(.tilemap)), on: left, at: .zone(.center))
+        #expect(m.workspace.layout.group(containing: m.workspace.focusedItem!.id)?.id == left)
+        #expect(m.workspace.layout.items.filter { $0.content == .graphics(.tilemap) }.count == 1)
+        #expect(m.workspace.layout.groups.count == 1, "the bottom group emptied and went")
+        // Code opens a new tab each time.
+        m.drop(.open(.code(.c)), on: left, at: .tabBar(index: 0))
+        #expect(m.workspace.layout.groups[0].items.first?.content == .code(.c))
+    }
+
+    @Test func droppingAGroupsOnlyTabOnItselfChangesNothing() async throws {
+        let m = try await model()
+        let g = m.workspace.focusedGroup
+        let a = try #require(m.workspace.focusedItem?.id)
+        let before = m.workspace.layout
+        m.drop(.item(a), on: g, at: .zone(.edge(.left)))
+        #expect(m.workspace.layout == before)
+    }
 }

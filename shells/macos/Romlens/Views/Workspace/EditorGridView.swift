@@ -36,9 +36,13 @@ final class EditorGridNSView: NSView {
     private var rootView: NSView?
     private var monitor: Any?
 
+    private let overlay = DropOverlayView()
+
     init(model: RomViewModel) {
         self.model = model
         super.init(frame: .zero)
+        registerForDraggedTypes([NSPasteboard.PasteboardType(TabDrop.pasteboardType)])
+        overlay.isHidden = true
     }
 
     @available(*, unavailable)
@@ -94,8 +98,9 @@ final class EditorGridNSView: NSView {
         let view = build(root)
         view.frame = bounds
         view.autoresizingMask = [.width, .height]
-        addSubview(view)
+        addSubview(view, positioned: .below, relativeTo: nil)
         rootView = view
+        if overlay.superview == nil { addSubview(overlay) }
     }
 
     private func build(_ node: LayoutNode) -> NSView {
@@ -150,10 +155,102 @@ final class EditorGridNSView: NSView {
         }
     }
 
+    // MARK: Dropping a tab (docs/29, W4)
+
+    /// Where a drag at `point` would land, and the rect to preview it in.
+    func dropTarget(at point: NSPoint) -> (group: TabGroupView, target: DropTarget, preview: NSRect)? {
+        guard let group = group(at: point) else { return nil }
+        let bar = group.tabBar.convert(group.tabBar.bounds, to: self)
+        if bar.contains(point) {
+            let local = group.tabBar.convert(point, from: self)
+            return (group, .tabBar(index: group.tabBar.insertionIndex(at: local.x)), .zero)
+        }
+        let content = group.content.convert(group.content.bounds, to: self)
+        // This view is flipped, as `dropZone` expects: the top is minY.
+        let zone = dropZone(point, in: content)
+        let preview: NSRect = switch zone {
+        case .center: content
+        case .edge(.left): NSRect(x: content.minX, y: content.minY, width: content.width / 2, height: content.height)
+        case .edge(.right): NSRect(x: content.midX, y: content.minY, width: content.width / 2, height: content.height)
+        case .edge(.top): NSRect(x: content.minX, y: content.minY, width: content.width, height: content.height / 2)
+        case .edge(.bottom): NSRect(x: content.minX, y: content.midY, width: content.width, height: content.height / 2)
+        }
+        return (group, .zone(zone), preview.insetBy(dx: 4, dy: 4))
+    }
+
+    private func payload(_ info: NSDraggingInfo) -> TabDrop? {
+        guard let data = info.draggingPasteboard.data(forType: NSPasteboard.PasteboardType(TabDrop.pasteboardType)) else { return nil }
+        return try? JSONDecoder().decode(TabDrop.self, from: data)
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        draggingUpdated(sender)
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard payload(sender) != nil, let found = dropTarget(at: convert(sender.draggingLocation, from: nil)) else {
+            clearPreview()
+            return []
+        }
+        for g in groupViews.values where g !== found.group { g.tabBar.insertion = nil }
+        switch found.target {
+        case .tabBar(let index):
+            found.group.tabBar.insertion = index
+            overlay.isHidden = true
+        case .zone:
+            found.group.tabBar.insertion = nil
+            overlay.frame = found.preview
+            overlay.isHidden = false
+        }
+        return .move
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        clearPreview()
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        defer { clearPreview() }
+        guard let drop = payload(sender), let found = dropTarget(at: convert(sender.draggingLocation, from: nil)) else { return false }
+        model.drop(drop, on: found.group.groupID, at: found.target)
+        return true
+    }
+
+    override func concludeDragOperation(_ sender: NSDraggingInfo?) {
+        clearPreview()
+    }
+
+    private func clearPreview() {
+        overlay.isHidden = true
+        for g in groupViews.values { g.tabBar.insertion = nil }
+    }
+
     /// The group at a point in this view's coordinates, for drops.
     func group(at point: NSPoint) -> TabGroupView? {
         groupViews.values.first { $0.window != nil && $0.convert($0.bounds, to: self).contains(point) }
     }
+}
+
+/// The blue area that shows where a dragged tab will go. It takes no
+/// clicks or drags itself.
+final class DropOverlayView: NSView {
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.cornerRadius = 5
+        layer?.borderWidth = 1
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    override func updateLayer() {
+        layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.18).cgColor
+        layer?.borderColor = NSColor.controlAccentColor.cgColor
+    }
+
+    override var wantsUpdateLayer: Bool { true }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
 /// One split of the grid. Divider drags write the fractions back to the

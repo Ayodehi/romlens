@@ -438,3 +438,19 @@ struct EditorLayout: Hashable, Codable, Sendable {
         root = walk(root)
     }
 }
+
+/// What a drag into the editor area carries: a tab, or something to open
+/// (a row of the sidebar).
+enum TabDrop: Codable, Equatable, Sendable {
+    case item(UUID)
+    case open(EditorContent)
+
+    static let pasteboardType = "io.github.ayodehi.romlens.tab"
+}
+
+/// Where a drop lands in a group: between two tabs of its bar, or in a zone
+/// of its view.
+enum DropTarget: Equatable, Sendable {
+    case tabBar(index: Int)
+    case zone(DropZone)
+}
