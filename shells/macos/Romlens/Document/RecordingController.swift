@@ -23,8 +23,10 @@ enum RecordingController {
         panel.allowsMultipleSelection = false
         panel.allowedContentTypes = [streamType, recordingType]
         panel.allowsOtherFileTypes = true
-        if let mesen = mesenScriptData, FileManager.default.fileExists(atPath: mesen.path) {
-            panel.directoryURL = mesen
+        if let folder = [recordingsFolder, mesenScriptData].compactMap({ $0 }).first(where: {
+            FileManager.default.fileExists(atPath: $0.path)
+        }) {
+            panel.directoryURL = folder
         }
         run(panel, on: window) { url in
             if url.pathExtension.lowercased() == "rlstream" {
@@ -35,12 +37,21 @@ enum RecordingController {
         }
     }
 
-    /// Where Mesen's recorder script writes its streams: the real home's,
-    /// not the sandbox container's.
-    static var mesenScriptData: URL? {
+    /// The real home, not the sandbox container's.
+    private static var realHome: URL? {
         guard let pw = getpwuid(getuid()), let home = pw.pointee.pw_dir else { return nil }
         return URL(fileURLWithPath: String(cString: home))
-            .appendingPathComponent("Library/Application Support/Mesen2/LuaScriptData", isDirectory: true)
+    }
+
+    /// Where Mesen's recorder script writes its streams: Documents/Romlens/
+    /// Recordings, where they are easy to find and clear out.
+    static var recordingsFolder: URL? {
+        realHome?.appendingPathComponent("Documents/Romlens/Recordings", isDirectory: true)
+    }
+
+    /// Where earlier versions of the script wrote them: Mesen's own folder.
+    static var mesenScriptData: URL? {
+        realHome?.appendingPathComponent("Library/Application Support/Mesen2/LuaScriptData", isDirectory: true)
     }
 
     /// Where packed recordings are kept: the app's own Recordings folder.
@@ -75,12 +86,38 @@ enum RecordingController {
             model.graphics.packing = nil
             switch result {
             case .success(let summary):
-                if attach(url: out, model: model, window: window), summary.truncated {
-                    show("The recording was cut short", "Mesen closed before the recorder finished; every whole frame, \(summary.frames) of them, was kept.", window: window, style: .informational)
+                if attach(url: out, model: model, window: window) {
+                    if summary.truncated {
+                        show("The recording was cut short", "Mesen closed before the recorder finished; every whole frame, \(summary.frames) of them, was kept.", window: window, style: .informational)
+                    }
+                    offerToDelete(stream: stream, window: window)
                 }
             case .failure(let error):
                 show("The recorder's stream could not be read", message(error), window: window)
             }
+        }
+    }
+
+    /// The raw stream is far larger than the recording packed from it and is
+    /// not needed once packed, so offer to put it in the Trash. The panel
+    /// granted the app this one file; the logs beside it stay.
+    private static func offerToDelete(stream: URL, window: NSWindow?) {
+        guard stream.pathExtension.lowercased() == "rlstream" else { return }
+        let size = (try? stream.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
+        let alert = NSAlert()
+        alert.messageText = "Move the raw stream to the Trash?"
+        alert.informativeText = "\(stream.lastPathComponent) (\(ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file))) has been packed into a recording and is not needed to open it."
+        alert.addButton(withTitle: "Move to Trash")
+        alert.addButton(withTitle: "Keep")
+        let finish: (NSApplication.ModalResponse) -> Void = { response in
+            if response == .alertFirstButtonReturn {
+                try? FileManager.default.trashItem(at: stream, resultingItemURL: nil)
+            }
+        }
+        if let window {
+            alert.beginSheetModal(for: window, completionHandler: finish)
+        } else {
+            finish(alert.runModal())
         }
     }
 
@@ -170,7 +207,7 @@ enum RecordingController {
                     """
                     1. In Mesen, open Debug › Script Window and load \(url.lastPathComponent).
                     2. In the script window's settings, allow access to I/O and OS functions, then run it.
-                    3. Play, then stop the script, and open what it wrote with File › Open Recording…: the panel starts in Mesen's script data folder, and Romlens packs the stream itself.
+                    3. Play, then stop the script, and open what it wrote with File › Open Recording…: the panel starts in Documents/Romlens/Recordings, and Romlens packs the stream itself.
                     Or choose File › Start Live Session first: while it runs, the views follow the game, sound included.
                     4. A Mesen with an execution log (the MesenCE fork) also gets a .mxlog beside the stream: import it with File › Import › Execution Trace… for the calls, jumps, reads and DMA the game made.
                     5. To watch the game live, also allow network access in the script settings, and choose File › Start Live Session here. The script connects within two seconds.

@@ -29,8 +29,9 @@ side (`LiveSource` keeps each frame's audio RAM, DSP registers, SPC700 and
 sound events, as the recorder already sent them), so File › Start Live
 Session and the recorder script are all it takes to see and hear a game;
 File › Open Recording… takes the recorder's `.rlstream` itself, starting
-in Mesen's script data folder, and packs it into the app's own Recordings
-folder before opening it (`pack_recorder_stream`); the Samples keyboard is
+in Documents/Romlens/Recordings (where the recorder writes it, not inside
+Mesen's folder), and packs it into the app's own Recordings folder before
+opening it (`pack_recorder_stream`), then offers to trash the raw stream; the Samples keyboard is
 laid out as a piano's.
 
 A song bank's own samples, 27 September 2026: laid over the driver, a

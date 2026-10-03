@@ -57,4 +57,4 @@ wrote <tmp>/mesen_recorder.lua
 1. In Mesen, open Debug > Script Window and load the script.
 2. In the script window's settings, allow access to I/O and OS functions, then run it.
 3. Play, then stop the script and run: romlens rec pack <stream> --rom <rom> --out <recording>.romrec
-   The stream goes to Mesen's script data folder unless ROMLENS_REC_OUT names a file.
+   The stream goes to ~/Documents/Romlens/Recordings unless ROMLENS_REC_OUT names a file.
