@@ -16,7 +16,7 @@ use adw::prelude::*;
 
 use crate::model::{Change, Document};
 use crate::tabgrid::{self, Grid};
-use crate::{actions, headerband, inspector, menu, navigatorview, results, sheets};
+use crate::{actions, headerband, inspector, menu, results, sheets, sidebar};
 
 pub fn open_document(app: &adw::Application, doc: Rc<Document>) -> adw::ApplicationWindow {
     let window = adw::ApplicationWindow::builder()
@@ -71,7 +71,7 @@ pub fn open_document(app: &adw::Application, doc: Rc<Document>) -> adw::Applicat
         .min_sidebar_width(200.0)
         .max_sidebar_width(360.0)
         .content(&inner)
-        .sidebar(&navigatorview::build(&doc))
+        .sidebar(&sidebar::build(&doc))
         .show_sidebar(true)
         .build();
     sync_panes(&doc, &outer, &inner);
@@ -112,7 +112,7 @@ fn build_header(doc: &Rc<Document>) -> adw::HeaderBar {
     let navigator = toggle_button(
         "sidebar-show-symbolic",
         "win.toggle-navigator",
-        "Show or hide the navigator (Ctrl+0)",
+        "Show or hide the sidebar (Ctrl+0)",
     );
     header.pack_start(&navigator);
     header.pack_start(&back_forward());

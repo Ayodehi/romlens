@@ -406,6 +406,20 @@ const ENTRIES: &[Entry] = &[
             }
         },
     },
+    // The sidebar's Lessons and Quizzes: the tutor, at its lessons.
+    Entry {
+        name: "show-lessons",
+        enabled: always,
+        run: |d, w| {
+            if let Some(app) = w
+                .application()
+                .and_then(|a| a.downcast::<adw::Application>().ok())
+            {
+                crate::tutorview::open(&app, w, d);
+            }
+            d.edit_tutor(|t| t.sheet = Some(crate::model::tutor::Sheet::Lessons));
+        },
+    },
     // File
     Entry {
         name: "save",
@@ -723,7 +737,7 @@ pub const SHORTCUT_GROUPS: &[(&str, &[(&str, &str)])] = &[
             ("OAM", "win.show-oam"),
             ("Tilemap", "win.show-tilemap"),
             ("Tutor", "win.show-tutor"),
-            ("Navigator", "win.toggle-navigator"),
+            ("Sidebar", "win.toggle-navigator"),
             ("Inspector", "win.toggle-inspector"),
             ("Overview Strip", "win.toggle-strip"),
             ("Results", "win.toggle-results"),

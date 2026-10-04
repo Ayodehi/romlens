@@ -14,6 +14,8 @@ pub struct Settings {
     pub hide_explanations: bool,
     /// How the C tab prints numbers: `auto`, `hex`, `decimal` or `binary`.
     pub c_numbers: String,
+    /// The sidebar's sections and symbol lists the person closed, by id.
+    pub sidebar_collapsed: Vec<String>,
 }
 
 pub fn config_dir() -> PathBuf {
@@ -101,6 +103,7 @@ mod tests {
         let s = Settings {
             hide_explanations: true,
             c_numbers: "hex".into(),
+            sidebar_collapsed: vec!["ppu".into(), "labels".into()],
         };
         s.save_to(&path).unwrap();
         assert_eq!(Settings::load_from(&path), s);

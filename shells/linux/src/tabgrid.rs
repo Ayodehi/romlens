@@ -121,7 +121,7 @@ fn with_analyzing(doc: &Rc<Document>, view: gtk::Widget) -> gtk::Widget {
 }
 
 /// A tab's icon, from the desktop's symbolic set.
-fn icon_name(content: EditorContent) -> &'static str {
+pub fn icon_name(content: EditorContent) -> &'static str {
     match content {
         EditorContent::Code(CodeRep::Assembly) => "format-justify-left-symbolic",
         EditorContent::Code(CodeRep::C) => "text-x-script-symbolic",
