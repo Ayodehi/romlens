@@ -150,7 +150,7 @@ impl State {
     fn follow_scroll(&self) {
         let doc = &self.doc;
         self.scroll
-            .follow(doc.scroll_request(), &self.area, |offset| {
+            .follow(doc.scroll_request(), None, &self.area, |offset| {
                 doc.line_for_offset(offset)
             });
     }

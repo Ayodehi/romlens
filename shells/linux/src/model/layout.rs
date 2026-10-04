@@ -1,6 +1,9 @@
-//! Which tab the editor shows and which panes are open, with Focus on Code.
-//! Pure state, so the rules are tested without a window. The macOS twin is
-//! the pane flags and `toggleFocus` in `RomViewModel`.
+//! Which panes are open, with Focus on Code, and the text views by name.
+//! Which tabs show is the workspace's (`workspace.rs`). Pure state, so the
+//! rules are tested without a window. The macOS twin is the pane flags and
+//! `toggleFocus` in `RomViewModel`.
+
+use super::workspace::{CodeRep, EditorContent};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Tab {
@@ -59,6 +62,25 @@ impl Tab {
         Self::ALL.into_iter().find(|t| t.id() == id)
     }
 
+    /// The content of this view's tab.
+    pub fn content(self) -> EditorContent {
+        match self {
+            Tab::Hex => EditorContent::Code(CodeRep::Hex),
+            Tab::Disassembly => EditorContent::Code(CodeRep::Assembly),
+            Tab::Both => EditorContent::Code(CodeRep::Both),
+            Tab::C => EditorContent::Code(CodeRep::C),
+            Tab::Graph => EditorContent::Code(CodeRep::Graph),
+            Tab::Source => EditorContent::Source,
+            Tab::Atlas => EditorContent::Atlas,
+            Tab::Compare => EditorContent::Compare,
+        }
+    }
+
+    /// The text view a tab shows; `None` for graphics, sound and the tutor.
+    pub fn from_content(content: EditorContent) -> Option<Tab> {
+        Self::ALL.into_iter().find(|t| t.content() == content)
+    }
+
     /// Tabs that only make sense with a finished analysis.
     pub fn needs_disassembly(self) -> bool {
         !matches!(self, Tab::Hex | Tab::Atlas | Tab::Compare)
@@ -94,14 +116,6 @@ impl Default for Panes {
 
 #[derive(Debug, Clone)]
 pub struct Layout {
-    pub tab: Tab,
-    /// A graphics view in the editor area, if one is open. Choosing a text
-    /// tab closes it, which is how the tab buttons and the Graphics menu
-    /// share the area.
-    pub graphics: Option<super::graphics::Tab>,
-    /// A sound view in the editor area, if one is open. A graphics view and a
-    /// sound view are never both open.
-    pub audio: Option<super::audio::Tab>,
     pub panes: Panes,
     pub results_kind: ResultsKind,
     /// What Focus on Code hid, to put back when it is turned off.
@@ -111,9 +125,6 @@ pub struct Layout {
 impl Default for Layout {
     fn default() -> Self {
         Self {
-            tab: Tab::Hex,
-            graphics: None,
-            audio: None,
             panes: Panes::default(),
             results_kind: ResultsKind::Find,
             unfocused: None,
@@ -200,6 +211,14 @@ mod tests {
         }
         assert_eq!(Tab::from_id("nope"), None);
         assert!(Tab::BUILT.iter().all(|t| Tab::ALL.contains(t)));
+    }
+
+    #[test]
+    fn every_text_view_is_a_content_and_back() {
+        for t in Tab::ALL {
+            assert_eq!(Tab::from_content(t.content()), Some(t));
+        }
+        assert_eq!(Tab::from_content(EditorContent::Tutor), None);
     }
 
     #[test]

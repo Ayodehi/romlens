@@ -31,8 +31,6 @@ pub mod testing;
 pub mod transfer;
 pub mod tutor;
 pub mod tutor_settings;
-// The window's tabs (docs/29); the document runs on it from LW2.
-#[allow(dead_code)]
 pub mod workspace;
 
 pub use commands::{CEdit, EditorCommand, EditorSource, Sheet, Zoom};

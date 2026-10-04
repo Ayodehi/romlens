@@ -136,7 +136,7 @@ impl State {
 
     fn follow_scroll(&self) {
         self.scroll
-            .follow(self.doc.scroll_request(), &self.area, |offset| {
+            .follow(self.doc.scroll_request(), None, &self.area, |offset| {
                 Some(offset / BYTES_PER_ROW as u32)
             });
     }
