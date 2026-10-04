@@ -13,6 +13,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::model::workspace::WorkspaceRecord;
+
 /// Machine-local facts: not part of the project, rewritten on every save.
 pub const LOCAL_FILE: &str = "local.json";
 
@@ -21,13 +23,31 @@ pub const LOCAL_FILE: &str = "local.json";
 /// version removed would come back when the project reopens.
 pub const OPTIONAL_CORE_FILES: [&str; 3] = ["variables.json", "c_notes.json", "c_versions.json"];
 
-/// What the shell remembers about this machine. The `bookmark` the macOS shell
-/// also stores is meaningless here and is neither read nor written.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+/// What the shell remembers about this machine: where the ROM was, and the
+/// window as it was left (docs/29), in the JSON the macOS shell writes. The
+/// macOS `bookmark` means nothing here, but is kept as it was, so a project
+/// carried between the two still finds its ROM on the Mac.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LocalRecord {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bookmark: Option<String>,
     #[serde(rename = "lastPath", skip_serializing_if = "Option::is_none")]
     pub last_path: Option<String>,
+    /// The tabs, the focus and the panels. One this version cannot read is
+    /// left out, rather than costing the rest of the record.
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient_workspace"
+    )]
+    pub workspace: Option<WorkspaceRecord>,
+}
+
+fn lenient_workspace<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<WorkspaceRecord>, D::Error> {
+    let value = serde_json::Value::deserialize(d)?;
+    Ok(serde_json::from_value(value).ok())
 }
 
 fn invalid(name: &str) -> io::Error {
@@ -218,6 +238,8 @@ mod tests {
     fn the_local_record_round_trips_and_ignores_the_macos_bookmark() {
         let dir = scratch("local");
         let rec = LocalRecord {
+            bookmark: None,
+            workspace: None,
             last_path: Some("/roms/Game.sfc".into()),
         };
         write_local(&dir, &rec).unwrap();
