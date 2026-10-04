@@ -984,7 +984,10 @@ pub fn install(window: &adw::ApplicationWindow, doc: &Rc<Document>) {
     };
     refresh();
     doc.subscribe(move |change| {
-        if !matches!(change, Change::Scroll | Change::Sheet | Change::Navigator) {
+        if !matches!(
+            change,
+            Change::Scroll | Change::Sheet | Change::Navigator | Change::Citations
+        ) {
             refresh();
         }
     });

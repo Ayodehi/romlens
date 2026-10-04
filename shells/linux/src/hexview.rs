@@ -105,7 +105,9 @@ pub fn build(doc: &Rc<Document>, item: Option<Id>) -> HexPane {
 
     let s = Rc::clone(&state);
     doc.subscribe(move |change| match change {
-        Change::Rows | Change::AddressStyle | Change::Selection => s.area.queue_draw(),
+        Change::Rows | Change::AddressStyle | Change::Selection | Change::Citations => {
+            s.area.queue_draw()
+        }
         Change::Scroll => s.follow_scroll(),
         _ => {}
     });
@@ -149,7 +151,7 @@ impl State {
         self.doc.hex_cache.batch(row)?.row(row).cloned()
     }
 
-    fn draw(&self, cr: &cairo::Context, _width: f64, height: f64) {
+    fn draw(&self, cr: &cairo::Context, width: f64, height: f64) {
         let m = self.metrics.get();
         let fg = self.area.color();
         let accent = adw::StyleManager::default().accent_color_rgba();
@@ -186,6 +188,7 @@ impl State {
             let _ = cr.fill();
         };
 
+        let cited = self.doc.citation_highlight();
         let mut row_index = first;
         while y < height && row_index < self.doc.row_count() {
             let Some(row) = self.row(row_index) else {
@@ -207,6 +210,15 @@ impl State {
                     fill_bytes(i, j - 1, y, 2.0);
                 }
                 i = j;
+            }
+
+            // A row holding bytes an answer's paragraph cites (docs/29).
+            let end = row.file_offset + row.byte_count as u32;
+            if cited
+                .iter()
+                .any(|r| r.start < end && row.file_offset < r.end)
+            {
+                crate::asmview::cited_outline(cr, &accent, width, y, rh);
             }
 
             // The highlighted range: the instruction's bytes, or the

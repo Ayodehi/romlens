@@ -108,6 +108,8 @@ pub enum Change {
     Compare,
     /// Analysis state or undo state changed.
     Status,
+    /// The lines the paragraph pointed at in an answer cites changed.
+    Citations,
     History,
 }
 
@@ -1046,7 +1048,7 @@ impl Document {
             .collect();
         if *self.citation_highlight.borrow() != ranges {
             *self.citation_highlight.borrow_mut() = ranges;
-            self.emit(Change::Rows);
+            self.emit(Change::Citations);
         }
     }
 
