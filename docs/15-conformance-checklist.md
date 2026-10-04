@@ -6,6 +6,13 @@ scenario that checks the same behaviour from a script
 (`08-cross-platform.md`, rule 7). A shell "conforms" to an item when a person
 following the shell column gets the same answer as the CLI column.
 
+Linux column (added 3 October 2026): 🧪 means built in `shells/linux` and
+covered by its unit tests and screenshot checks, not yet verified by hand.
+Still open on Linux in Phases 0 to 2A: the sticky `00` to `0F` column header and
+hover names on header spans (0.4, 0.6), the launch log line (0.12), the
+undo title in the menu (1.12), and the traced-bytes line in the analysis
+status (2.3).
+
 Status: macOS ✅ done, 🧪 built and covered by the app test bundle but not
 yet verified by hand, ⬜ not yet; Windows and Linux start after macOS
 Phase 1. The macOS Phase 0 manual pass was completed on 21 September 2026
@@ -20,41 +27,41 @@ and track 2C is started, with the details under Phase 2.
 
 | # | Capability | Shell must expose | CLI scenario | macOS | Win | Linux |
 |---|---|---|---|---|---|---|
-| 0.1 | Open a ROM (`.sfc`/`.smc`) | File › Open, Open Recent, drag onto the app; copier header stripped silently | `romlens info <rom>` prints size and "copier header stripped" when present | ✅ | ⬜ | ⬜ |
-| 0.2 | Refuse non-ROMs with the core's message | The error text comes from the core, verbatim | `romlens info /dev/zero`-style input exits 1 with "no valid SNES header" | ✅ | ⬜ | ⬜ |
-| 0.3 | Header summary | Mapping, FastROM, header offset, title, sizes, region, developer, version, checksum with mirrored-sum verdict, SHA-256, twelve vectors | `romlens info <rom>` (and `--json`) | ✅ | ⬜ | ⬜ |
+| 0.1 | Open a ROM (`.sfc`/`.smc`) | File › Open, Open Recent, drag onto the app; copier header stripped silently | `romlens info <rom>` prints size and "copier header stripped" when present | ✅ | ⬜ | 🧪 |
+| 0.2 | Refuse non-ROMs with the core's message | The error text comes from the core, verbatim | `romlens info /dev/zero`-style input exits 1 with "no valid SNES header" | ✅ | ⬜ | 🧪 |
+| 0.3 | Header summary | Mapping, FastROM, header offset, title, sizes, region, developer, version, checksum with mirrored-sum verdict, SHA-256, twelve vectors | `romlens info <rom>` (and `--json`) | ✅ | ⬜ | 🧪 |
 | 0.4 | Hex view, 16 bytes per row, virtualized | Scrolls the whole image smoothly; sticky column header `00`–`0F` with the selected column emphasised; last row may be partial | `romlens hex <rom> --from <expr> --rows N` | ✅ | ⬜ | ⬜ |
-| 0.5 | Dual address column with toggle | Both / SNES / file, switchable without refetching | `--address both\|snes\|file` | ✅ | ⬜ | ⬜ |
+| 0.5 | Dual address column with toggle | Both / SNES / file, switchable without refetching | `--address both\|snes\|file` | ✅ | ⬜ | 🧪 |
 | 0.6 | Header and vector overlays | Coloured spans over the header bytes; name and decoded value on hover or selection; click a span in the summary to jump | Rows carrying a span are marked `*` in `romlens hex`; `romlens info` lists the values | ✅ | ⬜ | ⬜ |
-| 0.7 | Jump to address | ⌘L / Ctrl+L sheet; live preview `0x00041C = $80:841C` or the core's message; Return jumps and centres the row | `romlens resolve <rom> <expr>` | ✅ | ⬜ | ⬜ |
-| 0.8 | Address expressions | `$80:841C`, `80:841C`, `$80841C`, `0x41C` all accepted | same | ✅ | ⬜ | ⬜ |
-| 0.9 | Byte inspector | File offset, on-disk offset when a copier header exists, canonical SNES address, mirrors, u8/i8, u16/i16 LE, u24, ASCII, u16 in current bank and u24 as SNES address with Go, span name | `romlens resolve` gives the addresses and mirrors; readings come from the FFI `inspect` (a CLI `inspect` command is due with Phase 1) | ✅ | ⬜ | ⬜ |
-| 0.10 | Keyboard navigation | Arrows move by 1 and 16 bytes, Page Up/Down by a page, Home/End, Backspace or ⌘[ goes back in jump history | n/a (interaction) | ✅ | ⬜ | ⬜ |
-| 0.11 | Homebrew test ROM | The shell opens the fixture the CLI writes | `romlens testrom --out t.sfc --mapping lorom\|hirom\|exhirom` | ✅ | ⬜ | ⬜ |
+| 0.7 | Jump to address | ⌘L / Ctrl+L sheet; live preview `0x00041C = $80:841C` or the core's message; Return jumps and centres the row | `romlens resolve <rom> <expr>` | ✅ | ⬜ | 🧪 |
+| 0.8 | Address expressions | `$80:841C`, `80:841C`, `$80841C`, `0x41C` all accepted | same | ✅ | ⬜ | 🧪 |
+| 0.9 | Byte inspector | File offset, on-disk offset when a copier header exists, canonical SNES address, mirrors, u8/i8, u16/i16 LE, u24, ASCII, u16 in current bank and u24 as SNES address with Go, span name | `romlens resolve` gives the addresses and mirrors; readings come from the FFI `inspect` (a CLI `inspect` command is due with Phase 1) | ✅ | ⬜ | 🧪 |
+| 0.10 | Keyboard navigation | Arrows move by 1 and 16 bytes, Page Up/Down by a page, Home/End, Backspace or ⌘[ goes back in jump history | n/a (interaction) | ✅ | ⬜ | 🧪 |
+| 0.11 | Homebrew test ROM | The shell opens the fixture the CLI writes | `romlens testrom --out t.sfc --mapping lorom\|hirom\|exhirom` | ✅ | ⬜ | 🧪 |
 | 0.12 | API version visible | About box credits and a launch log line show the core API version the shell was built against, read from the core at runtime | `romlens --version` | 🧪 | ⬜ | ⬜ |
 
 ## Phase 1
 
 | # | Capability | Shell must expose | CLI scenario | macOS | Win | Linux |
 |---|---|---|---|---|---|---|
-| 1.1 | Analysis runs on open, off the main thread | Progress and phase in the toolbar with ⌘. to cancel; the hex view is usable meanwhile; percentages when done; tap to re-run | `romlens analyze <rom> --stats [--progress] [--warnings]` | 🧪 | ⬜ | ⬜ |
-| 1.2 | Disassembly view, virtualized | One line per instruction or data row; section, label, comment and blank lines; tokens coloured by kind, auto labels dimmer than user labels; region gutter and tint by confidence | `romlens disasm <rom> --from <expr> --count N [--verbose]` | 🧪 | ⬜ | ⬜ |
+| 1.1 | Analysis runs on open, off the main thread | Progress and phase in the toolbar with ⌘. to cancel; the hex view is usable meanwhile; percentages when done; tap to re-run | `romlens analyze <rom> --stats [--progress] [--warnings]` | 🧪 | ⬜ | 🧪 |
+| 1.2 | Disassembly view, virtualized | One line per instruction or data row; section, label, comment and blank lines; tokens coloured by kind, auto labels dimmer than user labels; region gutter and tint by confidence | `romlens disasm <rom> --from <expr> --count N [--verbose]` | 🧪 | ⬜ | 🧪 |
 | 1.3 | Raw decode under chosen flags | (inspector shows the analyzer's flags; a raw decode is a tutor tool) | `romlens disasm <rom> --flags m1x0e0` | n/a | ⬜ | ⬜ |
-| 1.4 | Hex ↔ asm lockstep | Both tab: scrolling either side keeps the other aligned; the highlighted bytes and their line are joined by a bracket; selecting in one selects in the other | `romlens disasm --from <expr>` shows the line the bytes belong to | 🧪 | ⬜ | ⬜ |
-| 1.5 | Instruction inspector | Mnemonic and mode with a one-line description, bytes, operand, effective target with Go, flags before → after, DBR/DP known or unknown, assumptions and warnings | `romlens inspect <rom> <expr>` | 🧪 | ⬜ | ⬜ |
-| 1.6 | Regions and evidence | Region kind and confidence on every line and in the inspector; evidence one click away (vector reach depth, heuristic, user) | `romlens inspect` prints the region and its evidence | 🧪 | ⬜ | ⬜ |
-| 1.7 | Labels | Auto labels `RESET_/NMI_/…/SUB_/CODE_/LOOP_/SKIP_/PTR_/DATA_` + address (`LOOP_` where a branch comes back up to it, `SKIP_` where only forward branches reach it); user rename (`n`, Rename Label…, inspector field) validated live; remove restores the auto name | `romlens labels <rom> [--source]`, `romlens project <P> label <expr> <name\|->` | 🧪 | ⬜ | ⬜ |
-| 1.8 | Comments | Line comment after the instruction, block comment above (`;`, Comment…, inspector fields) | `romlens project <P> comment <expr> <text\|-> --line\|--block` | 🧪 | ⬜ | ⬜ |
-| 1.9 | Region marks and flag overrides | `c`/`d`/`u` and Mark as … on the highlighted range; Set Flags… pins M/X/E/DBR/DP; the analysis re-runs after a short pause | `romlens project <P> mark <expr> <len> <kind>`, `clear`, `flags <expr> --m 0\|1 …` | 🧪 | ⬜ | ⬜ |
-| 1.10 | Cross-references | Referenced-by and references lists in the inspector, click to jump; double-click or `g`/⌘↩ follows a target | `romlens xrefs <rom> <expr>` | 🧪 | ⬜ | ⬜ |
-| 1.11 | Navigator | Labels (filter by name or `$address` prefix, user first), regions, banks; selection jumps | `romlens labels`, `romlens analyze --json` | 🧪 | ⬜ | ⬜ |
+| 1.4 | Hex ↔ asm lockstep | Both tab: scrolling either side keeps the other aligned; the highlighted bytes and their line are joined by a bracket; selecting in one selects in the other | `romlens disasm --from <expr>` shows the line the bytes belong to | 🧪 | ⬜ | 🧪 |
+| 1.5 | Instruction inspector | Mnemonic and mode with a one-line description, bytes, operand, effective target with Go, flags before → after, DBR/DP known or unknown, assumptions and warnings | `romlens inspect <rom> <expr>` | 🧪 | ⬜ | 🧪 |
+| 1.6 | Regions and evidence | Region kind and confidence on every line and in the inspector; evidence one click away (vector reach depth, heuristic, user) | `romlens inspect` prints the region and its evidence | 🧪 | ⬜ | 🧪 |
+| 1.7 | Labels | Auto labels `RESET_/NMI_/…/SUB_/CODE_/LOOP_/SKIP_/PTR_/DATA_` + address (`LOOP_` where a branch comes back up to it, `SKIP_` where only forward branches reach it); user rename (`n`, Rename Label…, inspector field) validated live; remove restores the auto name | `romlens labels <rom> [--source]`, `romlens project <P> label <expr> <name\|->` | 🧪 | ⬜ | 🧪 |
+| 1.8 | Comments | Line comment after the instruction, block comment above (`;`, Comment…, inspector fields) | `romlens project <P> comment <expr> <text\|-> --line\|--block` | 🧪 | ⬜ | 🧪 |
+| 1.9 | Region marks and flag overrides | `c`/`d`/`u` and Mark as … on the highlighted range; Set Flags… pins M/X/E/DBR/DP; the analysis re-runs after a short pause | `romlens project <P> mark <expr> <len> <kind>`, `clear`, `flags <expr> --m 0\|1 …` | 🧪 | ⬜ | 🧪 |
+| 1.10 | Cross-references | Referenced-by and references lists in the inspector, click to jump; double-click or `g`/⌘↩ follows a target | `romlens xrefs <rom> <expr>` | 🧪 | ⬜ | 🧪 |
+| 1.11 | Navigator | Labels (filter by name or `$address` prefix, user first), regions, banks; selection jumps | `romlens labels`, `romlens analyze --json` | 🧪 | ⬜ | 🧪 |
 | 1.12 | Undo and redo | ⌘Z / ⇧⌘Z with the command's title; one stack in the core; the document's edited state follows every command | `romlens project <P> history` lists the package's contents | 🧪 | ⬜ | ⬜ |
-| 1.13 | Project package | Opening a ROM makes an untitled `.romlens`; Save/Save As/Revert/Duplicate; reopening finds the ROM by hash, then the remembered path, then asks (and rejects a wrong file) | `romlens project <P> init --rom <rom>`; every command takes `--project` | 🧪 | ⬜ | ⬜ |
-| 1.14 | Export | File › Export ▸ Assembly Listing… (byte columns off by default, docs/12 message), Labels and Comments…, Symbol File… | `romlens export asm <rom> --out F [--range a..b]`, `export sym [--include-auto]` | 🧪 | ⬜ | ⬜ |
+| 1.13 | Project package | Opening a ROM makes an untitled `.romlens`; Save/Save As/Revert/Duplicate; reopening finds the ROM by hash, then the remembered path, then asks (and rejects a wrong file) | `romlens project <P> init --rom <rom>`; every command takes `--project` | 🧪 | ⬜ | 🧪 |
+| 1.14 | Export | File › Export ▸ Assembly Listing… (byte columns off by default, docs/12 message), Labels and Comments…, Symbol File… | `romlens export asm <rom> --out F [--range a..b]`, `export sym [--include-auto]` | 🧪 | ⬜ | 🧪 |
 | 1.15 | Byte search | (see 2.7) | `romlens search <rom> "78 18 ?? 5C"` | n/a | ⬜ | ⬜ |
-| 1.16 | Hardware registers | `STA $420D` carries `; MEMSEL`; the inspector shows the register's access and description | `romlens registers [address]` | 🧪 | ⬜ | ⬜ |
-| 1.17 | Hex region tint | Hex rows tint code and data bytes by confidence after analysis without a refetch | (the hex-row batch's span lane) | 🧪 | ⬜ | ⬜ |
-| 1.18 | Range selection | Shift+arrows and shift-click extend the highlighted range in either canvas; mouse-drag and cross-canvas drag are not in Phase 1 | n/a (interaction) | 🧪 | ⬜ | ⬜ |
+| 1.16 | Hardware registers | `STA $420D` carries `; MEMSEL`; the inspector shows the register's access and description | `romlens registers [address]` | 🧪 | ⬜ | 🧪 |
+| 1.17 | Hex region tint | Hex rows tint code and data bytes by confidence after analysis without a refetch | (the hex-row batch's span lane) | 🧪 | ⬜ | 🧪 |
+| 1.18 | Range selection | Shift+arrows and shift-click extend the highlighted range in either canvas; mouse-drag and cross-canvas drag are not in Phase 1 | n/a (interaction) | 🧪 | ⬜ | 🧪 |
 
 ## Phase 2
 
@@ -90,10 +97,10 @@ are not started.
 | 2.1 | Jump tables resolved | Table rows render `dw CODE_…` with a "jump table" region badge; the evidence popover names the dispatching instruction and links to it; the `computed jump` warning becomes informational | `romlens tables <rom> [--json]` | 🧪 | ⬜ | ⬜ |
 | 2.2 | Heuristic scores visible | The evidence popover lists every heuristic with its score, sorted descending, with the detail string ("entropy 7.4 bits/byte over `$96:0000`–`$96:8000`") | `romlens heuristics <rom> [--kind …] [--from --to] [--json]` | 🧪 | ⬜ | ⬜ |
 | 2.3 | Trace and coverage import | File › Import ▸ Execution Trace…; a coverage lane in the overview strip; the analysis status reports traced bytes | `romlens import trace <P> --rom R <file> [--format cdl\|usage]` | 🧪 | ⬜ | ⬜ |
-| 2.4 | Symbol import | File › Import ▸ Symbols…; imported labels visibly distinct from auto; collisions and rewritten names reported, never silently dropped | `romlens import symbols <P> --rom R <file> [--format wla\|nocash\|lbl] [--source NAME]` | 🧪 | ⬜ | ⬜ |
-| 2.5 | Data typing with parameters | Mark as ▸ submenu covering every data kind, with a sheet for stride, bank rule, element kind and bpp; a pointer table renders as labelled targets with xrefs | `romlens project <P> mark <expr> <len> table --stride 2 --elem code\|pointer\|raw --bank same\|$C0\|entry` | 🧪 | ⬜ | ⬜ |
-| 2.6 | Region overview strip | A minimap under the editor coloured by kind and confidence, hatched where a bucket is mixed, with the selection as a caret and a lane for traced bytes; click and drag to jump | `romlens map <rom> [--buckets N] [--json]` | 🧪 | ⬜ | ⬜ |
-| 2.7 | Byte and text search | ⌘F sheet reporting the core's message; a results list under the editor showing each hit's bytes in context; ⌘G / ⇧⌘G for next and previous; Return jumps and centres | `romlens search <rom> "78 18 ?? 5C"`, `romlens search <rom> --text "Nintendo" [--ignore-case]` | 🧪 | ⬜ | ⬜ |
+| 2.4 | Symbol import | File › Import ▸ Symbols…; imported labels visibly distinct from auto; collisions and rewritten names reported, never silently dropped | `romlens import symbols <P> --rom R <file> [--format wla\|nocash\|lbl] [--source NAME]` | 🧪 | ⬜ | 🧪 |
+| 2.5 | Data typing with parameters | Mark as ▸ submenu covering every data kind, with a sheet for stride, bank rule, element kind and bpp; a pointer table renders as labelled targets with xrefs | `romlens project <P> mark <expr> <len> table --stride 2 --elem code\|pointer\|raw --bank same\|$C0\|entry` | 🧪 | ⬜ | 🧪 |
+| 2.6 | Region overview strip | A minimap under the editor coloured by kind and confidence, hatched where a bucket is mixed, with the selection as a caret and a lane for traced bytes; click and drag to jump | `romlens map <rom> [--buckets N] [--json]` | 🧪 | ⬜ | 🧪 |
+| 2.7 | Byte and text search | ⌘F sheet reporting the core's message; a results list under the editor showing each hit's bytes in context; ⌘G / ⇧⌘G for next and previous; Return jumps and centres | `romlens search <rom> "78 18 ?? 5C"`, `romlens search <rom> --text "Nintendo" [--ignore-case]` | 🧪 | ⬜ | 🧪 |
 | 2.8 | Classifier accuracy | A line at the end of analysis reporting the classified percentage | `romlens accuracy <rom> --truth F\|--fixture [--project P] [--json]`, `romlens truth from-cdl <rom> <cdl> --out F` | ⬜ | ⬜ | ⬜ |
 
 ### 2B — graphics

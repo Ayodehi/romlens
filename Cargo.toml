@@ -1,9 +1,10 @@
 [workspace]
 resolver = "3"
 members = ["crates/*"]
-# The FFI spikes are standalone packages with their own lockfiles; nested
-# packages must be excluded or they break workspace resolution.
-exclude = ["spikes/ffi-rows/uniffi", "spikes/ffi-rows/c-abi"]
+# The FFI spikes and the Linux shell (it needs GTK) are standalone packages
+# with their own lockfiles; nested packages must be excluded or they break
+# workspace resolution.
+exclude = ["spikes/ffi-rows/uniffi", "spikes/ffi-rows/c-abi", "shells/linux"]
 
 [workspace.package]
 version = "0.1.0"

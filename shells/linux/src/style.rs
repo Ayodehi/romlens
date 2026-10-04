@@ -1,0 +1,52 @@
+//! The few styles libadwaita does not already have: the tinted chips the
+//! sidebars and inspector use, and the strip's rounded frame. Colours are
+//! libadwaita's named palette, so they follow light and dark.
+
+const CSS: &str = "
+.chip {
+    border-radius: 99px;
+    padding: 0 7px;
+    font-size: 0.85em;
+    background: alpha(currentColor, 0.12);
+}
+.chip-accent { background: alpha(@accent_bg_color, 0.25); }
+.chip-blue   { background: alpha(@blue_3, 0.25); }
+.chip-orange { background: alpha(@orange_3, 0.25); }
+.chip-gray   { background: alpha(@light_5, 0.25); }
+.chip-red    { background: alpha(@red_3, 0.25); }
+.chip-green  { background: alpha(@green_4, 0.25); }
+.chip-purple { background: alpha(@purple_3, 0.25); }
+.chip-indigo { background: alpha(@purple_2, 0.2); }
+.romlens-strip-frame { border-radius: 4px; }
+.romlens-idiom {
+    border-radius: 8px;
+    padding: 10px;
+    background: alpha(@purple_2, 0.1);
+}
+.diff-added   { background: alpha(@green_4, 0.2); }
+.romlens-flags-title { font-size: 0.8em; opacity: 0.6; }
+";
+
+pub fn install() {
+    let provider = gtk::CssProvider::new();
+    provider.load_from_string(CSS);
+    if let Some(display) = gtk::gdk::Display::default() {
+        gtk::style_context_add_provider_for_display(
+            &display,
+            &provider,
+            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
+    }
+}
+
+/// A small tinted pill. `class` is one of the `chip-*` names, or empty.
+pub fn chip(text: &str, class: &str) -> gtk::Label {
+    use gtk::prelude::*;
+    let l = gtk::Label::new(Some(text));
+    l.add_css_class("chip");
+    if !class.is_empty() {
+        l.add_css_class(class);
+    }
+    l.set_valign(gtk::Align::Center);
+    l
+}

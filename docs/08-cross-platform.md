@@ -198,3 +198,25 @@ same way.
 - **Contributors.** Each shell needs someone who cares about that platform.
   The core-first design means a Windows or Linux contributor can start with a
   working brain and a checklist.
+
+## Linux shell decisions (October 2026)
+
+- **Menus.** A GNOME hamburger menu, not a menu bar. The macOS menu tree is
+  flattened into sections and Import, Export, Edit, View and Go submenus.
+  Every command is a named `gio` action, so a menu item, a shortcut and a
+  button reach it the same way; a command whose feature is not built yet is
+  listed and insensitive.
+- **Shortcuts.** Ctrl stands for Command and Alt for Option, with the view
+  tabs on Alt+digit (as GNOME terminals and browsers switch tabs) and the
+  tutor, live session and compare on Alt+Shift, because Ctrl+Alt combinations
+  collide with desktop bindings. The one table is `ACCELS` in
+  `shells/linux/src/actions.rs`; the Keyboard Shortcuts window is built from
+  it, and tests fail if two commands share a shortcut or the window omits one.
+- **Projects.** A `.romlens` package is a folder, so Open ROM and Open Project
+  are separate commands (a file chooser cannot offer both). A project that has
+  a file is saved when its window closes and every 30 seconds, as
+  `autosavesInPlace` does; an untitled one asks.
+- **Minimum versions.** GTK 4.14 and libadwaita 1.6 (the accent colour). Ubuntu
+  24.04 LTS ships libadwaita 1.5, so a `.deb` for it needs a fixed accent
+  colour; the Flatpak is unaffected.
+
