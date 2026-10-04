@@ -11,11 +11,13 @@ covered by its unit tests and screenshot checks, not yet verified by hand.
 Still open on Linux in Phases 0 to 2A: the sticky `00` to `0F` column header and
 hover names on header spans (0.4, 0.6), the launch log line (0.12), the
 undo title in the menu (1.12), and the traced-bytes line in the analysis
-status (2.3). Phase 3 to 5 rows are built on Linux except the C tab's versions and
-annotation sheets, which arrive with the tutor. The sound output opens a real
+status (2.3). Phase 3 to 5 rows are built on Linux, and so is 6A, the tutor. The sound output opens a real
 device and plays, but whether it sounds right is a by-ear check not yet done. The live session is covered by a
 test against a replayed stream, not yet run against Mesen, and Mesen's Linux
 script data folder (`~/.config/Mesen2/LuaScriptData`) is assumed, not checked.
+The tutor is covered against the scripted loopback server the core's own tests
+use, never a real provider, and its keys against an in-memory store, not a real
+Secret Service: the keyring check (item 52's Keychain twin) is by hand.
 
 Status: macOS ✅ done, 🧪 built and covered by the app test bundle but not
 yet verified by hand, ⬜ not yet; Windows and Linux start after macOS
@@ -220,18 +222,18 @@ Written from `24-tutor.md` on 27 September 2026; it replaces rows 3.19–3.21.
 
 | # | Capability | Shell must expose | CLI scenario | macOS | Win | Linux |
 |---|---|---|---|---|---|---|
-| 6.1 | Keys and endpoints | Settings: the Anthropic and OpenAI keys in the credential store, local endpoints with a Test that lists models, the default model and mode, what is sent | `romlens tutor models [--provider P]` | 🧪 | ⬜ | ⬜ |
-| 6.2 | Ask about the selection | A Tutor window: the answer streamed with cited addresses and frames as links into the main window, thinking and the tool log collapsed, the cost | `romlens tutor ask <rom> "<question>" [--at <a>]` | 🧪 | ⬜ | ⬜ |
-| 6.3 | Pictures in and out | Paste or drop a screenshot or photo; attach the current frame; tools that return tiles and frames show them; a generated picture when an image provider is set | `romlens tutor ask … --attach <png>` | 🧪 | ⬜ | ⬜ |
-| 6.4 | Edits under a mode | Read-only, Ask before edits (cards with Accept and Reject), Accept edits; Shift-Tab cycles; every edit undoable and marked as the tutor's | `romlens tutor ask … --mode accept --project P` | 🧪 | ⬜ | ⬜ |
-| 6.5 | The C shaped | Signatures, local names, structs and C comments change the generated C; C versions beside it, anchored to addresses | `romlens project <p> signature\|local\|struct\|ccomment\|cversion …`; `romlens decompile …` | 🧪 | ⬜ | ⬜ |
-| 6.6 | A conversation kept | Conversations listed and resumed; ↑ recalls earlier prompts; `/rewind` takes back the conversation, the edits, or both | `romlens tutor conversations` | 🧪 | ⬜ | ⬜ |
-| 6.7 | Another provider mid-conversation | `/model` changes provider, model and effort between turns, and the conversation goes on | `romlens tutor ask … --resume <id> --provider P --model M` | 🧪 | ⬜ | ⬜ |
-| 6.8 | A recording investigated | Recording tools (changes, who wrote a byte, provenance, frames) in the tool log | `romlens tutor ask <rom> "<question>" --rec R` | 🧪 | ⬜ | ⬜ |
-| 6.9 | Lessons (`25-lessons.md`) | Explain mode and `/learn`: a lesson card stepped with Back and Next, predict questions behind Show, each step pointing the main window at its place without bringing it forward, offers to go deeper; the lesson library and the map of concepts shaded by level reached; each finished lesson checked in the background and corrected | `romlens tutor lessons`; `romlens tutor lesson show <id>` (with each step's revisions) | ⬜ | ⬜ | ⬜ |
-| 6.10 | Diagrams (`26-diagrams.md`) | The tutor draws register fields, memory maps, the machine's parts, a frame's timeline and a byte's way to the screen from the core's own data, and checks its own SVG; shown large in answers and in lesson steps | `romlens draw <rom> <kind> <spec>`; `romlens draw check <svg>` | ⬜ | ⬜ | ⬜ |
-| 6.11 | The glossary (`27-glossary.md`) | Each acronym, initialism and register in an answer or a lesson step is linked the first time it appears; a click shows a bubble spelling it out, with a sentence or two and a button to ask the tutor about it | `romlens glossary [TERM] [--registers]`; the tutor's `reference` topic `glossary` | ⬜ | ⬜ | ⬜ |
-| 6.12 | Quizzes and progress (`28-quizzes.md`) | `/quiz` asks checked questions (Romlens's, and the tutor's with claims Romlens verifies); passing proves a level, shown on the map beside the level learned; proven levels come due for review; points, a rank from what is proven, streaks and achievements, including finds in the game; predict questions guessed before Show; a setting hides the scores | `romlens tutor quiz <rom> [concept]`; `romlens tutor quiz coverage <rom>`; `romlens tutor progress [--ledger]` | ⬜ | ⬜ | ⬜ |
+| 6.1 | Keys and endpoints | Settings: the Anthropic and OpenAI keys in the credential store, local endpoints with a Test that lists models, the default model and mode, what is sent | `romlens tutor models [--provider P]` | 🧪 | ⬜ | 🧪 |
+| 6.2 | Ask about the selection | A Tutor window: the answer streamed with cited addresses and frames as links into the main window, thinking and the tool log collapsed, the cost | `romlens tutor ask <rom> "<question>" [--at <a>]` | 🧪 | ⬜ | 🧪 |
+| 6.3 | Pictures in and out | Paste or drop a screenshot or photo; attach the current frame; tools that return tiles and frames show them; a generated picture when an image provider is set | `romlens tutor ask … --attach <png>` | 🧪 | ⬜ | 🧪 |
+| 6.4 | Edits under a mode | Read-only, Ask before edits (cards with Accept and Reject), Accept edits; Shift-Tab cycles; every edit undoable and marked as the tutor's | `romlens tutor ask … --mode accept --project P` | 🧪 | ⬜ | 🧪 |
+| 6.5 | The C shaped | Signatures, local names, structs and C comments change the generated C; C versions beside it, anchored to addresses | `romlens project <p> signature\|local\|struct\|ccomment\|cversion …`; `romlens decompile …` | 🧪 | ⬜ | 🧪 |
+| 6.6 | A conversation kept | Conversations listed and resumed; ↑ recalls earlier prompts; `/rewind` takes back the conversation, the edits, or both | `romlens tutor conversations` | 🧪 | ⬜ | 🧪 |
+| 6.7 | Another provider mid-conversation | `/model` changes provider, model and effort between turns, and the conversation goes on | `romlens tutor ask … --resume <id> --provider P --model M` | 🧪 | ⬜ | 🧪 |
+| 6.8 | A recording investigated | Recording tools (changes, who wrote a byte, provenance, frames) in the tool log | `romlens tutor ask <rom> "<question>" --rec R` | 🧪 | ⬜ | 🧪 |
+| 6.9 | Lessons (`25-lessons.md`) | Explain mode and `/learn`: a lesson card stepped with Back and Next, predict questions behind Show, each step pointing the main window at its place without bringing it forward, offers to go deeper; the lesson library and the map of concepts shaded by level reached; each finished lesson checked in the background and corrected | `romlens tutor lessons`; `romlens tutor lesson show <id>` (with each step's revisions) | ⬜ | ⬜ | 🧪 |
+| 6.10 | Diagrams (`26-diagrams.md`) | The tutor draws register fields, memory maps, the machine's parts, a frame's timeline and a byte's way to the screen from the core's own data, and checks its own SVG; shown large in answers and in lesson steps | `romlens draw <rom> <kind> <spec>`; `romlens draw check <svg>` | ⬜ | ⬜ | 🧪 |
+| 6.11 | The glossary (`27-glossary.md`) | Each acronym, initialism and register in an answer or a lesson step is linked the first time it appears; a click shows a bubble spelling it out, with a sentence or two and a button to ask the tutor about it | `romlens glossary [TERM] [--registers]`; the tutor's `reference` topic `glossary` | ⬜ | ⬜ | 🧪 |
+| 6.12 | Quizzes and progress (`28-quizzes.md`) | `/quiz` asks checked questions (Romlens's, and the tutor's with claims Romlens verifies); passing proves a level, shown on the map beside the level learned; proven levels come due for review; points, a rank from what is proven, streaks and achievements, including finds in the game; predict questions guessed before Show; a setting hides the scores | `romlens tutor quiz <rom> [concept]`; `romlens tutor quiz coverage <rom>`; `romlens tutor progress [--ledger]` | ⬜ | ⬜ | 🧪 |
 
 ## Manual pass, macOS (to repeat before each release)
 

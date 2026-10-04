@@ -45,24 +45,6 @@ fn zooms(d: &Document) -> bool {
     matches!(d.tab(), Tab::Graph | Tab::Atlas)
 }
 
-fn never(_: &Document) -> bool {
-    false
-}
-
-fn nothing(_: &Rc<Document>, _: &adw::ApplicationWindow) {}
-
-/// Registered but not wired to a feature yet; the menu already has its final
-/// shape, and each one switches on as its feature lands.
-macro_rules! pending {
-    ($name:literal) => {
-        Entry {
-            name: $name,
-            enabled: never,
-            run: nothing,
-        }
-    };
-}
-
 /// File › Import: a trace, symbols or ca65 debug information.
 macro_rules! import {
     ($name:literal, $kind:ident) => {
@@ -364,7 +346,18 @@ const ENTRIES: &[Entry] = &[
         enabled: always,
         run: |d, _| d.open_audio(crate::model::audio::Tab::Scope),
     },
-    pending!("show-tutor"),
+    Entry {
+        name: "show-tutor",
+        enabled: always,
+        run: |d, w| {
+            if let Some(app) = w
+                .application()
+                .and_then(|a| a.downcast::<adw::Application>().ok())
+            {
+                crate::tutorview::open(&app, w, d);
+            }
+        },
+    },
     // File
     Entry {
         name: "save",

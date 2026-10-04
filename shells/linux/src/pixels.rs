@@ -42,6 +42,15 @@ pub fn surface(bitmap: &BitmapInfo) -> Option<cairo::ImageSurface> {
     Some(s)
 }
 
+/// The bitmap as PNG bytes, scaled up as a model reads it best, for sending.
+pub fn png(bitmap: &BitmapInfo) -> Option<Vec<u8>> {
+    if bitmap.width == 0 || bitmap.height == 0 {
+        return None;
+    }
+    let scale = romlens_ffi::tutor::png::scale_for_model(bitmap);
+    Some(romlens_ffi::tutor::png::encode(bitmap, scale))
+}
+
 /// Whole-number scale that fits `fit_width` (so pixels stay square), 1 to 8.
 pub fn fit_scale(width: u32, fit_width: u32) -> i32 {
     ((fit_width / width.max(1)).clamp(1, 8)) as i32

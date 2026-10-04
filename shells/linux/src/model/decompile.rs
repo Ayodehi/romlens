@@ -39,6 +39,9 @@ pub struct Decompile {
     pub result_generation: u64,
     /// The routine shown (or being decompiled), by entry address.
     pub entry: Option<u32>,
+    /// The C version of the routine picked in the C tab, if not the generated
+    /// C (docs/24, U10).
+    pub shown_version: Option<String>,
     /// For each file offset an instruction starts at, the C lines it made.
     lines_by_offset: HashMap<u32, Vec<usize>>,
     key: Option<Key>,
@@ -56,6 +59,7 @@ impl Default for Decompile {
             result: None,
             result_generation: 0,
             entry: None,
+            shown_version: None,
             lines_by_offset: HashMap::new(),
             key: None,
             shown: None,
