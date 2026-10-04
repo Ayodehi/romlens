@@ -4,11 +4,11 @@
 //! collapse into overlays on a narrow window. The macOS twin is
 //! `RomWindowController` and `DocumentView`.
 //!
-//! The editor is tab groups in a grid (docs/29, `tabgrid.rs`), and the
-//! header bar holds commands only: the panels, Back and Forward, and the
-//! menu. Views are chosen from the View menu and their keys. What the
-//! analyzer found is not a control, so it is in the header band with the
-//! overview strip.
+//! The editor is tab groups in a grid (docs/29, `tabgrid.rs`), with the
+//! results and then the status bar (the strip and the analysis) under it.
+//! The header bar holds the panels, Back and Forward, the jump bar, Open
+//! Quickly and the menu; views are chosen in the sidebar, the View menu and
+//! their keys.
 
 use std::rc::Rc;
 
@@ -16,7 +16,7 @@ use adw::prelude::*;
 
 use crate::model::{Change, Document};
 use crate::tabgrid::{self, Grid};
-use crate::{actions, headerband, inspector, jumpbar, menu, results, sheets, sidebar};
+use crate::{actions, inspector, jumpbar, menu, results, sheets, sidebar, statusbar};
 
 pub fn open_document(app: &adw::Application, doc: Rc<Document>) -> adw::ApplicationWindow {
     let window = adw::ApplicationWindow::builder()
@@ -52,11 +52,10 @@ pub fn open_document(app: &adw::Application, doc: Rc<Document>) -> adw::Applicat
     let editor = grid.root.clone();
 
     let center = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    center.append(&headerband::build(&doc));
-    center.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
     editor.set_vexpand(true);
     center.append(&editor);
     center.append(&results::build(&doc));
+    center.append(&statusbar::build(&doc));
 
     let inner = adw::OverlaySplitView::builder()
         .sidebar_position(gtk::PackType::End)
