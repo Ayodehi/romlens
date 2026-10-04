@@ -47,11 +47,17 @@ impl KeyStore for SecretService {
 
     fn set_key(&self, endpoint: &str, key: Option<&str>) -> Result<(), String> {
         let attributes = || HashMap::from([("endpoint", endpoint)]);
-        libsecret::password_clear_sync(Some(&schema()), attributes(), gtk::gio::Cancellable::NONE)
-            .map_err(|e| e.to_string())?;
         let Some(key) = key.map(str::trim).filter(|k| !k.is_empty()) else {
-            return Ok(());
+            return libsecret::password_clear_sync(
+                Some(&schema()),
+                attributes(),
+                gtk::gio::Cancellable::NONE,
+            )
+            .map_err(|e| e.to_string());
         };
+        // Stored over the item with the same attributes, which libsecret
+        // updates in place: a store that fails leaves the old key, where
+        // clearing it first left none (as the Keychain's update now does).
         libsecret::password_store_sync(
             Some(&schema()),
             attributes(),
