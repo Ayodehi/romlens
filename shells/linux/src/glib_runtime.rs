@@ -55,6 +55,22 @@ impl Runtime for GlibRuntime {
         });
     }
 
+    fn sink(
+        &self,
+        handler: Rc<dyn Fn(Box<dyn std::any::Any + Send>)>,
+    ) -> crate::model::runtime::Post {
+        let (tx, rx) = async_channel::unbounded::<Box<dyn std::any::Any + Send>>();
+        glib::spawn_future_local(async move {
+            while let Ok(message) = rx.recv().await {
+                handler(message);
+            }
+        });
+        Arc::new(move |message| {
+            // A closed receiver means the document is gone.
+            let _ = tx.try_send(message);
+        })
+    }
+
     fn attach_listener(&self, workbench: &Workbench, handler: Rc<dyn Fn(WorkbenchEvent)>) {
         let (tx, rx) = async_channel::unbounded();
         workbench.set_listener(Some(Arc::new(Bridge { tx })));

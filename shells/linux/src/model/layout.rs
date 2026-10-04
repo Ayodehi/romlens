@@ -95,6 +95,10 @@ impl Default for Panes {
 #[derive(Debug, Clone)]
 pub struct Layout {
     pub tab: Tab,
+    /// A graphics view in the editor area, if one is open. Choosing a text
+    /// tab closes it, which is how the tab buttons and the Graphics menu
+    /// share the area.
+    pub graphics: Option<super::graphics::Tab>,
     pub panes: Panes,
     pub results_kind: ResultsKind,
     /// What Focus on Code hid, to put back when it is turned off.
@@ -105,6 +109,7 @@ impl Default for Layout {
     fn default() -> Self {
         Self {
             tab: Tab::Hex,
+            graphics: None,
             panes: Panes::default(),
             results_kind: ResultsKind::Find,
             unfocused: None,

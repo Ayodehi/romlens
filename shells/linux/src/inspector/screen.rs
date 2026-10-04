@@ -137,10 +137,9 @@ fn row_view(doc: &Rc<Document>, row: &ScreenRowInfo) -> gtk::Widget {
         detail.append(&jump_button(doc, "Go", "Go to the DMA", at));
     }
     if let Some(link) = row.link {
-        // The graphics views arrive with L3; the link is shown, not live.
         let open = small_button(link_title(link));
-        open.set_sensitive(false);
-        open.set_tooltip_text(Some("The graphics views are not built yet"));
+        let d = Rc::clone(doc);
+        open.connect_clicked(move |_| d.open_screen_link(link));
         detail.append(&open);
     }
     if detail.first_child().is_some() {

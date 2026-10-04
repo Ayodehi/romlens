@@ -23,6 +23,7 @@ use super::commands::{EditorCommand, EditorSource, Sheet};
 use super::compare::{self, CompareModel, Item as CompareItem};
 use super::decompile::{Decompile, Key as DecompileKey};
 use super::graph::{self, GraphMode, GraphModel, Key as GraphKey};
+use super::graphics::{self as gfx, GraphicsModel};
 use super::layout::{Layout, Panes, ResultsKind, Tab};
 use super::navigator::{NavTab, Navigator, NavigatorData};
 use super::references::ReferencesModel;
@@ -66,6 +67,8 @@ pub enum Change {
     Graph,
     /// Zoom In, Out or Fit was asked for.
     Zoom,
+    /// A graphics view's source, settings or selection changed.
+    Graphics,
     /// The inspector's Screen section opened, closed or got its result.
     Screen,
     /// The Source tab's files, shown file or text changed.
@@ -194,6 +197,10 @@ pub struct Document {
     decompile: RefCell<Decompile>,
     graph: RefCell<GraphModel>,
     source: RefCell<SourceModel>,
+    graphics: RefCell<GraphicsModel>,
+    live_latest: Cell<Option<u64>>,
+    live_scheduled: Cell<bool>,
+    live_post: RefCell<Option<super::runtime::Post>>,
     screen: RefCell<ScreenModel>,
     compare: RefCell<CompareModel>,
     zoom: Cell<Option<(Zoom, u64)>>,
@@ -230,6 +237,7 @@ impl Document {
     ) -> Result<Rc<Self>, RomlensError> {
         let workbench = Workbench::with_project_files(Arc::clone(&rom), files)?;
         let doc = Self::with_workbench(rom, workbench, runtime);
+        doc.reattach_recording();
         *doc.project_path.borrow_mut() = Some(project_path.to_path_buf());
         *doc.rom_path.borrow_mut() = Some(rom_path.to_path_buf());
         Ok(doc)
@@ -246,6 +254,7 @@ impl Document {
         runtime: Rc<dyn Runtime>,
     ) -> Rc<Self> {
         let info = rom.info();
+        let rom_for_graphics = Arc::clone(&rom);
         let span_kinds = rom
             .spans()
             .into_iter()
@@ -279,6 +288,10 @@ impl Document {
             decompile: RefCell::new(Decompile::default()),
             graph: RefCell::new(GraphModel::default()),
             source: RefCell::new(SourceModel::default()),
+            graphics: RefCell::new(GraphicsModel::new(Arc::clone(&rom_for_graphics))),
+            live_latest: Cell::new(None),
+            live_scheduled: Cell::new(false),
+            live_post: RefCell::new(None),
             screen: RefCell::new(ScreenModel::default()),
             compare: RefCell::new(CompareModel::default()),
             zoom: Cell::new(None),
@@ -499,13 +512,383 @@ impl Document {
     pub fn set_tab(&self, tab: Tab) {
         let changed = {
             let mut l = self.layout.borrow_mut();
-            std::mem::replace(&mut l.tab, tab) != tab
+            // A text tab takes the editor area back from a graphics view.
+            let was_graphics = l.graphics.take().is_some();
+            std::mem::replace(&mut l.tab, tab) != tab || was_graphics
         };
         if changed {
             self.emit(Change::Layout);
             self.refresh_decompile();
             self.refresh_graph();
         }
+    }
+
+    // MARK: Graphics
+
+    pub fn graphics(&self) -> std::cell::Ref<'_, GraphicsModel> {
+        self.graphics.borrow()
+    }
+
+    /// The graphics view in the editor area, if one is open.
+    pub fn graphics_tab(&self) -> Option<gfx::Tab> {
+        self.layout.borrow().graphics
+    }
+
+    /// Open a graphics view, reading the ROM bytes at the selection.
+    pub fn open_graphics(&self, tab: gfx::Tab) {
+        if !tab.needs_recording()
+            && self.graphics.borrow().source == gfx::Source::Rom
+            && let Some(range) = self.highlighted_range()
+        {
+            self.graphics.borrow_mut().rom_offset = range.start;
+        }
+        let changed = self.layout.borrow_mut().graphics.replace(tab) != Some(tab);
+        if changed {
+            self.emit(Change::Layout);
+        }
+        self.emit(Change::Graphics);
+    }
+
+    /// Change the graphics model. The closure may return the ROM bytes the
+    /// change selected, which are selected in the editor too (one selection
+    /// across code and graphics).
+    pub fn edit_graphics(
+        &self,
+        f: impl FnOnce(&mut GraphicsModel) -> Option<std::ops::Range<u32>>,
+    ) {
+        let range = f(&mut self.graphics.borrow_mut());
+        if let Some(r) = range {
+            self.select_range(r);
+        }
+        self.emit(Change::Graphics);
+    }
+
+    /// Attach a recording, refusing one of another ROM with the core's
+    /// words. The project keeps its path and fingerprint, never its
+    /// contents (docs/12, rule 4).
+    pub fn attach_recording(
+        &self,
+        session: Arc<romlens_ffi::RecordingSession>,
+        name: &str,
+    ) -> Result<(), RomlensError> {
+        self.graphics
+            .borrow_mut()
+            .attach(Arc::clone(&session), name)?;
+        if let Some(reference) = session.reference() {
+            self.workbench().attach_recording(reference);
+        }
+        if self.graphics_tab().is_none() {
+            self.open_graphics(gfx::Tab::Tilemap);
+        } else {
+            self.emit(Change::Graphics);
+        }
+        Ok(())
+    }
+
+    /// Close the recording the views read, and stop referring to it.
+    pub fn close_recording(&self) {
+        for r in self.workbench().recordings() {
+            self.workbench().detach_recording(r.path);
+        }
+        self.graphics.borrow_mut().detach();
+        self.emit(Change::Graphics);
+    }
+
+    /// On opening a project: reattach the recording it refers to, if the
+    /// file is still there and unchanged. Quietly does nothing otherwise,
+    /// since a recording is a convenience, not part of the project's content.
+    pub fn reattach_recording(&self) {
+        let Some(r) = self.workbench().recordings().into_iter().last() else {
+            return;
+        };
+        let Ok(session) = romlens_ffi::RecordingSession::open(r.path.clone(), false) else {
+            return;
+        };
+        if session.reference().map(|x| x.fingerprint) != Some(r.fingerprint) {
+            return;
+        }
+        let name = std::path::Path::new(&r.path)
+            .file_name()
+            .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+        // Attached, but the views are not opened: a reopened project shows
+        // its listing, and the recording is there when asked for.
+        let _ = self.graphics.borrow_mut().attach(session, &name);
+    }
+
+    /// Where a pixel of the current frame came from (docs/22, P5), worked out
+    /// off the main thread: the DMAs that put its bytes in VRAM, the code
+    /// before them and the ROM bytes.
+    pub fn pixel_provenance(
+        &self,
+        x: usize,
+        y: usize,
+        done: impl FnOnce(Option<romlens_ffi::ProvenanceInfo>) + 'static,
+    ) {
+        let (Some(recording), frame) = (
+            self.graphics.borrow().recording().cloned(),
+            self.graphics.borrow().frame(),
+        ) else {
+            return done(None);
+        };
+        let wb = Arc::clone(self.workbench());
+        background(
+            &*self.runtime,
+            move || wb.pixel_provenance_blocking(recording, frame, x as u32, y as u32),
+            done,
+        );
+    }
+
+    // MARK: Live session
+
+    pub fn is_live(&self) -> bool {
+        self.graphics.borrow().is_live()
+    }
+
+    /// File > Start Live Session: listen for the recorder script's stream and
+    /// show it in the graphics views as it arrives. The session is a
+    /// recording like any other to the views, so everything that reads one
+    /// works live. It listens on the loopback address only, and refuses a
+    /// stream recorded from another ROM.
+    pub fn start_live(&self) -> Result<(), RomlensError> {
+        if self.is_live() {
+            return Ok(());
+        }
+        let Some(bridge) = self.live_bridge() else {
+            return Ok(());
+        };
+        let session = romlens_ffi::live::LiveSession::start(
+            Arc::clone(&self.rom),
+            romlens_ffi::live::live_default_port(),
+            bridge,
+        )?;
+        self.attach_live_session(session)
+    }
+
+    /// The listener a live session reports to: it posts to this document's
+    /// main loop.
+    pub fn live_bridge(&self) -> Option<Arc<super::live::LiveBridge>> {
+        let me = self.me.borrow().upgrade()?;
+        let existing = self.live_post.borrow().clone();
+        let post = existing.unwrap_or_else(|| {
+            let weak = Rc::downgrade(&me);
+            let post = self.runtime.sink(Rc::new(move |message| {
+                if let Some(d) = weak.upgrade() {
+                    d.live_message(message);
+                }
+            }));
+            *self.live_post.borrow_mut() = Some(Arc::clone(&post));
+            post
+        });
+        Some(super::live::LiveBridge::new(
+            post,
+            Arc::clone(self.workbench()),
+        ))
+    }
+
+    /// Read a started session's frames as the recording, following the
+    /// newest.
+    pub fn attach_live_session(
+        &self,
+        session: Arc<romlens_ffi::live::LiveSession>,
+    ) -> Result<(), RomlensError> {
+        self.graphics.borrow_mut().attach_live(session, 0)?;
+        if self.graphics_tab().is_none() {
+            self.open_graphics(gfx::Tab::Tilemap);
+        } else {
+            self.emit(Change::Graphics);
+        }
+        Ok(())
+    }
+
+    /// Stop listening, keeping the frames already received.
+    pub fn stop_live(&self) {
+        self.graphics.borrow_mut().stop_live();
+        self.emit(Change::Graphics);
+    }
+
+    /// A message from the session's thread, on the main loop.
+    fn live_message(self: &Rc<Self>, message: Box<dyn std::any::Any + Send>) {
+        use super::live::{LiveMessage, MAX_FRAME_RATE};
+        let Ok(message) = message.downcast::<LiveMessage>() else {
+            return;
+        };
+        match *message {
+            LiveMessage::Frame(n) => {
+                // Frames arrive sixty times a second; the views are told at
+                // most thirty, with only the newest, so drawing never falls
+                // behind.
+                self.live_latest.set(Some(n));
+                if !self.live_scheduled.replace(true) {
+                    let weak = Rc::downgrade(self);
+                    self.runtime.after(
+                        std::time::Duration::from_millis(1000 / MAX_FRAME_RATE),
+                        Box::new(move || {
+                            let Some(d) = weak.upgrade() else { return };
+                            d.live_scheduled.set(false);
+                            if let Some(latest) = d.live_latest.take() {
+                                d.graphics.borrow_mut().live_arrived(latest);
+                                d.emit(Change::Graphics);
+                            }
+                        }),
+                    );
+                }
+            }
+            LiveMessage::Status(s) => {
+                self.graphics.borrow_mut().live_status_changed(&s);
+                self.emit(Change::Graphics);
+            }
+            LiveMessage::Merged(added) => {
+                self.graphics.borrow_mut().live_log_merged(added);
+                // The bookkeeping a command does, and the re-analysis.
+                self.session.finish_command(true);
+                self.refresh_details();
+                self.emit(Change::Graphics);
+            }
+        }
+    }
+
+    /// Pack a recorder stream (`.rlstream`) into a recording at `out`, off
+    /// the main thread.
+    pub fn pack_recording(
+        &self,
+        stream: PathBuf,
+        out: PathBuf,
+        done: impl FnOnce(Result<romlens_ffi::PackSummary, RomlensError>) + 'static,
+    ) {
+        let rom = Arc::clone(&self.rom);
+        background(
+            &*self.runtime,
+            move || {
+                if let Some(dir) = out.parent() {
+                    std::fs::create_dir_all(dir).map_err(|e| RomlensError::Io {
+                        msg: format!("{}: {e}", dir.display()),
+                    })?;
+                }
+                romlens_ffi::pack_recorder_stream(
+                    rom,
+                    stream.to_string_lossy().into_owned(),
+                    out.to_string_lossy().into_owned(),
+                    None,
+                )
+            },
+            done,
+        );
+    }
+
+    /// Move the recording to `frame`.
+    pub fn set_frame(&self, frame: u64) {
+        if self.graphics.borrow().frame() == frame {
+            return;
+        }
+        self.edit_graphics(|g| {
+            g.set_frame(frame);
+            None
+        });
+    }
+
+    pub fn step_frame(&self, delta: i64) {
+        self.edit_graphics(|g| {
+            g.step(delta);
+            None
+        });
+    }
+
+    /// Read from the selection: Decode the bytes at the editor's selection.
+    pub fn read_graphics_from_selection(&self) {
+        if let Some(r) = self.highlighted_range() {
+            self.edit_graphics(|g| {
+                g.rom_offset = r.start;
+                g.selected_tile = 0;
+                None
+            });
+        }
+    }
+
+    /// A Screen row's view: the ROM bytes a DMA sends to VRAM or the
+    /// palette, in the Tile Decoder, Tilemap or Palette view.
+    pub fn open_screen_link(&self, link: romlens_ffi::ScreenLinkInfo) {
+        use romlens_ffi::{ScreenLinkInfo, TileFormat};
+        // The palette the same setup loads, where it is in ROM.
+        let palette = self.screen.borrow().setup.as_ref().and_then(|s| {
+            s.sections
+                .iter()
+                .flat_map(|sec| &sec.rows)
+                .find_map(|r| match r.link {
+                    Some(ScreenLinkInfo::Palette { rom }) => Some(rom),
+                    _ => None,
+                })
+        });
+        let tab = {
+            let mut g = self.graphics.borrow_mut();
+            g.source = gfx::Source::Rom;
+            match link {
+                ScreenLinkInfo::Tiles { rom, bpp } => {
+                    g.rom_offset = rom;
+                    g.format = match bpp {
+                        2 => TileFormat::Bpp2,
+                        8 => TileFormat::Bpp8,
+                        7 => TileFormat::Mode7,
+                        _ => TileFormat::Bpp4,
+                    };
+                    if let Some(p) = palette {
+                        g.palette = gfx::PaletteChoice::Rom(p);
+                    }
+                    g.selected_tile = 0;
+                    gfx::Tab::Tiles
+                }
+                ScreenLinkInfo::Tilemap { rom } => {
+                    g.rom_offset = rom;
+                    gfx::Tab::Tilemap
+                }
+                ScreenLinkInfo::Palette { rom } => {
+                    g.rom_offset = rom;
+                    gfx::Tab::Palette
+                }
+            }
+        };
+        self.open_graphics(tab);
+    }
+
+    /// The inspector's "Open in …": the preview's view on the range it
+    /// previewed, or on the decompressed bytes for compressed data.
+    pub fn open_preview(&self, p: &romlens_ffi::PreviewInfo) {
+        use romlens_ffi::PreviewView;
+        let params = self.workbench().region_params_at(p.start);
+        {
+            let mut g = self.graphics.borrow_mut();
+            match &p.decompressed {
+                Some(data) => {
+                    g.source = gfx::Source::Bytes {
+                        label: "Decompressed".into(),
+                        data: data.clone(),
+                    }
+                }
+                None => {
+                    g.source = gfx::Source::Rom;
+                    g.rom_offset = p.start;
+                }
+            }
+            if let Some(f) = p.format {
+                g.format = f;
+            }
+            if let Some(params) = params {
+                if let Some(c) = params.columns {
+                    g.columns = usize::from(c);
+                }
+                if let Some(s) = params.screen_size {
+                    g.screen_size = s;
+                }
+                if let Some(offset) = params.palette.and_then(|a| self.rom.file_offset_for(a)) {
+                    g.palette = gfx::PaletteChoice::Rom(offset);
+                }
+            }
+            g.selected_tile = 0;
+        }
+        self.open_graphics(match p.view {
+            PreviewView::TileDecoder => gfx::Tab::Tiles,
+            PreviewView::Palette => gfx::Tab::Palette,
+            PreviewView::Tilemap => gfx::Tab::Tilemap,
+        });
     }
 
     /// Source only with sources imported, Compare only while comparing.
@@ -1581,6 +1964,39 @@ impl Document {
     /// Live preview for the jump sheet: what the expression resolves to.
     pub fn preview_address(&self, text: &str) -> Result<ResolvedAddress, RomlensError> {
         self.rom.resolve(text.to_owned())
+    }
+
+    /// Set how the marked range previews: undoable, and never re-analyses.
+    pub fn set_preview_options(
+        &self,
+        params: romlens_ffi::RegionParamsInfo,
+    ) -> Result<(), RomlensError> {
+        let Some(range) = self.marked_range() else {
+            return Ok(());
+        };
+        self.session.execute(Command::SetRegionParams {
+            start: range.start,
+            params,
+        })?;
+        self.refresh_details();
+        Ok(())
+    }
+
+    /// How the marked range at the selection previews now.
+    pub fn preview_options(&self) -> Option<romlens_ffi::RegionParamsInfo> {
+        let range = self.marked_range()?;
+        self.workbench().region_params_at(range.start)
+    }
+
+    /// A typed address as the 24-bit SNES address the core stores it as.
+    pub fn snes_address_of(&self, text: &str) -> Result<Option<u32>, RomlensError> {
+        let text = text.trim();
+        if text.is_empty() {
+            return Ok(None);
+        }
+        let r = self.rom.resolve(text.to_owned())?;
+        Ok(r.snes_address
+            .or_else(|| self.rom.snes_address_for(r.file_offset)))
     }
 
     pub fn can_go_back(&self) -> bool {
@@ -2666,5 +3082,261 @@ mod tests {
         // Leaving the instruction clears it.
         d.select(None);
         assert!(d.screen().setup.is_none());
+    }
+
+    fn graphics_doc() -> (Rc<Document>, Rc<TestRuntime>) {
+        let rt = TestRuntime::new();
+        let rom =
+            romlens_ffi::Rom::from_bytes(romlens_ffi::make_graphics_test_rom(), "g.sfc".into())
+                .unwrap();
+        let d = Document::new(rom, rt.clone());
+        d.start_analysis();
+        rt.pump();
+        (d, rt)
+    }
+
+    #[test]
+    fn a_graphics_view_reads_the_selection_and_a_text_tab_takes_the_area_back() {
+        let (d, _rt) = graphics_doc();
+        d.select(Some(0x1400));
+        assert_eq!(d.graphics_tab(), None);
+        d.open_graphics(gfx::Tab::Tiles);
+        assert_eq!(d.graphics_tab(), Some(gfx::Tab::Tiles));
+        assert_eq!(d.graphics().rom_offset, 0x1400);
+        // Frame and Layers do not move the offset.
+        d.select(Some(0x1800));
+        d.open_graphics(gfx::Tab::Frame);
+        assert_eq!(d.graphics().rom_offset, 0x1400);
+        // Choosing the tab that was already current still closes the view.
+        let current = d.tab();
+        d.set_tab(current);
+        assert_eq!(d.graphics_tab(), None);
+    }
+
+    #[test]
+    fn selecting_in_a_graphics_view_selects_its_bytes_in_the_editor() {
+        let (d, _rt) = graphics_doc();
+        d.select(Some(0x1000));
+        d.open_graphics(gfx::Tab::Tiles);
+        d.edit_graphics(|g| g.select_tile(2));
+        assert_eq!(d.highlighted_range(), Some(0x1040..0x1060));
+        d.open_graphics(gfx::Tab::Palette);
+        d.edit_graphics(|g| g.select_colour(1));
+        // The palette view reads from where the tile selection left the editor.
+        assert_eq!(d.highlighted_range(), Some(0x1042..0x1044));
+    }
+
+    #[test]
+    fn a_previews_open_button_reads_the_range_in_the_view_it_names() {
+        let (d, rt) = graphics_doc();
+        d.select(Some(0x1000));
+        d.select_range(0x1000..0x1400);
+        d.mark(OverrideKind::Data, DataKind::Graphics).unwrap();
+        rt.fire_timers();
+        rt.pump();
+        let preview = d.details().preview.expect("a typed range previews");
+        d.open_preview(&preview);
+        assert_eq!(d.graphics_tab(), Some(gfx::Tab::Tiles));
+        assert_eq!(d.graphics().rom_offset, 0x1000);
+        assert_eq!(d.graphics().format, romlens_ffi::TileFormat::Bpp4);
+        assert_eq!(d.graphics().source, gfx::Source::Rom);
+    }
+
+    #[test]
+    fn preview_options_are_set_on_the_mark_and_an_empty_address_means_the_default() {
+        let (d, rt) = graphics_doc();
+        d.select(Some(0x1000));
+        d.select_range(0x1000..0x1400);
+        // Not marked yet: there is nothing for the options to belong to.
+        assert!(d.preview_options().is_none());
+        d.mark(OverrideKind::Data, DataKind::Graphics).unwrap();
+        rt.fire_timers();
+        rt.pump();
+        assert_eq!(d.snes_address_of("  ").unwrap(), None);
+        assert_eq!(d.snes_address_of("0x1800").unwrap(), Some(0x00_9800));
+        assert!(d.snes_address_of("nonsense").is_err());
+        d.set_preview_options(romlens_ffi::RegionParamsInfo {
+            palette: Some(0x00_9800),
+            columns: Some(8),
+            ..Default::default()
+        })
+        .unwrap();
+        let got = d.preview_options().expect("a mark has options");
+        assert_eq!((got.palette, got.columns), (Some(0x00_9800), Some(8)));
+        d.session.undo();
+        assert_eq!(d.preview_options().and_then(|p| p.columns), None);
+    }
+
+    fn recording_file(name: &str, frames: u32) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("romlens-rec-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("test.romrec");
+        std::fs::write(&path, romlens_ffi::make_test_recording(frames)).unwrap();
+        path
+    }
+
+    #[test]
+    fn attaching_a_recording_opens_the_tilemap_and_closing_it_goes_back_to_the_rom() {
+        let (d, _rt) = graphics_doc();
+        let path = recording_file("attach", 12);
+        let session =
+            romlens_ffi::RecordingSession::open(path.to_string_lossy().into_owned(), false)
+                .unwrap();
+        d.attach_recording(session, "test.romrec").unwrap();
+        assert_eq!(d.graphics_tab(), Some(gfx::Tab::Tilemap));
+        assert_eq!(d.graphics().source, gfx::Source::Recording);
+        // The project refers to it, never holds it.
+        assert_eq!(d.workbench().recordings().len(), 1);
+        d.set_frame(5);
+        assert_eq!(d.graphics().frame(), 5);
+        d.step_frame(100);
+        assert_eq!(d.graphics().frame(), 11);
+        d.close_recording();
+        assert!(d.workbench().recordings().is_empty());
+        assert_eq!(d.graphics().source, gfx::Source::Rom);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn a_saved_project_reattaches_its_recording_when_the_file_is_unchanged() {
+        let dir = scratch_dir("reattach");
+        let rec = dir.join("test.romrec");
+        std::fs::write(&rec, romlens_ffi::make_test_recording(6)).unwrap();
+        let (d, _rt) = graphics_doc();
+        let session =
+            romlens_ffi::RecordingSession::open(rec.to_string_lossy().into_owned(), false).unwrap();
+        d.attach_recording(session, "test.romrec").unwrap();
+        let project = dir.join("g.romlens");
+        d.save_to(&project).unwrap();
+
+        let files =
+            romlens_ffi::workbench::read_project_package(project.to_string_lossy().into_owned())
+                .unwrap();
+        let (files, _) = package::split_local(files);
+        let rt = TestRuntime::new();
+        let rom =
+            romlens_ffi::Rom::from_bytes(romlens_ffi::make_graphics_test_rom(), "g.sfc".into())
+                .unwrap();
+        let reopened =
+            Document::from_project(rom, files.clone(), &project, &dir.join("g.sfc"), rt.clone())
+                .unwrap();
+        assert!(reopened.graphics().has_recording(), "found where it was");
+
+        // A changed file is not the recording the project saw.
+        std::fs::write(&rec, romlens_ffi::make_test_recording(7)).unwrap();
+        let rom =
+            romlens_ffi::Rom::from_bytes(romlens_ffi::make_graphics_test_rom(), "g.sfc".into())
+                .unwrap();
+        let again = Document::from_project(rom, files, &project, &dir.join("g.sfc"), rt).unwrap();
+        assert!(!again.graphics().has_recording());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_recording_of_another_rom_is_refused_and_attaches_nothing() {
+        let rt = TestRuntime::new();
+        let rom =
+            romlens_ffi::Rom::from_bytes(romlens_ffi::make_routines_test_rom(), "r.sfc".into())
+                .unwrap();
+        let d = Document::new(rom, rt);
+        let path = recording_file("other", 3);
+        let session =
+            romlens_ffi::RecordingSession::open(path.to_string_lossy().into_owned(), false)
+                .unwrap();
+        assert!(d.attach_recording(session, "x").is_err());
+        assert!(d.workbench().recordings().is_empty());
+        assert_eq!(d.graphics_tab(), None);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn packing_a_recorder_stream_makes_a_recording_in_the_folder_asked_for() {
+        // A stream is what the Mesen script writes; the core's own tests make
+        // one, so here only a bad stream's failure is checked.
+        let (d, rt) = graphics_doc();
+        let dir = scratch_dir("pack");
+        let stream = dir.join("bad.rlstream");
+        std::fs::write(&stream, b"not a stream").unwrap();
+        let out = dir.join("nested").join("out.romrec");
+        let got = Rc::new(RefCell::new(None));
+        let sink = Rc::clone(&got);
+        d.pack_recording(stream, out.clone(), move |r| *sink.borrow_mut() = Some(r));
+        rt.pump();
+        assert!(matches!(got.borrow().as_ref(), Some(Err(_))));
+        assert!(!out.exists(), "a failure leaves nothing half-written");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_live_session_feeds_the_views_coalesced_and_follows_the_newest_frame() {
+        let (d, rt) = graphics_doc();
+        let stream = romlens_ffi::live::make_test_stream(Arc::clone(&d.rom), 12, None);
+        let bridge = d.live_bridge().expect("the document is alive");
+        let session = romlens_ffi::live::LiveSession::replay(Arc::clone(&d.rom), stream, bridge)
+            .expect("a fixture stream replays");
+        d.attach_live_session(Arc::clone(&session)).unwrap();
+        assert!(d.is_live());
+        assert_eq!(d.graphics_tab(), Some(gfx::Tab::Tilemap));
+        // The session reads on its own thread; wait for the last frame.
+        let start = std::time::Instant::now();
+        while session.latest_frame() != Some(11) {
+            assert!(
+                start.elapsed() < std::time::Duration::from_secs(10),
+                "stream never arrived"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        rt.pump();
+        // Frames are told at most thirty times a second: one timer, however
+        // many arrived.
+        assert!(rt.pending_timers() <= 1, "{} timers", rt.pending_timers());
+        rt.fire_timers();
+        assert_eq!(d.graphics().frame(), 11, "following the newest");
+        assert!(
+            d.graphics()
+                .source_description()
+                .starts_with("Live, frame 11, ")
+        );
+        // Moving off the newest frame pauses following.
+        d.set_frame(4);
+        assert!(!d.graphics().follow_live);
+        d.stop_live();
+        assert!(!d.is_live());
+        assert_eq!(d.graphics().recording_name(), Some("Live (stopped)"));
+        assert_eq!(
+            d.graphics().frame_count(),
+            12,
+            "the frames received stay readable"
+        );
+    }
+
+    #[test]
+    fn a_screen_rows_link_opens_its_rom_bytes_in_the_view_it_names() {
+        use romlens_ffi::ScreenLinkInfo;
+        let (d, _rt) = graphics_doc();
+        d.open_screen_link(ScreenLinkInfo::Tiles {
+            rom: 0x1000,
+            bpp: 2,
+        });
+        assert_eq!(d.graphics_tab(), Some(gfx::Tab::Tiles));
+        assert_eq!(d.graphics().rom_offset, 0x1000);
+        assert_eq!(d.graphics().format, romlens_ffi::TileFormat::Bpp2);
+        d.open_screen_link(ScreenLinkInfo::Tiles {
+            rom: 0x1400,
+            bpp: 7,
+        });
+        assert_eq!(d.graphics().format, romlens_ffi::TileFormat::Mode7);
+        d.open_screen_link(ScreenLinkInfo::Tilemap { rom: 0x2000 });
+        assert_eq!(
+            (d.graphics_tab(), d.graphics().rom_offset),
+            (Some(gfx::Tab::Tilemap), 0x2000)
+        );
+        d.open_screen_link(ScreenLinkInfo::Palette { rom: 0x1800 });
+        assert_eq!(
+            (d.graphics_tab(), d.graphics().rom_offset),
+            (Some(gfx::Tab::Palette), 0x1800)
+        );
+        assert_eq!(d.graphics().source, gfx::Source::Rom);
     }
 }

@@ -14,6 +14,8 @@
 //! - `ROMLENS_COMPARE`: compare with this ROM file or project folder first
 //! - `ROMLENS_COMPARE_ITEM`: choose a change in the Compare list: `routine:0`, `data:1`...
 //! - `ROMLENS_SCREEN`: open the inspector's Screen section
+//! - `ROMLENS_RECORDING`: attach this `.romrec` first, then `ROMLENS_FRAME` (a frame
+//!   number) and `ROMLENS_PIXEL` (`x,y`, kept in the Frame view)
 //! - `ROMLENS_MENU`: capture a menu instead of the window: `primary`, or
 //!   the label of the menu button (`File + SNES`)
 
@@ -42,6 +44,30 @@ pub fn maybe_capture(window: &adw::ApplicationWindow, doc: &Rc<Document>) {
         move || {
             if let Ok(dbg) = std::env::var("ROMLENS_IMPORT_DBG") {
                 doc.import(crate::model::transfer::ImportKind::Dbg, dbg.into(), |_| {});
+            }
+            if let Ok(path) = std::env::var("ROMLENS_RECORDING")
+                && let Ok(session) = romlens_ffi::RecordingSession::open(path, false)
+            {
+                let _ = doc.attach_recording(session, "recording.romrec");
+                if let Some(n) = std::env::var("ROMLENS_FRAME")
+                    .ok()
+                    .and_then(|f| f.parse().ok())
+                {
+                    doc.set_frame(n);
+                }
+                if let Some((x, y)) = std::env::var("ROMLENS_PIXEL")
+                    .ok()
+                    .and_then(|p| {
+                        p.split_once(',')
+                            .map(|(x, y)| (x.parse().ok(), y.parse().ok()))
+                    })
+                    .and_then(|(x, y)| Some((x?, y?)))
+                {
+                    doc.edit_graphics(|g| {
+                        g.selected_pixel = Some((x, y));
+                        None
+                    });
+                }
             }
             if let Ok(other) = std::env::var("ROMLENS_COMPARE") {
                 doc.compare_with(other.into());

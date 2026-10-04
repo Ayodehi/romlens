@@ -11,10 +11,10 @@ covered by its unit tests and screenshot checks, not yet verified by hand.
 Still open on Linux in Phases 0 to 2A: the sticky `00` to `0F` column header and
 hover names on header spans (0.4, 0.6), the launch log line (0.12), the
 undo title in the menu (1.12), and the traced-bytes line in the analysis
-status (2.3). Phase 3 and 4 rows are built on Linux except the ones that
-need the graphics views (3.12 to 3.14, 4.5 and 4.6: the Screen section is
-there, but its Show Tiles, Tilemap and Palette links wait for them), and the C
-tab's versions and annotation sheets, which arrive with the tutor.
+status (2.3). Phase 3 and 4 rows are built on Linux except the C tab's versions and
+annotation sheets, which arrive with the tutor. The live session is covered by a
+test against a replayed stream, not yet run against Mesen, and Mesen's Linux
+script data folder (`~/.config/Mesen2/LuaScriptData`) is assumed, not checked.
 
 Status: macOS ✅ done, 🧪 built and covered by the app test bundle but not
 yet verified by hand, ⬜ not yet; Windows and Linux start after macOS
@@ -110,27 +110,27 @@ are not started.
 
 | # | Capability | Shell must expose | CLI scenario | macOS | Win | Linux |
 |---|---|---|---|---|---|---|
-| 2.20 | Tile decoder on raw ROM bytes | Tile decoder tab; 2/4/8 bpp; a palette picker; bytes, the bitplane grids, the index grid and the zoomed tile side by side; hovering a pixel lights its bit in each plane and its byte in the strip | `romlens tiles <rom> --from <expr> --bpp 4 --text` prints the 8×8 index grid; `--json` adds the per-plane bytes | 🧪 | ⬜ | ⬜ |
-| 2.21 | Tile sheet browsing | A scrolling sheet at the chosen bpp and column count; clicking a tile selects its bytes in the hex view | `romlens tiles <rom> --from <expr> --count 64 --columns 16 --text` | 🧪 | ⬜ | ⬜ |
-| 2.22 | Palette view | 16×16 swatches; the entry detail shows the raw `$7FFF`, the 5-bit B/G/R fields and the 8-bit RGB; clicking a swatch selects its two bytes | `romlens palette <rom> --from <expr> [--count 256] [--json]` | 🧪 | ⬜ | ⬜ |
-| 2.23 | OAM table | 128 rows with index, x, y, tile, palette, priority, flips, size in pixels from OBSEL and name table; sortable by table order, screen position or priority; selecting a row selects its low- and high-table bytes | `romlens oam <rom> --from <expr> [--obsel 0x30] [--sort table\|screen\|priority] [--json]` | 🧪 | ⬜ | ⬜ |
-| 2.24 | Tilemap view | Entries decoded as `vhopppcc cccccccc`, overlaid as a grid on the rendered layer; clicking a cell selects its two bytes and reveals its tile | `romlens tilemap <rom> --from <expr> --size 32x32\|64x32\|32x64\|64x64 [--json]` | 🧪 | ⬜ | ⬜ |
-| 2.25 | Previews for typed ranges | A range typed `graphics(bpp)`, `palette`, `tilemap` or `compressed` previews in the inspector with an "Open in …" button; Options… sets the palette, tiles across, and a tilemap's size and tile source on the mark | `romlens inspect <rom> <expr> --project P` prints the preview summary; `romlens project <P> preview <expr> [--palette A] [--columns N] [--size S] [--tiles A]` | 🧪 | ⬜ | ⬜ |
-| 2.26 | Reference BG layer render | The Tilemap tab renders one BG layer from VRAM, CGRAM and the PPU registers (no priority, windows or colour math in Phase 2); in Mode 7 it draws the 128×128 plane untransformed, with 8-bit tile numbers in the grid | `romlens render bg --rec R --frame N --bg 1 [--ascii] [--digest]`, `romlens render sprite --rec R --frame N --index I` | 🧪 | ⬜ | ⬜ |
-| 2.27 | Super Metroid decompression | Marking a range `compressed` offers "Decompress and preview", opening the tile decoder on the output | `romlens decompress <rom> --from <expr> --format sm [--stats] [--out F]` | 🧪 | ⬜ | ⬜ |
+| 2.20 | Tile decoder on raw ROM bytes | Tile decoder tab; 2/4/8 bpp; a palette picker; bytes, the bitplane grids, the index grid and the zoomed tile side by side; hovering a pixel lights its bit in each plane and its byte in the strip | `romlens tiles <rom> --from <expr> --bpp 4 --text` prints the 8×8 index grid; `--json` adds the per-plane bytes | 🧪 | ⬜ | 🧪 |
+| 2.21 | Tile sheet browsing | A scrolling sheet at the chosen bpp and column count; clicking a tile selects its bytes in the hex view | `romlens tiles <rom> --from <expr> --count 64 --columns 16 --text` | 🧪 | ⬜ | 🧪 |
+| 2.22 | Palette view | 16×16 swatches; the entry detail shows the raw `$7FFF`, the 5-bit B/G/R fields and the 8-bit RGB; clicking a swatch selects its two bytes | `romlens palette <rom> --from <expr> [--count 256] [--json]` | 🧪 | ⬜ | 🧪 |
+| 2.23 | OAM table | 128 rows with index, x, y, tile, palette, priority, flips, size in pixels from OBSEL and name table; sortable by table order, screen position or priority; selecting a row selects its low- and high-table bytes | `romlens oam <rom> --from <expr> [--obsel 0x30] [--sort table\|screen\|priority] [--json]` | 🧪 | ⬜ | 🧪 |
+| 2.24 | Tilemap view | Entries decoded as `vhopppcc cccccccc`, overlaid as a grid on the rendered layer; clicking a cell selects its two bytes and reveals its tile | `romlens tilemap <rom> --from <expr> --size 32x32\|64x32\|32x64\|64x64 [--json]` | 🧪 | ⬜ | 🧪 |
+| 2.25 | Previews for typed ranges | A range typed `graphics(bpp)`, `palette`, `tilemap` or `compressed` previews in the inspector with an "Open in …" button; Options… sets the palette, tiles across, and a tilemap's size and tile source on the mark | `romlens inspect <rom> <expr> --project P` prints the preview summary; `romlens project <P> preview <expr> [--palette A] [--columns N] [--size S] [--tiles A]` | 🧪 | ⬜ | 🧪 |
+| 2.26 | Reference BG layer render | The Tilemap tab renders one BG layer from VRAM, CGRAM and the PPU registers (no priority, windows or colour math in Phase 2); in Mode 7 it draws the 128×128 plane untransformed, with 8-bit tile numbers in the grid | `romlens render bg --rec R --frame N --bg 1 [--ascii] [--digest]`, `romlens render sprite --rec R --frame N --index I` | 🧪 | ⬜ | 🧪 |
+| 2.27 | Super Metroid decompression | Marking a range `compressed` offers "Decompress and preview", opening the tile decoder on the output | `romlens decompress <rom> --from <expr> --format sm [--stats] [--out F]` | 🧪 | ⬜ | 🧪 |
 
 ### 2C — recordings
 
 | # | Capability | Shell must expose | CLI scenario | macOS | Win | Linux |
 |---|---|---|---|---|---|---|
-| 2.28 | Open a recording | File › Open Recording…; a frame field with prev/next appears and the graphics tabs read the recording's state | `romlens rec info R` | 🧪 | ⬜ | ⬜ |
-| 2.29 | Validate a recording; a recording cut short offers "Open What Was Recorded" | The open path shows the validator's diagnostics verbatim and refuses a recording whose ROM hash differs | `romlens rec validate R [--rom <rom>] [--sample N] [--strict] [--recover]` | 🧪 | ⬜ | ⬜ |
-| 2.30 | Extract a frame region | Export Frame Region… writes VRAM, CGRAM, OAM, WRAM or the register blocks | `romlens rec extract R --frame N --region vram [--out F] [--hex]` | 🧪 | ⬜ | ⬜ |
-| 2.31 | What changed between frames (badges are exact: runs narrow, bytes decide; a sprite's own high-table bits) | The graphics views badge entries that changed since the previous frame | `romlens rec changes R --from A --to B --region vram` | 🧪 | ⬜ | ⬜ |
-| 2.32 | When did this byte change (shown in each graphics view's detail pane, where VRAM, CGRAM and OAM bytes are selected, rather than the inspector) | The inspector on a VRAM/CGRAM/OAM byte reads "changed at frame N, next at M" with Go | `romlens rec when R --region vram --offset 0x4000 [--len 2] [--after N] [--backward]`, `romlens rec index R [--rebuild]` | 🧪 | ⬜ | ⬜ |
-| 2.33 | Snapshot import (`.mss` savestates are not read: optional, and not done) | File › Import Snapshot… accepts loose VRAM/CGRAM/OAM dumps and a Mesen2 savestate, producing a one-frame recording | `romlens rec import-raw --vram f --cgram f --oam f --out r.romrec`, `romlens rec import-savestate s.mss --out r.romrec` | 🧪 | ⬜ | ⬜ |
-| 2.34 | Ship the recorder script | Help › Save Mesen Recorder Script… writes the .lua and shows the three-step instructions | `romlens rec script --out mesen_recorder.lua`, then `romlens rec pack <stream> --rom <rom> --out r.romrec [--wram full\|keyframe\|off]` | 🧪 | ⬜ | ⬜ |
-| 2.35 | Recordings referenced, never copied (the Open panel says so rather than Save, and there is no shareable export yet to omit them from; the project reattaches its recording on open only while the file is unchanged) | Attaching one stores path and hash in the project; Save shows the docs/12 notice; a shareable export omits recordings | `romlens project <P> recordings [add R \| list \| remove R]` | 🧪 | ⬜ | ⬜ |
+| 2.28 | Open a recording | File › Open Recording…; a frame field with prev/next appears and the graphics tabs read the recording's state | `romlens rec info R` | 🧪 | ⬜ | 🧪 |
+| 2.29 | Validate a recording; a recording cut short offers "Open What Was Recorded" | The open path shows the validator's diagnostics verbatim and refuses a recording whose ROM hash differs | `romlens rec validate R [--rom <rom>] [--sample N] [--strict] [--recover]` | 🧪 | ⬜ | 🧪 |
+| 2.30 | Extract a frame region | Export Frame Region… writes VRAM, CGRAM, OAM, WRAM or the register blocks | `romlens rec extract R --frame N --region vram [--out F] [--hex]` | 🧪 | ⬜ | 🧪 |
+| 2.31 | What changed between frames (badges are exact: runs narrow, bytes decide; a sprite's own high-table bits) | The graphics views badge entries that changed since the previous frame | `romlens rec changes R --from A --to B --region vram` | 🧪 | ⬜ | 🧪 |
+| 2.32 | When did this byte change (shown in each graphics view's detail pane, where VRAM, CGRAM and OAM bytes are selected, rather than the inspector) | The inspector on a VRAM/CGRAM/OAM byte reads "changed at frame N, next at M" with Go | `romlens rec when R --region vram --offset 0x4000 [--len 2] [--after N] [--backward]`, `romlens rec index R [--rebuild]` | 🧪 | ⬜ | 🧪 |
+| 2.33 | Snapshot import (`.mss` savestates are not read: optional, and not done) | File › Import Snapshot… accepts loose VRAM/CGRAM/OAM dumps and a Mesen2 savestate, producing a one-frame recording | `romlens rec import-raw --vram f --cgram f --oam f --out r.romrec`, `romlens rec import-savestate s.mss --out r.romrec` | 🧪 | ⬜ | 🧪 |
+| 2.34 | Ship the recorder script | Help › Save Mesen Recorder Script… writes the .lua and shows the three-step instructions | `romlens rec script --out mesen_recorder.lua`, then `romlens rec pack <stream> --rom <rom> --out r.romrec [--wram full\|keyframe\|off]` | 🧪 | ⬜ | 🧪 |
+| 2.35 | Recordings referenced, never copied (the Open panel says so rather than Save, and there is no shareable export yet to omit them from; the project reattaches its recording on open only while the file is unchanged) | Attaching one stores path and hash in the project; Save shows the docs/12 notice; a shareable export omits recordings | `romlens project <P> recordings [add R \| list \| remove R]` | 🧪 | ⬜ | 🧪 |
 | 2.36 | Synthetic recording fixture (done in 2B, with `--keyframe-interval`) | (n/a) | `romlens testrec --out r.romrec [--frames N]`, then every row above against it | n/a | ⬜ | ⬜ |
 
 
@@ -167,9 +167,9 @@ Written from `22-phase3-finish.md` on 25 September 2026.
 
 | # | Capability | Shell must expose | CLI scenario | macOS | Win | Linux |
 |---|---|---|---|---|---|---|
-| 3.12 | A recorded frame, drawn from the PPU state | A Frame view over the frame stepper; hovering names the layer, tile or sprite that drew the pixel; clicking selects its OAM entry or tilemap cell, tile and palette row | `romlens render frame <rec> <frame> [--at x,y]` | 🧪 | ⬜ | ⬜ |
-| 3.13 | The frame's layers apart | A Layers view: each enabled layer alone, in priority order, with the mode's rules | `romlens render bg …` | 🧪 | ⬜ | ⬜ |
-| 3.14 | From a pixel back to ROM | The inspector's Provenance chain: pixel, OAM or tilemap entry, VRAM word, the DMA, the WRAM buffer and its writer, the ROM bytes; each step a link with its evidence and confidence | `romlens provenance <rec> <frame> x,y [--project P]` | 🧪 | ⬜ | ⬜ |
+| 3.12 | A recorded frame, drawn from the PPU state | A Frame view over the frame stepper; hovering names the layer, tile or sprite that drew the pixel; clicking selects its OAM entry or tilemap cell, tile and palette row | `romlens render frame <rec> <frame> [--at x,y]` | 🧪 | ⬜ | 🧪 |
+| 3.13 | The frame's layers apart | A Layers view: each enabled layer alone, in priority order, with the mode's rules | `romlens render bg …` | 🧪 | ⬜ | 🧪 |
+| 3.14 | From a pixel back to ROM | The inspector's Provenance chain: pixel, OAM or tilemap entry, VRAM word, the DMA, the WRAM buffer and its writer, the ROM bytes; each step a link with its evidence and confidence | `romlens provenance <rec> <frame> x,y [--project P]` | 🧪 | ⬜ | 🧪 |
 | 3.15 | The whole ROM as a map | An Atlas editor tab: banks, then blocks, then items, zoomed continuously; overlays for kind, confidence, entropy, coverage and call arcs; double-click opens the listing | `romlens map <rom> --from <a> --len <n> [--arcs] [--items N]` | 🧪 | 🧪 | 🧪 |
 | 3.16 | Two versions of a ROM compared | File › Compare With…: a Compare tab listing changed, moved, added and removed routines and data, the two listings side by side; carry names over | `romlens diff <a> <b> [--project-a P] [--project-b P] [--routines] [--json]` | 🧪 | 🧪 | 🧪 |
 | 3.17 | Locals and arguments on the stack | `LDA $03,S` in the C as a named argument or local; arguments pushed before a call passed in the call | `romlens decompile <rom> <address>` | 🧪 | ⬜ | 🧪 |
@@ -192,8 +192,8 @@ Written from `21-screen-setup.md` on 24 September 2026.
 
 | # | Capability | Shell must expose | CLI scenario | macOS | Win | Linux |
 |---|---|---|---|---|---|---|
-| 4.5 | What the screen is set up to be at an instruction | The inspector's Screen section: display, mode, each layer's depth, tilemap, tiles and size, sprites, colour math, interrupts; each value selects the instruction that set it | `romlens screen <rom> [--project P] <address>` | 🧪 | ⬜ | ⬜ |
-| 4.6 | Where VRAM was filled from | A layer's tiles or tilemap name the DMA that uploaded them; a button opens its ROM source in the Tile Decoder or Tilemap viewer | `romlens screen … ` (the uploads) | 🧪 | ⬜ | ⬜ |
+| 4.5 | What the screen is set up to be at an instruction | The inspector's Screen section: display, mode, each layer's depth, tilemap, tiles and size, sprites, colour math, interrupts; each value selects the instruction that set it | `romlens screen <rom> [--project P] <address>` | 🧪 | ⬜ | 🧪 |
+| 4.6 | Where VRAM was filled from | A layer's tiles or tilemap name the DMA that uploaded them; a button opens its ROM source in the Tile Decoder or Tilemap viewer | `romlens screen … ` (the uploads) | 🧪 | ⬜ | 🧪 |
 
 ### 5A — sound
 

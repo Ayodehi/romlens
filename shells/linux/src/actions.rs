@@ -299,12 +299,36 @@ const ENTRIES: &[Entry] = &[
         run: |d, _| d.request_zoom(crate::model::Zoom::Fit),
     },
     // Graphics, audio and the tutor
-    pending!("show-frame"),
-    pending!("show-layers"),
-    pending!("show-tiles"),
-    pending!("show-palette"),
-    pending!("show-oam"),
-    pending!("show-tilemap"),
+    Entry {
+        name: "show-frame",
+        enabled: always,
+        run: |d, _| d.open_graphics(crate::model::graphics::Tab::Frame),
+    },
+    Entry {
+        name: "show-layers",
+        enabled: always,
+        run: |d, _| d.open_graphics(crate::model::graphics::Tab::Layers),
+    },
+    Entry {
+        name: "show-tiles",
+        enabled: always,
+        run: |d, _| d.open_graphics(crate::model::graphics::Tab::Tiles),
+    },
+    Entry {
+        name: "show-palette",
+        enabled: always,
+        run: |d, _| d.open_graphics(crate::model::graphics::Tab::Palette),
+    },
+    Entry {
+        name: "show-oam",
+        enabled: always,
+        run: |d, _| d.open_graphics(crate::model::graphics::Tab::Oam),
+    },
+    Entry {
+        name: "show-tilemap",
+        enabled: always,
+        run: |d, _| d.open_graphics(crate::model::graphics::Tab::Tilemap),
+    },
     pending!("show-voices"),
     pending!("show-timeline"),
     pending!("show-samples"),
@@ -334,11 +358,26 @@ const ENTRIES: &[Entry] = &[
         enabled: |d| d.project_path().is_some() && d.session.is_dirty(),
         run: |d, w| crate::files::revert(w, d),
     },
-    pending!("open-recording"),
-    pending!("import-snapshot"),
-    pending!("export-frame-region"),
-    pending!("close-recording"),
-    pending!("live-session"),
+    Entry {
+        name: "open-recording",
+        enabled: always,
+        run: |d, w| crate::recording::open(w, d),
+    },
+    Entry {
+        name: "import-snapshot",
+        enabled: always,
+        run: |d, w| crate::recording::import_snapshot(w, d),
+    },
+    Entry {
+        name: "export-frame-region",
+        enabled: |d| d.graphics().has_recording(),
+        run: |d, w| crate::recording::export_frame_region(w, d),
+    },
+    Entry {
+        name: "close-recording",
+        enabled: |d| d.graphics().has_recording(),
+        run: |d, _| d.close_recording(),
+    },
     Entry {
         name: "compare-with",
         enabled: always,
@@ -370,7 +409,11 @@ const ENTRIES: &[Entry] = &[
     export!("export-assembly", Assembly),
     export!("export-annotations", Annotations),
     export!("export-symbols", Symbols),
-    pending!("save-recorder-script"),
+    Entry {
+        name: "save-recorder-script",
+        enabled: always,
+        run: |_, w| crate::recording::save_recorder_script(w),
+    },
 ];
 
 const TOGGLES: &[Toggle] = &[
@@ -393,6 +436,22 @@ const TOGGLES: &[Toggle] = &[
         name: "toggle-results",
         get: |d| d.panes().results,
         set: |d, v| d.set_pane(|p| &mut p.results, v),
+    },
+    Toggle {
+        name: "live-session",
+        get: |d| d.is_live(),
+        set: |d, v| {
+            if !v {
+                d.stop_live();
+            } else if let Err(e) = d.start_live() {
+                let app = gio::Application::default().and_downcast::<gtk::Application>();
+                crate::files::alert(
+                    app.and_then(|a| a.active_window()).as_ref(),
+                    "The live session could not start",
+                    &format!("{e}\n\nAnother Romlens window may already be listening."),
+                );
+            }
+        },
     },
     Toggle {
         name: "focus-on-code",
@@ -701,7 +760,13 @@ pub fn install(window: &adw::ApplicationWindow, doc: &Rc<Document>) {
             for (action, get) in &toggles {
                 action.set_state(&get(&doc).to_variant());
             }
-            tab.set_state(&doc.tab().id().to_variant());
+            // No text tab is current while a graphics view has the area.
+            let current = if doc.graphics_tab().is_some() {
+                ""
+            } else {
+                doc.tab().id()
+            };
+            tab.set_state(&current.to_variant());
             style.set_state(&style_id(doc.address_style()).to_variant());
         }
     };

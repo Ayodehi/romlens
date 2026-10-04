@@ -10,21 +10,28 @@ mod config;
 mod cview;
 mod editor_keys;
 mod files;
+mod frameview;
+mod gfxdraw;
 mod glib_runtime;
+mod graphicsview;
 mod graphview;
 mod headerband;
 mod hex;
 mod hexview;
 mod inspector;
+mod layersview;
 mod lists;
 mod locator;
 mod lockstep;
 mod menu;
 mod model;
 mod navigatorview;
+mod oamview;
 mod package;
 mod palette;
+mod paletteview;
 mod pixels;
+mod recording;
 mod results;
 mod settings;
 mod sheets;
@@ -33,6 +40,8 @@ mod snapshot;
 mod sourceview;
 mod stripview;
 mod style;
+mod tilemapview;
+mod tilesview;
 mod transferview;
 mod window;
 
@@ -51,6 +60,8 @@ fn write_fixture(kind: &str, out: &std::path::Path) -> std::io::Result<()> {
     match kind {
         "routines" => std::fs::write(out, romlens_ffi::make_routines_test_rom()),
         "explain" => std::fs::write(out, romlens_ffi::make_explain_test_rom()),
+        "graphics" => std::fs::write(out, romlens_ffi::make_graphics_test_rom()),
+        "recording" => std::fs::write(out, romlens_ffi::make_test_recording(40)),
         "compare" => {
             let roms = romlens_ffi::make_compare_test_roms();
             into(vec![
@@ -71,7 +82,8 @@ fn write_fixture(kind: &str, out: &std::path::Path) -> std::io::Result<()> {
 fn main() -> glib::ExitCode {
     // Development aid: `romlens --write-fixture <kind> <out>` writes one of the
     // core's test programs: `routines` (a ROM with loops and calls to
-    // decompile), `explain` (a reset that sets the screen up), `compare` (`<out>` is a folder getting old.sfc and new.sfc)
+    // decompile), `explain` (a reset that sets the screen up), `graphics` (tiles, a
+    // palette, OAM and a tilemap) or `recording` (40 frames to go with it), `compare` (`<out>` is a folder getting old.sfc and new.sfc)
     // or `ca65` (a folder getting a ROM, its .dbg and the sources it names).
     let args: Vec<String> = std::env::args().collect();
     if let [_, flag, kind, out] = args.as_slice()
