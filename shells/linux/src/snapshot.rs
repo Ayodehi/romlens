@@ -18,6 +18,15 @@
 //!   number) and `ROMLENS_PIXEL` (`x,y`, kept in the Frame view)
 //! - `ROMLENS_PLAY`: start playing the sound view's source after it opens
 //! - `ROMLENS_SAMPLE`: select a sample (and a block) in the Samples view: `0` or `0:1`
+//! - `ROMLENS_TUTOR`: ask the tutor this, answered by a scripted local server, and
+//!   capture the Tutor window (run with `XDG_CONFIG_HOME` and `XDG_DATA_HOME` set
+//!   to scratch folders: it adds an endpoint). `ROMLENS_TUTOR_LINES` has more
+//!   composer lines to submit after it, such as `/help` or `/lessons`
+//! - `ROMLENS_TUTOR_SCRIPT=edit`: the scripted model reads, then proposes a label
+//! - `ROMLENS_CVERSION`: write a C version of the selected routine and show it
+//!   (`tutor` for the tutor's, else yours); `ROMLENS_CEDIT` opens the sheet for
+//!   one: `local`, `note`, `comment` or `version`
+//! - `ROMLENS_WAIT`: milliseconds before the capture (default 3400)
 //! - `ROMLENS_MENU`: capture a menu instead of the window: `primary`, or
 //!   the label of the menu button (`File + SNES`)
 
@@ -139,6 +148,16 @@ pub fn maybe_capture(window: &adw::ApplicationWindow, doc: &Rc<Document>) {
             if std::env::var("ROMLENS_REFS").is_ok() {
                 doc.find_references();
             }
+            if std::env::var("ROMLENS_CVERSION").is_ok() || std::env::var("ROMLENS_CEDIT").is_ok() {
+                // The C takes a moment to come.
+                let doc = Rc::clone(&doc);
+                glib::timeout_add_local_once(Duration::from_millis(1200), move || {
+                    scripted_cedit(&doc);
+                });
+            }
+            if let Ok(question) = std::env::var("ROMLENS_TUTOR") {
+                scripted_tutor(&window, &doc, &question);
+            }
             if let Ok(which) = std::env::var("ROMLENS_MENU")
                 && let Some(button) = find_menu_button(window.upcast_ref(), &which)
             {
@@ -148,12 +167,26 @@ pub fn maybe_capture(window: &adw::ApplicationWindow, doc: &Rc<Document>) {
     });
 
     let window = window.clone();
-    glib::timeout_add_local_once(Duration::from_millis(3400), move || {
+    let sha = doc.info.sha256.clone();
+    let wait = std::env::var("ROMLENS_WAIT")
+        .ok()
+        .and_then(|w| w.parse().ok())
+        .unwrap_or(3400);
+    glib::timeout_add_local_once(Duration::from_millis(wait), move || {
+        let tutor = std::env::var("ROMLENS_TUTOR")
+            .ok()
+            .and_then(|_| crate::tutorview::window_for(&sha));
         let target: gtk::Widget = std::env::var("ROMLENS_MENU")
             .ok()
             .and_then(|which| find_menu_button(window.upcast_ref(), &which))
             .and_then(|b| b.popover())
-            .map_or_else(|| window.clone().upcast(), |p| p.upcast());
+            .map_or_else(
+                || tutor.map_or_else(|| window.clone().upcast(), |t| t.upcast()),
+                |p| p.upcast(),
+            );
+        if std::env::var("ROMLENS_DUMP").is_ok() {
+            dump(&target, 0);
+        }
         if !save(&target, &path) {
             eprintln!("snapshot failed");
         }
@@ -161,6 +194,117 @@ pub fn maybe_capture(window: &adw::ApplicationWindow, doc: &Rc<Document>) {
             app.quit();
         }
     });
+}
+
+/// A C version of the routine shown, and the sheets that edit the C's notes.
+fn scripted_cedit(doc: &Rc<Document>) {
+    use crate::model::CEdit;
+    use romlens_ffi::cnotes::{CAnchorInfo, CAuthor, CVersionInfo};
+    let Some((routine, text)) = doc
+        .decompile()
+        .result
+        .as_ref()
+        .map(|r| (r.entry, r.text.clone()))
+    else {
+        eprintln!("no routine is shown: select an instruction with ROMLENS_SELECT");
+        return;
+    };
+    if let Ok(who) = std::env::var("ROMLENS_CVERSION") {
+        let mine = format!("// My own reading of this routine.\n{text}");
+        let version = CVersionInfo {
+            text: mine,
+            author: if who == "tutor" {
+                CAuthor::Tutor
+            } else {
+                CAuthor::User
+            },
+            anchors: vec![CAnchorInfo {
+                first: 2,
+                last: 3,
+                start: routine,
+                end: routine + 3,
+            }],
+        };
+        let _ = doc.run_c_command(romlens_ffi::Command::SetCVersion {
+            routine,
+            name: "My version".into(),
+            version: Some(version),
+        });
+        doc.show_c_version(Some("My version".into()));
+    }
+    if let Ok(which) = std::env::var("ROMLENS_CEDIT") {
+        doc.begin_c_edit(match which.as_str() {
+            "note" => CEdit::Note { routine },
+            "comment" => CEdit::Comment { address: routine },
+            "local" => CEdit::Local {
+                routine,
+                local: "v1".into(),
+            },
+            _ => CEdit::Version {
+                routine,
+                name: doc.shown_version(),
+            },
+        });
+    }
+}
+
+/// Opens the Tutor window with a scripted model behind it: the question is
+/// answered with a fixed reply that shows what the transcript can draw.
+fn scripted_tutor(window: &adw::ApplicationWindow, doc: &Rc<Document>, question: &str) {
+    use crate::model::tutor_settings::{Endpoint, Kind};
+    use romlens_ffi::tutor::session::{tutor_test_server, tutor_test_text_reply};
+    let reply = "The **reset vector** at [$00:FFFC](romlens://a/FFFC) points at \
+        [$00:8000](romlens://a/8000), where the game starts: it turns the screen off \
+        with `INIDISP` and sets up the PPU before anything else.\n\n\
+        ```asm\n$00:8000  SEI\n$00:8001  LDA #$8F\n$00:8003  STA $2100 ; force blank\n```\n\n\
+        | Register | Meaning |\n|---|---|\n| `$2100` | Screen on or off, and brightness |\n\
+        | `$4200` | NMI and joypad enables |\n\nTry `/learn DMA` next.";
+    let replies = if std::env::var("ROMLENS_TUTOR_SCRIPT").is_ok_and(|s| s == "edit") {
+        // A read, then an edit waiting for the answer.
+        use romlens_ffi::tutor::session::tutor_test_call_reply;
+        vec![
+            tutor_test_call_reply("disassemble".into(), r#"{"address":"$00:8000"}"#.into()),
+            tutor_test_call_reply(
+                "set_label".into(),
+                r#"{"address":"$00:8000","name":"Reset","reason":"The reset vector points here"}"#
+                    .into(),
+            ),
+            tutor_test_text_reply(reply.into()),
+        ]
+    } else {
+        vec![tutor_test_text_reply(reply.into())]
+    };
+    let url = tutor_test_server(replies);
+    let settings = crate::settings::tutor();
+    let taken: Vec<String> = settings
+        .borrow()
+        .endpoints()
+        .into_iter()
+        .map(|e| e.id)
+        .collect();
+    let e = Endpoint::local("Scripted", &url, Kind::Chat, &taken);
+    let id = e.id.clone();
+    settings.borrow_mut().add(e);
+    settings.borrow_mut().edit(|s| {
+        s.endpoint = id.clone();
+        s.models.insert(id, "qwen3".into());
+    });
+    if let Some(app) = window
+        .application()
+        .and_then(|a| a.downcast::<adw::Application>().ok())
+    {
+        crate::tutorview::open(&app, window, doc);
+    }
+    doc.tutor_submit(question);
+    // More lines after the answer is in.
+    if let Ok(lines) = std::env::var("ROMLENS_TUTOR_LINES") {
+        let doc = Rc::clone(doc);
+        glib::timeout_add_local_once(Duration::from_millis(1200), move || {
+            for l in lines.split('|') {
+                doc.tutor_submit(l);
+            }
+        });
+    }
 }
 
 /// `name` or `name::parameter`, run as a window action.
@@ -225,4 +369,21 @@ fn save(target: &gtk::Widget, path: &str) -> bool {
             texture.save_to_png(path).ok()
         })
         .is_some()
+}
+
+/// Development aid: the widget tree with each widget's size.
+fn dump(w: &gtk::Widget, depth: usize) {
+    eprintln!(
+        "{}{} {}x{} {}",
+        "  ".repeat(depth),
+        w.type_().name(),
+        w.width(),
+        w.height(),
+        w.css_classes().join(".")
+    );
+    let mut c = w.first_child();
+    while let Some(child) = c {
+        dump(&child, depth + 1);
+        c = child.next_sibling();
+    }
 }

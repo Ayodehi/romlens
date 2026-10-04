@@ -3,6 +3,7 @@
 //! They are `AdwDialog`s: Cancel at the start of the header, the action at
 //! the end, Enter runs the action and Escape cancels.
 
+mod cedit;
 mod datatype;
 mod find;
 mod flags;
@@ -123,6 +124,7 @@ pub fn present(window: &adw::ApplicationWindow, doc: &Rc<Document>, sheet: Sheet
         Sheet::DataType => datatype::build(doc),
         Sheet::Variable => variable::build(doc),
         Sheet::PreviewOptions => preview::build(doc),
+        Sheet::CEdit => cedit::build(doc),
     };
     // Whoever dismisses it, the document forgets the request.
     let d = Rc::clone(doc);

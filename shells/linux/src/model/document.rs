@@ -20,7 +20,7 @@ use romlens_ffi::{
 use super::audio::{self, AudioModel};
 use super::batch_cache::BatchCache;
 use super::commands::Zoom;
-use super::commands::{EditorCommand, EditorSource, Sheet};
+use super::commands::{CEdit, EditorCommand, EditorSource, Sheet};
 use super::compare::{self, CompareModel, Item as CompareItem};
 use super::decompile::{Decompile, Key as DecompileKey};
 use super::graph::{self, GraphMode, GraphModel, Key as GraphKey};
@@ -35,6 +35,7 @@ use super::search::SearchModel;
 use super::session::{ChangeKind, Session};
 use super::source::{self, SourceModel};
 use super::transfer::{self, ExportKind, ImportKind};
+use super::tutor::{self, TutorModel};
 use crate::asm::AsmBatch;
 use crate::hex::{AddressStyle, BYTES_PER_ROW, HexBatch};
 use crate::package::{self, LocalRecord};
@@ -72,6 +73,8 @@ pub enum Change {
     Graphics,
     /// A sound view's source, selection, playback or machine changed.
     Audio,
+    /// The Tutor's conversation, turn streaming in, cards or sheets changed.
+    Tutor,
     /// The inspector's Screen section opened, closed or got its result.
     Screen,
     /// The Source tab's files, shown file or text changed.
@@ -187,6 +190,7 @@ pub struct Document {
     pub asm_cache: BatchCache<AsmBatch>,
     asm_line_count: Cell<u32>,
     sheet: Cell<Option<Sheet>>,
+    c_edit: RefCell<Option<CEdit>>,
     layout: RefCell<Layout>,
     explanations: Cell<bool>,
     runtime: Rc<dyn Runtime>,
@@ -202,6 +206,8 @@ pub struct Document {
     source: RefCell<SourceModel>,
     graphics: RefCell<GraphicsModel>,
     audio: RefCell<AudioModel>,
+    tutor: RefCell<TutorModel>,
+    tutor_post: RefCell<Option<super::runtime::Post>>,
     audio_ticking: Cell<bool>,
     live_latest: Cell<Option<u64>>,
     live_scheduled: Cell<bool>,
@@ -282,6 +288,7 @@ impl Document {
             }),
             asm_line_count: Cell::new(line_count),
             sheet: Cell::new(None),
+            c_edit: RefCell::new(None),
             layout: RefCell::new(Layout::default()),
             explanations: Cell::new(true),
             runtime,
@@ -301,6 +308,11 @@ impl Document {
                 !cfg!(test),
             )),
             audio_ticking: Cell::new(false),
+            tutor: RefCell::new(TutorModel::new(
+                crate::settings::tutor(),
+                TutorModel::default_root(),
+            )),
+            tutor_post: RefCell::new(None),
             live_latest: Cell::new(None),
             live_scheduled: Cell::new(false),
             live_post: RefCell::new(None),
@@ -572,6 +584,208 @@ impl Document {
             self.emit(Change::Layout);
         }
         self.emit(Change::Graphics);
+    }
+
+    // MARK: Tutor
+
+    pub fn tutor(&self) -> std::cell::Ref<'_, TutorModel> {
+        self.tutor.borrow()
+    }
+
+    /// Change the Tutor's model, then tell the views.
+    pub fn edit_tutor<R>(&self, f: impl FnOnce(&mut TutorModel) -> R) -> R {
+        let r = f(&mut self.tutor.borrow_mut());
+        self.emit(Change::Tutor);
+        r
+    }
+
+    /// Reads the Tutor's model, which may fetch from the core, without telling
+    /// the views: for a view that is itself being built from a change.
+    pub fn edit_tutor_quiet<R>(&self, f: impl FnOnce(&mut TutorModel) -> R) -> R {
+        f(&mut self.tutor.borrow_mut())
+    }
+
+    /// The tutor changed the project (or took its edits back): the listing and
+    /// the analysis follow, as for any edit.
+    pub fn tutor_edited(&self) {
+        if let Some(me) = self.me.borrow().upgrade() {
+            me.session.finish_command(true);
+            me.refresh_details();
+        }
+        self.emit(Change::Tutor);
+    }
+
+    /// The core's session, made on first use so a project that never opens
+    /// the tutor costs nothing.
+    pub fn tutor_session(&self) -> Option<Arc<romlens_ffi::tutor::session::TutorSession>> {
+        let me = self.me.borrow().upgrade()?;
+        let existing = self.tutor_post.borrow().clone();
+        let post = existing.unwrap_or_else(|| {
+            let weak = Rc::downgrade(&me);
+            let post = self.runtime.sink(Rc::new(move |message| {
+                if let Some(d) = weak.upgrade()
+                    && let Ok(event) =
+                        message.downcast::<romlens_ffi::tutor::session::TutorEventInfo>()
+                {
+                    d.tutor_event(*event);
+                }
+            }));
+            *self.tutor_post.borrow_mut() = Some(Arc::clone(&post));
+            post
+        });
+        let keys = Arc::clone(&crate::settings::tutor().borrow().keys);
+        let offset = tutor_utc_offset();
+        Some(self.tutor.borrow_mut().ensure_session(
+            Arc::clone(self.workbench()),
+            Arc::new(crate::secrets::TutorCredentials(keys)),
+            Arc::new(tutor::TutorBridge(post)),
+            offset,
+        ))
+    }
+
+    /// An event of the session, on the main loop.
+    fn tutor_event(&self, event: romlens_ffi::tutor::session::TutorEventInfo) {
+        let effects = self.tutor.borrow_mut().handle(event);
+        if effects.edited {
+            // What the tutor changed shows in the listing, and the analysis
+            // follows where a mark or a flag did (`tutorEdited`).
+            if let Some(me) = self.me.borrow().upgrade() {
+                me.session.finish_command(true);
+                me.refresh_details();
+            }
+        }
+        self.emit(Change::Tutor);
+    }
+
+    /// The composer's line: a slash command, or a question.
+    pub fn tutor_submit(&self, text: &str) {
+        self.tutor_session();
+        let text = text.trim();
+        if text.starts_with('/') {
+            let result = self.tutor.borrow_mut().run_command(text);
+            if text.to_lowercase().starts_with("/attach") && text.to_lowercase().contains("frame") {
+                self.tutor_attach_frame();
+            }
+            self.emit(Change::Tutor);
+            if result.send
+                && let Some(t) = result.composer
+            {
+                self.tutor_send(&t);
+            }
+            return;
+        }
+        self.tutor_send(text);
+    }
+
+    pub fn tutor_send(&self, text: &str) {
+        self.tutor_session();
+        let selection = self.tutor_selection_text();
+        let recording = self.graphics.borrow().recording().cloned();
+        self.tutor.borrow_mut().send(text, selection, recording);
+        self.emit(Change::Tutor);
+    }
+
+    /// The recording's frame the main window shows, as a picture.
+    pub fn tutor_attach_frame(&self) {
+        let png = self
+            .graphics
+            .borrow()
+            .frame_image()
+            .and_then(|f| crate::pixels::png(&f.image));
+        self.edit_tutor(|t| match png {
+            Some(p) => {
+                let n = self.graphics.borrow().frame();
+                t.attach(p, "image/png", &format!("Frame {n}"));
+            }
+            None => t.error = Some("Open a recording to attach its frame.".into()),
+        });
+    }
+
+    /// What goes with a question: where, and the listing there.
+    pub fn tutor_selection_text(&self) -> Option<String> {
+        let off = self.selected()?;
+        let a = self.selected_address()?;
+        let wb = self.workbench();
+        let mut s = tutor::address(a);
+        if let Some(l) = &self.details.borrow().label {
+            s += &format!(" ({})", l.name);
+        }
+        if let Some(line) = wb.line_for_offset(off) {
+            s += "\n";
+            s += &wb.asm_lines_text(line.saturating_sub(4), 16, romlens_ffi::AddressStyle::Snes);
+        }
+        let at = self
+            .details
+            .borrow()
+            .instruction
+            .as_ref()
+            .map_or(off, |i| i.file_offset);
+        if let Some(c) = self.tutor_c_text(at) {
+            s += "\n";
+            s += &c;
+        }
+        if self.graphics.borrow().has_recording() {
+            s += &format!(
+                "\nA recording is open in Romlens, at frame {}.",
+                self.graphics.borrow().frame()
+            );
+        }
+        Some(s)
+    }
+
+    /// The C the student is reading when the C tab has the editor: the
+    /// generated C around the selection.
+    fn tutor_c_text(&self, offset: u32) -> Option<String> {
+        if self.tab() != Tab::C || self.graphics_tab().is_some() || self.audio_tab().is_some() {
+            return None;
+        }
+        let d = self.decompile.borrow();
+        let r = d
+            .result
+            .as_ref()
+            .filter(|_| d.state == super::decompile::DecompileState::Ready)?;
+        if let Some(v) = d.shown_version.as_ref()
+            && let Some(n) = self.c_versions(r.entry).into_iter().find(|n| &n.name == v)
+        {
+            return Some(format!(
+                "[The student is reading the C tab: the C version “{v}” of {}, not the generated C.]\n```c\n{}\n```",
+                r.name,
+                tutor::clip(&n.version.text, None, 160)
+            ));
+        }
+        let at = d.lines_for_instruction(offset).first().copied();
+        Some(format!(
+            "[The student is reading the C tab: {} as Romlens generates it, at level {:?}.]\n```c\n{}\n```",
+            r.name,
+            d.level,
+            tutor::clip(&r.text, at, 160)
+        ))
+    }
+
+    /// Show what a citation in an answer points at in the main window.
+    /// Returns false if there is nothing to show (a frame with no recording).
+    pub fn follow_citation(&self, c: tutor::Citation) -> bool {
+        match c {
+            tutor::Citation::Address(a) => {
+                self.jump_to_snes(a);
+                true
+            }
+            tutor::Citation::Routine(a) => {
+                self.set_tab(Tab::C);
+                self.jump_to_snes(a);
+                true
+            }
+            tutor::Citation::Frame(n, view) => {
+                if !self.graphics.borrow().has_recording() {
+                    return false;
+                }
+                self.set_frame(n);
+                self.open_graphics(view.unwrap_or(gfx::Tab::Frame));
+                true
+            }
+            // A register has no place in the ROM to show; the step names it.
+            tutor::Citation::Register => true,
+        }
     }
 
     // MARK: Audio
@@ -1725,6 +1939,57 @@ impl Document {
         self.sheet.get()
     }
 
+    /// Ask for the C annotation sheet on `edit`.
+    pub fn begin_c_edit(&self, edit: CEdit) {
+        *self.c_edit.borrow_mut() = Some(edit);
+        // A request while one is open starts over.
+        self.sheet.set(None);
+        self.show_sheet(Some(Sheet::CEdit));
+    }
+
+    pub fn c_edit(&self) -> Option<CEdit> {
+        self.c_edit.borrow().clone()
+    }
+
+    /// The C versions written for a routine, by name.
+    pub fn c_versions(&self, routine: u32) -> Vec<romlens_ffi::cnotes::NamedCVersionInfo> {
+        self.workbench().c_versions(Some(routine))
+    }
+
+    /// The version of the shown routine picked in the C tab.
+    pub fn shown_version(&self) -> Option<String> {
+        self.decompile.borrow().shown_version.clone()
+    }
+
+    /// Pick a C version of the shown routine, or `None` for the generated C.
+    pub fn show_c_version(&self, name: Option<String>) {
+        if self.decompile.borrow().shown_version == name {
+            return;
+        }
+        self.decompile.borrow_mut().shown_version = name;
+        self.emit(Change::Decompile);
+    }
+
+    /// Carry out a C annotation, and leave the sheet.
+    pub fn run_c_command(&self, command: Command) -> Result<(), RomlensError> {
+        // A version taken away no longer shows.
+        let removed = match &command {
+            Command::SetCVersion {
+                name,
+                version: None,
+                ..
+            } => Some(name.clone()),
+            _ => None,
+        };
+        self.session.execute(command)?;
+        if removed.is_some() && removed == self.shown_version() {
+            self.decompile.borrow_mut().shown_version = None;
+        }
+        self.refresh_decompile();
+        self.emit(Change::Decompile);
+        Ok(())
+    }
+
     pub fn show_sheet(&self, sheet: Option<Sheet>) {
         if self.sheet.replace(sheet) != sheet {
             self.emit(Change::Sheet);
@@ -1926,6 +2191,11 @@ impl Document {
     }
 
     /// The address of the selected item (instruction start or byte).
+    /// The SNES address a file offset has, if it maps to one.
+    pub fn snes_address(&self, offset: u32) -> Option<u32> {
+        self.rom.snes_address_for(offset)
+    }
+
     pub fn selected_address(&self) -> Option<u32> {
         let offset = self.selected()?;
         let start = self
@@ -2312,6 +2582,14 @@ impl Document {
     pub fn start_analysis(&self) {
         self.session.start_analysis();
     }
+}
+
+/// The seconds the person's day is ahead of UTC, for streaks that count their
+/// own days.
+fn tutor_utc_offset() -> i32 {
+    gtk::glib::DateTime::now_local()
+        .map(|d| (d.utc_offset().as_seconds() / 1_000_000) as i32)
+        .unwrap_or(0)
 }
 
 impl Drop for Document {
@@ -3495,5 +3773,366 @@ mod tests {
             (Some(gfx::Tab::Palette), 0x1800)
         );
         assert_eq!(d.graphics().source, gfx::Source::Rom);
+    }
+
+    /// A document on the explain fixture, with a scripted model server as the
+    /// tutor's default endpoint.
+    fn tutor_doc(replies: Vec<String>) -> (Rc<Document>, Rc<TestRuntime>) {
+        let rt = TestRuntime::new();
+        let rom =
+            romlens_ffi::Rom::from_bytes(romlens_ffi::make_explain_test_rom(), "e.sfc".into())
+                .unwrap();
+        let d = Document::new(rom, rt.clone());
+        d.start_analysis();
+        rt.pump();
+        let url = romlens_ffi::tutor::session::tutor_test_server(replies);
+        let settings = crate::settings::tutor();
+        let taken: Vec<String> = settings
+            .borrow()
+            .endpoints()
+            .into_iter()
+            .map(|e| e.id)
+            .collect();
+        let e = crate::model::tutor_settings::Endpoint::local(
+            "Scripted",
+            &url,
+            crate::model::tutor_settings::Kind::Chat,
+            &taken,
+        );
+        let id = e.id.clone();
+        settings.borrow_mut().add(e);
+        settings.borrow_mut().edit(|s| {
+            s.endpoint = id.clone();
+            s.models.insert(id, "qwen3".into());
+        });
+        (d, rt)
+    }
+
+    /// Deliver the session's events until the turn is over.
+    fn until_answered(d: &Rc<Document>, rt: &Rc<TestRuntime>, mut each: impl FnMut(&Document)) {
+        for _ in 0..3000 {
+            rt.pump();
+            each(d);
+            if !d.tutor().busy {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        panic!("the turn never ended");
+    }
+
+    #[test]
+    fn a_question_is_answered_streams_in_and_is_kept_in_the_transcript() {
+        let reply =
+            romlens_ffi::tutor::session::tutor_test_text_reply("RESET starts the game.".into());
+        let (d, rt) = tutor_doc(vec![reply]);
+        d.select(Some(0));
+        d.tutor_submit("What is at the reset vector?");
+        assert!(d.tutor().busy, "the turn is running");
+        assert_eq!(
+            d.tutor().live.as_ref().map(|l| l.question.as_str()),
+            Some("What is at the reset vector?")
+        );
+        let mut streamed = String::new();
+        until_answered(&d, &rt, |d| {
+            if let Some(l) = &d.tutor().live {
+                streamed = streamed.clone().max(l.text.clone());
+            }
+        });
+        let t = d.tutor();
+        assert!(t.error.is_none(), "{:?}", t.error);
+        assert!(
+            t.turns.len() >= 2,
+            "the question and the answer: {}",
+            t.turns.len()
+        );
+        let answer = t.turns.iter().rev().find(|x| !x.user).expect("an answer");
+        assert!(format!("{:?}", answer.blocks).contains("RESET starts the game."));
+        assert!(t.live.is_none());
+        assert!(streamed.contains("RESET starts") || t.turns.len() >= 2);
+        assert_eq!(t.model_name.as_deref(), Some("qwen3"));
+        assert_eq!(t.endpoint_name.as_deref(), Some("Scripted"));
+        drop(t);
+        // The selection went with it, as text.
+        let sel = d.tutor_selection_text().expect("something is selected");
+        assert!(sel.starts_with("$00:8000"), "{sel}");
+        assert!(sel.contains("SEI"), "the listing there: {sel}");
+        // The question can be walked back to with the up arrow.
+        assert_eq!(
+            d.edit_tutor(|t| t.history_up("half a thought")).as_deref(),
+            Some("What is at the reset vector?")
+        );
+        assert_eq!(
+            d.edit_tutor(|t| t.history_down()).as_deref(),
+            Some("half a thought")
+        );
+    }
+
+    #[test]
+    fn an_edit_is_a_card_that_waits_and_accepting_it_changes_the_project() {
+        use romlens_ffi::tutor::session::tutor_test_call_reply;
+        let (d, rt) = tutor_doc(vec![
+            tutor_test_call_reply(
+                "set_label".into(),
+                r#"{"address":"$00:8000","name":"Reset","reason":"the vector"}"#.into(),
+            ),
+            romlens_ffi::tutor::session::tutor_test_text_reply("Named it.".into()),
+        ]);
+        d.tutor_submit("Name RESET");
+        let mut decided = false;
+        until_answered(&d, &rt, |d| {
+            let waiting = d.tutor().live.as_ref().and_then(|l| {
+                l.cards
+                    .iter()
+                    .find(|c| c.state == tutor::CardState::Waiting)
+                    .cloned()
+            });
+            if let Some(card) = waiting {
+                assert_eq!(card.proposal.summary, "Name $00:8000 `Reset`");
+                assert_ne!(
+                    d.workbench().label_at(0x8000).map(|l| l.name),
+                    Some("Reset".into()),
+                    "nothing is changed before the answer"
+                );
+                d.edit_tutor(|t| t.answer_card(&card.proposal.id, true, None, false));
+                decided = true;
+            }
+        });
+        assert!(decided, "a card was shown");
+        assert_eq!(d.workbench().label_at(0x8000).unwrap().name, "Reset");
+        assert!(
+            d.session.is_dirty(),
+            "the project has the tutor's edit to save"
+        );
+    }
+
+    #[test]
+    fn declining_a_card_leaves_the_project_alone_and_a_read_only_tutor_proposes_nothing() {
+        use romlens_ffi::tutor::session::tutor_test_call_reply;
+        let (d, rt) = tutor_doc(vec![
+            tutor_test_call_reply(
+                "set_label".into(),
+                r#"{"address":"$00:8000","name":"Reset","reason":"the vector"}"#.into(),
+            ),
+            romlens_ffi::tutor::session::tutor_test_text_reply("Fine.".into()),
+        ]);
+        d.tutor_submit("Name RESET");
+        until_answered(&d, &rt, |d| {
+            let waiting = d.tutor().live.as_ref().and_then(|l| {
+                l.cards
+                    .iter()
+                    .find(|c| c.state == tutor::CardState::Waiting)
+                    .cloned()
+            });
+            if let Some(card) = waiting {
+                d.edit_tutor(|t| {
+                    t.answer_card(&card.proposal.id, false, Some("not yet".into()), false)
+                });
+            }
+        });
+        assert_ne!(
+            d.workbench().label_at(0x8000).map(|l| l.name),
+            Some("Reset".into())
+        );
+    }
+
+    #[test]
+    fn rewinding_goes_back_to_before_a_question_and_hands_back_its_words() {
+        use romlens_ffi::tutor::session::RewindWhat;
+        let reply = romlens_ffi::tutor::session::tutor_test_text_reply("One.".into());
+        let (d, rt) = tutor_doc(vec![reply.clone(), reply]);
+        d.tutor_submit("First question");
+        until_answered(&d, &rt, |_| {});
+        d.tutor_submit("Second question");
+        until_answered(&d, &rt, |_| {});
+        let points = d.tutor().session().unwrap().rewind_points();
+        assert_eq!(points.len(), 2, "one point for each question");
+        let r = d
+            .edit_tutor(|t| t.rewind(points[1].index, RewindWhat::Both))
+            .unwrap();
+        assert_eq!(r.prompt.as_deref(), Some("Second question"));
+        let shown = tutor::rows(&d.tutor().turns);
+        assert!(
+            matches!(shown.last(), Some(tutor::Row::Note { text, .. }) if text == "Rewound to here."),
+            "the transcript ends where it was rewound: {shown:?}"
+        );
+        assert!(
+            !shown.iter().any(
+                |r| matches!(r, tutor::Row::Question { text, .. } if text == "Second question")
+            ),
+            "the question taken back is not shown"
+        );
+        assert!(
+            d.edit_tutor(|t| t.rewind(999, RewindWhat::Both)).is_err(),
+            "a point that is not there is refused"
+        );
+    }
+
+    #[test]
+    fn the_model_chosen_is_kept_and_a_conversation_goes_on_with_it() {
+        let reply = romlens_ffi::tutor::session::tutor_test_text_reply("Hi.".into());
+        let (d, rt) = tutor_doc(vec![reply]);
+        let settings = crate::settings::tutor();
+        let e = settings.borrow().default_endpoint();
+        // With no conversation open, it is the default for the next one.
+        d.tutor_session();
+        d.edit_tutor(|t| t.use_model(&e, "other-model", None));
+        assert_eq!(settings.borrow().model(&e).as_deref(), Some("other-model"));
+        d.tutor_submit("Hello");
+        until_answered(&d, &rt, |_| {});
+        assert_eq!(d.tutor().model_name.as_deref(), Some("other-model"));
+        // With one open, it changes the conversation, and says so in it.
+        d.edit_tutor(|t| t.use_model(&e, "qwen3", Some("high".into())));
+        assert_eq!(d.tutor().model_name.as_deref(), Some("qwen3"));
+        assert_eq!(settings.borrow().effort(&e).as_deref(), Some("high"));
+        let rows = tutor::rows(&d.tutor().turns);
+        assert!(
+            rows.iter().any(
+                |r| matches!(r, tutor::Row::Note { text, .. } if text.contains("Now on qwen3"))
+            ),
+            "the switch is noted in the transcript: {rows:?}"
+        );
+    }
+
+    #[test]
+    fn a_quiz_is_answered_proves_a_level_and_earns_points() {
+        use romlens_ffi::tutor::quiz::QuizPurposeInfo;
+        use romlens_ffi::tutor::session::tutor_test_quiz_answers;
+        let (d, _rt) = tutor_doc(Vec::new());
+        d.tutor_session();
+        assert!(
+            d.edit_tutor(|t| t.start_if_needed()),
+            "a conversation is open"
+        );
+        let concept = d.tutor().learner().unwrap().concepts[0].id.clone();
+        d.edit_tutor(|t| t.start_quiz(Some(concept.clone()), None, QuizPurposeInfo::Prove));
+        assert_eq!(
+            d.tutor().sheet,
+            Some(tutor::Sheet::Quiz),
+            "the quiz is raised"
+        );
+        let quiz = d.tutor().quiz.clone().unwrap();
+        let session = d.tutor().session().unwrap().clone();
+        let answers = tutor_test_quiz_answers(session, quiz.id.clone());
+        assert_eq!(answers.len(), quiz.questions.len());
+        for (q, a) in quiz.questions.iter().zip(answers) {
+            d.edit_tutor(|t| t.answer_question(&q.id, a));
+            assert!(
+                d.tutor().result(&q.id).is_some(),
+                "each answer has its result"
+            );
+        }
+        d.edit_tutor(|t| t.finish_quiz());
+        let t = d.tutor();
+        let q = t.quiz.as_ref().unwrap();
+        assert!(q.finished && q.outcome.passed, "{:?}", q.outcome);
+        assert!(
+            t.progress.as_ref().unwrap().xp > 0,
+            "right answers earn points"
+        );
+        let p = t.learner().unwrap();
+        assert!(p.concepts.iter().any(|c| c.id == concept && c.proven > 0));
+    }
+
+    #[test]
+    fn a_lesson_is_stepped_through_and_a_guess_is_kept() {
+        let (d, _rt) = tutor_doc(Vec::new());
+        assert!(d.edit_tutor(|t| t.lessons().is_empty()), "no lessons yet");
+        d.tutor_session();
+        assert!(d.tutor().learner().is_some_and(|l| !l.concepts.is_empty()));
+        // The step a card is at is the model's, and moving it is remembered.
+        assert_eq!(d.tutor().step_of("nothing"), 0);
+        d.edit_tutor(|t| t.mark_known("cpu", Some(3)));
+        let l = d.tutor().learner().unwrap();
+        assert!(
+            l.concepts
+                .iter()
+                .all(|c| c.id != "cpu" || (c.level == 3 && c.marked)),
+            "marking a concept known shows on the map"
+        );
+        d.edit_tutor(|t| t.mark_known("cpu", None));
+        let l = d.tutor().learner().unwrap();
+        assert!(
+            l.concepts.iter().all(|c| c.id != "cpu" || !c.marked),
+            "and the mark can go"
+        );
+    }
+
+    #[test]
+    fn a_provider_without_its_key_says_so_and_asks_nothing() {
+        let rt = TestRuntime::new();
+        let rom =
+            romlens_ffi::Rom::from_bytes(romlens_ffi::make_explain_test_rom(), "e.sfc".into())
+                .unwrap();
+        let d = Document::new(rom, rt);
+        crate::settings::tutor()
+            .borrow_mut()
+            .edit(|s| s.endpoint = "anthropic".into());
+        d.tutor_submit("Hello?");
+        let t = d.tutor();
+        assert!(!t.busy);
+        assert_eq!(
+            t.error.as_deref(),
+            Some("Add a key for Anthropic in Settings (Ctrl+,).")
+        );
+    }
+
+    #[test]
+    fn slash_commands_change_the_mode_raise_sheets_and_refuse_what_they_do_not_know() {
+        let (d, _rt) = tutor_doc(Vec::new());
+        d.tutor_submit("/mode read-only");
+        assert_eq!(
+            d.tutor().mode,
+            crate::model::tutor_settings::ModePreference::ReadOnly
+        );
+        d.tutor_submit("/mode");
+        assert_eq!(
+            d.tutor().mode,
+            crate::model::tutor_settings::ModePreference::AskBeforeEdits,
+            "cycles"
+        );
+        d.tutor_submit("/mode nonsense");
+        assert_eq!(
+            d.tutor().error.as_deref(),
+            Some("The modes are read-only, ask and accept.")
+        );
+        d.tutor_submit("/help");
+        assert_eq!(d.tutor().sheet, Some(tutor::Sheet::Help));
+        d.tutor_submit("/bogus");
+        assert_eq!(
+            d.tutor().error.as_deref(),
+            Some("/bogus is not a command. /help lists them.")
+        );
+        d.tutor_submit("/quiz");
+        assert!(
+            d.tutor()
+                .error
+                .as_deref()
+                .unwrap()
+                .starts_with("Name what to be quizzed on")
+        );
+        d.tutor_submit("/selection");
+        assert!(!d.tutor().include_selection);
+        d.tutor_submit("/attach nothing");
+        assert!(d.tutor().error.is_some());
+        d.tutor_submit("/attach frame");
+        assert_eq!(
+            d.tutor().error.as_deref(),
+            Some("Open a recording to attach its frame.")
+        );
+    }
+
+    #[test]
+    fn a_citation_shows_its_address_its_routine_or_its_frame() {
+        let (d, _rt) = tutor_doc(Vec::new());
+        assert!(d.follow_citation(tutor::Citation::Address(0x8030)));
+        assert_eq!(d.selected(), Some(0x30));
+        assert!(d.follow_citation(tutor::Citation::Routine(0x8000)));
+        assert_eq!(d.tab(), Tab::C);
+        assert!(
+            !d.follow_citation(tutor::Citation::Frame(3, None)),
+            "no recording to show"
+        );
+        assert!(d.follow_citation(tutor::Citation::Register));
     }
 }

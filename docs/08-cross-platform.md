@@ -234,3 +234,14 @@ same way.
   plug. The DSP runs at 32 kHz and is rendered ahead into a lock-free ring on
   its own thread; the device callback resamples to the device's rate and never
   allocates, locks or calls into the core.
+- **Tutor.** One Tutor window per project, transient for its project window and
+  closed with it. Keys live in the Secret Service through libsecret (schema
+  `io.github.ayodehi.Romlens.tutor`, attribute `endpoint`), never in the
+  settings file `$XDG_CONFIG_HOME/romlens/tutor.json` or a project; where no
+  Secret Service is running no key can be saved. Conversations are kept under
+  `$XDG_DATA_HOME/romlens/Tutor`, not in the project. Answers are Markdown drawn
+  as GTK labels: prose as Pango markup with each citation a link into the main
+  window and each glossary term a link to a bubble, code in the C view's
+  colours, tables as grids. The Settings window carries the macOS Settings pages
+  (General, Providers, Tutor, Images, Privacy) as an `AdwPreferencesDialog`.
+  Lessons, the map, progress and the quiz are dialogs over the Tutor window.

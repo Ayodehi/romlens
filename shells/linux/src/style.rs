@@ -38,6 +38,32 @@ const CSS: &str = "
 .flag-on { background: alpha(@accent_bg_color, 0.25); }
 .flag-off { opacity: 0.45; }
 .romlens-flags-title { font-size: 0.8em; opacity: 0.6; }
+.question-bubble {
+    border-radius: 12px;
+    background: alpha(@accent_bg_color, 0.2);
+}
+.lesson-card { border: 1px solid alpha(@accent_bg_color, 0.4); }
+.concept {
+    border-radius: 6px;
+    padding: 5px 8px;
+    background: alpha(currentColor, 0.08);
+}
+.concept-1 { background: alpha(@accent_bg_color, 0.29); }
+.concept-2 { background: alpha(@accent_bg_color, 0.46); }
+.concept-3 { background: alpha(@accent_bg_color, 0.63); }
+.concept-4 { background: alpha(@accent_bg_color, 0.8); color: white; }
+.concept-5 { background: alpha(@accent_bg_color, 0.97); color: white; }
+.proven-1 { border: 1.5px solid @accent_bg_color; }
+.proven-2 { border: 2px solid @accent_bg_color; }
+.proven-3 { border: 2.5px solid @accent_bg_color; }
+.proven-4 { border: 3px solid @accent_bg_color; }
+.proven-5 { border: 3.5px solid @accent_bg_color; }
+.quiz-bit { min-width: 24px; min-height: 24px; padding: 0; }
+.quiz-result {
+    border-radius: 8px;
+    padding: 10px;
+    background: alpha(currentColor, 0.08);
+}
 ";
 
 pub fn install() {

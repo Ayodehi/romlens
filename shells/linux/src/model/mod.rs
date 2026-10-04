@@ -17,6 +17,7 @@ pub mod graphics;
 pub mod graphscene;
 pub mod layout;
 pub mod live;
+pub mod markdown;
 pub mod navigator;
 pub mod references;
 pub mod runtime;
@@ -28,8 +29,10 @@ pub mod strip;
 #[cfg(test)]
 pub mod testing;
 pub mod transfer;
+pub mod tutor;
+pub mod tutor_settings;
 
-pub use commands::{EditorCommand, EditorSource, Sheet, Zoom};
+pub use commands::{CEdit, EditorCommand, EditorSource, Sheet, Zoom};
 pub use document::{Change, Details, Document, MarkOptions, ScrollRequest, VariableDraft};
 pub use layout::{ResultsKind, Tab};
 pub use runtime::Runtime;

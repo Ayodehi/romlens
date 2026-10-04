@@ -41,6 +41,13 @@ fn existing_window(sha256: &str) -> Option<adw::ApplicationWindow> {
     })
 }
 
+/// Bring the window of the document with this ROM hash forward.
+pub fn present_window_for(sha256: &str) {
+    if let Some(w) = existing_window(sha256) {
+        w.present();
+    }
+}
+
 fn register(sha256: &str, window: &adw::ApplicationWindow) {
     OPEN.with(|o| o.borrow_mut().push((sha256.to_owned(), window.downgrade())));
 }

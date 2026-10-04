@@ -3,8 +3,9 @@
 //! highlights its counterpart on the other. The macOS twin is `CSplitView`
 //! and `CPaneController`.
 //!
-//! Not here yet: C versions and the C's annotation sheets (name a local, note
-//! a routine, comment a line), which arrive with the tutor (L5).
+//! The right-click menu and the version picker carry the C's annotations
+//! (docs/24, U10): name a local, comment a line, note the routine, or write a
+//! C version beside the generated C.
 
 use std::cell::{Cell, RefCell};
 use std::ops::Range;
@@ -12,7 +13,8 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::{cairo, gdk, gio, glib};
-use romlens_ffi::{CTokenInfo, CTokenKind};
+use romlens_ffi::cnotes::CVersionInfo;
+use romlens_ffi::{CTokenInfo, CTokenKind, Command};
 
 use crate::asmview;
 use crate::canvas::{set_source, with_alpha};
@@ -21,7 +23,7 @@ use crate::model::cfold::{self, Folder};
 use crate::model::decompile::{
     DecompileState, LEVELS, NUMBER_STYLES, bases, literal_value, utf16_to_chars,
 };
-use crate::model::{Change, Document};
+use crate::model::{CEdit, Change, Document};
 use crate::palette;
 
 const GUTTER_WIDTH: i32 = 16;
@@ -44,6 +46,25 @@ fn tag_name(kind: CTokenKind) -> String {
     format!("c-{kind:?}")
 }
 
+/// An entry of the version picker.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum VersionItem {
+    Generated,
+    Named(String),
+    New,
+    Edit,
+    Delete,
+}
+
+/// The annotations the right-click menu offers at the click.
+#[derive(Debug, Clone, Default)]
+struct MenuTarget {
+    /// The local under the click: its name in the C, and its original.
+    local: Option<(String, String)>,
+    /// The instruction the clicked line came from.
+    address: Option<u32>,
+}
+
 struct Pane {
     doc: Rc<Document>,
     view: gtk::TextView,
@@ -53,6 +74,16 @@ struct Pane {
     status: gtk::Label,
     levels: Vec<gtk::ToggleButton>,
     numbers: Vec<gtk::ToggleButton>,
+    versions: gtk::DropDown,
+    /// What each entry of the picker does.
+    version_items: RefCell<Vec<VersionItem>>,
+    versions_key: RefCell<String>,
+    /// The picker is being rebuilt: its changes are not choices.
+    building_versions: Cell<bool>,
+    /// The version's text as shown, when one is.
+    shown_version_text: RefCell<Option<String>>,
+    /// What the right-click menu was built for.
+    menu_target: RefCell<MenuTarget>,
     folder: RefCell<Folder>,
     /// Char offset where each line starts, plus the end.
     line_starts: RefCell<Vec<usize>>,
@@ -152,6 +183,10 @@ impl Pane {
             &NUMBER_STYLES.map(|(_, n, _)| n),
             "How numbers print: small ones in decimal and the rest in hex, or all in hex, decimal or binary. Addresses stay hex. Hover over a number to see it in every base.",
         );
+        let versions = gtk::DropDown::new(None::<gtk::StringList>, gtk::Expression::NONE);
+        versions.set_tooltip_text(Some(
+            "The C Romlens generates, or a C version written by you or the tutor",
+        ));
         let export = gtk::Button::builder()
             .label("Export C…")
             .action_name("win.export-c")
@@ -178,10 +213,12 @@ impl Pane {
             .homogeneous(false)
             .build();
         for w in [
-            number_box.upcast_ref::<gtk::Widget>(),
+            versions.upcast_ref::<gtk::Widget>(),
+            number_box.upcast_ref(),
             level_box.upcast_ref(),
             export.upcast_ref(),
         ] {
+            w.set_halign(gtk::Align::Start);
             controls.append(w);
         }
         let header = gtk::Box::new(gtk::Orientation::Vertical, 0);
@@ -204,6 +241,12 @@ impl Pane {
             status,
             levels,
             numbers,
+            versions,
+            version_items: RefCell::new(Vec::new()),
+            versions_key: RefCell::new(String::new()),
+            building_versions: Cell::new(false),
+            shown_version_text: RefCell::new(None),
+            menu_target: RefCell::new(MenuTarget::default()),
             folder: RefCell::new(Folder::default()),
             line_starts: RefCell::new(vec![0]),
             tokens: RefCell::new(Vec::new()),
@@ -289,6 +332,16 @@ impl Pane {
             });
         }
 
+        // The version picker.
+        let this = Rc::downgrade(self);
+        self.versions.connect_selected_notify(move |d| {
+            if let Some(p) = this.upgrade()
+                && !p.building_versions.get()
+            {
+                p.version_chosen(d.selected() as usize);
+            }
+        });
+
         // The fold gutter.
         let this = Rc::downgrade(self);
         self.gutter.set_draw_func(move |_, cr, w, h| {
@@ -363,19 +416,35 @@ impl Pane {
         }
         self.view.add_controller(keys);
 
-        // The context menu's fold items.
-        let menu = gio::Menu::new();
-        let section = gio::Menu::new();
-        for (label, name) in [
-            ("Fold", "c.fold"),
-            ("Unfold", "c.unfold"),
-            ("Fold All", "c.fold-all"),
-            ("Unfold All", "c.unfold-all"),
-        ] {
-            section.append(Some(label), Some(name));
-        }
-        menu.append_section(None, &section);
+        // The context menu: the C's annotations, then the fold items.
         let actions = gio::SimpleActionGroup::new();
+        for name in [
+            "name-local",
+            "comment",
+            "note",
+            "new-version",
+            "edit-version",
+        ] {
+            let a = gio::SimpleAction::new(name, None);
+            let this = Rc::downgrade(self);
+            a.connect_activate(move |_, _| {
+                if let Some(p) = this.upgrade() {
+                    p.annotate(name);
+                }
+            });
+            actions.add_action(&a);
+        }
+        let right = gtk::GestureClick::builder()
+            .button(gdk::BUTTON_SECONDARY)
+            .propagation_phase(gtk::PropagationPhase::Capture)
+            .build();
+        let this = Rc::downgrade(self);
+        right.connect_pressed(move |_, _, x, y| {
+            if let Some(p) = this.upgrade() {
+                p.build_menu(x, y);
+            }
+        });
+        self.view.add_controller(right);
         for (name, key) in [
             ("fold", FoldKey::Fold),
             ("unfold", FoldKey::Unfold),
@@ -392,7 +461,6 @@ impl Pane {
             actions.add_action(&a);
         }
         self.view.insert_action_group("c", Some(&actions));
-        self.view.set_extra_menu(Some(&menu));
 
         // Redraw and refresh when the document or the colour scheme changes.
         let this = Rc::downgrade(self);
@@ -472,8 +540,25 @@ impl Pane {
             DecompileState::Failed(m) => self.status.set_text(m),
         }
 
-        if self.shown_generation.get() != generation {
+        self.refresh_versions();
+        if let Some(version) = self.shown_version_info() {
+            let name = doc.shown_version().unwrap_or_default();
+            if self.shown_version_text.borrow().as_deref() != Some(version.text.as_str())
+                || self.shown_generation.get() != generation
+            {
+                self.shown_generation.set(generation);
+                self.set_version_text(&name, &version);
+            }
+            self.highlight_version(&version);
+            self.selecting_from_text.set(false);
+            return;
+        }
+        if self.shown_generation.get() != generation || self.shown_version_text.borrow().is_some() {
             self.shown_generation.set(generation);
+            if self.shown_version_text.borrow_mut().take().is_some() {
+                // Back from a version: the generated text goes in whole.
+                self.shown_entry.set(None);
+            }
             self.set_text(result.as_ref());
         }
         let start = doc
@@ -507,6 +592,17 @@ impl Pane {
         }
         let same_routine = result.is_some() && result.map(|r| r.entry) == self.shown_entry.get();
         self.shown_entry.set(result.map(|r| r.entry));
+        self.install(
+            text,
+            result.map_or(&[], |r| r.tokens.as_slice()),
+            same_routine,
+        );
+    }
+
+    /// Put `text` in the pane, coloured by `tokens`. What was folded stays
+    /// folded and the scroll stays where it was when `same_routine`.
+    fn install(self: &Rc<Self>, text: &str, tokens: &[CTokenInfo], same_routine: bool) {
+        let buffer = self.buffer();
         let (hadj, vadj) = (
             self.scroll.hadjustment().value(),
             self.scroll.vadjustment().value(),
@@ -538,22 +634,20 @@ impl Pane {
 
         // Tokens, with the core's UTF-16 offsets mapped to chars.
         let map = utf16_to_chars(text);
-        let mut tokens = Vec::new();
-        if let Some(r) = result {
-            for t in &r.tokens {
-                let (s, e) = (t.start as usize, (t.start + t.len) as usize);
-                let (Some(&cs), Some(&ce)) = (map.get(s), map.get(e)) else {
-                    continue;
-                };
-                let (a, b) = (
-                    buffer.iter_at_offset(cs as i32),
-                    buffer.iter_at_offset(ce as i32),
-                );
-                buffer.apply_tag_by_name(&tag_name(t.kind), &a, &b);
-                tokens.push((cs..ce, t.clone()));
-            }
+        let mut placed = Vec::new();
+        for t in tokens {
+            let (s, e) = (t.start as usize, (t.start + t.len) as usize);
+            let (Some(&cs), Some(&ce)) = (map.get(s), map.get(e)) else {
+                continue;
+            };
+            let (a, b) = (
+                buffer.iter_at_offset(cs as i32),
+                buffer.iter_at_offset(ce as i32),
+            );
+            buffer.apply_tag_by_name(&tag_name(t.kind), &a, &b);
+            placed.push((cs..ce, t.clone()));
         }
-        *self.tokens.borrow_mut() = tokens;
+        *self.tokens.borrow_mut() = placed;
         self.highlighted.borrow_mut().clear();
 
         let folds = cfold::find(text);
@@ -650,6 +744,10 @@ impl Pane {
         }
         let buffer = self.buffer();
         let at = buffer.iter_at_mark(&buffer.get_insert()).offset() as usize;
+        if let Some(version) = self.shown_version_info() {
+            self.follow_version_line(&version, self.line_of(at));
+            return;
+        }
         let offsets = self.doc.decompile().offsets_for_line(self.line_of(at));
         let Some(first) = offsets.iter().min().copied() else {
             return;
@@ -710,6 +808,246 @@ impl Pane {
             false,
         );
         literal_value(&literal).map(bases)
+    }
+
+    // MARK: C versions and the C's annotations (docs/24, U10)
+
+    /// The routine shown.
+    fn entry(&self) -> Option<u32> {
+        self.doc.decompile().result.as_ref().map(|r| r.entry)
+    }
+
+    /// The version picked, if it still exists for the routine shown.
+    fn shown_version_info(&self) -> Option<CVersionInfo> {
+        let name = self.doc.shown_version()?;
+        self.doc
+            .c_versions(self.entry()?)
+            .into_iter()
+            .find(|n| n.name == name)
+            .map(|n| n.version)
+    }
+
+    /// The picker: Generated, each version, then what can be done.
+    fn refresh_versions(&self) {
+        let entry = self.entry();
+        let names: Vec<String> = entry
+            .map(|e| self.doc.c_versions(e).into_iter().map(|n| n.name).collect())
+            .unwrap_or_default();
+        let shown = self.doc.shown_version().filter(|v| names.contains(v));
+        let key = format!("{entry:?}|{}|{shown:?}", names.join("|"));
+        if *self.versions_key.borrow() == key {
+            return;
+        }
+        *self.versions_key.borrow_mut() = key;
+        let mut items = vec![VersionItem::Generated];
+        items.extend(names.iter().cloned().map(VersionItem::Named));
+        items.push(VersionItem::New);
+        if shown.is_some() {
+            items.push(VersionItem::Edit);
+            items.push(VersionItem::Delete);
+        }
+        let labels: Vec<&str> = items
+            .iter()
+            .map(|i| match i {
+                VersionItem::Generated => "Generated",
+                VersionItem::Named(n) => n.as_str(),
+                VersionItem::New => "New Version…",
+                VersionItem::Edit => "Edit Version…",
+                VersionItem::Delete => "Delete Version",
+            })
+            .collect();
+        self.building_versions.set(true);
+        self.versions
+            .set_model(Some(&gtk::StringList::new(&labels)));
+        let at = shown
+            .and_then(|s| {
+                items
+                    .iter()
+                    .position(|i| *i == VersionItem::Named(s.clone()))
+            })
+            .unwrap_or(0);
+        self.versions.set_selected(at as u32);
+        self.versions.set_sensitive(entry.is_some());
+        self.building_versions.set(false);
+        *self.version_items.borrow_mut() = items;
+    }
+
+    fn version_chosen(self: &Rc<Self>, index: usize) {
+        let Some(item) = self.version_items.borrow().get(index).cloned() else {
+            return;
+        };
+        let Some(entry) = self.entry() else { return };
+        let doc = &self.doc;
+        match item {
+            VersionItem::Generated => doc.show_c_version(None),
+            VersionItem::Named(n) => doc.show_c_version(Some(n)),
+            VersionItem::New => doc.begin_c_edit(CEdit::Version {
+                routine: entry,
+                name: None,
+            }),
+            VersionItem::Edit => doc.begin_c_edit(CEdit::Version {
+                routine: entry,
+                name: doc.shown_version(),
+            }),
+            VersionItem::Delete => {
+                if let Some(v) = doc.shown_version() {
+                    let _ = doc.run_c_command(Command::SetCVersion {
+                        routine: entry,
+                        name: v,
+                        version: None,
+                    });
+                    doc.show_c_version(None);
+                }
+            }
+        }
+        // The picker shows what is shown, whatever was asked.
+        self.versions_key.borrow_mut().clear();
+        self.update();
+    }
+
+    /// A version's text, coloured by the lexer.
+    fn set_version_text(self: &Rc<Self>, name: &str, version: &CVersionInfo) {
+        let tokens = self.doc.workbench().lex_c(version.text.clone());
+        *self.shown_version_text.borrow_mut() = Some(version.text.clone());
+        self.shown_entry.set(None);
+        self.install(&version.text, &tokens, false);
+        let routine = self.title.text();
+        let routine = routine.split(' ').next().unwrap_or_default();
+        self.title.set_text(&format!("{routine}  version “{name}”"));
+        self.status
+            .set_text(if version.author == romlens_ffi::cnotes::CAuthor::Tutor {
+                "Written by the tutor; not checked against the code"
+            } else {
+                "Written by you; not checked against the code"
+            });
+        self.status.set_tooltip_text(None);
+    }
+
+    /// The version's lines anchored to the selected instruction.
+    fn highlight_version(self: &Rc<Self>, version: &CVersionInfo) {
+        let Some(a) = self.doc.selected_address() else {
+            return;
+        };
+        let lines: Vec<usize> = version
+            .anchors
+            .iter()
+            .filter(|x| x.start <= a && a <= x.end)
+            .flat_map(|x| x.first.saturating_sub(1) as usize..=x.last.saturating_sub(1) as usize)
+            .collect();
+        if lines != *self.highlighted.borrow() {
+            self.set_highlight(&lines, true);
+            if !self.selecting_from_text.get()
+                && let Some(&first) = lines.first()
+            {
+                // The new text has not laid out yet.
+                let this = Rc::downgrade(self);
+                glib::idle_add_local_once(move || {
+                    if let Some(p) = this.upgrade() {
+                        p.scroll_to_line(first);
+                    }
+                });
+            }
+        }
+    }
+
+    fn follow_version_line(&self, version: &CVersionInfo, line: usize) {
+        let Some(a) = version.anchors.iter().find(|a| {
+            (a.first.saturating_sub(1) as usize..=a.last.saturating_sub(1) as usize).contains(&line)
+        }) else {
+            return;
+        };
+        if Some(a.start) == self.doc.selected_address() {
+            return;
+        }
+        self.selecting_from_text.set(true);
+        self.doc.jump_to_snes(a.start);
+    }
+
+    /// Right-click in the C: name a local, comment the line, note the routine,
+    /// or write a version. Built for each click.
+    fn build_menu(&self, x: f64, y: f64) {
+        let menu = gio::Menu::new();
+        let mut target = MenuTarget::default();
+        if self.entry().is_some() {
+            let notes = gio::Menu::new();
+            if self.shown_version_info().is_none() {
+                if let Some(index) = self.char_at(x, y) {
+                    if let Some((range, t)) = self.token_at(index)
+                        && t.kind == CTokenKind::Local
+                    {
+                        let buffer = self.buffer();
+                        let word = buffer
+                            .text(
+                                &buffer.iter_at_offset(range.start as i32),
+                                &buffer.iter_at_offset(range.end as i32),
+                                false,
+                            )
+                            .to_string();
+                        let original = self
+                            .entry()
+                            .and_then(|e| {
+                                self.doc
+                                    .workbench()
+                                    .local_names(e)
+                                    .into_iter()
+                                    .find(|n| n.name == word)
+                            })
+                            .map_or_else(|| word.clone(), |n| n.local);
+                        notes.append(Some(&format!("Name “{word}”…")), Some("c.name-local"));
+                        target.local = Some((word, original));
+                    }
+                    let offsets = self.doc.decompile().offsets_for_line(self.line_of(index));
+                    if let Some(a) = offsets.iter().min().and_then(|o| self.doc.snes_address(*o)) {
+                        target.address = Some(a);
+                        notes.append(Some("C Comment Here…"), Some("c.comment"));
+                    }
+                }
+                notes.append(Some("Routine Note…"), Some("c.note"));
+            }
+            menu.append_section(None, &notes);
+            let versions = gio::Menu::new();
+            versions.append(Some("New C Version…"), Some("c.new-version"));
+            if self.shown_version_info().is_some() {
+                versions.append(Some("Edit C Version…"), Some("c.edit-version"));
+            }
+            menu.append_section(None, &versions);
+        }
+        let folds = gio::Menu::new();
+        for (label, name) in [
+            ("Fold", "c.fold"),
+            ("Unfold", "c.unfold"),
+            ("Fold All", "c.fold-all"),
+            ("Unfold All", "c.unfold-all"),
+        ] {
+            folds.append(Some(label), Some(name));
+        }
+        menu.append_section(None, &folds);
+        *self.menu_target.borrow_mut() = target;
+        self.view.set_extra_menu(Some(&menu));
+    }
+
+    fn annotate(&self, what: &str) {
+        let Some(routine) = self.entry() else { return };
+        let target = self.menu_target.borrow().clone();
+        let edit = match what {
+            "name-local" => target
+                .local
+                .map(|(_, local)| CEdit::Local { routine, local }),
+            "comment" => target.address.map(|address| CEdit::Comment { address }),
+            "note" => Some(CEdit::Note { routine }),
+            "new-version" => Some(CEdit::Version {
+                routine,
+                name: None,
+            }),
+            "edit-version" => Some(CEdit::Version {
+                routine,
+                name: self.doc.shown_version(),
+            }),
+            _ => None,
+        };
+        if let Some(e) = edit {
+            self.doc.begin_c_edit(e);
+        }
     }
 
     // MARK: Folding

@@ -1114,6 +1114,32 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ce5d3ddc6d3fa000eb1536d85e147bfe31aacaba692ed6a876f95cb7c855be78"
 
 [[package]]
+name = "libsecret"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c162ba1511e2ebf4a545a6991ed8632fa5f34736d6ec40e2d0aa3336ae7bee36"
+dependencies = [
+ "gio",
+ "glib",
+ "libc",
+ "libsecret-sys",
+]
+
+[[package]]
+name = "libsecret-sys"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8ed69ddd340207df082a020ed4bd27f5478591a47489bf4bb02f2f648d0c2d8e"
+dependencies = [
+ "gio-sys",
+ "glib-sys",
+ "gobject-sys",
+ "libc",
+ "pkg-config",
+ "system-deps",
+]
+
+[[package]]
 name = "linux-raw-sys"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1587,6 +1613,7 @@ dependencies = [
  "cpal",
  "gtk4",
  "libadwaita",
+ "libsecret",
  "pangocairo",
  "romlens-ffi",
  "serde",
