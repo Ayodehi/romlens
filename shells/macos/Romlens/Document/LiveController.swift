@@ -34,7 +34,7 @@ enum LiveController {
         do {
             let session = try LiveSession.start(rom: model.rom, port: liveDefaultPort(), listener: bridge)
             try model.graphics.attachLive(session)
-            if model.graphicsTab == nil { model.graphicsTab = .tilemap }
+            if model.graphicsTab == nil { model.show(.graphics(.tilemap)) }
         } catch {
             let alert = NSAlert()
             alert.messageText = "The live session could not start"

@@ -473,7 +473,10 @@ impl Workbench {
     /// cancelled task) cancels the run.
     pub async fn analyze(&self) -> Result<AnalysisStats, RomlensError> {
         let job = self.analysis_job();
-        let result = crate::future::spawn(Arc::clone(&self.cancel), job).await;
+        // Wrapped, so a panic in the analyzer is an error and not taken for
+        // a cancel.
+        let job = move || Ok::<_, RomlensError>(job());
+        let result = crate::future::spawn(Arc::clone(&self.cancel), job).await?;
         match result {
             Ok(done) => Ok(self.install(done)),
             Err(_) => Err(RomlensError::Cancelled),
@@ -551,10 +554,9 @@ impl Workbench {
         let mut batch = encode_rows(&self.rom.image, &self.rom.index, start_row, count);
         let inner = self.lock();
         let rows = u32::from_le_bytes(batch[4..8].try_into().unwrap()) as usize;
-        let first = start_row * BYTES_PER_ROW as u32;
-        let regions = inner
-            .snapshot
-            .regions_in(first, rows as u32 * BYTES_PER_ROW as u32);
+        let first = start_row.saturating_mul(BYTES_PER_ROW as u32);
+        let span = rows as u32 * BYTES_PER_ROW as u32;
+        let regions = inner.snapshot.regions_in(first, span);
         for r in regions {
             let code = match r.kind {
                 model::RegionKind::Unknown => continue,
@@ -564,7 +566,7 @@ impl Workbench {
             let conf = (r.confidence * 15.0).round().clamp(0.0, 15.0) as u8;
             let value = 0x80 | (code << 4) | conf;
             let lo = r.start.0.max(first);
-            let hi = r.end().min(first + rows as u32 * BYTES_PER_ROW as u32);
+            let hi = r.end().min(first.saturating_add(span));
             for b in lo..hi {
                 let row = ((b - first) / BYTES_PER_ROW as u32) as usize;
                 let i = ((b - first) % BYTES_PER_ROW as u32) as usize;
@@ -588,7 +590,11 @@ impl Workbench {
         self.lock().lines.offset_for_line(line as usize)
     }
 
+    /// One entry a byte, the range cut at the ROM's end: a byte past it
+    /// has no line, and a range of 4 GiB would be a 16 GiB answer.
     pub fn line_numbers_for_bytes(&self, start: u32, len: u32) -> Vec<u32> {
+        let end = start.saturating_add(len).min(self.rom.image.len() as u32);
+        let len = end.saturating_sub(start);
         self.lock().lines.line_numbers_for_bytes(start, len)
     }
 

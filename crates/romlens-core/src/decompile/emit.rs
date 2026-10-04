@@ -15,7 +15,7 @@ use crate::decompile::cfg::{BlockId, Cfg, Term};
 use crate::decompile::function::Function;
 use crate::decompile::header::{GLOBALS, HELPERS};
 use crate::decompile::ir::{
-    BinOp, CallTarget, Expr, LiftedBlock, Place, Stmt, UnOp, VarDecl, Width,
+    BinOp, CType, CallTarget, Expr, LiftedBlock, Place, Stmt, UnOp, VarDecl, Width,
 };
 use crate::decompile::signature::Abi;
 use crate::memory::address::SnesAddress;
@@ -695,6 +695,16 @@ impl<'a, 'n> Emitter<'a, 'n> {
                 self.local(&name)
             }
             Expr::Mem { addr, width } => self.mem(addr, *width),
+            // `!!c` of a value already 0 or 1 is `c`. Structuring negates
+            // conditions after the variables have their types, so a `bool`
+            // can arrive here negated twice.
+            Expr::Un(UnOp::LNot, inner)
+                if let Expr::Un(UnOp::LNot, x) = &**inner
+                    && (x.is_boolean()
+                        || matches!(**x, Expr::Var(v) if self.vars.get(v as usize).is_some_and(|d| d.ty == CType::Bool))) =>
+            {
+                self.expr(x)
+            }
             Expr::Un(op, inner) => {
                 self.w.w(match op {
                     UnOp::Not => "~",

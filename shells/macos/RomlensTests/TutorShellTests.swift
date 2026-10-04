@@ -76,8 +76,6 @@ import Testing
         // After the answer the model names it, for the list and the window.
         try await Fixture.settle(timeout: 10) { r.tutor.title == "Test conversation" }
         #expect(r.tutor.conversations.first?.title == "Test conversation")
-        let window = TutorWindowController(tutor: r.tutor, title: "t.sfc")
-        #expect(window.window?.subtitle == "Test conversation")
     }
 
     @Test func aLessonIsReadAStepAtATime() async throws {
@@ -148,11 +146,11 @@ import Testing
         if ProcessInfo.processInfo.environment["ROMLENS_SNAPSHOTS"] != nil {
             r.tutor.markKnown("vblank", level: 4)
             r.tutor.show(step: 0, of: lesson)
-            let c = TutorWindowController(tutor: r.tutor, title: "Test")
+            let c = Self.tutorWindow(r.tutor)
             let map = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 720, height: 560), styleMask: [.titled], backing: .buffered, defer: false)
             map.isReleasedWhenClosed = false
             map.contentViewController = NSHostingController(rootView: LessonsSheet(tutor: r.tutor, tab: .map))
-            for (w, name) in [(c.window!, "lesson.png"), (map, "map.png")] {
+            for (w, name) in [(c, "lesson.png"), (map, "map.png")] {
                 w.appearance = NSAppearance(named: .aqua)
                 if name == "lesson.png" { w.setContentSize(NSSize(width: 520, height: 640)) }
                 w.orderFront(nil)
@@ -218,9 +216,9 @@ import Testing
 
         if ProcessInfo.processInfo.environment["ROMLENS_SNAPSHOTS"] != nil {
             r.tutor.show(step: 0, of: lesson)
-            let c = TutorWindowController(tutor: r.tutor, title: "Test")
+            let c = Self.tutorWindow(r.tutor)
             for (appearance, name) in [(NSAppearance.Name.aqua, "diagram-light.png"), (.darkAqua, "diagram-dark.png")] {
-                let w = c.window!
+                let w = c
                 w.appearance = NSAppearance(named: appearance)
                 w.setContentSize(NSSize(width: 560, height: 900))
                 w.orderFront(nil)
@@ -233,7 +231,7 @@ import Testing
                         .write(to: FileManager.default.temporaryDirectory.appendingPathComponent(name))
                 }
             }
-            c.window?.close()
+            c.close()
         }
     }
 
@@ -512,8 +510,7 @@ import Testing
         let r = try await rig([tutorTestCallReply(name: "listing", arguments: #"{"address":"$00:8000","lines":4}"#), tutorTestTextReply(text: "It is `$00:8000`.\n```c\nvoid Reset(void);\n```\n| Where | Bytes | As code |\n|---|---|---|\n| `$7F:8000` | `A9 F0` | `LDA #$F0` |\n| `$7F:8182` | `6B` | **RTL**, the routine's end |\n\nThen more.")])
         defer { try? FileManager.default.removeItem(at: r.root) }
         try await ask(r.tutor, "Where is RESET?")
-        let c = TutorWindowController(tutor: r.tutor, title: "Test")
-        let w = try #require(c.window)
+        let w = Self.tutorWindow(r.tutor)
         w.appearance = NSAppearance(named: .aqua)
         w.setContentSize(NSSize(width: 520, height: 640))
         w.orderFront(nil)
@@ -521,8 +518,6 @@ import Testing
         w.contentView?.layoutSubtreeIfNeeded()
         Fixture.spin(0.3)
         w.display()
-        #expect(w.title == "Tutor — Test")
-        #expect(!c.shouldCloseDocument)
         // With ROMLENS_SNAPSHOTS set, saved in the sandbox's temporary folder.
         if ProcessInfo.processInfo.environment["ROMLENS_SNAPSHOTS"] != nil, let view = w.contentView,
            let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
@@ -537,7 +532,7 @@ import Testing
         defer { try? FileManager.default.removeItem(at: r.root) }
         r.rom.select(offset: 0)
         #expect(r.tutor.selectionText()?.contains("C tab") == false)
-        r.rom.editorTab = .c
+        r.rom.showTab(.c)
         try await Fixture.settle(timeout: 20) { r.rom.decompiler.state == .ready }
         let s = try #require(r.tutor.selectionText())
         #expect(s.contains("[The student is reading the C tab:") && s.contains("```c\n"))
@@ -554,17 +549,28 @@ import Testing
         #expect(TutorModel.clip("a\nb", around: nil) == "a\nb")
     }
 
-    @Test func theDocumentOpensOneTutorWindow() throws {
+    /// The tutor's view in a window of its own, for looking at: in the app
+    /// it is in the inspector or a tab (docs/29).
+    static func tutorWindow(_ tutor: TutorModel) -> NSWindow {
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 640), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        w.isReleasedWhenClosed = false
+        w.contentViewController = NSHostingController(rootView: TutorView(tutor: tutor))
+        return w
+    }
+
+    @Test func theTutorIsInTheInspectorWithOneConversation() throws {
         let doc = ProjectDocument()
         try doc.read(from: makeTestRom(mapping: .loRom), ofType: Fixture.romType)
-        doc.model?.session.cancelAnalysis()
+        let model = try #require(doc.model)
+        model.session.cancelAnalysis()
         doc.makeWindowControllers()
+        model.isInspectorVisible = false
         doc.showTutor()
-        let first = try #require(doc.tutorController)
+        #expect(model.rightPane == .tutor && model.isInspectorVisible)
+        let first = try #require(model.tutor)
         doc.showTutor()
-        #expect(doc.tutorController === first)
-        #expect(doc.windowControllers.count == 2)
-        first.window?.close()
+        #expect(model.tutor === first)
+        #expect(doc.windowControllers.count == 1, "no second window")
         doc.close()
     }
 }

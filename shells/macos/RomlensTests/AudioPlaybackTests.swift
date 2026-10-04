@@ -47,6 +47,30 @@ import Testing
         #expect(ring.available == 16)
     }
 
+    /// A clear is honoured by the reader: what was written before it, and
+    /// what the old player rendered after it, is never heard.
+    @Test func aClearDropsWhatTheOldPlayerWrote() {
+        let ring = SampleRing(capacity: 16)
+        var l = [Float](repeating: 9, count: 4)
+        var r = [Float](repeating: 9, count: 4)
+        func read() -> Int {
+            l.withUnsafeMutableBufferPointer { lp in
+                r.withUnsafeMutableBufferPointer { rp in ring.read(into: lp.baseAddress!, rp.baseAddress!, frames: 4) }
+            }
+        }
+        ring.write([100, 100, 100, 100])
+        let generation = ring.clear()
+        ring.write([200, 200])
+        #expect(read() == 0, "nothing of the new player yet")
+        #expect(l == [0, 0, 0, 0])
+        ring.write([200, 200])
+        ring.write([16384, 16384], generation: generation)
+        #expect(ring.pending(generation: generation) == 1)
+        #expect(read() == 1)
+        #expect(l == [0.5, 0, 0, 0])
+        #expect(ring.pending(generation: generation) == 0)
+    }
+
     @Test func theRomsDriverPlaysACommandSentOnAPort() async throws {
         let m = try await model()
         let a = m.audio
@@ -76,7 +100,7 @@ import Testing
 
     @Test func playThisCommandBootsTheDriverAndSendsIt() async throws {
         let m = try await model()
-        m.editorTab = .disassembly
+        m.showTab(.disassembly)
         m.openAudio(.voices)
         m.audio.playCommand(port: 0, value: 1)
         #expect(m.audio.isPlaying && m.audio.source == .rom)

@@ -83,7 +83,7 @@ _Noreturn void table_overrun(void);
 #define OBSEL MEM8(0x2101) /* Object size and tile base */
 #define OAMADDL MEM8(0x2102) /* OAM address, low */
 #define OAMADDH MEM8(0x2103) /* OAM address, high and priority rotation */
-#define OAMDATA MEM8(0x2104) /* OAM data write */
+#define OAMDATA MEM8(0x2104) /* OAM data write (in pairs below the high table) */
 #define BGMODE MEM8(0x2105) /* Background mode and tile sizes */
 #define MOSAIC MEM8(0x2106) /* Mosaic size and enable */
 #define BG1SC MEM8(0x2107) /* BG1 tilemap address and size */
@@ -94,26 +94,26 @@ _Noreturn void table_overrun(void);
 #define BG34NBA MEM8(0x210C) /* BG3 and BG4 character base */
 #define BG1HOFS MEM8(0x210D) /* BG1 horizontal scroll (write twice) */
 #define BG1VOFS MEM8(0x210E) /* BG1 vertical scroll (write twice) */
-#define BG2HOFS MEM8(0x210F) /* BG2 horizontal scroll */
-#define BG2VOFS MEM8(0x2110) /* BG2 vertical scroll */
-#define BG3HOFS MEM8(0x2111) /* BG3 horizontal scroll */
-#define BG3VOFS MEM8(0x2112) /* BG3 vertical scroll */
-#define BG4HOFS MEM8(0x2113) /* BG4 horizontal scroll */
-#define BG4VOFS MEM8(0x2114) /* BG4 vertical scroll */
+#define BG2HOFS MEM8(0x210F) /* BG2 horizontal scroll (write twice) */
+#define BG2VOFS MEM8(0x2110) /* BG2 vertical scroll (write twice) */
+#define BG3HOFS MEM8(0x2111) /* BG3 horizontal scroll (write twice) */
+#define BG3VOFS MEM8(0x2112) /* BG3 vertical scroll (write twice) */
+#define BG4HOFS MEM8(0x2113) /* BG4 horizontal scroll (write twice) */
+#define BG4VOFS MEM8(0x2114) /* BG4 vertical scroll (write twice) */
 #define VMAIN MEM8(0x2115) /* VRAM address increment mode */
 #define VMADDL MEM8(0x2116) /* VRAM address, low */
 #define VMADDH MEM8(0x2117) /* VRAM address, high */
 #define VMDATAL MEM8(0x2118) /* VRAM data write, low */
 #define VMDATAH MEM8(0x2119) /* VRAM data write, high */
 #define M7SEL MEM8(0x211A) /* Mode 7 settings */
-#define M7A MEM8(0x211B) /* Mode 7 matrix A (also multiplicand) */
-#define M7B MEM8(0x211C) /* Mode 7 matrix B (also multiplier) */
-#define M7C MEM8(0x211D) /* Mode 7 matrix C */
-#define M7D MEM8(0x211E) /* Mode 7 matrix D */
-#define M7X MEM8(0x211F) /* Mode 7 centre X */
-#define M7Y MEM8(0x2120) /* Mode 7 centre Y */
+#define M7A MEM8(0x211B) /* Mode 7 matrix A, also multiplicand (write twice) */
+#define M7B MEM8(0x211C) /* Mode 7 matrix B, also multiplier (write twice) */
+#define M7C MEM8(0x211D) /* Mode 7 matrix C (write twice) */
+#define M7D MEM8(0x211E) /* Mode 7 matrix D (write twice) */
+#define M7X MEM8(0x211F) /* Mode 7 centre X (write twice) */
+#define M7Y MEM8(0x2120) /* Mode 7 centre Y (write twice) */
 #define CGADD MEM8(0x2121) /* CGRAM (palette) address */
-#define CGDATA MEM8(0x2122) /* CGRAM data write */
+#define CGDATA MEM8(0x2122) /* CGRAM data write (write twice) */
 #define W12SEL MEM8(0x2123) /* Window mask settings for BG1 and BG2 */
 #define W34SEL MEM8(0x2124) /* Window mask settings for BG3 and BG4 */
 #define WOBJSEL MEM8(0x2125) /* Window mask settings for OBJ and colour */

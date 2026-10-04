@@ -7,6 +7,9 @@ import UniformTypeIdentifiers
 /// status line.
 struct TutorView: View {
     @Bindable var tutor: TutorModel
+    /// The inspector's drawer is narrower than the tutor's old window
+    /// (docs/29).
+    var minWidth: CGFloat = 280
 
     var body: some View {
         VStack(spacing: 0) {
@@ -24,7 +27,7 @@ struct TutorView: View {
             }
         }
         .animation(.easeOut(duration: 0.25), value: tutor.banner)
-        .frame(minWidth: 380, minHeight: 360)
+        .frame(minWidth: minWidth, minHeight: 300)
         .environment(\.openURL, OpenURLAction { url in
             if let e = Glossary.entry(for: url) {
                 GlossaryPopover.show(e) { term in tutor.composer = "Tell me more about \(term)." }
@@ -279,7 +282,7 @@ struct EmptyTutor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Ask about this ROM").font(.title3.bold())
-            Text("Select an instruction, a routine or a frame in the main window, then ask: what it does, why it is written that way, what would change if… The tutor reads Romlens's analysis with its tools and cites every address.")
+            Text("Select an instruction, a routine or a frame in the editor, then ask: what it does, why it is written that way, what would change if… The tutor reads Romlens's analysis with its tools and cites every address.")
                 .foregroundStyle(.secondary)
             Text("Return sends, ⇧Return starts a line, ↑ brings back what you asked, ⇧⇥ changes what it may edit, Esc stops it, / lists the commands.")
                 .font(.caption).foregroundStyle(.secondary)
@@ -560,75 +563,103 @@ struct Picture: View {
 struct StatusLine: View {
     let tutor: TutorModel
 
+    /// On one row where there is room, as in a tab; in the inspector's
+    /// narrow drawer (docs/29), the model and mode above the tools, every
+    /// part on one line of its own.
     var body: some View {
-        HStack(spacing: 10) {
-            Button {
-                tutor.sheet = .model
-            } label: {
-                Text([tutor.endpointName, tutor.modelName ?? tutor.settings.model(for: tutor.settings.defaultEndpoint)]
-                    .compactMap { $0 }.joined(separator: " · "))
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) {
+                about
+                Spacer(minLength: 8)
+                tools
             }
-            .buttonStyle(.plain)
-            .help("Change the provider or model (/model)")
-            Button { tutor.cycleMode() } label: {
-                Label(tutor.mode.title, systemImage: tutor.mode == .readOnly ? "eye" : tutor.mode == .askBeforeEdits ? "hand.raised" : "pencil")
-                    .lineLimit(1).fixedSize()
-            }
-            .buttonStyle(.plain)
-            .help("What the tutor may change: ⇧⇥ cycles")
-            if tutor.contextUsed > 0 {
-                Text("context \(Int(tutor.contextUsed * 100))%")
-                    .help("How full the model's context was at the last answer; past 80% it summarises first")
-            }
-            Text(String(format: "$%.3f", tutor.cost)).help("What this conversation has cost")
-            Spacer()
-            // Quizzes (docs/28): reviews due are learning, shown always;
-            // points only when the student wants them.
-            if tutor.dueCount > 0 {
-                Button { tutor.startQuiz(nil, purpose: .review) } label: {
-                    Label("\(tutor.dueCount)", systemImage: "clock.badge.checkmark")
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 10) { about }
+                HStack(spacing: 10) {
+                    Spacer(minLength: 0)
+                    tools
                 }
-                .buttonStyle(.plain)
-                .help("\(tutor.dueCount) ready to review (/review)")
-            }
-            if tutor.settings.showProgress, let p = tutor.progress {
-                Button { tutor.sheet = .progress } label: {
-                    Text("\(p.xp) XP").monospacedDigit()
-                }
-                .buttonStyle(.plain)
-                .help("\(p.rank): your points, rank and achievements (/progress)")
-            }
-            Button { tutor.sheet = .resume } label: {
-                Label("Conversations", systemImage: "clock.arrow.circlepath").labelStyle(.iconOnly)
-            }
-            .buttonStyle(.plain)
-            .disabled(tutor.busy)
-            .help("Go back to an earlier conversation (/resume)")
-            Button { tutor.sheet = .lessons } label: {
-                Label("Lessons", systemImage: "books.vertical").labelStyle(.iconOnly)
-            }
-            .buttonStyle(.plain)
-            .help("Your lessons, and what you have learned (/lessons, /map)")
-            Button { tutor.setExplain(!tutor.explain) } label: {
-                Label("Explain", systemImage: tutor.explain ? "graduationcap.fill" : "graduationcap")
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(tutor.explain ? Color.accentColor : Color.secondary)
-            .help(tutor.explain ? "Answering with lessons: click for plain answers (/explain)" : "Answer with lessons, as deep as you have got (/explain, /learn <topic>)")
-            Button { tutor.settings.showWork.toggle() } label: {
-                Label("Details", systemImage: tutor.settings.showWork ? "list.bullet.rectangle.fill" : "list.bullet.rectangle")
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(tutor.settings.showWork ? Color.accentColor : Color.secondary)
-            .help(tutor.settings.showWork ? "Hide the tutor's thinking and tool calls (/details)" : "Show the tutor's thinking and tool calls (/details)")
-            if tutor.busy {
-                Button("Stop") { tutor.stop() }.keyboardShortcut(.cancelAction).controlSize(.small)
             }
         }
+        .lineLimit(1)
         .font(.caption)
         .foregroundStyle(.secondary)
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
+    }
+
+    @ViewBuilder
+    private var about: some View {
+        Button {
+            tutor.sheet = .model
+        } label: {
+            Text([tutor.endpointName, tutor.modelName ?? tutor.settings.model(for: tutor.settings.defaultEndpoint)]
+                .compactMap { $0 }.joined(separator: " · "))
+                .truncationMode(.middle)
+        }
+        .buttonStyle(.plain)
+        .help("Change the provider or model (/model)")
+        Button { tutor.cycleMode() } label: {
+            Label(tutor.mode.title, systemImage: tutor.mode == .readOnly ? "eye" : tutor.mode == .askBeforeEdits ? "hand.raised" : "pencil")
+                .fixedSize()
+        }
+        .buttonStyle(.plain)
+        .help("What the tutor may change: ⇧⇥ cycles")
+        if tutor.contextUsed > 0 {
+            Text("context \(Int(tutor.contextUsed * 100))%")
+                .fixedSize()
+                .help("How full the model's context was at the last answer; past 80% it summarises first")
+        }
+        // Never "$-0.000": a cost is at least nothing.
+        Text(String(format: "$%.3f", tutor.cost > 0 ? tutor.cost : 0))
+            .fixedSize()
+            .help("What this conversation has cost")
+    }
+
+    @ViewBuilder
+    private var tools: some View {
+        // Quizzes (docs/28): reviews due are learning, shown always;
+        // points only when the student wants them.
+        if tutor.dueCount > 0 {
+            Button { tutor.startQuiz(nil, purpose: .review) } label: {
+                Label("\(tutor.dueCount)", systemImage: "clock.badge.checkmark").fixedSize()
+            }
+            .buttonStyle(.plain)
+            .help("\(tutor.dueCount) ready to review (/review)")
+        }
+        if tutor.settings.showProgress, let p = tutor.progress {
+            Button { tutor.sheet = .progress } label: {
+                Text("\(p.xp) XP").monospacedDigit().fixedSize()
+            }
+            .buttonStyle(.plain)
+            .help("\(p.rank): your points, rank and achievements (/progress)")
+        }
+        Button { tutor.sheet = .resume } label: {
+            Label("Conversations", systemImage: "clock.arrow.circlepath").labelStyle(.iconOnly)
+        }
+        .buttonStyle(.plain)
+        .disabled(tutor.busy)
+        .help("Go back to an earlier conversation (/resume)")
+        Button { tutor.sheet = .lessons } label: {
+            Label("Lessons", systemImage: "books.vertical").labelStyle(.iconOnly)
+        }
+        .buttonStyle(.plain)
+        .help("Your lessons, and what you have learned (/lessons, /map)")
+        Button { tutor.setExplain(!tutor.explain) } label: {
+            Label("Explain", systemImage: tutor.explain ? "graduationcap.fill" : "graduationcap").fixedSize()
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(tutor.explain ? Color.accentColor : Color.secondary)
+        .help(tutor.explain ? "Answering with lessons: click for plain answers (/explain)" : "Answer with lessons, as deep as you have got (/explain, /learn <topic>)")
+        Button { tutor.settings.showWork.toggle() } label: {
+            Label("Details", systemImage: tutor.settings.showWork ? "list.bullet.rectangle.fill" : "list.bullet.rectangle").fixedSize()
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(tutor.settings.showWork ? Color.accentColor : Color.secondary)
+        .help(tutor.settings.showWork ? "Hide the tutor's thinking and tool calls (/details)" : "Show the tutor's thinking and tool calls (/details)")
+        if tutor.busy {
+            Button("Stop") { tutor.stop() }.keyboardShortcut(.cancelAction).controlSize(.small)
+        }
     }
 }
 

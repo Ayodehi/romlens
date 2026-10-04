@@ -75,6 +75,19 @@ fn size_limits() {
         RomImage::from_bytes(vec![0; 0x80_0000 + 1024], "l.sfc"),
         Err(RomError::TooLarge { .. })
     ));
+    // A file too large is refused by its size, before it is read: 4 GiB
+    // here, sparse, so the test writes nothing.
+    let path = std::env::temp_dir().join(format!("romlens-huge-{}.sfc", std::process::id()));
+    std::fs::File::create(&path)
+        .unwrap()
+        .set_len(1 << 32)
+        .unwrap();
+    let loaded = RomImage::load(&path);
+    std::fs::remove_file(&path).unwrap();
+    assert!(matches!(
+        loaded,
+        Err(RomError::TooLarge { len: 0x1_0000_0000 })
+    ));
     // 512 + 32 KB: a copier header on a minimal image is stripped, not rejected.
     let mut smc = vec![0u8; 512];
     smc.extend(fixtures::minimal_lorom());
@@ -82,6 +95,10 @@ fn size_limits() {
     assert!(rom.has_copier_header());
     assert_eq!(rom.len(), 0x8000);
     assert_eq!(rom.mapping(), MappingMode::LoRom);
+    assert!(
+        !rom.header().is_fast_rom(),
+        "the letter's bit 4 is not FastROM"
+    );
 }
 
 /// Both slots carry a complete, complement-valid header; only the map-mode
@@ -116,10 +133,22 @@ fn ambiguous_slots_are_decided_by_the_map_mode_byte() {
 fn unsupported_map_mode_is_reported() {
     let mut rom = fixtures::minimal_lorom();
     rom[0x7FC0 + 0x15] = 0x23; // SA-1
+    rom[0x7FC0 + 0x16] = 0x35; // SA-1 with RAM and battery
     match RomImage::from_bytes(rom, "sa1.sfc") {
         Err(RomError::UnsupportedMapping(0x23)) => {}
         other => panic!("expected UnsupportedMapping, got {other:?}"),
     }
+}
+
+/// A 22-character title runs into the map-mode byte ("...WARS" puts `S`,
+/// $53, there). Without a coprocessor the slot decides the mapping.
+#[test]
+fn a_title_over_the_map_mode_byte_maps_by_its_slot() {
+    let mut rom = fixtures::minimal_lorom();
+    rom[0x7FC0 + 0x15] = b'S';
+    rom[0x7FC0 + 0x16] = 0x00;
+    let rom = RomImage::from_bytes(rom, "long-title.sfc").unwrap();
+    assert_eq!(rom.mapping(), MappingMode::LoRom);
 }
 
 #[test]

@@ -143,6 +143,11 @@ fn peepholes_recover_dbr_and_dp() {
     assert_eq!(plb.flags_after.dbr, None);
     let tcd = dec(&[0x5B], a, native());
     assert_eq!(tcd.flags_after.dp, None);
+    // MVN/MVP leave DBR at the destination bank (the first operand byte).
+    let mvn = dec(&[0x54, 0x7E, 0x00], a, native());
+    assert_eq!(mvn.flags_after.dbr, Some(0x7E));
+    let mvp = dec(&[0x44, 0x7F, 0xC0], a, native());
+    assert_eq!(mvp.flags_after.dbr, Some(0x7F));
 }
 
 #[test]

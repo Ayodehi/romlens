@@ -564,7 +564,7 @@ pub fn script(out: &Path) -> Result<()> {
         "3. Play, then stop the script and run: romlens rec pack <stream> --rom <rom> --out <recording>.romrec"
     );
     println!(
-        "   The stream goes to Mesen's script data folder unless ROMLENS_REC_OUT names a file."
+        "   The stream goes to ~/Documents/Romlens/Recordings unless ROMLENS_REC_OUT names a file."
     );
     Ok(())
 }

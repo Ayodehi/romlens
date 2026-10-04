@@ -17,7 +17,7 @@ import Testing
     @Test func aVersionShowsBesideTheGeneratedC() async throws {
         let m = try await model()
         m.select(offset: 0x22)
-        m.editorTab = .c
+        m.showTab(.c)
         try await Fixture.settle(until: { m.decompiler.result?.name == "SUB_008020" })
         try m.session.execute(.setCVersion(routine: 0x00_8020, name: "Plain", version: CVersionInfo(
             text: "void ClearSlots(void)\n{\n    memset(slots, 0, 16);\n}\n", author: .tutor,
@@ -40,6 +40,18 @@ import Testing
 
         m.beginCEdit(.local(routine: 0x00_8020, local: "x"))
         #expect(m.activeSheet == .cEdit && m.cEdit == .local(routine: 0x00_8020, local: "x"))
+    }
+
+    /// An anchor that ends before it starts, or names line 0, is skipped
+    /// rather than turned into a range that traps.
+    @Test func badAnchorsAreSkipped() {
+        let anchors = [
+            CAnchorInfo(first: 5, last: 3, start: 0x00_8020, end: 0x00_8027),
+            CAnchorInfo(first: 0, last: 2, start: 0x00_8020, end: 0x00_8027),
+            CAnchorInfo(first: 2, last: 3, start: 0x00_8020, end: 0x00_8027),
+            CAnchorInfo(first: 7, last: 7, start: 0x00_8030, end: 0x00_8031),
+        ]
+        #expect(CPaneController.anchoredLines(anchors, at: 0x00_8022) == [1, 2])
     }
 
     @Test func aPictureIsDrawnForTheTutor() async throws {

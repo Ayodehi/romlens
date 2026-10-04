@@ -368,3 +368,36 @@ fn inline_arguments_are_skipped_and_assumed_widths_lower_confidence() {
         assert_eq!(at(off).unwrap().assumptions & ASSUMED_WIDTHS, 0, "{off:#x}");
     }
 }
+
+/// Code that ends exactly at `$FFFF` falls through to `$bb:0000` on the
+/// CPU, not to the next file bank, so the walk stops with a warning.
+#[test]
+fn falling_off_the_end_of_a_bank_stops_the_walk() {
+    let mut code = vec![0u8; 0x10];
+    code[..8].copy_from_slice(&[0x78, 0x18, 0xFB, 0x5C, 0xFC, 0xFF, 0x01, 0x00]); // SEI; CLC; XCE; JML $01FFFC
+    let mut bytes = fixtures::build_custom(
+        MappingMode::LoRom,
+        0x2_0000,
+        false,
+        &code,
+        "BANK END",
+        [0x8000; 12],
+    );
+    bytes[0xFFFC..0x1_0000].copy_from_slice(&[0xEA; 4]); // NOP x4 at $01:FFFC
+    bytes[0x1_0000..0x1_0003].copy_from_slice(&[0xA9, 0x12, 0xDB]); // LDA #$12; STP at $02:8000
+    let rom = RomImage::from_bytes(bytes, "bank-end.sfc").unwrap();
+    let snap = analyze(&rom, &Project::new(&rom), &AnalysisControl::silent()).unwrap();
+    assert_eq!(
+        snap.instruction_at(FileOffset(0xFFFF)).unwrap().opcode,
+        0xEA
+    );
+    assert!(
+        snap.warnings
+            .iter()
+            .any(|w| w.kind == WarningKind::BankWrap && w.offset == FileOffset(0xFFFF))
+    );
+    assert!(
+        snap.instruction_at(FileOffset(0x1_0000)).is_none(),
+        "the next bank is not walked into"
+    );
+}

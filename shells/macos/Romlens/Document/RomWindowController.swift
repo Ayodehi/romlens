@@ -20,7 +20,6 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
         window.tabbingMode = .disallowed
         super.init(window: window)
         shouldCascadeWindows = true
-        model.bringMainWindowForward = { [weak window] in window?.makeKeyAndOrderFront(nil) }
         let hosting = NSHostingController(rootView: DocumentView(model: model))
         hosting.sceneBridgingOptions = [.toolbars]
         // Only the content's minimum: by default the host also sizes the
@@ -29,6 +28,12 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
         // it back.
         hosting.sizingOptions = [.minSize]
         window.contentViewController = hosting
+        // Setting the content view controller shrinks the window to its
+        // minimum, whatever the content rect said; size it again, within
+        // the screen. (It opened at 900 × 480 before docs/29 as well.)
+        let visible = (window.screen ?? NSScreen.main)?.visibleFrame.size ?? NSSize(width: 1440, height: 900)
+        window.setContentSize(NSSize(width: min(1440, visible.width - 40), height: min(860, visible.height - 80)))
+        window.center()
         window.subtitle = Self.subtitle(for: model.info)
         RecordingController.reattach(model: model)
     }
@@ -52,6 +57,7 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
     // MARK: Navigation
 
     @objc func jumpToAddress(_ sender: Any?) { model.activeSheet = .jump }
+    @objc func openQuickly(_ sender: Any?) { model.activeSheet = .openQuickly }
     @objc func find(_ sender: Any?) { model.activeSheet = .find }
     @objc func findNext(_ sender: Any?) { model.stepSearch(by: 1) }
     @objc func findPrevious(_ sender: Any?) { model.stepSearch(by: -1) }
@@ -71,15 +77,15 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
     @objc func showBothAddresses(_ sender: Any?) { model.addressStyle = .both }
     @objc func showSnesAddresses(_ sender: Any?) { model.addressStyle = .snes }
     @objc func showFileOffsets(_ sender: Any?) { model.addressStyle = .file }
-    @objc func showHex(_ sender: Any?) { model.editorTab = .hex }
-    @objc func showDisassembly(_ sender: Any?) { model.editorTab = .disassembly }
-    @objc func showBoth(_ sender: Any?) { model.editorTab = .both }
-    @objc func showC(_ sender: Any?) { model.editorTab = .c }
+    @objc func showHex(_ sender: Any?) { model.showTab(.hex) }
+    @objc func showDisassembly(_ sender: Any?) { model.showTab(.disassembly) }
+    @objc func showBoth(_ sender: Any?) { model.showTab(.both) }
+    @objc func showC(_ sender: Any?) { model.showTab(.c) }
     @objc func decompileRoutine(_ sender: Any?) { model.showDecompiled() }
     @objc func showGraph(_ sender: Any?) { model.showGraph() }
-    @objc func showSource(_ sender: Any?) { model.editorTab = .source }
-    @objc func showAtlas(_ sender: Any?) { model.editorTab = .atlas }
-    @objc func showCompare(_ sender: Any?) { model.editorTab = .compare }
+    @objc func showSource(_ sender: Any?) { model.showTab(.source) }
+    @objc func showAtlas(_ sender: Any?) { model.showTab(.atlas) }
+    @objc func showCompare(_ sender: Any?) { model.showTab(.compare) }
     @objc func compareWith(_ sender: Any?) { CompareController.open(model: model, window: window) }
     /// View › Show Explanations, remembered for the next window.
     @objc func toggleExplanations(_ sender: Any?) {
@@ -145,10 +151,31 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
     // content.
     @objc func toggleNavigator(_ sender: Any?) { withAnimation { model.isNavigatorVisible.toggle() } }
     @objc func toggleInspector(_ sender: Any?) { withAnimation { model.isInspectorVisible.toggle() } }
-    @objc func showTutor(_ sender: Any?) { (document as? ProjectDocument)?.showTutor() }
+    @objc func showTutor(_ sender: Any?) { model.showTutorInDrawer() }
+    /// The sidebar's Lessons and Quizzes: the tutor, on its lessons.
+    @objc func showLessons(_ sender: Any?) {
+        model.showTutorInDrawer()
+        model.tutor?.sheet = .lessons
+    }
     @objc func toggleStrip(_ sender: Any?) { withAnimation { model.isStripVisible.toggle() } }
     @objc func toggleFocus(_ sender: Any?) { withAnimation { model.toggleFocus() } }
     @objc func toggleResults(_ sender: Any?) { withAnimation { model.isResultsVisible.toggle() } }
+
+    // MARK: Tabs (docs/29)
+
+    /// Close Tab, or the window when the focused group has no tab left.
+    @objc func closeTab(_ sender: Any?) {
+        if model.workspace.focusedItem != nil { model.closeFocusedTab() } else { window?.performClose(sender) }
+    }
+    @objc func splitRight(_ sender: Any?) { model.splitFocused(.right) }
+    @objc func splitDown(_ sender: Any?) { model.splitFocused(.bottom) }
+    @objc func nextTab(_ sender: Any?) { model.selectAdjacentTab(1) }
+    @objc func previousTab(_ sender: Any?) { model.selectAdjacentTab(-1) }
+    @objc func focusGroupItem(_ sender: NSMenuItem) { model.focusGroup(at: sender.tag) }
+    @objc func applyLayout(_ sender: NSMenuItem) {
+        guard LayoutPreset.allCases.indices.contains(sender.tag) else { return }
+        model.workspace.apply(LayoutPreset.allCases[sender.tag])
+    }
 
     // MARK: Editing
 
@@ -278,10 +305,17 @@ final class RomWindowController: NSWindowController, NSMenuItemValidation {
             return model.graphics.hasRecording
         case #selector(toggleLiveSession(_:)):
             item.title = model.graphics.isLive ? "Stop Live Session" : "Start Live Session"
+        case #selector(splitRight(_:)), #selector(splitDown(_:)):
+            return model.workspace.focusedItem != nil
+        case #selector(nextTab(_:)), #selector(previousTab(_:)):
+            return (model.workspace.layout.group(model.workspace.focusedGroup)?.items.count ?? 0) > 1
+        case #selector(focusGroupItem(_:)):
+            item.state = model.workspace.layout.groups.firstIndex { $0.id == model.workspace.focusedGroup } == item.tag ? .on : .off
+            return model.workspace.layout.groups.indices.contains(item.tag)
         case #selector(toggleFocus(_:)):
             item.state = model.isFocused ? .on : .off
         case #selector(toggleNavigator(_:)):
-            item.title = model.isNavigatorVisible ? "Hide Navigator" : "Show Navigator"
+            item.title = model.isNavigatorVisible ? "Hide Sidebar" : "Show Sidebar"
         case #selector(toggleInspector(_:)):
             item.title = model.isInspectorVisible ? "Hide Inspector" : "Show Inspector"
         case #selector(goBack(_:)):

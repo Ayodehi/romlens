@@ -174,10 +174,15 @@ fn info_text(i: &RomInfo) -> String {
             "pair invalid"
         },
         i.computed_checksum,
-        if i.checksum_ok {
-            "match, mirrored sum"
+        if !i.checksum_ok {
+            "mismatch".to_owned()
+        } else if i.checksum_len < i.byte_len {
+            format!(
+                "match, mirrored sum of the first {} KB; the rest is padding",
+                i.checksum_len / 1024
+            )
         } else {
-            "mismatch"
+            "match, mirrored sum".to_owned()
         }
     );
     let _ = writeln!(s, "Vectors:         native            emulation");

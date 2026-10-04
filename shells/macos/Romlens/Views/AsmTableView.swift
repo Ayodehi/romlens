@@ -9,7 +9,7 @@ struct AsmTableView: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let controller = AsmPaneController(model: model)
+        let controller = AsmPaneController(model: model, item: context.environment.editorItem)
         context.coordinator.controller = controller
         return controller.scrollView
     }
@@ -33,10 +33,14 @@ final class AsmPaneController {
     let scrollView: NSScrollView
     private var asmGeneration = -1
     private var selectedOffset: UInt32?
+    private var citedShown: [Range<UInt32>] = []
     private var lastScrollId = 0
+    /// The tab this pane is in, if any (docs/29).
+    let item: UUID?
 
-    init(model: RomViewModel) {
+    init(model: RomViewModel, item: UUID? = nil) {
         self.model = model
+        self.item = item
         canvas = AsmCanvasView(model: model)
         scrollView = AsmScrollView()
         scrollView.documentView = canvas
@@ -48,7 +52,16 @@ final class AsmPaneController {
         scrollView.horizontalScrollElasticity = .none
         canvas.autoresizingMask = []
         canvas.frame = NSRect(x: 0, y: 0, width: model.asmLayout.totalWidth, height: canvas.documentHeight)
-        (scrollView as? AsmScrollView)?.onLayout = { [weak canvas] in canvas?.fitWidth() }
+        (scrollView as? AsmScrollView)?.onLayout = { [weak self] in
+            guard let self else { return }
+            canvas.fitWidth()
+            // A tab's pane is made before its group is laid out; a scroll
+            // asked for then waits for a real height (docs/29).
+            if let line = pendingLine, scrollView.contentView.bounds.height > 1 {
+                pendingLine = nil
+                scroll(toLine: line)
+            }
+        }
         canvas.onKeyCommand = { [weak self] command in self?.handle(command) }
     }
 
@@ -56,6 +69,11 @@ final class AsmPaneController {
         let generation = model.asmGeneration
         let selected = model.selectedOffset
         let scroll = model.scrollRequest
+        let cited = model.citationHighlight
+        if cited != citedShown {
+            citedShown = cited
+            canvas.needsDisplay = true
+        }
         if asmGeneration != generation {
             asmGeneration = generation
             canvas.layoutDidChange()
@@ -70,8 +88,11 @@ final class AsmPaneController {
             selectedOffset = selected
         }
         if let scroll, lastScrollId != scroll.id {
+            // A new pane catches up with the last request, wherever it was
+            // meant: it opens on the selection.
+            let fresh = lastScrollId == 0
             lastScrollId = scroll.id
-            if let line = model.workbench.lineForOffset(fileOffset: scroll.offset) {
+            if fresh || scroll.applies(to: item), let line = model.workbench.lineForOffset(fileOffset: scroll.offset) {
                 self.scroll(toLine: Int(line))
             }
         }
@@ -81,10 +102,16 @@ final class AsmPaneController {
         max(1, Int(scrollView.contentView.bounds.height / canvas.rowHeight) - 1)
     }
 
+    private var pendingLine: Int?
+
     func scroll(toLine line: Int) {
         let rect = canvas.rect(ofLine: line)
         let clip = scrollView.contentView
         let visibleHeight = clip.bounds.height
+        guard visibleHeight > 1 else {
+            pendingLine = line
+            return
+        }
         let y = max(0, min(rect.midY - visibleHeight / 2, canvas.bounds.height - visibleHeight))
         clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: y))
         scrollView.reflectScrolledClipView(clip)
@@ -185,6 +212,7 @@ final class AsmCanvasView: NSView {
         let gen = generation
         let selectedLine = model.selectedOffset.flatMap { model.workbench.lineForOffset(fileOffset: $0) }
         let focused = window?.firstResponder === self
+        let cited = model.citationHighlight
         for line in lines(in: dirtyRect) {
             let line32 = UInt32(line)
             let batch = model.asmBatch(containingLine: line32)
@@ -196,7 +224,17 @@ final class AsmCanvasView: NSView {
                 selected: selectedLine == line32, focused: focused,
                 in: rect(ofLine: line), context: context
             )
+            if cited.contains(where: { $0.contains(record.fileOffset) }) {
+                outline(rect(ofLine: line), context)
+            }
         }
+    }
+
+    /// A line a citation names (docs/29).
+    private func outline(_ r: NSRect, _ context: CGContext) {
+        context.setStrokeColor(NSColor.controlAccentColor.cgColor)
+        context.setLineWidth(1.5)
+        context.stroke(r.insetBy(dx: 1, dy: 1))
     }
 
     /// The line under a point.

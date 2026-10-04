@@ -10,7 +10,7 @@ use crate::memory::address::{FileOffset, SnesAddress};
 use crate::memory::map::{AddressMap, MappingMode, MemoryClass};
 use crate::memory::parse::{AddressExpr, parse_address_expr};
 use crate::model::hardware::{HardwareRegister, hardware_register, is_system_bank};
-use crate::rom::checksum::compute_checksum;
+use crate::rom::checksum::{compute_checksum, padded_length};
 use crate::rom::copier::{COPIER_HEADER_LEN, split_copier_header};
 use crate::rom::header::{RomHeader, Vectors};
 use crate::rom::scorer::detect_mapping;
@@ -31,6 +31,9 @@ pub struct RomImage {
     map: AddressMap,
     sha256: [u8; 32],
     computed_checksum: u16,
+    /// Bytes the computed checksum covers: the payload, or less when the
+    /// dump is padded past the end of the game.
+    checksum_len: u32,
     source_name: String,
 }
 
@@ -47,6 +50,9 @@ pub struct RomInfo {
     pub header: RomHeader,
     pub computed_checksum: u16,
     pub checksum_ok: bool,
+    /// Bytes the computed checksum covers; less than `byte_len` for a
+    /// padded dump.
+    pub checksum_len: u32,
     pub sha256: String,
 }
 
@@ -74,6 +80,13 @@ impl RomImage {
     /// Read and identify a `.sfc`/`.smc` file.
     pub fn load(path: impl AsRef<Path>) -> Result<Self, RomError> {
         let path = path.as_ref();
+        // Too large even with a copier header: refused before it is read.
+        let len = std::fs::metadata(path)?.len();
+        if len > (MAX_ROM_LEN + COPIER_HEADER_LEN) as u64 {
+            return Err(RomError::TooLarge {
+                len: usize::try_from(len).unwrap_or(usize::MAX),
+            });
+        }
         let bytes = std::fs::read(path)?;
         let name = path
             .file_name()
@@ -94,7 +107,14 @@ impl RomImage {
         }
         let best = detect_mapping(payload)?;
         let sha256: [u8; 32] = Sha256::digest(payload).into();
-        let computed_checksum = compute_checksum(payload);
+        let mut computed_checksum = compute_checksum(payload);
+        let mut checksum_len = payload.len() as u32;
+        if computed_checksum != best.header.checksum
+            && let Some(len) = padded_length(payload, best.header.checksum)
+        {
+            computed_checksum = best.header.checksum;
+            checksum_len = len as u32;
+        }
         let copier_header = copier.map(Arc::from);
         let payload: Arc<[u8]> = Arc::from(payload);
         let map = AddressMap::new(best.mode, payload.len() as u32, best.header.is_fast_rom());
@@ -107,6 +127,7 @@ impl RomImage {
             map,
             sha256,
             computed_checksum,
+            checksum_len,
             source_name: source_name.into(),
         })
     }
@@ -206,6 +227,7 @@ impl RomImage {
             header: self.header.clone(),
             computed_checksum: self.computed_checksum,
             checksum_ok: self.checksum_ok(),
+            checksum_len: self.checksum_len,
             sha256: self.sha256_hex(),
         }
     }

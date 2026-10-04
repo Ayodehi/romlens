@@ -56,7 +56,8 @@ final class TutorModel {
         var id: Self { self }
     }
 
-    let rom: RomViewModel
+    /// Unowned: the model owns its tutor (docs/29), which lives no longer.
+    unowned let rom: RomViewModel
     let settings: TutorSettings
     private let root: URL
     private(set) var session: TutorSession?
@@ -68,7 +69,7 @@ final class TutorModel {
     var error: String?
     var composer = ""
     var attachments: [Attachment] = []
-    /// Send the main window's selection with the question.
+    /// Send the editor's selection with the question.
     var includeSelection = true
     var sheet: Sheet?
     private(set) var cost = 0.0
@@ -222,6 +223,17 @@ final class TutorModel {
 
     /// Esc: stops the turn, and a waiting card says no.
     func stop() {
+        session?.cancel()
+    }
+
+    /// The tutor's window or its project closed: no one is left to read
+    /// the answer or decide a card, so the turn stops rather than run on
+    /// (and cost) unseen, and every waiting card says no.
+    func close() {
+        acceptRest = false
+        for card in live?.cards ?? [] where card.state == .waiting {
+            answer(card, accept: false)
+        }
         session?.cancel()
     }
 
@@ -421,7 +433,7 @@ final class TutorModel {
         }
     }
 
-    /// The recording's frame the main window shows, as a picture.
+    /// The recording's frame the editor shows, as a picture.
     func attachFrame() {
         guard let frame = rom.graphics.frameImage(), let cg = frame.image.cgImage,
               let png = NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:]) else {
@@ -491,36 +503,38 @@ final class TutorModel {
 
     // MARK: Citations
 
-    /// A link from an answer: an address or a frame, shown in the main
-    /// window. A click brings the main window forward; a lesson's step
-    /// moving (`raise` false) only points it, so the tutor stays in front.
+    /// A link from an answer: an address or a frame, shown in the editor.
+    /// `raise` is kept for the lesson steps that pass false; the tutor and
+    /// the editor now share one window (docs/29), so nothing is raised.
     func follow(_ url: URL, raise: Bool = true) -> Bool {
         guard url.scheme == "romlens" else { return false }
         let value = url.lastPathComponent
         switch url.host() {
         case "a":
             guard let a = UInt32(value, radix: 16) else { return false }
+            // In a code tab, the tutor's own tab staying in view (docs/29).
+            if !rom.showsTextEditor || rom.workspace.focusedItem?.content == .tutor {
+                rom.reveal(.code(.assembly))
+            }
             rom.jump(toSnesAddress: a)
         case "c":
             // A routine's C: the C tab, at the instruction.
             guard let a = UInt32(value, radix: 16) else { return false }
-            rom.graphicsTab = nil
-            rom.audioTab = nil
-            rom.editorTab = .c
+            rom.reveal(.code(.c))
             rom.jump(toSnesAddress: a)
         case "f":
             guard let f = UInt64(value), rom.graphics.hasRecording else { return false }
             rom.graphics.frame = f
             let view = URLComponents(url: url, resolvingAgainstBaseURL: false)?
                 .queryItems?.first { $0.name == "view" }?.value
-            rom.graphicsTab = view.flatMap(GraphicsModel.Tab.init(rawValue:)) ?? .frame
+            rom.reveal(.graphics(view.flatMap(GraphicsModel.Tab.init(rawValue:)) ?? .frame))
         case "r":
             // A register has no place in the ROM to show; the step names it.
             return true
         default:
             return false
         }
-        if raise { rom.bringMainWindowForward?() }
+        _ = raise
         return true
     }
 
@@ -542,7 +556,7 @@ final class TutorModel {
         Command(name: "/compact", about: "Summarise the conversation to make room"),
         Command(name: "/cost", about: "What this conversation has cost"),
         Command(name: "/attach", about: "/attach frame: the recording's frame as a picture"),
-        Command(name: "/selection", about: "Send the main window's selection with questions, or not"),
+        Command(name: "/selection", about: "Send the editor's selection with questions, or not"),
         Command(name: "/details", about: "Show or hide the tutor's thinking and tool calls"),
         Command(name: "/learn", about: "/learn <topic>: a lesson about it, as deep as you have got"),
         Command(name: "/explain", about: "Answer with lessons, or not (Explain mode)"),
@@ -673,7 +687,7 @@ final class TutorModel {
 
     func step(of lesson: String) -> Int { lessonSteps[lesson] ?? 0 }
 
-    /// Moves a lesson's card to step `i`, points the main window at what the
+    /// Moves a lesson's card to step `i`, points the editor at what the
     /// step is about (without bringing it forward), and tells the next
     /// question where the student is.
     func show(step i: Int, of lesson: LessonInfo) {

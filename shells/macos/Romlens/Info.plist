@@ -76,6 +76,16 @@
 		<dict>
 			<key>UTTypeConformsTo</key>
 			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Romlens tab</string>
+			<key>UTTypeIdentifier</key>
+			<string>io.github.ayodehi.romlens.tab</string>
+		</dict>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
 				<string>com.apple.package</string>
 			</array>
 			<key>UTTypeDescription</key>

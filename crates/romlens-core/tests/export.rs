@@ -163,7 +163,11 @@ fn assemble(rom: &RomImage, listing: &str) -> (u32, Vec<u8>) {
                 if let Some(p) = pc {
                     // Contiguous ranges only: the export writes one org per bank
                     // start, and banks are contiguous in file order.
-                    let prev_off = rom.file_offset_for(SnesAddress::from_u24(p)).map(|o| o.0);
+                    // Measured from the last byte, since a full LoROM bank
+                    // ends where `pc` has no file offset.
+                    let prev_off = rom
+                        .file_offset_for(SnesAddress::from_u24(p - 1))
+                        .map(|o| o.0 + 1);
                     let new_off = rom.file_offset_for(SnesAddress::from_u24(a)).map(|o| o.0);
                     assert_eq!(prev_off, new_off, "org {rest} is not where the bytes ended");
                 }
@@ -479,4 +483,28 @@ fn a_label_inside_an_instruction_is_defined_by_value() {
     let listing = check_exact(&rom, &project, None);
     assert!(listing.contains("LDA.w TableBase,X"), "{listing}");
     assert!(listing.contains("TableBase = $008025"), "{listing}");
+}
+
+/// An instruction whose bytes cross a bank end goes out as data: asar
+/// refuses it ("bank border crossed"), and the CPU would wrap instead.
+#[test]
+fn an_instruction_across_a_bank_end_is_exported_as_data() {
+    let code = [0x78, 0x18, 0xFB, 0x5C, 0xFE, 0xFF, 0x01, 0x00]; // SEI; CLC; XCE; JML $01FFFE
+    let mut bytes = fixtures::build_custom(
+        MappingMode::LoRom,
+        0x2_0000,
+        false,
+        &code,
+        "BANK END",
+        [0x8000; 12],
+    );
+    bytes[0xFFFE..0x1_0001].copy_from_slice(&[0xAD, 0x34, 0x12]); // LDA $1234 across the end
+    let rom = RomImage::from_bytes(bytes, "bank-end.sfc").unwrap();
+    let listing = check_exact(&rom, &Project::new(&rom), None);
+    let at = listing
+        .find("CODE_01FFFE:")
+        .expect("the jump target is labelled");
+    let after = &listing[at..at + 80];
+    assert!(!after.contains("LDA"), "{after}");
+    assert!(after.contains("db $AD,$34"), "{after}");
 }

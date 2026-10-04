@@ -30,11 +30,10 @@ fn run(args: &[&str]) -> String {
     run_env(args, &[])
 }
 
-/// `run`, with variables set in its environment.
-fn run_env(args: &[&str], vars: &[(&str, &str)]) -> String {
+fn run_env(args: &[&str], env: &[(&str, &str)]) -> String {
     let out = Command::new(env!("CARGO_BIN_EXE_romlens"))
         .args(args)
-        .envs(vars.iter().copied())
+        .envs(env.iter().copied())
         .output()
         .expect("romlens runs");
     let stdout = String::from_utf8(out.stdout).unwrap().replace("\r\n", "\n");
@@ -1441,13 +1440,11 @@ fn tutor_quiz_commands() {
     let rom = rom.to_string_lossy().into_owned();
     let learner = dir.join("tutor");
     let learner = learner.to_string_lossy().into_owned();
-    // One moment for every run, so the points earned all fall in the same
-    // second and day however slow the machine (the ledger is in time order).
-    let at = |head: &[&str], tail: &[&str]| {
-        run_env(&[head, tail].concat(), &[("ROMLENS_NOW", "1790000000")])
-    };
-    let coverage = at(&["tutor", "quiz", "coverage", &rom], &[]);
-    let wrong = at(
+    // One clock for every run: the ledger orders by the second, and the
+    // second quiz can land in the next one.
+    let at = [("ROMLENS_NOW", "1790000000")];
+    let coverage = run_env(&["tutor", "quiz", "coverage", &rom], &at);
+    let wrong = run_env(
         &[
             "tutor",
             "quiz",
@@ -1457,10 +1454,14 @@ fn tutor_quiz_commands() {
             "2",
             "--seed",
             "7",
+            "--answers",
+            "A;B;C;A;B",
+            "--dir",
+            &learner,
         ],
-        &["--answers", "A;B;C;A;B", "--dir", &learner],
+        &at,
     );
-    let right = at(
+    let right = run_env(
         &[
             "tutor",
             "quiz",
@@ -1470,10 +1471,14 @@ fn tutor_quiz_commands() {
             "2",
             "--seed",
             "7",
+            "--answers",
+            "B;$2100;B;7;0-3",
+            "--dir",
+            &learner,
         ],
-        &["--answers", "B;$2100;B;7;0-3", "--dir", &learner],
+        &at,
     );
-    let progress = at(&["tutor", "progress", "--ledger", "--dir", &learner], &[]);
+    let progress = run_env(&["tutor", "progress", "--ledger", "--dir", &learner], &at);
     check(
         "tutor-quiz-lorom",
         &redact_tmp(&dir, &format!("{coverage}\n{wrong}\n{right}\n{progress}")),

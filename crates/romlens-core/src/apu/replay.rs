@@ -21,6 +21,23 @@ use crate::recording::apu::{ApuEvent, ApuEventKind};
 use crate::recording::{MachineStateSource, RecordingError, SpcState, StateRegion};
 use crate::spc700::decode_at;
 
+/// The most SPC700 cycles a replay runs from one snapshot to the next: a
+/// frame is about 17,000 (20,500 on a PAL machine), so this is several
+/// frames' worth. A larger gap is a damaged recording, not a slow frame,
+/// and running it out would take hours.
+pub const MAX_FRAME_CYCLES: u64 = 1 << 17;
+
+/// Refuse a run from `cycle` to `target` longer than `frames` frames can
+/// be. `frame` is the frame it ends at, for the message.
+fn within(cycle: u64, target: u64, frames: u64, frame: u64) -> Result<(), RecordingError> {
+    if target.saturating_sub(cycle) > MAX_FRAME_CYCLES.saturating_mul(frames.max(1)) {
+        return Err(RecordingError::Corrupt(format!(
+            "frame {frame}'s SPC700 clock jumps from {cycle} to {target} cycles"
+        )));
+    }
+    Ok(())
+}
+
 /// How one frame compares.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct FrameCheck {
@@ -176,6 +193,7 @@ fn run_frame(
     carried: &mut Vec<ApuEvent>,
 ) -> Result<FrameCheck, RecordingError> {
     let target = want.spc.cycle;
+    within(apu.bus.cycle, target, 1, frame)?;
     let mut events = std::mem::take(carried);
     events.extend(src.apu_events(frame)?.map(|e| e.events).unwrap_or_default());
     // Writes our last instruction made past the frame before's end belong
@@ -359,14 +377,18 @@ fn start(s: &Snapshot, (pc, back): (u16, u8)) -> Apu {
         apu.bus.dsp_hold = back;
     }
     apu.cpu.pc = pc;
-    apu.bus.cycle -= back as u64;
+    apu.bus.cycle = apu.bus.cycle.saturating_sub(back as u64);
     for (t, period) in apu.bus.io.timers.iter_mut().zip(super::TIMER_PERIODS) {
         if t.phase >= back {
             t.phase -= back;
         } else {
             // It ticked in those cycles; the count before it is not known
             // exactly, so only the phase goes back.
-            t.phase = t.phase + period - back;
+            // A recorded phase can be out of range; widen so it cannot
+            // overflow.
+            t.phase = (u16::from(t.phase) + u16::from(period))
+                .saturating_sub(u16::from(back))
+                .min(0xFF) as u8;
         }
     }
     apu
@@ -478,6 +500,11 @@ pub fn start_at(src: &dyn MachineStateSource, frame: u64) -> Result<Apu, Recordi
         return Ok(start(&prev, (prev.spc.pc, 0)));
     }
     let want = snapshot(src, frame + 1)?;
+    // A next frame whose clock is out of reach says nothing about where
+    // to start: start from the snapshot's program counter.
+    if within(prev.spc.cycle, want.spc.cycle, 1, frame + 1).is_err() {
+        return Ok(start(&prev, (prev.spc.pc, 0)));
+    }
     let carried = after_snapshot(src, frame, prev.spc.cycle)?;
     best_of(src, frame + 1, &prev, &want, &carried)
 }
@@ -499,6 +526,7 @@ pub fn frame_writers(
     let prev = snapshot(src, frame - 1)?;
     let want = snapshot(src, frame)?;
     let target = want.spc.cycle;
+    within(prev.spc.cycle, target, 1, frame)?;
     let mut events = after_snapshot(src, frame - 1, prev.spc.cycle)?;
     events.extend(src.apu_events(frame)?.map(|e| e.events).unwrap_or_default());
     let events: Vec<ApuEvent> = events.into_iter().filter(|e| !carries(e, target)).collect();
@@ -566,6 +594,12 @@ pub fn note_agreement(
         .filter(|n| n.kind == NoteKind::On)
         .collect();
     let end = snapshot(src, to)?.spc.cycle;
+    within(
+        snapshot(src, from)?.spc.cycle,
+        end,
+        to.saturating_sub(from),
+        to,
+    )?;
     let mut p = Player::from_recording(src, from, true)?;
     p.log_notes();
     while p.apu.bus.cycle < end {

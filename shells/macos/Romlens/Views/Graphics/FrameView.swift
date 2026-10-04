@@ -165,7 +165,7 @@ struct PixelDetail: View {
 
     private func button(_ title: String, _ what: GraphicsModel.Reveal, _ image: String) -> some View {
         Button {
-            if let tab = graphics.reveal(what, of: winner) { model.graphicsTab = tab }
+            if let tab = graphics.reveal(what, of: winner) { model.show(.graphics(tab)) }
         } label: {
             Label(title, systemImage: image)
         }
@@ -237,12 +237,12 @@ struct ProvenancePartView: View {
     }
 
     private func showCode(_ pc: UInt32) {
-        model.editorTab = .disassembly
+        model.showTab(.disassembly)
         model.jump(toSnesAddress: pc)
     }
 
     private func showBytes(_ start: UInt32, _ len: UInt32) {
-        model.editorTab = .hex
+        model.showTab(.hex)
         model.jump(to: start)
         model.selectRange(start..<start + len)
     }
@@ -251,7 +251,7 @@ struct ProvenancePartView: View {
         guard let d = try? decompressSm(bytes: model.rom.bytes(fileOffset: p.start, len: max(p.len, 1))) else { return }
         graphics.source = .bytes(label: "Decompressed", data: d.output)
         graphics.selectedTile = 0
-        model.graphicsTab = .tiles
+        model.show(.graphics(.tiles))
     }
 
     private func markCompressed(_ p: PlacedInfo) {

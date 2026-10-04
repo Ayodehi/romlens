@@ -17,7 +17,7 @@ import Testing
         let m = try await model()
         m.select(offset: 0x22)
         #expect(m.graph.state == .idle, "nothing is built until the tab shows")
-        m.editorTab = .graph
+        m.showTab(.graph)
         try await Fixture.settle(until: { m.graph.state == .ready })
         let g = try #require(m.graph.blocks)
         #expect(g.name == "SUB_008020")
@@ -39,7 +39,7 @@ import Testing
     @Test func changesKeepTheGraphUp() async throws {
         let m = try await model()
         m.select(offset: 0x22)
-        m.editorTab = .graph
+        m.showTab(.graph)
         try await Fixture.settle(until: { m.graph.state == .ready })
         let first = m.graph.resultGeneration
         var sawLoading = false
@@ -55,7 +55,7 @@ import Testing
     @Test func theCanvasDrawsTheLinesAndAClickSelects() async throws {
         let m = try await model()
         m.select(offset: 0x22)
-        m.editorTab = .graph
+        m.showTab(.graph)
         let controller = RomWindowController(model: m)
         controller.window?.orderFront(nil)
         defer { controller.close() }
@@ -87,7 +87,7 @@ import Testing
     @Test func zoomToFitShrinksALargeGraph() async throws {
         let m = try await model()
         m.select(offset: 0x00)
-        m.editorTab = .graph
+        m.showTab(.graph)
         let controller = RomWindowController(model: m)
         controller.window?.setContentSize(NSSize(width: 900, height: 300))
         controller.window?.orderFront(nil)
@@ -102,5 +102,40 @@ import Testing
         let scroll = try #require(canvas.enclosingScrollView)
         m.graph.requestZoom(.zoomOut)
         try await Fixture.settle(until: { scroll.magnification < 1 })
+    }
+
+    /// The listing changed while the blocks were built: the build is dropped
+    /// and made again, never shown with the older listing's lines.
+    @Test func aBuildForAnOlderListingIsNotShown() async throws {
+        let m = try await model()
+        m.graph.follow(workbench: m.workbench, instructionStart: 0x22, generation: 100)
+        m.graph.follow(workbench: m.workbench, instructionStart: 0x22, generation: 101)
+        try await Fixture.settle(until: { m.graph.state == .ready })
+        #expect(m.graph.shownGeneration == 101)
+        #expect(m.graph.resultGeneration == 1, "the first build was not installed")
+    }
+
+    /// Lines a graph names past the end of the listing are left out, not
+    /// read.
+    @Test func blocksPastTheListingAreSkipped() async throws {
+        let m = try await model()
+        m.select(offset: 0x22)
+        m.showTab(.graph)
+        try await Fixture.settle(until: { m.graph.state == .ready })
+        let g = try #require(m.graph.blocks)
+        let past = m.asmLineCount + 1000
+        let stale = RoutineGraphInfo(
+            name: g.name, entry: g.entry,
+            blocks: g.blocks.map {
+                GraphBlockInfo(
+                    offsets: $0.offsets, address: $0.address, exit: $0.exit, exitTarget: $0.exitTarget,
+                    exitText: $0.exitText, loopDepth: $0.loopDepth, loopHeader: $0.loopHeader, runs: $0.runs,
+                    firstLine: $0.firstLine.map { _ in past }, lineCount: $0.lineCount
+                )
+            },
+            edges: g.edges, loops: g.loops, irreducible: g.irreducible, truncated: g.truncated, counted: g.counted
+        )
+        let scene = GraphSceneBuilder.blocks(stale, model: m)
+        #expect(scene.boxes.count == g.blocks.count)
     }
 }

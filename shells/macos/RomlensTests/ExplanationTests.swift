@@ -50,7 +50,7 @@ import Testing
     @Test func turningExplanationsOffGivesThePlainListingAndC() async throws {
         let m = try await model()
         m.select(offset: 0x09)
-        m.editorTab = .c
+        m.showTab(.c)
         try await Fixture.settle(until: { m.decompiler.state == .ready })
         #expect(m.decompiler.result?.text.contains("/* ▸ DMA transfer") == true)
         let lines = m.asmLineCount
@@ -72,7 +72,7 @@ import Testing
     @Test func theCPrintsNumbersInTheBaseAsked() async throws {
         let m = try await model()
         m.select(offset: 0x09)
-        m.editorTab = .c
+        m.showTab(.c)
         try await Fixture.settle(until: { m.decompiler.state == .ready })
         #expect(m.decompiler.result?.text.contains("INIDISP = 0x8F;") == true)
         m.decompiler.numbers = .binary

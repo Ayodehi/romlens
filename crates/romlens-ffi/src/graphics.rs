@@ -882,7 +882,7 @@ impl RecordingSession {
                 next: None,
             });
         };
-        let mut slot = self.index.lock().unwrap();
+        let mut slot = self.index.lock().unwrap_or_else(|e| e.into_inner());
         if slot.is_none() {
             *slot = Some(match &self.origin {
                 Origin::Path(p) => load_or_build(Path::new(p), source, false)?.0,
@@ -1052,7 +1052,7 @@ impl RecordingSession {
     pub fn render_frame(&self, frame: u64) -> Result<FrameImageInfo, RomlensError> {
         let (f, bg_mode, per_line) = self.compose(frame, Default::default())?;
         let f = Arc::new(f);
-        *self.composed.lock().unwrap() = Some((frame, f.clone()));
+        *self.composed.lock().unwrap_or_else(|e| e.into_inner()) = Some((frame, f.clone()));
         Ok(FrameImageInfo {
             image: f.bitmap.clone().into(),
             bg_mode,
@@ -1080,7 +1080,7 @@ impl RecordingSession {
             None => {
                 let (f, ..) = self.compose(frame, Default::default())?;
                 let f = Arc::new(f);
-                *self.composed.lock().unwrap() = Some((frame, f.clone()));
+                *self.composed.lock().unwrap_or_else(|e| e.into_inner()) = Some((frame, f.clone()));
                 f
             }
         };
@@ -1368,7 +1368,7 @@ impl RecordingSession {
         let Some(source) = self.source.file() else {
             return floor;
         };
-        let mut slot = self.index.lock().unwrap();
+        let mut slot = self.index.lock().unwrap_or_else(|e| e.into_inner());
         if slot.is_none() {
             *slot = match &self.origin {
                 Origin::Path(p) => load_or_build(Path::new(p), source, false).ok().map(|x| x.0),

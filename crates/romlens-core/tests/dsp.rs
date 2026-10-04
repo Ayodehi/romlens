@@ -144,24 +144,38 @@ fn an_end_block_sets_endx_and_one_that_does_not_loop_ends_the_note() {
     let (mut regs, mut aram) = machine(false);
     regs[0x07] = 0x7F;
     let mut dsp = Dsp::default();
+    regs[0x7C] = 0x01;
     dsp.write_kon(0x01);
     for _ in 0..3 {
         dsp.sample(&mut regs, &mut aram);
     }
-    // Keying on clears ENDX; the block's start sets it again.
+    // Keying on clears ENDX; a block that ends and does not loop ends
+    // the note as it starts.
     while dsp.voices[0].delay > 0 {
         dsp.sample(&mut regs, &mut aram);
     }
-    assert_eq!(regs[0x7C] & 1, 1);
+    assert_eq!(regs[0x7C] & 1, 0);
     assert_eq!(dsp.voices[0].mode, EnvelopeMode::Release);
     assert_eq!(dsp.voices[0].envelope, 0);
+    // ENDX comes as the decoder moves past its last sample (four in at
+    // the start, one a sample at pitch $1000).
+    for _ in 0..11 {
+        dsp.sample(&mut regs, &mut aram);
+    }
+    assert_eq!(regs[0x7C] & 1, 0);
+    dsp.sample(&mut regs, &mut aram);
+    assert_eq!(regs[0x7C] & 1, 1);
 
     // A looping one keeps playing and goes back to its loop point.
     let (mut regs, mut aram) = machine(true);
     regs[0x07] = 0x7F;
     let mut dsp = Dsp::default();
     keyed(&mut dsp, &mut regs, &mut aram);
-    for _ in 0..13 {
+    for _ in 0..11 {
+        dsp.sample(&mut regs, &mut aram);
+    }
+    assert_eq!(regs[0x7C] & 1, 0);
+    for _ in 0..2 {
         dsp.sample(&mut regs, &mut aram);
     }
     assert_eq!(regs[0x7C] & 1, 1);
@@ -240,10 +254,173 @@ fn echo_goes_into_the_buffer_and_comes_back_through_the_fir() {
     );
     // The next sample reads it back: halved into the FIR, × $40 >> 6.
     let g = dsp.sample(&mut regs, &mut aram);
-    let fir = ((written >> 1) * 0x40) >> 6;
+    let fir = (((written >> 1) * 0x40) >> 6) & !1;
     assert_eq!(
         g.left as i32,
         (fir * 0x7F) >> 7,
         "master volume 0: only the echo"
+    );
+}
+
+#[test]
+fn the_fir_output_drops_its_low_bit() {
+    // An entry of 6 in a 4-byte buffer at $8000: halved into the FIR (3),
+    // × $40 >> 6 by FIR7, 3 made even (2), then echo volume +127: 1.
+    let (mut regs, mut aram) = machine(true);
+    regs[0x6D] = 0x80;
+    regs[0x7F] = 0x40;
+    regs[0x2C] = 0x7F;
+    aram[0x8000] = 6;
+    let mut dsp = Dsp::default();
+    let f = dsp.sample(&mut regs, &mut aram);
+    assert_eq!(f.left, 1, "(2 × 127) >> 7, not (3 × 127) >> 7");
+}
+
+#[test]
+fn a_kon_write_replaces_the_one_before() {
+    let (mut regs, mut aram) = machine(true);
+    regs[0x07] = 0x7F;
+    regs[0x17] = 0x7F;
+    let mut dsp = Dsp::default();
+    // Two writes before a poll (the first sample's): only the second
+    // keys on.
+    dsp.write_kon(0x01);
+    dsp.write_kon(0x02);
+    dsp.sample(&mut regs, &mut aram);
+    assert_eq!(
+        (dsp.voices[0].delay, dsp.voices[1].delay),
+        (0, KEY_ON_DELAY)
+    );
+    // Written again with voice 1 still in it, the next poll clears the
+    // voice it took last time and keys voice 0 alone.
+    dsp.write_kon(0x03);
+    dsp.sample(&mut regs, &mut aram);
+    dsp.sample(&mut regs, &mut aram);
+    assert_eq!(
+        (dsp.voices[0].delay, dsp.voices[1].delay),
+        (KEY_ON_DELAY, KEY_ON_DELAY - 2)
+    );
+}
+
+#[test]
+fn key_on_keeps_the_decoders_history() {
+    let (mut regs, mut aram) = machine(true);
+    regs[0x07] = 0x7F;
+    let mut dsp = Dsp::default();
+    keyed(&mut dsp, &mut regs, &mut aram);
+    dsp.sample(&mut regs, &mut aram);
+    dsp.write_kon(0x01);
+    // The poll is at the sample's last step, after the voice has run.
+    for _ in 0..2 {
+        for t in 0..31 {
+            dsp.step(t, &mut regs, &mut aram);
+        }
+        let before = (dsp.voices[0].p1, dsp.voices[0].p2);
+        dsp.step(31, &mut regs, &mut aram);
+        if dsp.voices[0].delay == KEY_ON_DELAY {
+            assert_eq!(before, (0x3800, 0x3800));
+            assert_eq!((dsp.voices[0].p1, dsp.voices[0].p2), before);
+            return;
+        }
+    }
+    panic!("KON not taken");
+}
+
+#[test]
+fn pitch_modulation_moves_a_noise_voice_too() {
+    // Voice 1 plays noise, modulated by voice 0's output: its pitch
+    // counter moves on differently with PMON than without.
+    let run = |pmon: u8| {
+        let (mut regs, mut aram) = machine(true);
+        regs[0x07] = 0x7F;
+        regs[0x17] = 0x7F;
+        regs[0x12] = 0x00;
+        regs[0x13] = 0x10;
+        regs[0x3D] = 0x02;
+        regs[0x2D] = pmon;
+        let mut dsp = Dsp::default();
+        dsp.write_kon(0x03);
+        for _ in 0..12 {
+            dsp.sample(&mut regs, &mut aram);
+        }
+        let v = dsp.voices[1];
+        (v.nibble, v.fraction)
+    };
+    assert_ne!(run(0x02), run(0x00));
+}
+
+/// Voice 0 keyed on with these envelope registers, then put in `mode` at
+/// `envelope`, its step before at `hidden`.
+fn envelope_at(
+    adsr: [u8; 3],
+    mode: EnvelopeMode,
+    envelope: u16,
+    hidden: i32,
+) -> (Dsp, [u8; 128], Vec<u8>) {
+    let (mut regs, mut aram) = machine(true);
+    regs[0x05..0x08].copy_from_slice(&adsr);
+    let mut dsp = Dsp::default();
+    keyed(&mut dsp, &mut regs, &mut aram);
+    let v = &mut dsp.voices[0];
+    (v.mode, v.envelope, v.hidden) = (mode, envelope, hidden);
+    (dsp, regs, aram)
+}
+
+#[test]
+fn attack_lasts_until_the_level_passes_7ff() {
+    // Attack 14 (+32 at rate 29): from $7C0 to $7E0 is still attack.
+    let (mut dsp, mut regs, mut aram) =
+        envelope_at([0x8E, 0xE0, 0], EnvelopeMode::Attack, 0x7C0, 0x7C0);
+    while dsp.voices[0].envelope == 0x7C0 {
+        dsp.sample(&mut regs, &mut aram);
+    }
+    assert_eq!(dsp.voices[0].envelope, 0x7E0);
+    assert_eq!(dsp.voices[0].mode, EnvelopeMode::Attack);
+    // Past $7FF the next sample, whether or not the rate lets the step
+    // in: decay from then.
+    dsp.sample(&mut regs, &mut aram);
+    assert_eq!(dsp.voices[0].mode, EnvelopeMode::Decay);
+}
+
+#[test]
+fn decay_meets_sustain_only_at_its_level() {
+    // Sustain level 7: from $7FF the first step's top bits are 7, so
+    // sustain at once, before the decay's rate has let a step in.
+    let (mut dsp, mut regs, mut aram) =
+        envelope_at([0x80, 0xE0, 0], EnvelopeMode::Decay, 0x7FF, 0x7FF);
+    dsp.sample(&mut regs, &mut aram);
+    assert_eq!(dsp.voices[0].mode, EnvelopeMode::Sustain);
+    // Below the level already, decay never meets it and goes on down.
+    let (mut dsp, mut regs, mut aram) =
+        envelope_at([0xF0, 0xE0, 0], EnvelopeMode::Decay, 0x600, 0x600);
+    for _ in 0..64 {
+        dsp.sample(&mut regs, &mut aram);
+    }
+    assert_eq!(dsp.voices[0].mode, EnvelopeMode::Decay);
+    assert!(dsp.voices[0].envelope < 0x600);
+}
+
+#[test]
+fn the_bent_line_reads_the_step_before() {
+    // Bent line at rate 31: +8, not +32, when the step before was $600 or
+    // more, whatever the level is now.
+    let (mut dsp, mut regs, mut aram) =
+        envelope_at([0, 0, 0xFF], EnvelopeMode::Attack, 0x100, 0x700);
+    dsp.sample(&mut regs, &mut aram);
+    assert_eq!(
+        (dsp.voices[0].envelope, dsp.voices[0].hidden),
+        (0x108, 0x108)
+    );
+    // Below zero counts as past $600 too (compared unsigned).
+    let (mut dsp, mut regs, mut aram) =
+        envelope_at([0, 0, 0xFF], EnvelopeMode::Attack, 0x100, -0x20);
+    dsp.sample(&mut regs, &mut aram);
+    assert_eq!(dsp.voices[0].envelope, 0x108);
+    // At rate 0 the level stays, but the step is still worked out.
+    let (mut dsp, mut regs, mut aram) = envelope_at([0, 0, 0xE0], EnvelopeMode::Attack, 0x5F0, 0);
+    dsp.sample(&mut regs, &mut aram);
+    assert_eq!(
+        (dsp.voices[0].envelope, dsp.voices[0].hidden),
+        (0x5F0, 0x610)
     );
 }

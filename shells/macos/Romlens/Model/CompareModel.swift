@@ -30,11 +30,15 @@ final class CompareModel {
     var selected: Item?
     @ObservationIgnored private(set) var other: Workbench?
     @ObservationIgnored private var comparedGeneration = -1
+    /// Bumped by every start and close, so an older run cannot land over a
+    /// newer one.
+    @ObservationIgnored private(set) var run = 0
 
     var isActive: Bool { state != .idle }
 
     /// Analyse `other` and compare it with `this`.
     func start(this: Workbench, other: Workbench, name: String, generation: Int) async {
+        let run = supersede()
         self.other = other
         otherName = name
         info = nil
@@ -42,11 +46,15 @@ final class CompareModel {
         state = .loading("Analysing \(name)…")
         do {
             _ = try await other.analyze()
+            guard run == self.run else { return }
             state = .loading("Comparing…")
-            info = try await this.compareWith(other: other)
+            let compared = try await this.compareWith(other: other)
+            guard run == self.run else { return }
+            info = compared
             comparedGeneration = generation
             state = .ready
         } catch {
+            guard run == self.run else { return }
             state = .failed("\(error)")
         }
     }
@@ -55,12 +63,22 @@ final class CompareModel {
     func refresh(this: Workbench, generation: Int) async {
         guard let other, state == .ready, generation != comparedGeneration else { return }
         comparedGeneration = generation
-        if let fresh = try? await this.compareWith(other: other) {
+        let run = self.run
+        if let fresh = try? await this.compareWith(other: other), run == self.run {
             info = fresh
         }
     }
 
+    /// Start a new run: the one under way stops analysing, and whatever it
+    /// or a refresh of it finds later is dropped.
+    private func supersede() -> Int {
+        if case .loading = state { other?.cancelAnalysis() }
+        run += 1
+        return run
+    }
+
     func close() {
+        _ = supersede()
         other = nil
         otherName = nil
         info = nil

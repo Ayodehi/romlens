@@ -12,7 +12,7 @@ struct SourceSplitView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSSplitView {
         let source = SourcePaneController(model: model)
-        let asm = AsmPaneController(model: model)
+        let asm = AsmPaneController(model: model, item: context.environment.editorItem)
         let split = CSplitPaneView()
         split.isVertical = true
         split.dividerStyle = .thin

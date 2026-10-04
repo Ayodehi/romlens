@@ -16,7 +16,9 @@ pub struct Run {
 
 impl Run {
     pub const fn end(self) -> u32 {
-        self.offset + self.len
+        // Saturating: a damaged directory's run can claim to end past
+        // 4 GiB, and every check against a region's size still refuses it.
+        self.offset.saturating_add(self.len)
     }
 }
 

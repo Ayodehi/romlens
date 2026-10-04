@@ -1,7 +1,7 @@
 Code:          6872 bytes (0.2%) in 63 blocks, 3029 instructions
-Data:          471645 bytes (15.0%)
-Unknown:       2667211 bytes (84.8%)
-Regions:       793
+Data:          981444 bytes (31.2%)
+Unknown:       2157412 bytes (68.6%)
+Regions:       1090
 Labels:        256
 Xrefs:         1554
 Warnings:      7 (0 flag conflicts)

@@ -5,6 +5,8 @@ import SwiftUI
 /// the view.
 struct AudioEditorView: View {
     @Bindable var model: RomViewModel
+    /// The view to show; the focused tab's when nil.
+    var tab: AudioModel.Tab? = nil
 
     var body: some View {
         VStack(spacing: 0) {
@@ -22,7 +24,7 @@ struct AudioEditorView: View {
 
     @ViewBuilder
     private var content: some View {
-        switch model.audioTab {
+        switch tab ?? model.audioTab {
         case .voices: VoicesView(audio: model.audio)
         case .samples: SamplesView(audio: model.audio)
         case .aram: AramView(audio: model.audio)

@@ -363,6 +363,17 @@ pub struct UploadReportInfo {
     pub commands: Vec<SoundCommandInfo>,
 }
 
+/// The trace panicked: no uploads found.
+impl crate::future::Panicked for UploadReportInfo {
+    fn panicked(_: String) -> Self {
+        UploadReportInfo {
+            routines: Vec::new(),
+            uploads: Vec::new(),
+            commands: Vec::new(),
+        }
+    }
+}
+
 impl From<&UploadReport> for UploadReportInfo {
     fn from(r: &UploadReport) -> Self {
         let driver = upload::driver(&r.uploads).map(|d| d.list);
@@ -1377,7 +1388,13 @@ impl ApuPlayer {
     #[uniffi::constructor]
     pub fn from_rom_sample(rom: Arc<Rom>, offset: u32, loop_offset: u32, pitch: u16) -> Arc<Self> {
         let s = decode_sample(rom.image.bytes(), offset, None, 4096);
-        let bytes = &rom.image.bytes()[offset as usize..(offset + s.len()) as usize];
+        // Past the ROM's end there is no sample: a silent player.
+        let start = offset as usize;
+        let bytes = rom
+            .image
+            .bytes()
+            .get(start..start + s.len() as usize)
+            .unwrap_or(&[]);
         let origins = vec![(
             romlens_core::apu::player::SAMPLE_AT,
             s.len().min(0xFFFF) as u16,
@@ -1678,7 +1695,12 @@ mod tests {
         assert_eq!(s.blocks.len(), 4);
         assert!(!s.unterminated && s.loops);
         assert_eq!(s.blocks[0].steps[0].nibble, -8);
-        let p = ApuPlayer::from_rom_sample(rom, SAMPLE_OFFSET as u32, SAMPLE_LOOP as u32, 0x1000);
+        let p = ApuPlayer::from_rom_sample(
+            rom.clone(),
+            SAMPLE_OFFSET as u32,
+            SAMPLE_LOOP as u32,
+            0x1000,
+        );
         assert!(p.render(320).iter().all(|v| *v == 0));
         p.key_on(1);
         let out = p.render(3200);
@@ -1687,6 +1709,13 @@ mod tests {
         // Release takes 8 a sample from at most $7FF: gone in 256.
         p.render(600);
         assert!(p.render(64).iter().all(|v| *v == 0));
+        // Past the ROM's end: a player all the same, and silent.
+        let len = rom.byte_len();
+        for offset in [len - 4, len, u32::MAX] {
+            let p = ApuPlayer::from_rom_sample(rom.clone(), offset, 0, 0x1000);
+            p.key_on(1);
+            assert!(p.render(320).iter().all(|v| *v == 0), "{offset:#x}");
+        }
         let rec = recording();
         let p = ApuPlayer::from_recorded_sample(rec, 3, 0, 0x0800).unwrap();
         p.key_on(1);

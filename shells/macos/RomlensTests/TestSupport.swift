@@ -92,7 +92,7 @@ enum Fixture {
     }
 
     static func asmWindow(_ model: RomViewModel) throws -> (RomWindowController, NSScrollView, AsmCanvasView) {
-        model.editorTab = .disassembly
+        model.showTab(.disassembly)
         let controller = RomWindowController(model: model)
         controller.window?.orderFront(nil)
         let content = try #require(controller.window?.contentView)

@@ -2527,6 +2527,8 @@ pub fn simplify(e: Expr) -> Expr {
                 }
             }
             Expr::Signed(w, inner) => Expr::un(UnOp::LNot, Expr::Signed(w, inner)),
+            // `!!c` is `c` when `c` is already 0 or 1.
+            Expr::Un(UnOp::LNot, inner) if inner.is_boolean() => *inner,
             x => Expr::un(UnOp::LNot, x),
         },
         // (e & sign) != 0  →  (sN)e < 0

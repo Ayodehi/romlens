@@ -130,6 +130,7 @@ final class ProjectDocument: NSDocument {
             let workbench = try Workbench.withProjectFiles(rom: rom, files: files)
             // Creating the view model starts the analysis.
             install(rom: rom, workbench: workbench, url: located.url, bookmark: located.bookmark)
+            if let kept = local?.workspace { model?.restore(kept) }
         }
         lastWrapper = fileWrapper
     }
@@ -190,7 +191,10 @@ final class ProjectDocument: NSDocument {
         for name in Self.optionalCoreFiles where files[name] == nil {
             if let old = wrapper.fileWrappers?[name] { wrapper.removeFileWrapper(old) }
         }
-        let local = LocalRecord(bookmark: romBookmark, lastPath: romURL?.path)
+        // Saving runs on the main thread (no asynchronous writing here), as
+        // reading does.
+        let workspace = MainActor.assumeIsolated { model?.workspaceRecord }
+        let local = LocalRecord(bookmark: romBookmark, lastPath: romURL?.path, workspace: workspace)
         if let old = wrapper.fileWrappers?[Self.localFileName] { wrapper.removeFileWrapper(old) }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -233,22 +237,53 @@ final class ProjectDocument: NSDocument {
         addWindowController(RomWindowController(model: model))
     }
 
-    /// The tutor's window (docs/24): a second window of this project, made
-    /// on first use, closing with it.
-    private(set) var tutorController: TutorWindowController?
-
+    /// The tutor in the project's window (docs/29): the inspector's Tutor
+    /// tab. It had a window of its own until then (docs/24).
     func showTutor() {
-        guard let model else { return }
-        if tutorController == nil {
-            let c = TutorWindowController(tutor: TutorModel(rom: model), title: displayName)
-            addWindowController(c)
-            tutorController = c
+        model?.showTutorInDrawer()
+    }
+
+    /// Nothing started for the project outlives it: the tutor's turn, the
+    /// analysis, the sound and a comparison all stop.
+    override func close() {
+        MainActor.assumeIsolated {
+            keepWorkspace()
+            model?.close()
         }
-        // Closing the window takes it off the document; showing it again
-        // puts it back, conversation and all.
-        if let c = tutorController, c.document == nil { addWindowController(c) }
-        tutorController?.showWindow(nil)
-        tutorController?.window?.makeKeyAndOrderFront(nil)
+        super.close()
+    }
+
+    /// Writes the window's layout into the package's `local.json` without a
+    /// save (docs/29), so arranging tabs never marks the project edited.
+    /// Coordinated with this document as the presenter, and the package's
+    /// new date taken as the document's own, so the next save does not
+    /// think another app changed it.
+    @MainActor
+    func keepWorkspace() {
+        guard let url = fileURL, Self.isType(fileType ?? "", Self.projectType),
+              let workspace = model?.workspaceRecord,
+              (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+        else { return }
+        let record = LocalRecord(bookmark: romBookmark, lastPath: romURL?.path, workspace: workspace)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        guard let data = try? encoder.encode(record) else { return }
+        let target = url.appendingPathComponent(Self.localFileName)
+        var error: NSError?
+        NSFileCoordinator(filePresenter: self).coordinate(writingItemAt: target, options: .forReplacing, error: &error) { at in
+            try? data.write(to: at, options: .atomic)
+        }
+        // From the file system, not `URL.resourceValues`, which caches.
+        if let date = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date {
+            fileModificationDate = date
+        }
+        // The next save keeps this record too.
+        if let wrapper = lastWrapper {
+            if let old = wrapper.fileWrappers?[Self.localFileName] { wrapper.removeFileWrapper(old) }
+            let child = FileWrapper(regularFileWithContents: data)
+            child.preferredFilename = Self.localFileName
+            wrapper.addFileWrapper(child)
+        }
     }
 
     /// The document's ROM hash, for de-duplication by the controller.

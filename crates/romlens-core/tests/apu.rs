@@ -327,3 +327,53 @@ fn every_cycle_is_one_bus_call() {
     cpu.step(&mut bus);
     assert_eq!(bus.0, 2);
 }
+
+mod replay {
+    use romlens_core::apu::player::Player;
+    use romlens_core::apu::replay::{check_frames, run_free, start_at};
+    use romlens_core::recording::mesen::stream::encode::fixture_run_by_apu;
+    use romlens_core::recording::mesen::{PackOptions, pack};
+    use romlens_core::recording::{
+        MachineStateSource, MemorySource, RecordingError, RomrecSource, SpcState, StateRegion,
+    };
+    use romlens_core::rom::image::RomImage;
+
+    /// The sound fixture's driver run for 5 frames, with frame 2's
+    /// SPC700 clock damaged as one flipped bit in its top byte does.
+    fn jumped() -> MemorySource {
+        let bytes = romlens_core::fixtures::sound::sound_upload_lorom();
+        let rom = RomImage::from_bytes(bytes.clone(), "sound.sfc").unwrap();
+        let mut out = std::io::Cursor::new(Vec::new());
+        pack(
+            fixture_run_by_apu(&bytes, 5).as_slice(),
+            &rom,
+            &mut out,
+            PackOptions::default(),
+        )
+        .unwrap();
+        let rec = RomrecSource::from_bytes(out.into_inner(), false).unwrap();
+        let mut frames: Vec<_> = (0..5).map(|f| rec.state_at(f).unwrap()).collect();
+        let spc = frames[2].regions.get_mut(&StateRegion::SpcState).unwrap();
+        let mut s = SpcState::decode(spc);
+        s.cycle += 1 << 40;
+        *spc = s.encode().to_vec();
+        MemorySource::new(rec.identity().clone(), frames)
+    }
+
+    #[test]
+    fn a_clock_that_jumps_is_refused_rather_than_run_out() {
+        let src = jumped();
+        let corrupt = |r: Result<_, RecordingError>| match r {
+            Err(RecordingError::Corrupt(m)) => m.contains("frame 2"),
+            _ => false,
+        };
+        assert!(corrupt(check_frames(&src, 2, 2).map(|_| ())));
+        assert!(corrupt(run_free(&src, 1, 3).map(|_| ())));
+        // A player still starts at frame 1, from the snapshot as it is.
+        assert!(start_at(&src, 1).is_ok());
+        let mut p = Player::from_recording(&src, 1, true).unwrap();
+        p.render(1024);
+        // Frame 3's clock runs back from frame 2's: nothing to run.
+        assert!(check_frames(&src, 3, 3).is_ok());
+    }
+}

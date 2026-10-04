@@ -716,14 +716,14 @@ pub fn from_files(
                 end: parse_snes(C_VERSIONS_FILE, &a.end)?,
             });
         }
-        project.c_versions.insert(
-            (r, v.name),
-            CVersion {
-                text: v.text,
-                author: Author::parse(&v.author),
-                anchors,
-            },
-        );
+        let version = CVersion {
+            text: v.text,
+            author: Author::parse(&v.author),
+            anchors,
+        };
+        // A hand-edited file can name lines the version does not have.
+        version.validate(&v.name)?;
+        project.c_versions.insert((r, v.name), version);
     }
     for c in read_list::<CommentDto>(files, "comments.json")? {
         let address = Project::canonical(rom, parse_snes("comments.json", &c.address)?);

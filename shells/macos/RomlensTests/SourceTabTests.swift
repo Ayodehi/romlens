@@ -77,7 +77,7 @@ import Testing
         let model = try await Fixture.analyzedModel(rom: try Rom.fromBytes(bytes: rom, name: "fixture.sfc"))
         _ = try model.session.importDbg(source: "fixture.dbg", dir: dir.path, text: dbg)
         model.source.reload(workbench: model.workbench)
-        model.editorTab = .source
+        model.showTab(.source)
         let controller = RomWindowController(model: model)
         controller.window?.orderFront(nil)
         defer { controller.close() }

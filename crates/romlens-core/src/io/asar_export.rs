@@ -161,7 +161,7 @@ pub fn export_asar(
 ) {
     let symbols = Symbols::new(rom, project, &snap.auto_labels);
     let (start, len) = options.range.unwrap_or((0, rom.len() as u32));
-    let end = (start + len).min(rom.len() as u32);
+    let end = start.saturating_add(len).min(rom.len() as u32);
     let bank = bank_size(rom);
     let h = rom.header();
     let _ = writeln!(out, "; Romlens export of {:?}", h.title);
@@ -283,9 +283,13 @@ pub fn export_asar(
             }
             out.push('\n');
         }
+        // An instruction whose bytes cross a bank end is one the CPU never
+        // runs as such (its program counter wraps within the bank), and asar
+        // refuses it; it goes out as data rows.
         if let Some(r) = rec
             && let Some(insn) = snap.decode_at(rom, &r)
             && r.end() <= end
+            && r.offset / bank == (r.end() - 1) / bank
         {
             // A branch that reaches its target only by wrapping around the
             // bank, as the 65816's program counter does: asar measures the

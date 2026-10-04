@@ -83,7 +83,7 @@ struct CompareView: View {
                 Spacer()
                 Button("Close") {
                     compare.close()
-                    model.editorTab = .disassembly
+                    model.showTab(.disassembly)
                 }
                     .controlSize(.small)
                     .help("Stop comparing")
@@ -188,7 +188,7 @@ struct CompareView: View {
             Text(text).fixedSize(horizontal: false, vertical: true)
             if let offset {
                 Button("Show in Hex") {
-                    model.editorTab = .hex
+                    model.showTab(.hex)
                     model.jump(to: offset)
                 }
             }
@@ -208,7 +208,7 @@ struct CompareView: View {
                 Spacer()
                 if let b = r.b {
                     Button("Show in Listing") {
-                        model.editorTab = .disassembly
+                        model.showTab(.disassembly)
                         model.jump(to: b.offset)
                     }
                 }

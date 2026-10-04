@@ -80,7 +80,7 @@ import Testing
         #expect(m.audioTab == nil && m.graphicsTab == .tiles)
         m.openAudio(.voices)
         #expect(m.graphicsTab == nil && m.audioTab == .voices && !m.showsTextEditor)
-        m.editorTab = .hex
+        m.showTab(.hex)
         #expect(m.audioTab == nil && m.showsTextEditor)
     }
 

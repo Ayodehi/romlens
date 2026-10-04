@@ -5,8 +5,9 @@
 -- compression, hashing and the register layouts to Romlens.
 --
 -- Needs Mesen's "Allow access to I/O and OS functions" script option.
--- Output: $ROMLENS_REC_OUT, or romlens-<time>.rlstream in the script data
--- folder. $ROMLENS_REC_FRAMES stops the emulator after that many frames.
+-- Output: $ROMLENS_REC_OUT, or romlens-<time>.rlstream in ~/Documents/Romlens/
+-- Recordings (made if missing; the script data folder if that cannot be
+-- written). $ROMLENS_REC_FRAMES stops the emulator after that many frames.
 --
 -- Where Mesen has an execution log (emu.startExecutionLog, in the MesenCE
 -- fork), the script also records one and writes it beside the stream as
@@ -79,9 +80,28 @@ if not io or not os then
   return
 end
 
+-- Streams run to gigabytes, so they go where the user can see and manage
+-- them, not into Mesen's own folder (inside the app bundle when Mesen runs
+-- portable, where a rebuild would delete them).
+local function default_out_path()
+  local name = "/romlens-" .. os.date("%Y%m%d-%H%M%S") .. ".rlstream"
+  local home = os.getenv("HOME")
+  if home and home ~= "" and os.execute then
+    local dir = home .. "/Documents/Romlens/Recordings"
+    os.execute('mkdir -p "' .. dir .. '"')
+    local probe = io.open(dir .. name, "wb")
+    if probe then
+      probe:close()
+      os.remove(dir .. name)
+      return dir .. name
+    end
+  end
+  return emu.getScriptDataFolder() .. name
+end
+
 local out_path = os.getenv("ROMLENS_REC_OUT")
 if not out_path or out_path == "" then
-  out_path = emu.getScriptDataFolder() .. "/romlens-" .. os.date("%Y%m%d-%H%M%S") .. ".rlstream"
+  out_path = default_out_path()
 end
 emu.log(out_path)
 local frame_limit = tonumber(os.getenv("ROMLENS_REC_FRAMES") or "")

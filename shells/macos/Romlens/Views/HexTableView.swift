@@ -11,7 +11,7 @@ struct HexTableView: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeNSView(context: Context) -> HexPaneView {
-        let controller = HexPaneController(model: model)
+        let controller = HexPaneController(model: model, item: context.environment.editorItem)
         context.coordinator.controller = controller
         return controller.pane
     }
@@ -37,10 +37,14 @@ final class HexPaneController {
     let header: HexColumnHeaderView
     private var lineGeneration = -1
     private var highlighted: Range<UInt32>?
+    private var citedShown: [Range<UInt32>] = []
     private var lastScrollId = 0
+    /// The tab this pane is in, if any (docs/29).
+    let item: UUID?
 
-    init(model: RomViewModel) {
+    init(model: RomViewModel, item: UUID? = nil) {
         self.model = model
+        self.item = item
         canvas = HexCanvasView(model: model)
         scrollView = NSScrollView()
         scrollView.documentView = canvas
@@ -57,6 +61,11 @@ final class HexPaneController {
         canvas.frame = NSRect(x: 0, y: 0, width: model.layout.totalWidth, height: canvas.documentHeight)
         header = HexColumnHeaderView(model: model)
         pane = HexPaneView(header: header, scrollView: scrollView)
+        pane.onLayout = { [weak self] in
+            guard let self, let row = pendingRow, scrollView.contentView.bounds.height > 1 else { return }
+            pendingRow = nil
+            scroll(toRow: row)
+        }
         canvas.onKeyCommand = { [weak self] command in self?.handle(command) }
     }
 
@@ -66,6 +75,11 @@ final class HexPaneController {
         let generation = model.lineGeneration
         let range = model.highlightedRange
         let scroll = model.scrollRequest
+        let cited = model.citationHighlight
+        if cited != citedShown {
+            citedShown = cited
+            canvas.needsDisplay = true
+        }
 
         if lineGeneration != generation {
             lineGeneration = generation
@@ -79,8 +93,11 @@ final class HexPaneController {
             header.selectedByte = model.selectedOffset.map { Int($0 % 16) }
         }
         if let scroll, lastScrollId != scroll.id {
+            let fresh = lastScrollId == 0
             lastScrollId = scroll.id
-            self.scroll(toRow: Int(scroll.offset / 16))
+            if fresh || scroll.applies(to: item) {
+                self.scroll(toRow: Int(scroll.offset / 16))
+            }
         }
     }
 
@@ -96,10 +113,17 @@ final class HexPaneController {
     }
 
     /// Scroll so the row sits in the middle of the visible area.
+    /// A row asked for before the pane had a height (docs/29).
+    var pendingRow: Int?
+
     func scroll(toRow row: Int) {
         let rowRect = canvas.rect(ofRow: row)
         let clip = scrollView.contentView
         let visibleHeight = clip.bounds.height
+        guard visibleHeight > 1 else {
+            pendingRow = row
+            return
+        }
         let y = max(0, min(rowRect.midY - visibleHeight / 2, canvas.bounds.height - visibleHeight))
         clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: y))
         scrollView.reflectScrolledClipView(clip)
@@ -185,9 +209,11 @@ final class HexCanvasView: NSView {
         let selected = model.selectedOffset
         let highlighted = model.highlightedRange
         let focused = window?.firstResponder === self
+        let cited = model.citationHighlight
         for row in rows(in: dirtyRect) {
             let row32 = UInt32(row)
             let batch = model.batch(containingRow: row32)
+            guard batch.contains(row: row32) else { continue }
             let record = batch.record(row: row32)
             let line = batch.line(row: row32, generation: generation, layout: layout)
             var selectedByte: Int?
@@ -204,6 +230,13 @@ final class HexCanvasView: NSView {
                 highlighted: rowRange, selectedByte: selectedByte, focused: focused,
                 in: rect(ofRow: row), context: context
             )
+            let rowStart = row32 * 16
+            if cited.contains(where: { $0.lowerBound < rowStart + 16 && $0.upperBound > rowStart }) {
+                // A row a citation names (docs/29).
+                context.setStrokeColor(NSColor.controlAccentColor.cgColor)
+                context.setLineWidth(1.5)
+                context.stroke(rect(ofRow: row).insetBy(dx: 1, dy: 1))
+            }
         }
     }
 
@@ -278,6 +311,26 @@ enum EditorContextMenu {
         menu.addItem(.separator())
         item("Copy Address", #selector(RomWindowController.copyAddress(_:)))
         item("Copy Line", #selector(RomWindowController.copyLine(_:)))
+        menu.addItem(.separator())
+        let addresses = NSMenuItem(title: "Addresses", action: nil, keyEquivalent: "")
+        addresses.submenu = addressMenu()
+        menu.addItem(addresses)
+        return menu
+    }
+
+    /// Which address columns show (docs/29): here, in the column header's
+    /// menu and in the View menu, no longer in the toolbar. Checked by
+    /// `RomWindowController.validateMenuItem`.
+    @MainActor
+    static func addressMenu() -> NSMenu {
+        let menu = NSMenu(title: "Addresses")
+        for (title, action) in [
+            ("File Offset and SNES Address", #selector(RomWindowController.showBothAddresses(_:))),
+            ("SNES Address Only", #selector(RomWindowController.showSnesAddresses(_:))),
+            ("File Offset Only", #selector(RomWindowController.showFileOffsets(_:))),
+        ] {
+            menu.addItem(NSMenuItem(title: title, action: action, keyEquivalent: ""))
+        }
         return menu
     }
 }

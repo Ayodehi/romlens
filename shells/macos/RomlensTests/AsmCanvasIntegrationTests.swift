@@ -132,7 +132,7 @@ import Testing
     /// clamp instead of trapping on the UInt32 conversion.
     @Test func overscrollDoesNotTrap() async throws {
         let model = try await Fixture.analyzedModel(rom: try Fixture.smallRom())
-        model.editorTab = .both
+        model.showTab(.both)
         let controller = RomWindowController(model: model)
         controller.window?.orderFront(nil)
         let content = try #require(controller.window?.contentView)
@@ -159,7 +159,7 @@ import Testing
 
     @Test func bothTabScrollsInLockstepWithABracket() async throws {
         let model = try await Fixture.analyzedModel(rom: try Fixture.rom(megabytes: 1))
-        model.editorTab = .both
+        model.showTab(.both)
         let controller = RomWindowController(model: model)
         controller.window?.orderFront(nil)
         let content = try #require(controller.window?.contentView)

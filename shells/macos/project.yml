@@ -70,6 +70,11 @@ targets:
             UTTypeTagSpecification:
               public.filename-extension: [spclog]
         UTExportedTypeDeclarations:
+          # A tab, or a sidebar row, being dragged into the editor area
+          # (docs/29); never written to disk.
+          - UTTypeIdentifier: io.github.ayodehi.romlens.tab
+            UTTypeDescription: Romlens tab
+            UTTypeConformsTo: [public.data]
           - UTTypeIdentifier: io.github.ayodehi.romlens.project
             UTTypeDescription: Romlens Project
             UTTypeConformsTo: [com.apple.package]

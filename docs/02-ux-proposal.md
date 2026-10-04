@@ -1,5 +1,9 @@
 # UX proposal
 
+The layout was redrawn once every view existed: `29-workspace.md` replaces
+the toolbar's pickers with a sidebar and the single editor with tab groups
+in a grid. What follows is kept as written.
+
 Three layout options are described below. They are not mutually exclusive:
 the recommendation is to build Option A first, absorb Option B's lockstep
 behaviour as a mode inside it, and add Option C in Phase 2 as the overview
