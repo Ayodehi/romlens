@@ -240,6 +240,37 @@ pub fn choose_project(app: &adw::Application) {
     );
 }
 
+/// Compare With… : another version of this ROM, a ROM file, or (`project`)
+/// a saved project, which is a folder so a file chooser cannot offer both.
+pub fn choose_compare(window: &adw::ApplicationWindow, doc: &Rc<Document>, project: bool) {
+    let dialog = gtk::FileDialog::builder()
+        .title(if project {
+            "Compare With Project"
+        } else {
+            "Compare With"
+        })
+        .build();
+    let start = doc
+        .project_path()
+        .or_else(|| doc.rom_path())
+        .and_then(|p| p.parent().map(Path::to_path_buf));
+    if let Some(dir) = start {
+        dialog.set_initial_folder(Some(&gio::File::for_path(dir)));
+    }
+    let doc = Rc::clone(doc);
+    let done = move |picked: Result<gio::File, glib::Error>| {
+        if let Some(path) = picked.ok().and_then(|f| f.path()) {
+            doc.compare_with(path);
+        }
+    };
+    if project {
+        dialog.select_folder(Some(window), gio::Cancellable::NONE, done);
+    } else {
+        dialog.set_filters(Some(&rom_filters()));
+        dialog.open(Some(window), gio::Cancellable::NONE, done);
+    }
+}
+
 /// Put a document in a window, and make the window the one for its ROM.
 fn show(app: &adw::Application, doc: Rc<Document>) {
     // The welcome window has done its job.

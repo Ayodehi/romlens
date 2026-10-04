@@ -18,14 +18,20 @@ use romlens_ffi::{
 };
 
 use super::batch_cache::BatchCache;
+use super::commands::Zoom;
 use super::commands::{EditorCommand, EditorSource, Sheet};
+use super::compare::{self, CompareModel, Item as CompareItem};
+use super::decompile::{Decompile, Key as DecompileKey};
+use super::graph::{self, GraphMode, GraphModel, Key as GraphKey};
 use super::layout::{Layout, Panes, ResultsKind, Tab};
 use super::navigator::{NavTab, Navigator, NavigatorData};
 use super::references::ReferencesModel;
 use super::runtime::Runtime;
 use super::runtime::background;
+use super::screen::ScreenModel;
 use super::search::SearchModel;
 use super::session::{ChangeKind, Session};
+use super::source::{self, SourceModel};
 use super::transfer::{self, ExportKind, ImportKind};
 use crate::asm::AsmBatch;
 use crate::hex::{AddressStyle, BYTES_PER_ROW, HexBatch};
@@ -54,6 +60,18 @@ pub enum Change {
     Navigator,
     /// Find's hits or Find References' rows changed.
     Results,
+    /// The C tab's routine, level or text changed.
+    Decompile,
+    /// The Graph tab's routine, mode or graph changed.
+    Graph,
+    /// Zoom In, Out or Fit was asked for.
+    Zoom,
+    /// The inspector's Screen section opened, closed or got its result.
+    Screen,
+    /// The Source tab's files, shown file or text changed.
+    Source,
+    /// The Compare tab's state, list or selection changed.
+    Compare,
     /// Analysis state or undo state changed.
     Status,
     History,
@@ -173,6 +191,12 @@ pub struct Document {
     references: RefCell<ReferencesModel>,
     variable_draft: RefCell<VariableDraft>,
     project_path: RefCell<Option<PathBuf>>,
+    decompile: RefCell<Decompile>,
+    graph: RefCell<GraphModel>,
+    source: RefCell<SourceModel>,
+    screen: RefCell<ScreenModel>,
+    compare: RefCell<CompareModel>,
+    zoom: Cell<Option<(Zoom, u64)>>,
     me: RefCell<Weak<Document>>,
     rom_path: RefCell<Option<PathBuf>>,
     span_kinds: HashMap<u8, SpanKind>,
@@ -252,6 +276,12 @@ impl Document {
             references: RefCell::new(ReferencesModel::default()),
             variable_draft: RefCell::new(VariableDraft::default()),
             project_path: RefCell::new(None),
+            decompile: RefCell::new(Decompile::default()),
+            graph: RefCell::new(GraphModel::default()),
+            source: RefCell::new(SourceModel::default()),
+            screen: RefCell::new(ScreenModel::default()),
+            compare: RefCell::new(CompareModel::default()),
+            zoom: Cell::new(None),
             me: RefCell::new(Weak::new()),
             rom_path: RefCell::new(None),
             span_kinds,
@@ -265,6 +295,7 @@ impl Document {
             listeners: RefCell::new(Vec::new()),
         });
         *doc.me.borrow_mut() = Rc::downgrade(&doc);
+        doc.source.borrow_mut().reload(doc.workbench());
         let weak = Rc::downgrade(&doc);
         session.set_on_change(move |kind| {
             if let Some(d) = weak.upgrade() {
@@ -301,8 +332,15 @@ impl Document {
                 self.asm_cache.invalidate_all();
                 self.asm_line_count.set(self.workbench().line_count());
                 self.generation.set(self.generation.get() + 1);
+                self.screen.borrow_mut().invalidate();
                 self.refresh_details();
                 self.reload_navigator();
+                self.decompile.borrow_mut().invalidate();
+                self.graph.borrow_mut().invalidate();
+                self.refresh_decompile();
+                self.refresh_graph();
+                self.reload_source();
+                self.refresh_compare();
                 self.emit(Change::Rows);
             }
             ChangeKind::Project { .. } => {}
@@ -465,6 +503,17 @@ impl Document {
         };
         if changed {
             self.emit(Change::Layout);
+            self.refresh_decompile();
+            self.refresh_graph();
+        }
+    }
+
+    /// Source only with sources imported, Compare only while comparing.
+    pub fn tab_available(&self, tab: Tab) -> bool {
+        match tab {
+            Tab::Source => self.source.borrow().has_files(),
+            Tab::Compare => self.compare.borrow().is_active(),
+            _ => true,
         }
     }
 
@@ -715,6 +764,329 @@ impl Document {
         Ok(())
     }
 
+    // MARK: C
+
+    pub fn decompile(&self) -> std::cell::Ref<'_, Decompile> {
+        self.decompile.borrow()
+    }
+
+    /// Keep the C tab on the routine at the selection. Only while a tab is
+    /// showing: decompiling costs a summary of every routine the first time
+    /// after an analysis.
+    pub fn refresh_decompile(&self) {
+        if self.tab() != Tab::C || !self.has_disassembly() {
+            return;
+        }
+        let start = self
+            .details
+            .borrow()
+            .instruction
+            .as_ref()
+            .map(|i| i.file_offset)
+            .or_else(|| self.selected());
+        let run =
+            self.decompile
+                .borrow_mut()
+                .follow(self.workbench(), start, self.generation.get());
+        if let Some(run) = run {
+            self.run_decompile(run);
+        }
+        self.emit(Change::Decompile);
+    }
+
+    fn run_decompile(&self, run: DecompileKey) {
+        let wb = Arc::clone(self.workbench());
+        let weak = self.me.borrow().clone();
+        background(
+            &*self.runtime,
+            move || {
+                wb.set_c_numbers(run.numbers);
+                wb.decompile_blocking(run.entry, run.level)
+                    .map_err(|e| e.to_string())
+            },
+            move |outcome| {
+                let Some(d) = weak.upgrade() else { return };
+                let next = d.decompile.borrow_mut().finish(run, outcome);
+                d.emit(Change::Decompile);
+                if let Some(next) = next {
+                    d.run_decompile(next);
+                }
+            },
+        );
+    }
+
+    pub fn set_decompile_level(&self, level: romlens_ffi::DecompileLevel) {
+        {
+            let mut d = self.decompile.borrow_mut();
+            if d.level == level {
+                return;
+            }
+            d.level = level;
+            d.invalidate();
+        }
+        self.refresh_decompile();
+    }
+
+    pub fn set_c_numbers(&self, style: romlens_ffi::NumberStyle) {
+        {
+            let mut d = self.decompile.borrow_mut();
+            if d.numbers == style {
+                return;
+            }
+            d.numbers = style;
+            d.invalidate();
+        }
+        crate::config::Settings {
+            hide_explanations: !self.explanations(),
+            c_numbers: super::decompile::number_style_name(style).to_owned(),
+        }
+        .save();
+        self.refresh_decompile();
+    }
+
+    // MARK: Graph
+
+    pub fn graph(&self) -> std::cell::Ref<'_, GraphModel> {
+        self.graph.borrow()
+    }
+
+    /// Keep the Graph tab on the routine at the selection, while it shows.
+    pub fn refresh_graph(&self) {
+        if self.tab() != Tab::Graph || !self.has_disassembly() {
+            return;
+        }
+        let start = self
+            .details
+            .borrow()
+            .instruction
+            .as_ref()
+            .map(|i| i.file_offset)
+            .or_else(|| self.selected());
+        let run = self
+            .graph
+            .borrow_mut()
+            .follow(self.workbench(), start, self.generation.get());
+        if let Some(run) = run {
+            self.run_graph(run);
+        }
+        self.emit(Change::Graph);
+    }
+
+    fn run_graph(&self, run: GraphKey) {
+        let wb = Arc::clone(self.workbench());
+        let weak = self.me.borrow().clone();
+        background(
+            &*self.runtime,
+            move || graph::build(&wb, run),
+            move |outcome| {
+                let Some(d) = weak.upgrade() else { return };
+                let next = d.graph.borrow_mut().finish(run, outcome);
+                d.emit(Change::Graph);
+                if let Some(next) = next {
+                    d.run_graph(next);
+                }
+            },
+        );
+    }
+
+    pub fn set_graph_mode(&self, mode: GraphMode) {
+        {
+            let mut g = self.graph.borrow_mut();
+            if g.mode == mode {
+                return;
+            }
+            g.mode = mode;
+            g.invalidate();
+        }
+        self.refresh_graph();
+    }
+
+    // MARK: Source
+
+    pub fn source(&self) -> std::cell::Ref<'_, SourceModel> {
+        self.source.borrow()
+    }
+
+    /// Read the imported files again, and leave the Source tab if there are
+    /// none left to show.
+    fn reload_source(&self) {
+        let before = self.source.borrow().generation;
+        self.source.borrow_mut().reload(self.workbench());
+        if self.source.borrow().generation != before {
+            self.emit(Change::Source);
+        }
+        if self.tab() == Tab::Source && !self.source.borrow().has_files() {
+            self.set_tab(Tab::Disassembly);
+        }
+    }
+
+    pub fn show_source_file(&self, index: usize) {
+        if self.source.borrow().shown == Some(index) {
+            return;
+        }
+        self.source.borrow_mut().show(Some(index), self.workbench());
+        self.emit(Change::Source);
+    }
+
+    /// Read the shown file again, after it was found or fixed.
+    pub fn retry_source(&self) {
+        let shown = self.source.borrow().shown;
+        self.source.borrow_mut().show(shown, self.workbench());
+        self.emit(Change::Source);
+    }
+
+    /// The lines that made the selected byte, the program's own first.
+    pub fn source_lines_at_selection(&self) -> Vec<romlens_ffi::source::SourceLineInfo> {
+        self.selected()
+            .map_or_else(Vec::new, |o| self.workbench().source_lines_at(o))
+    }
+
+    /// Show the file of the selected byte's line, as selecting it elsewhere
+    /// does on macOS.
+    pub fn follow_selection_in_source(&self) {
+        let Some(line) = self.source_lines_at_selection().into_iter().next() else {
+            return;
+        };
+        let before = self.source.borrow().generation;
+        self.source
+            .borrow_mut()
+            .show_file_of(&line, self.workbench());
+        if self.source.borrow().generation != before {
+            self.emit(Change::Source);
+        }
+    }
+
+    /// A click on a line that made bytes selects its bytes; a macro's line
+    /// went through more than once, so a second click goes to the next.
+    pub fn select_source_line(&self, line: u32) {
+        let hit = self.source.borrow().by_line.get(&line).cloned();
+        let Some(hit) = hit else { return };
+        if let Some(r) = source::next_range(&hit.ranges, self.selected()) {
+            self.select_range(r.start..r.start + r.len.max(1));
+        }
+    }
+
+    // MARK: Compare
+
+    pub fn compare(&self) -> std::cell::Ref<'_, CompareModel> {
+        self.compare.borrow()
+    }
+
+    /// File › Compare With…: load the other version off the main thread,
+    /// analyse it, and compare.
+    pub fn compare_with(&self, path: PathBuf) {
+        let name = path
+            .file_stem()
+            .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+        let ticket = self.compare.borrow_mut().begin(&name);
+        self.set_tab(Tab::Compare);
+        self.emit(Change::Compare);
+        let this = Arc::clone(self.workbench());
+        let generation = self.generation.get();
+        let weak = self.me.borrow().clone();
+        background(
+            &*self.runtime,
+            move || {
+                let other = compare::load_other(&path)?;
+                let info = this
+                    .compare_with_blocking(Arc::clone(&other))
+                    .map_err(|e| e.to_string())?;
+                Ok::<_, String>((other, info))
+            },
+            move |result| {
+                let Some(d) = weak.upgrade() else { return };
+                if !d.compare.borrow().is_current(ticket) {
+                    return;
+                }
+                match result {
+                    Ok((other, info)) => {
+                        let mut c = d.compare.borrow_mut();
+                        c.loaded(other);
+                        c.finished(Ok(info), generation);
+                    }
+                    Err(e) => d.compare.borrow_mut().finished(Err(e), generation),
+                }
+                d.emit(Change::Compare);
+                d.refresh_compare();
+            },
+        );
+    }
+
+    /// This version changed since the comparison (a name, or a re-analysis):
+    /// compare again against the same other version.
+    fn refresh_compare(&self) {
+        let (ticket, other) = {
+            let c = self.compare.borrow();
+            if !c.needs_refresh(self.generation.get()) {
+                return;
+            }
+            let Some(other) = c.other.clone() else { return };
+            (c.current_ticket(), other)
+        };
+        let generation = self.generation.get();
+        // Counted as refreshed now, so a burst of edits runs it once per
+        // generation rather than once per event.
+        self.compare.borrow_mut().refreshed(None, generation);
+        let this = Arc::clone(self.workbench());
+        let weak = self.me.borrow().clone();
+        background(
+            &*self.runtime,
+            move || this.compare_with_blocking(other).ok(),
+            move |info| {
+                let Some(d) = weak.upgrade() else { return };
+                if !d.compare.borrow().is_current(ticket) {
+                    return;
+                }
+                d.compare.borrow_mut().refreshed(info, generation);
+                d.emit(Change::Compare);
+            },
+        );
+    }
+
+    pub fn close_compare(&self) {
+        self.compare.borrow_mut().close();
+        self.emit(Change::Compare);
+        if self.tab() == Tab::Compare {
+            self.set_tab(Tab::Disassembly);
+        }
+    }
+
+    pub fn select_compare_item(&self, item: Option<CompareItem>) {
+        self.compare.borrow_mut().selected = item;
+        self.emit(Change::Compare);
+    }
+
+    /// Carry over the names the other version has for routines this one only
+    /// has automatic names for: one undo step.
+    pub fn carry_names(self: &Rc<Self>) -> Result<usize, RomlensError> {
+        let names = self
+            .compare
+            .borrow()
+            .info
+            .as_ref()
+            .map_or_else(Vec::new, |i| i.names_to_carry.clone());
+        if names.is_empty() {
+            return Ok(0);
+        }
+        let n = names.len();
+        self.workbench().carry_names(names)?;
+        self.session.finish_command(true);
+        self.refresh_details();
+        Ok(n)
+    }
+
+    /// View › Zoom In, Out and Fit, for whichever canvas is showing.
+    pub fn request_zoom(&self, kind: Zoom) {
+        let id = self.zoom.get().map_or(0, |(_, id)| id) + 1;
+        self.zoom.set(Some((kind, id)));
+        self.emit(Change::Zoom);
+    }
+
+    /// The last zoom asked for, numbered so the same one can repeat.
+    pub fn zoom_request(&self) -> Option<(Zoom, u64)> {
+        self.zoom.get()
+    }
+
     // MARK: Navigator
 
     pub fn navigator(&self) -> std::cell::Ref<'_, Navigator> {
@@ -915,6 +1287,7 @@ impl Document {
             None => {
                 let changed = self.selection.borrow_mut().offset.take().is_some();
                 *self.details.borrow_mut() = Details::default();
+                self.refresh_screen(false);
                 if changed {
                     self.emit(Change::Selection);
                 }
@@ -922,6 +1295,8 @@ impl Document {
             Some(o) if o < self.byte_count() => {
                 self.selection.borrow_mut().offset = Some(o);
                 self.refresh_details();
+                self.refresh_decompile();
+                self.refresh_graph();
                 self.emit(Change::Selection);
             }
             Some(_) => {}
@@ -956,6 +1331,58 @@ impl Document {
         }
         d.instruction = instruction;
         *self.details.borrow_mut() = d;
+        self.refresh_screen(false);
+    }
+
+    // MARK: Screen
+
+    pub fn screen(&self) -> std::cell::Ref<'_, ScreenModel> {
+        self.screen.borrow()
+    }
+
+    pub fn set_show_screen(&self, shown: bool) {
+        {
+            let mut s = self.screen.borrow_mut();
+            if s.shown == shown {
+                return;
+            }
+            s.shown = shown;
+        }
+        self.refresh_screen(false);
+    }
+
+    /// Work out the screen at the selected instruction, if the Screen section
+    /// is open.
+    fn refresh_screen(&self, force: bool) {
+        let at = self
+            .details
+            .borrow()
+            .instruction
+            .as_ref()
+            .map(|i| i.file_offset);
+        let before = self.screen.borrow().setup.is_some();
+        let request = self.screen.borrow_mut().want(at, force);
+        let Some((at, ticket)) = request else {
+            // Left an instruction behind: the old result goes with it.
+            if before && self.screen.borrow().setup.is_none() {
+                self.emit(Change::Screen);
+            }
+            return;
+        };
+        let wb = Arc::clone(self.workbench());
+        let weak = self.me.borrow().clone();
+        background(
+            &*self.runtime,
+            move || wb.screen_at_blocking(at),
+            move |setup| {
+                if let Some(d) = weak.upgrade()
+                    && d.screen.borrow_mut().finished(ticket, setup)
+                {
+                    d.emit(Change::Screen);
+                }
+            },
+        );
+        self.emit(Change::Screen);
     }
 
     /// The address of the selected item (instruction start or byte).
@@ -2033,5 +2460,211 @@ mod tests {
         let err = got.borrow_mut().take().unwrap().unwrap_err();
         assert!(err.to_string().contains("no-such-dir"), "{err}");
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_c_tab_follows_the_selection_and_its_level() {
+        let rt = TestRuntime::new();
+        let rom =
+            romlens_ffi::Rom::from_bytes(romlens_ffi::make_routines_test_rom(), "r.sfc".into())
+                .unwrap();
+        let d = Document::new(rom, rt.clone());
+        d.start_analysis();
+        rt.pump();
+        // Nothing decompiles while another tab shows.
+        d.select(Some(0x22));
+        assert!(d.decompile().result.is_none());
+        d.set_tab(Tab::C);
+        assert_eq!(
+            d.decompile().result.as_ref().map(|r| r.name.clone()),
+            Some("SUB_008020".into())
+        );
+        let lines = d.decompile().lines_for_instruction(0x22);
+        assert!(!lines.is_empty());
+        let full = d.decompile().result.as_ref().unwrap().text.clone();
+        d.set_decompile_level(romlens_ffi::DecompileLevel::Lift);
+        assert_ne!(d.decompile().result.as_ref().unwrap().text, full);
+        // A rename changes the C: the next analysis or edit decompiles again.
+        d.select(Some(0x20));
+        d.set_label(Some("Loopy".into())).unwrap();
+        assert!(
+            d.decompile()
+                .result
+                .as_ref()
+                .unwrap()
+                .text
+                .contains("Loopy")
+        );
+    }
+
+    #[test]
+    fn the_graph_tab_follows_the_selection_and_its_mode() {
+        let rt = TestRuntime::new();
+        let rom =
+            romlens_ffi::Rom::from_bytes(romlens_ffi::make_routines_test_rom(), "r.sfc".into())
+                .unwrap();
+        let d = Document::new(rom, rt.clone());
+        d.start_analysis();
+        rt.pump();
+        d.select(Some(0x22));
+        assert!(
+            d.graph().blocks.is_none(),
+            "nothing builds while another tab shows"
+        );
+        d.set_tab(Tab::Graph);
+        assert_eq!(
+            d.graph().blocks.as_ref().map(|b| b.name.clone()),
+            Some("SUB_008020".into())
+        );
+        assert!(d.graph().block_containing(0x22).is_some());
+        d.set_graph_mode(GraphMode::Calls);
+        assert!(d.graph().calls.is_some() && d.graph().blocks.is_none());
+        d.request_zoom(Zoom::Fit);
+        assert_eq!(d.zoom_request(), Some((Zoom::Fit, 1)));
+    }
+
+    fn scratch_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("romlens-doc-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn importing_a_dbg_brings_the_source_tab_and_clicking_a_line_selects_its_bytes() {
+        let dir = scratch_dir("source");
+        for f in romlens_ffi::make_ca65_test_program() {
+            std::fs::write(dir.join(&f.name), &f.bytes).unwrap();
+        }
+        let rt = TestRuntime::new();
+        let d = Document::open(&dir.join("fixture.sfc"), rt.clone()).unwrap();
+        d.start_analysis();
+        rt.pump();
+        assert!(!d.source().has_files());
+        let seen = Rc::new(Cell::new(0));
+        d.subscribe({
+            let seen = Rc::clone(&seen);
+            move |c| {
+                if c == Change::Source {
+                    seen.set(seen.get() + 1);
+                }
+            }
+        });
+        d.import(ImportKind::Dbg, dir.join("fixture.dbg"), |r| {
+            r.unwrap();
+        });
+        rt.pump();
+        assert!(d.source().has_files());
+        assert!(seen.get() > 0, "the tab is told to appear");
+        let line = d
+            .source()
+            .by_line
+            .values()
+            .min_by_key(|l| l.line)
+            .cloned()
+            .expect("a line that made bytes");
+        d.select_source_line(line.line);
+        let first = line.ranges[0].start;
+        assert_eq!(d.selected(), Some(first));
+        // The byte's lines name the same line, and its file stays shown.
+        let at = d.source_lines_at_selection();
+        assert!(
+            at.iter()
+                .any(|l| l.line == line.line && l.file == line.file)
+        );
+        d.follow_selection_in_source();
+        assert_eq!(d.source().shown_file().map(|f| f.file), Some(line.file));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn comparing_with_a_rom_file_lists_what_changed_and_follows_this_versions_edits() {
+        let dir = scratch_dir("compare");
+        let roms = romlens_ffi::make_compare_test_roms();
+        std::fs::write(dir.join("old.sfc"), &roms[0]).unwrap();
+        std::fs::write(dir.join("new.sfc"), &roms[1]).unwrap();
+        let rt = TestRuntime::new();
+        let d = Document::open(&dir.join("new.sfc"), rt.clone()).unwrap();
+        d.start_analysis();
+        rt.pump();
+        assert!(!d.compare().is_active());
+        d.compare_with(dir.join("old.sfc"));
+        assert_eq!(d.tab(), Tab::Compare);
+        rt.pump();
+        assert_eq!(d.compare().state, compare::CompareState::Ready);
+        assert_eq!(d.compare().other_name.as_deref(), Some("old"));
+        assert!(!d.compare().routines().is_empty());
+        // A change here compares again, against the same other version.
+        let before = d.compare().compared_generation;
+        d.select(Some(0));
+        d.set_label(Some("Boot".into())).unwrap();
+        rt.pump();
+        assert_ne!(d.compare().compared_generation, before, "compared again");
+        assert_eq!(d.compare().state, compare::CompareState::Ready);
+        d.close_compare();
+        assert!(!d.compare().is_active());
+        assert_eq!(
+            d.tab(),
+            Tab::Disassembly,
+            "the tab closes with the comparison"
+        );
+        assert!(before.is_some());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_file_that_is_not_a_rom_fails_the_comparison_with_a_message() {
+        let dir = scratch_dir("compare-bad");
+        std::fs::write(dir.join("junk.sfc"), b"not a rom").unwrap();
+        let rt = TestRuntime::new();
+        let d = Document::new(
+            romlens_ffi::Rom::from_bytes(romlens_ffi::make_routines_test_rom(), "r.sfc".into())
+                .unwrap(),
+            rt.clone(),
+        );
+        d.start_analysis();
+        rt.pump();
+        d.compare_with(dir.join("junk.sfc"));
+        rt.pump();
+        assert!(matches!(
+            d.compare().state,
+            compare::CompareState::Failed(_)
+        ));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_screen_is_worked_out_only_while_its_section_is_open_and_follows_the_selection() {
+        let rt = TestRuntime::new();
+        let rom =
+            romlens_ffi::Rom::from_bytes(romlens_ffi::make_explain_test_rom(), "e.sfc".into())
+                .unwrap();
+        let d = Document::new(rom, rt.clone());
+        d.start_analysis();
+        rt.pump();
+        let seen = Rc::new(Cell::new(0));
+        d.subscribe({
+            let seen = Rc::clone(&seen);
+            move |c| {
+                if c == Change::Screen {
+                    seen.set(seen.get() + 1);
+                }
+            }
+        });
+        // Past the reset's first few instructions, where setup has happened.
+        d.select(Some(0x10));
+        rt.pump();
+        assert!(
+            d.screen().setup.is_none() && !d.screen().loading,
+            "closed: no work"
+        );
+        d.set_show_screen(true);
+        rt.pump();
+        assert!(!d.screen().loading);
+        assert!(d.screen().setup.is_some(), "the reset is inside a routine");
+        assert!(seen.get() >= 2, "asked, then answered");
+        // Leaving the instruction clears it.
+        d.select(None);
+        assert!(d.screen().setup.is_none());
     }
 }

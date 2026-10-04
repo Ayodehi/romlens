@@ -11,7 +11,10 @@ covered by its unit tests and screenshot checks, not yet verified by hand.
 Still open on Linux in Phases 0 to 2A: the sticky `00` to `0F` column header and
 hover names on header spans (0.4, 0.6), the launch log line (0.12), the
 undo title in the menu (1.12), and the traced-bytes line in the analysis
-status (2.3).
+status (2.3). Phase 3 and 4 rows are built on Linux except the ones that
+need the graphics views (3.12 to 3.14, 4.5 and 4.6: the Screen section is
+there, but its Show Tiles, Tilemap and Palette links wait for them), and the C
+tab's versions and annotation sheets, which arrive with the tutor.
 
 Status: macOS ✅ done, 🧪 built and covered by the app test bundle but not
 yet verified by hand, ⬜ not yet; Windows and Linux start after macOS
@@ -139,13 +142,13 @@ Written from `18-decompiler.md` on 23 September 2026. The macOS rows are built a
 
 | # | Capability | Shell must expose | CLI scenario | macOS | Win | Linux |
 |---|---|---|---|---|---|---|
-| 3.1 | Decompile the routine at the cursor to valid C | A C editor tab (View › C, ⌥⌘8) showing the disassembly and the C side by side; Decompile Routine in the context menu | `romlens decompile <rom> [--project P] <address>` | 🧪 | ⬜ | ⬜ |
-| 3.2 | Keep the two sides in step | Selecting a C line highlights its instructions, and selecting an instruction highlights its C line | `romlens decompile … --json` (the line map) | 🧪 | ⬜ | ⬜ |
-| 3.3 | Show each stage | A level picker in the C tab: lift, clean, full | `romlens decompile … --level lift\|clean\|full` | 🧪 | ⬜ | ⬜ |
-| 3.4 | Names follow the project | Renaming a label or defining a variable updates the C at once; a name in the C navigates to it | `romlens decompile` after `romlens project <P> label …` | 🧪 | ⬜ | ⬜ |
-| 3.5 | Export | Export C… writes the `.c` and `snes.h` | `romlens decompile … > f.c`, `romlens decompile --header snes.h` | 🧪 | ⬜ | ⬜ |
+| 3.1 | Decompile the routine at the cursor to valid C | A C editor tab (View › C, ⌥⌘8) showing the disassembly and the C side by side; Decompile Routine in the context menu | `romlens decompile <rom> [--project P] <address>` | 🧪 | ⬜ | 🧪 |
+| 3.2 | Keep the two sides in step | Selecting a C line highlights its instructions, and selecting an instruction highlights its C line | `romlens decompile … --json` (the line map) | 🧪 | ⬜ | 🧪 |
+| 3.3 | Show each stage | A level picker in the C tab: lift, clean, full | `romlens decompile … --level lift\|clean\|full` | 🧪 | ⬜ | 🧪 |
+| 3.4 | Names follow the project | Renaming a label or defining a variable updates the C at once; a name in the C navigates to it | `romlens decompile` after `romlens project <P> label …` | 🧪 | ⬜ | 🧪 |
+| 3.5 | Export | Export C… writes the `.c` and `snes.h` | `romlens decompile … > f.c`, `romlens decompile --header snes.h` | 🧪 | ⬜ | 🧪 |
 | 3.6 | Measure every routine | (n/a) | `romlens decompile <rom> --all --check` | n/a | ⬜ | ⬜ |
-| 3.7 | The `full` level reads as C | Registers are typed variables (`u8 a`), routines take and return them (`a = SUB_8123(x, &y);`), counted loops are `for (int i = …)`, byte-wise adds one 16-bit add, RAM a caller passes shown at the call | `romlens decompile <rom> [--project P] <address>` | 🧪 | ⬜ | ⬜ |
+| 3.7 | The `full` level reads as C | Registers are typed variables (`u8 a`), routines take and return them (`a = SUB_8123(x, &y);`), counted loops are `for (int i = …)`, byte-wise adds one 16-bit add, RAM a caller passes shown at the call | `romlens decompile <rom> [--project P] <address>` | 🧪 | ⬜ | 🧪 |
 
 ### 3B — graphs
 
@@ -153,10 +156,10 @@ Written from `19-graphs.md` on 24 September 2026.
 
 | # | Capability | Shell must expose | CLI scenario | macOS | Win | Linux |
 |---|---|---|---|---|---|---|
-| 3.8 | The routine at the cursor as a control-flow graph | A Graph editor tab (View › Graph, ⌥⌘9), Blocks mode: the listing's lines in boxes, edges coloured by kind, back edges and loop bodies marked, stubs naming where control goes; zoom and Fit | `romlens graph <rom> [--project P] <address> [--dot\|--json]` | 🧪 | ⬜ | ⬜ |
-| 3.9 | The graph and the listing in step | Clicking a line in a block selects its instruction; selecting an instruction elsewhere highlights its line and scrolls its block into view | (n/a) | 🧪 | ⬜ | ⬜ |
-| 3.10 | What the recording saw | With an execution log, each block's run count and each edge's count; blocks that never ran dimmed | `romlens graph … --json` with a project that has a log | 🧪 | ⬜ | ⬜ |
-| 3.11 | Who calls this, and what it calls | Calls mode: callers on the left, callees on the right, with sites and how they call; double-click re-centres; Back and Forward | `romlens graph … --calls [--dot\|--json]` | 🧪 | ⬜ | ⬜ |
+| 3.8 | The routine at the cursor as a control-flow graph | A Graph editor tab (View › Graph, ⌥⌘9), Blocks mode: the listing's lines in boxes, edges coloured by kind, back edges and loop bodies marked, stubs naming where control goes; zoom and Fit | `romlens graph <rom> [--project P] <address> [--dot\|--json]` | 🧪 | ⬜ | 🧪 |
+| 3.9 | The graph and the listing in step | Clicking a line in a block selects its instruction; selecting an instruction elsewhere highlights its line and scrolls its block into view | (n/a) | 🧪 | ⬜ | 🧪 |
+| 3.10 | What the recording saw | With an execution log, each block's run count and each edge's count; blocks that never ran dimmed | `romlens graph … --json` with a project that has a log | 🧪 | ⬜ | 🧪 |
+| 3.11 | Who calls this, and what it calls | Calls mode: callers on the left, callees on the right, with sites and how they call; double-click re-centres; Back and Forward | `romlens graph … --calls [--dot\|--json]` | 🧪 | ⬜ | 🧪 |
 
 ### 3C — finishing Phase 3
 
@@ -167,10 +170,10 @@ Written from `22-phase3-finish.md` on 25 September 2026.
 | 3.12 | A recorded frame, drawn from the PPU state | A Frame view over the frame stepper; hovering names the layer, tile or sprite that drew the pixel; clicking selects its OAM entry or tilemap cell, tile and palette row | `romlens render frame <rec> <frame> [--at x,y]` | 🧪 | ⬜ | ⬜ |
 | 3.13 | The frame's layers apart | A Layers view: each enabled layer alone, in priority order, with the mode's rules | `romlens render bg …` | 🧪 | ⬜ | ⬜ |
 | 3.14 | From a pixel back to ROM | The inspector's Provenance chain: pixel, OAM or tilemap entry, VRAM word, the DMA, the WRAM buffer and its writer, the ROM bytes; each step a link with its evidence and confidence | `romlens provenance <rec> <frame> x,y [--project P]` | 🧪 | ⬜ | ⬜ |
-| 3.15 | The whole ROM as a map | An Atlas editor tab: banks, then blocks, then items, zoomed continuously; overlays for kind, confidence, entropy, coverage and call arcs; double-click opens the listing | `romlens map <rom> --from <a> --len <n> [--arcs] [--items N]` | 🧪 | 🧪 | ⬜ |
-| 3.16 | Two versions of a ROM compared | File › Compare With…: a Compare tab listing changed, moved, added and removed routines and data, the two listings side by side; carry names over | `romlens diff <a> <b> [--project-a P] [--project-b P] [--routines] [--json]` | 🧪 | 🧪 | ⬜ |
-| 3.17 | Locals and arguments on the stack | `LDA $03,S` in the C as a named argument or local; arguments pushed before a call passed in the call | `romlens decompile <rom> <address>` | 🧪 | ⬜ | ⬜ |
-| 3.18 | A ca65 program with its source | File › Import reads a `.dbg`; a Source tab shows the source, a line selects its bytes and the bytes select their line | `romlens import dbg <project> <dbg>`; `romlens source <rom> --project P [<address>] [--line FILE:LINE]` | 🧪 | 🧪 | ⬜ |
+| 3.15 | The whole ROM as a map | An Atlas editor tab: banks, then blocks, then items, zoomed continuously; overlays for kind, confidence, entropy, coverage and call arcs; double-click opens the listing | `romlens map <rom> --from <a> --len <n> [--arcs] [--items N]` | 🧪 | 🧪 | 🧪 |
+| 3.16 | Two versions of a ROM compared | File › Compare With…: a Compare tab listing changed, moved, added and removed routines and data, the two listings side by side; carry names over | `romlens diff <a> <b> [--project-a P] [--project-b P] [--routines] [--json]` | 🧪 | 🧪 | 🧪 |
+| 3.17 | Locals and arguments on the stack | `LDA $03,S` in the C as a named argument or local; arguments pushed before a call passed in the call | `romlens decompile <rom> <address>` | 🧪 | ⬜ | 🧪 |
+| 3.18 | A ca65 program with its source | File › Import reads a `.dbg`; a Source tab shows the source, a line selects its bytes and the bytes select their line | `romlens import dbg <project> <dbg>`; `romlens source <rom> --project P [<address>] [--line FILE:LINE]` | 🧪 | 🧪 | 🧪 |
 
 ### 4A — explanations
 
@@ -178,10 +181,10 @@ Written from `20-explanations.md` on 24 September 2026.
 
 | # | Capability | Shell must expose | CLI scenario | macOS | Win | Linux |
 |---|---|---|---|---|---|---|
-| 4.1 | A register write explained field by field | The listing's automatic comment reads `NMITIMEN = $81: NMI on, joypad auto-read on`; the inspector's Explanation section lists every field; an unknown value says where it came from | `romlens explain <rom> [--project P] <address>`, `romlens registers <address>` | 🧪 | ⬜ | ⬜ |
-| 4.2 | Common idioms named | A note line above each (`; ▸ Wait for vertical blank`), with a summary in its values and why games do it in the inspector; clicking the note selects its instructions | `romlens explain <rom> --routine <address>` | 🧪 | ⬜ | ⬜ |
-| 4.3 | The C says the same | Explained stores and idioms carry the same text as comments in the C tab; the code is unchanged | `romlens decompile <rom> <address>` | 🧪 | ⬜ | ⬜ |
-| 4.4 | Explanations can be turned off | View › Show Explanations: off, the listing reads as before | (n/a) | 🧪 | ⬜ | ⬜ |
+| 4.1 | A register write explained field by field | The listing's automatic comment reads `NMITIMEN = $81: NMI on, joypad auto-read on`; the inspector's Explanation section lists every field; an unknown value says where it came from | `romlens explain <rom> [--project P] <address>`, `romlens registers <address>` | 🧪 | ⬜ | 🧪 |
+| 4.2 | Common idioms named | A note line above each (`; ▸ Wait for vertical blank`), with a summary in its values and why games do it in the inspector; clicking the note selects its instructions | `romlens explain <rom> --routine <address>` | 🧪 | ⬜ | 🧪 |
+| 4.3 | The C says the same | Explained stores and idioms carry the same text as comments in the C tab; the code is unchanged | `romlens decompile <rom> <address>` | 🧪 | ⬜ | 🧪 |
+| 4.4 | Explanations can be turned off | View › Show Explanations: off, the listing reads as before | (n/a) | 🧪 | ⬜ | 🧪 |
 
 ### 4B — the screen setup
 

@@ -23,7 +23,9 @@ const CSS: &str = "
     padding: 10px;
     background: alpha(@purple_2, 0.1);
 }
+.diff-changed { background: alpha(@orange_3, 0.2); }
 .diff-added   { background: alpha(@green_4, 0.2); }
+.diff-removed { background: alpha(@red_3, 0.2); }
 .romlens-flags-title { font-size: 0.8em; opacity: 0.6; }
 ";
 

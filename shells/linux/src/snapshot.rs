@@ -10,6 +10,10 @@
 //!   `name` or `name::string-parameter` (`focus-on-code`, `address-style::snes`)
 //! - `ROMLENS_FIND`: run Find with this query (hex bytes) and show the results
 //! - `ROMLENS_REFS`: Find References to the selected item
+//! - `ROMLENS_IMPORT_DBG`: import this ca65 `.dbg` first, which brings the Source tab
+//! - `ROMLENS_COMPARE`: compare with this ROM file or project folder first
+//! - `ROMLENS_COMPARE_ITEM`: choose a change in the Compare list: `routine:0`, `data:1`...
+//! - `ROMLENS_SCREEN`: open the inspector's Screen section
 //! - `ROMLENS_MENU`: capture a menu instead of the window: `primary`, or
 //!   the label of the menu button (`File + SNES`)
 
@@ -32,8 +36,21 @@ pub fn maybe_capture(window: &adw::ApplicationWindow, doc: &Rc<Document>) {
         window.set_default_size(w, h);
     }
 
+    // Imports and comparisons take a moment, so they start first.
+    glib::timeout_add_local_once(Duration::from_millis(1000), {
+        let doc = Rc::clone(doc);
+        move || {
+            if let Ok(dbg) = std::env::var("ROMLENS_IMPORT_DBG") {
+                doc.import(crate::model::transfer::ImportKind::Dbg, dbg.into(), |_| {});
+            }
+            if let Ok(other) = std::env::var("ROMLENS_COMPARE") {
+                doc.compare_with(other.into());
+            }
+        }
+    });
+
     // Once the first analysis has had time to land.
-    glib::timeout_add_local_once(Duration::from_millis(1200), {
+    glib::timeout_add_local_once(Duration::from_millis(2000), {
         let (window, doc) = (window.clone(), Rc::clone(doc));
         move || {
             if let Ok(tab) = std::env::var("ROMLENS_TAB") {
@@ -55,6 +72,22 @@ pub fn maybe_capture(window: &adw::ApplicationWindow, doc: &Rc<Document>) {
             {
                 run_action(&window, spec);
             }
+            if let Ok(spec) = std::env::var("ROMLENS_COMPARE_ITEM")
+                && let Some((kind, n)) = spec.split_once(':')
+                && let Ok(n) = n.parse()
+            {
+                use crate::model::compare::Item;
+                doc.select_compare_item(match kind {
+                    "routine" => Some(Item::Routine(n)),
+                    "data" => Some(Item::Data(n)),
+                    "run" => Some(Item::Run(n)),
+                    "move" => Some(Item::Move(n)),
+                    _ => None,
+                });
+            }
+            if std::env::var("ROMLENS_SCREEN").is_ok() {
+                doc.set_show_screen(true);
+            }
             if let Ok(q) = std::env::var("ROMLENS_FIND") {
                 doc.edit_search(|s| s.query = q);
                 doc.run_search();
@@ -72,7 +105,7 @@ pub fn maybe_capture(window: &adw::ApplicationWindow, doc: &Rc<Document>) {
     });
 
     let window = window.clone();
-    glib::timeout_add_local_once(Duration::from_millis(2600), move || {
+    glib::timeout_add_local_once(Duration::from_millis(3400), move || {
         let target: gtk::Widget = std::env::var("ROMLENS_MENU")
             .ok()
             .and_then(|which| find_menu_button(window.upcast_ref(), &which))

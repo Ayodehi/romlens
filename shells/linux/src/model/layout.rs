@@ -27,7 +27,7 @@ impl Tab {
     ];
 
     /// The tabs with a view behind them so far. Each joins as it is built.
-    pub const BUILT: [Tab; 3] = [Tab::Hex, Tab::Disassembly, Tab::Both];
+    pub const BUILT: [Tab; 8] = Tab::ALL;
 
     pub fn id(self) -> &'static str {
         match self {

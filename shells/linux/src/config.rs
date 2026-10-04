@@ -12,6 +12,8 @@ use serde::{Deserialize, Serialize};
 pub struct Settings {
     /// View › Show Explanations, stored inverted so the default is "shown".
     pub hide_explanations: bool,
+    /// How the C tab prints numbers: `auto`, `hex`, `decimal` or `binary`.
+    pub c_numbers: String,
 }
 
 pub fn config_dir() -> PathBuf {
@@ -88,6 +90,7 @@ mod tests {
         let path = dir.join("nested").join("settings.json");
         let s = Settings {
             hide_explanations: true,
+            c_numbers: "hex".into(),
         };
         s.save_to(&path).unwrap();
         assert_eq!(Settings::load_from(&path), s);
