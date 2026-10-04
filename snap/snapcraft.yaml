@@ -1,0 +1,79 @@
+# Romlens as a snap. Not built or run by the authors yet: snapcraft was not
+# available where this was written, so `grade` stays `devel` (the store will
+# not publish it to stable) until someone has run it on both architectures.
+#
+#   snapcraft            (from the repository root; builds natively per arch)
+name: romlens
+title: Romlens
+base: core26
+version: '0.1.0'
+summary: "Read a Super NES ROM: disassembly, C, graphics and sound"
+description: |
+  Romlens is a workbench for studying Super NES ROMs. It disassembles the
+  65816 code, lifts routines to C, draws the graphics and plays the sound with
+  an emulated SPC700 and DSP, and keeps your names and comments in a project
+  you can save.
+
+  An optional tutor answers questions about the ROM you have open. It needs an
+  API key for a provider you choose, or a model served on your own machine.
+
+  Romlens never ships or fetches a ROM. Open one you own.
+license: 0BSD
+website: https://github.com/Ayodehi/romlens
+source-code: https://github.com/Ayodehi/romlens
+issues: https://github.com/Ayodehi/romlens/issues
+contact: https://github.com/Ayodehi/romlens/issues
+icon: shells/linux/data/icons/hicolor/scalable/apps/io.github.ayodehi.Romlens.svg
+grade: devel
+confinement: strict
+
+platforms:
+  amd64:
+  arm64:
+
+apps:
+  romlens:
+    command: usr/bin/romlens
+    extensions: [gnome]
+    common-id: io.github.ayodehi.Romlens
+    desktop: usr/share/applications/io.github.ayodehi.Romlens.desktop
+    plugs:
+      - home                      # a ROM's siblings: .dbg files, other ROMs
+      - network                   # the tutor's providers
+      - network-bind              # the live session listens on the loopback address
+      - audio-playback            # the sound views
+      - password-manager-service  # the tutor's keys, in the keyring
+    environment:
+      # cpal talks ALSA; this routes it to PulseAudio or PipeWire.
+      ALSA_CONFIG_PATH: $SNAP/etc/asound.conf
+
+parts:
+  romlens:
+    plugin: rust
+    source: .
+    rust-path: [shells/linux]
+    build-packages:
+      - pkg-config
+      - libgtk-4-dev
+      - libadwaita-1-dev
+      - libsecret-1-dev
+      - libasound2-dev
+    stage-packages:
+      - libasound2t64
+      - libasound2-plugins
+      - libsecret-1-0
+    override-build: |
+      craftctl default
+      data=shells/linux/data
+      install -Dm644 $data/io.github.ayodehi.Romlens.desktop -t $CRAFT_PART_INSTALL/usr/share/applications
+      install -Dm644 $data/io.github.ayodehi.Romlens.metainfo.xml -t $CRAFT_PART_INSTALL/usr/share/metainfo
+      install -Dm644 $data/io.github.ayodehi.Romlens.xml -t $CRAFT_PART_INSTALL/usr/share/mime/packages
+      install -Dm644 $data/icons/hicolor/scalable/apps/io.github.ayodehi.Romlens.svg -t $CRAFT_PART_INSTALL/usr/share/icons/hicolor/scalable/apps
+      # The icon is inside the snap, not in the host's theme.
+      sed -i 's|^Icon=.*|Icon=${SNAP}/usr/share/icons/hicolor/scalable/apps/io.github.ayodehi.Romlens.svg|' \
+        $CRAFT_PART_INSTALL/usr/share/applications/io.github.ayodehi.Romlens.desktop
+  alsa-config:
+    plugin: dump
+    source: shells/linux/data/snap
+    organize:
+      asound.conf: etc/asound.conf

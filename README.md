@@ -86,7 +86,7 @@ dependencies:
 
 ```
 sudo apt install -y build-essential pkg-config \
-  libgtk-4-dev libadwaita-1-dev libsecret-1-dev libasound2-dev libssl-dev
+  libgtk-4-dev libadwaita-1-dev libsecret-1-dev libasound2-dev
 ```
 
 | Package | Used for |
@@ -95,8 +95,12 @@ sudo apt install -y build-essential pkg-config \
 | `libgtk-4-dev`, `libadwaita-1-dev` | the shell's windows, widgets and drawing (GTK 4.14 or newer, libadwaita 1.6 or newer) |
 | `libsecret-1-dev` | tutor API keys, kept in the Secret Service (GNOME Keyring or KWallet) |
 | `libasound2-dev` | audio playback through ALSA, which PulseAudio and PipeWire both serve |
-| `libssl-dev` | only if a dependency builds against the system OpenSSL |
 | `flatpak-builder` | optional: building the Flatpak package |
+
+Packages for a release (`.deb`, `.rpm`, a tarball and the Flatpak) are built by
+`scripts/package-linux.sh` and `scripts/build-flatpak.sh`; see
+`docs/08-cross-platform.md`. The shell needs libadwaita 1.6, so Ubuntu 24.04
+(1.5) builds only the Flatpak, and the other formats want Ubuntu 26.04 or newer.
 
 Install Rust with rustup (not the distro `rustc`, which lags the 1.88
 minimum and lacks the extra targets):
@@ -106,7 +110,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profil
 ```
 
 On Fedora and RHEL the equivalents are `gcc pkgconf-pkg-config gtk4-devel
-libadwaita-devel libsecret-devel alsa-lib-devel openssl-devel`.
+libadwaita-devel libsecret-devel alsa-lib-devel`.
 
 Layout:
 

@@ -11,13 +11,22 @@ repository.workspace = true
 name = "romlens_ffi"
 crate-type = ["lib", "cdylib", "staticlib"]
 
+# The binding generators pull in uniffi's whole command line (askama, goblin,
+# and more). The Swift shell and the XCFramework script need them; the Linux
+# shell links this crate as a library and turns the feature off.
+[features]
+default = ["bindgen"]
+bindgen = ["uniffi/cli"]
+
 [[bin]]
 name = "uniffi-bindgen"
 path = "src/bin/uniffi-bindgen.rs"
+required-features = ["bindgen"]
 
 [[bin]]
 name = "uniffi-bindgen-swift"
 path = "src/bin/uniffi-bindgen-swift.rs"
+required-features = ["bindgen"]
 
 [dependencies]
 romlens-core = { path = "../romlens-core" }

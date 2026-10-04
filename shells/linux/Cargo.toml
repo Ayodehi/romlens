@@ -1,6 +1,6 @@
 [package]
 name = "romlens-gtk"
-description = "Romlens for Linux: GTK4 and libadwaita over the Rust core"
+description = "Super NES ROM analysis workbench"
 version = "0.1.0"
 edition = "2024"
 license = "0BSD"
@@ -17,7 +17,7 @@ name = "romlens"
 path = "src/main.rs"
 
 [dependencies]
-romlens-ffi = { path = "../../crates/romlens-ffi" }
+romlens-ffi = { path = "../../crates/romlens-ffi", default-features = false }
 adw = { package = "libadwaita", version = "0.8", features = ["v1_6"] }
 gtk = { package = "gtk4", version = "0.10", features = ["v4_14"] }
 pangocairo = "0.21"
@@ -30,3 +30,52 @@ libsecret = "0.8.0"
 [profile.release]
 lto = true
 codegen-units = 1
+
+# .deb: `cargo deb` (see scripts/package-linux.sh). Runtime libraries are found
+# from the binary; the keyring is only recommended, because the tutor works
+# with a model on the person's own machine, which needs no key.
+[package.metadata.deb]
+name = "romlens"
+maintainer = "The Romlens authors <https://github.com/Ayodehi/romlens/issues>"
+copyright = "The Romlens authors"
+license-file = ["../../LICENSE", "0"]
+extended-description-file = "data/deb-description.txt"
+section = "devel"
+priority = "optional"
+depends = "$auto, libadwaita-1-0 (>= 1.6)"
+recommends = "gnome-keyring | kwalletmanager"
+assets = [
+    ["target/release/romlens", "usr/bin/romlens", "755"],
+    ["data/io.github.ayodehi.Romlens.desktop", "usr/share/applications/", "644"],
+    ["data/io.github.ayodehi.Romlens.metainfo.xml", "usr/share/metainfo/", "644"],
+    ["data/io.github.ayodehi.Romlens.xml", "usr/share/mime/packages/", "644"],
+    ["data/icons/hicolor/scalable/apps/io.github.ayodehi.Romlens.svg", "usr/share/icons/hicolor/scalable/apps/", "644"],
+    ["data/icons/hicolor/symbolic/apps/io.github.ayodehi.Romlens-symbolic.svg", "usr/share/icons/hicolor/symbolic/apps/", "644"],
+    ["../../THIRD-PARTY-NOTICES.md", "usr/share/doc/romlens/", "644"],
+]
+
+# .rpm: `cargo generate-rpm`. Package names are Fedora's.
+[package.metadata.generate-rpm]
+name = "romlens"
+summary = "Read a Super NES ROM: disassembly, C, graphics and sound"
+license = "0BSD"
+url = "https://github.com/Ayodehi/romlens"
+assets = [
+    { source = "target/release/romlens", dest = "/usr/bin/romlens", mode = "755" },
+    { source = "data/io.github.ayodehi.Romlens.desktop", dest = "/usr/share/applications/io.github.ayodehi.Romlens.desktop", mode = "644" },
+    { source = "data/io.github.ayodehi.Romlens.metainfo.xml", dest = "/usr/share/metainfo/io.github.ayodehi.Romlens.metainfo.xml", mode = "644" },
+    { source = "data/io.github.ayodehi.Romlens.xml", dest = "/usr/share/mime/packages/io.github.ayodehi.Romlens.xml", mode = "644" },
+    { source = "data/icons/hicolor/scalable/apps/io.github.ayodehi.Romlens.svg", dest = "/usr/share/icons/hicolor/scalable/apps/io.github.ayodehi.Romlens.svg", mode = "644" },
+    { source = "data/icons/hicolor/symbolic/apps/io.github.ayodehi.Romlens-symbolic.svg", dest = "/usr/share/icons/hicolor/symbolic/apps/io.github.ayodehi.Romlens-symbolic.svg", mode = "644" },
+    { source = "../../LICENSE", dest = "/usr/share/licenses/romlens/LICENSE", mode = "644", doc = true },
+    { source = "../../THIRD-PARTY-NOTICES.md", dest = "/usr/share/doc/romlens/THIRD-PARTY-NOTICES.md", mode = "644", doc = true },
+]
+
+[package.metadata.generate-rpm.requires]
+gtk4 = ">= 4.14"
+libadwaita = ">= 1.6"
+libsecret = "*"
+alsa-lib = "*"
+
+[package.metadata.generate-rpm.recommends]
+gnome-keyring = "*"

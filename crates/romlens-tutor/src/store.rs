@@ -66,7 +66,15 @@ pub struct Store {
     dir: PathBuf,
 }
 
+/// Seconds since 1970: `ROMLENS_NOW` if it is set, so a script's runs all
+/// happen at one moment, else the clock.
 pub fn now() -> u64 {
+    if let Some(t) = std::env::var("ROMLENS_NOW")
+        .ok()
+        .and_then(|t| t.parse().ok())
+    {
+        return t;
+    }
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())

@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.ayodehi.Romlens</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>0BSD</project_license>
+  <name>Romlens</name>
+  <summary>Read a Super NES ROM: disassembly, C, graphics and sound</summary>
+  <description>
+    <p>
+      Romlens is a workbench for studying Super NES ROMs. It disassembles the
+      65816 code, lifts routines to C, draws the graphics and plays the sound
+      with an emulated SPC700 and DSP, and keeps your names and comments in a
+      project you can save.
+    </p>
+    <p>
+      An optional tutor answers questions about the ROM you have open. It reads
+      Romlens's own analysis and cites addresses and frames you can click. It
+      needs an API key for a provider you choose, or a model served on your own
+      machine, and sends nothing until you ask a question.
+    </p>
+    <p>
+      Romlens never ships or fetches a ROM. Open one you own.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.ayodehi.Romlens.desktop</launchable>
+  <url type="homepage">https://github.com/Ayodehi/romlens</url>
+  <url type="bugtracker">https://github.com/Ayodehi/romlens/issues</url>
+  <provides>
+    <binary>romlens</binary>
+    <mediatype>application/vnd.nintendo.snes.rom</mediatype>
+    <mediatype>application/x-romlens-recording</mediatype>
+    <mediatype>application/x-romlens-stream</mediatype>
+  </provides>
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+  <requires>
+    <display_length compare="ge">900</display_length>
+  </requires>
+  <developer id="io.github.ayodehi">
+    <name>The Romlens authors</name>
+  </developer>
+  <categories>
+    <category>Development</category>
+    <category>Debugger</category>
+  </categories>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.0" date="2026-10-03">
+      <description>
+        <p>First release of the Linux shell.</p>
+      </description>
+    </release>
+  </releases>
+</component>

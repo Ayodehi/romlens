@@ -171,6 +171,10 @@ impl Resampler {
 struct Shared {
     ring: SampleRing,
     current: Mutex<Option<Arc<dyn Source>>>,
+    /// Held by whoever writes to the ring (the render thread, `play`, a
+    /// test's `fill`), since the ring takes one producer at a time. The
+    /// callback only reads, and never takes it.
+    producer: Mutex<()>,
     /// The output's level, 0 to 1, as `f32` bits.
     volume: AtomicU32,
     stop: AtomicBool,
@@ -179,6 +183,7 @@ struct Shared {
 impl Shared {
     /// Render until the ring holds `LEAD` frames, on the calling thread.
     fn fill(&self) {
+        let _producer = self.producer.lock().unwrap_or_else(|e| e.into_inner());
         let player = self
             .current
             .lock()
@@ -213,6 +218,7 @@ impl ApuAudio {
             shared: Arc::new(Shared {
                 ring: SampleRing::new(CAPACITY),
                 current: Mutex::new(None),
+                producer: Mutex::new(()),
                 volume: AtomicU32::new(1.0f32.to_bits()),
                 stop: AtomicBool::new(false),
             }),
@@ -254,12 +260,21 @@ impl ApuAudio {
     /// Play `player` from now, or stop with `None`.
     pub fn play(&mut self, player: Option<Arc<dyn Source>>) {
         let starting = player.is_some();
-        *self
-            .shared
-            .current
-            .lock()
-            .unwrap_or_else(|e| e.into_inner()) = player;
-        self.shared.ring.clear();
+        {
+            // So the render thread is not partway through writing the old
+            // player's samples when the ring is emptied for the new one.
+            let _producer = self
+                .shared
+                .producer
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            *self
+                .shared
+                .current
+                .lock()
+                .unwrap_or_else(|e| e.into_inner()) = player;
+            self.shared.ring.clear();
+        }
         if !starting {
             if let Some(s) = &self.stream {
                 let _ = s.pause();

@@ -167,6 +167,8 @@ fn main() -> glib::ExitCode {
 fn show_about(app: &adw::Application) {
     let dialog = adw::AboutDialog::builder()
         .application_name("Romlens")
+        // The installed icon (packages, Flatpak); a plain run has none.
+        .application_icon(APP_ID)
         .version(env!("CARGO_PKG_VERSION"))
         .comments(about_credits(&romlens_ffi::api_version()))
         .website("https://github.com/Ayodehi/romlens")

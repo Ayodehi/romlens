@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Romlens
+GenericName=SNES ROM Analysis Workbench
+Comment=Read a Super NES ROM: disassembly, C, graphics, sound, with a tutor
+Exec=romlens %F
+Icon=io.github.ayodehi.Romlens
+Terminal=false
+StartupNotify=true
+StartupWMClass=io.github.ayodehi.Romlens
+Categories=Development;Debugger;
+Keywords=snes;rom;disassembler;decompiler;65816;spc700;sfc;reverse engineering;
+MimeType=application/vnd.nintendo.snes.rom;application/x-romlens-recording;application/x-romlens-stream;
