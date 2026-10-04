@@ -13,7 +13,7 @@ use romlens_ffi::{CTokenInfo, CTokenKind};
 use crate::gfxdraw::caption;
 use crate::model::Document;
 use crate::model::markdown::{self, Segment};
-use crate::model::tutor::{self, Citation};
+use crate::model::tutor;
 use crate::palette;
 
 /// What a click on a link does: the window opens the glossary bubble or shows
@@ -278,17 +278,10 @@ pub fn footer(model: Option<&str>, cost: f64) -> Option<gtk::Label> {
     Some(caption(&parts.join("  ")))
 }
 
-/// Show a citation: the main window follows (the Tutor stays in front when
-/// `raise` is off, as a lesson's step does).
-pub fn follow(doc: &Rc<Document>, uri: &str, raise: bool) -> bool {
-    let Some(c) = tutor::parse_citation(uri) else {
-        return false;
-    };
-    let shown = doc.follow_citation(c);
-    if shown && raise && c != Citation::Register {
-        crate::files::present_window_for(&doc.info.sha256);
-    }
-    shown
+/// Show a citation in the window's tabs: beside the tutor's tab when that
+/// has focus (docs/29). The tutor is in the window, so nothing is raised.
+pub fn follow(doc: &Rc<Document>, uri: &str) -> bool {
+    tutor::parse_citation(uri).is_some_and(|c| doc.follow_citation(c))
 }
 
 #[cfg(test)]

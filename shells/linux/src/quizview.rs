@@ -367,7 +367,7 @@ impl Quiz {
             show.set_halign(gtk::Align::Start);
             let (doc, link) = (Rc::clone(&self.doc), link.clone());
             show.connect_clicked(move |_| {
-                messageview::follow(&doc, &link, true);
+                messageview::follow(&doc, &link);
             });
             b.append(&show);
         }

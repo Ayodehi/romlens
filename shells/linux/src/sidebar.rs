@@ -306,7 +306,7 @@ fn choose(ctx: &Ctx, row: &Row) {
             (Some(_), Some(_)) => {}
             (Some(EditorContent::Graphics(t)), None) => doc.open_graphics(t),
             (Some(EditorContent::Audio(t)), None) => doc.open_audio(t),
-            (Some(EditorContent::Tutor), None) => ctx.run("win.show-tutor"),
+            (Some(EditorContent::Tutor), None) => doc.show_tutor_tab(),
             (Some(content), None) => doc.show(content),
         },
         Row::Label(l) => doc.jump_to_snes(l.address),

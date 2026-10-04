@@ -16,7 +16,7 @@ use adw::prelude::*;
 
 use crate::model::{Change, Document};
 use crate::tabgrid::{self, Grid};
-use crate::{actions, inspector, jumpbar, menu, results, sheets, sidebar, statusbar};
+use crate::{actions, drawer, jumpbar, menu, results, sheets, sidebar, statusbar};
 
 pub fn open_document(app: &adw::Application, doc: Rc<Document>) -> adw::ApplicationWindow {
     let window = adw::ApplicationWindow::builder()
@@ -63,7 +63,7 @@ pub fn open_document(app: &adw::Application, doc: Rc<Document>) -> adw::Applicat
         .min_sidebar_width(280.0)
         .max_sidebar_width(420.0)
         .content(&center)
-        .sidebar(&inspector::build(&doc))
+        .sidebar(&drawer::build(&doc))
         .show_sidebar(true)
         .build();
     let outer = adw::OverlaySplitView::builder()

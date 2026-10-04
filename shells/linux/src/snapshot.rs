@@ -180,7 +180,7 @@ pub fn maybe_capture(window: &adw::ApplicationWindow, doc: &Rc<Document>) {
                 });
             }
             if let Ok(question) = std::env::var("ROMLENS_TUTOR") {
-                scripted_tutor(&window, &doc, &question);
+                scripted_tutor(&doc, &question);
             }
             if let Ok(which) = std::env::var("ROMLENS_MENU")
                 && let Some(button) = find_menu_button(window.upcast_ref(), &which)
@@ -191,23 +191,16 @@ pub fn maybe_capture(window: &adw::ApplicationWindow, doc: &Rc<Document>) {
     });
 
     let window = window.clone();
-    let sha = doc.info.sha256.clone();
     let wait = std::env::var("ROMLENS_WAIT")
         .ok()
         .and_then(|w| w.parse().ok())
         .unwrap_or(3400);
     glib::timeout_add_local_once(Duration::from_millis(wait), move || {
-        let tutor = std::env::var("ROMLENS_TUTOR")
-            .ok()
-            .and_then(|_| crate::tutorview::window_for(&sha));
         let target: gtk::Widget = std::env::var("ROMLENS_MENU")
             .ok()
             .and_then(|which| find_menu_button(window.upcast_ref(), &which))
             .and_then(|b| b.popover())
-            .map_or_else(
-                || tutor.map_or_else(|| window.clone().upcast(), |t| t.upcast()),
-                |p| p.upcast(),
-            );
+            .map_or_else(|| window.clone().upcast(), |p| p.upcast());
         if std::env::var("ROMLENS_DUMP").is_ok() {
             dump(&target, 0);
         }
@@ -274,7 +267,7 @@ fn scripted_cedit(doc: &Rc<Document>) {
 
 /// Opens the Tutor window with a scripted model behind it: the question is
 /// answered with a fixed reply that shows what the transcript can draw.
-fn scripted_tutor(window: &adw::ApplicationWindow, doc: &Rc<Document>, question: &str) {
+fn scripted_tutor(doc: &Rc<Document>, question: &str) {
     use crate::model::tutor_settings::{Endpoint, Kind};
     use romlens_ffi::tutor::session::{tutor_test_server, tutor_test_text_reply};
     let reply = "The **reset vector** at [$00:FFFC](romlens://a/FFFC) points at \
@@ -313,11 +306,9 @@ fn scripted_tutor(window: &adw::ApplicationWindow, doc: &Rc<Document>, question:
         s.endpoint = id.clone();
         s.models.insert(id, "qwen3".into());
     });
-    if let Some(app) = window
-        .application()
-        .and_then(|a| a.downcast::<adw::Application>().ok())
-    {
-        crate::tutorview::open(&app, window, doc);
+    // The drawer's tutor, unless the script opened it as a tab.
+    if doc.focused_content() != Some(crate::model::workspace::EditorContent::Tutor) {
+        doc.show_tutor_in_drawer();
     }
     doc.tutor_submit(question);
     // More lines after the answer is in.

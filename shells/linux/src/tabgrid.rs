@@ -48,12 +48,11 @@ fn content_view(doc: &Rc<Document>, item: &EditorItem) -> gtk::Widget {
         EditorContent::Compare => compareview::build(doc),
         EditorContent::Graphics(t) => graphicsview::build(doc, t),
         EditorContent::Audio(t) => audioview::build(doc, t),
-        EditorContent::Tutor => adw::StatusPage::builder()
-            .icon_name("help-about-symbolic")
-            .title("Tutor")
-            .description("The tutor opens in its own window for now: View › Tutor (Alt+Shift+T).")
-            .build()
-            .upcast(),
+        EditorContent::Tutor => {
+            let tutor = crate::tutorview::build(doc);
+            tutor.set_size_request(320, -1);
+            tutor
+        }
         EditorContent::Header => adw::StatusPage::builder()
             .title("Header and Vectors")
             .description("The inspector shows the header and vectors.")
@@ -66,9 +65,15 @@ fn content_view(doc: &Rc<Document>, item: &EditorItem) -> gtk::Widget {
         view
     };
     // A group may be narrower than a view's controls want: the view scrolls
-    // sideways rather than being cut off or holding the divider back.
+    // sideways rather than being cut off or holding the divider back. The
+    // tutor's text wraps to the tab instead.
+    let sideways = if item.content == EditorContent::Tutor {
+        gtk::PolicyType::Never
+    } else {
+        gtk::PolicyType::Automatic
+    };
     gtk::ScrolledWindow::builder()
-        .hscrollbar_policy(gtk::PolicyType::Automatic)
+        .hscrollbar_policy(sideways)
         .vscrollbar_policy(gtk::PolicyType::Never)
         .child(&view)
         .hexpand(true)
