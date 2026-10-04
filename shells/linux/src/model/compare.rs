@@ -146,8 +146,18 @@ impl CompareModel {
         self.state == CompareState::Ready && self.compared_generation != Some(generation)
     }
 
-    pub fn refreshed(&mut self, info: Option<ComparisonInfo>, generation: u64) {
+    /// A refresh against `generation` has begun; counted as done now, so a
+    /// burst of edits runs it once per generation rather than once per event.
+    pub fn refreshing(&mut self, generation: u64) {
         self.compared_generation = Some(generation);
+    }
+
+    /// A refresh against `generation` came back. One begun since, for a newer
+    /// generation, wins: an older result arriving after it is dropped.
+    pub fn refreshed(&mut self, info: Option<ComparisonInfo>, generation: u64) {
+        if self.compared_generation != Some(generation) {
+            return;
+        }
         if let Some(info) = info {
             self.info = Some(info);
             self.revision += 1;
@@ -268,8 +278,18 @@ mod tests {
         assert!(!m.routines().is_empty());
         assert!(!m.needs_refresh(3));
         assert!(m.needs_refresh(4), "this version's analysis moved on");
-        m.refreshed(None, 4);
+        m.refreshing(4);
         assert!(!m.needs_refresh(4));
+        // A refresh for 5 begins before 4's lands: 4's result is dropped.
+        m.refreshing(5);
+        let (before, routines) = (m.revision, m.routines().len());
+        let mut changed = m.info.clone().unwrap();
+        changed.routines.clear();
+        m.refreshed(Some(changed.clone()), 4);
+        assert_eq!((m.revision, m.routines().len()), (before, routines));
+        m.refreshed(Some(changed), 5);
+        assert_eq!(m.revision, before + 1, "the newest result is taken");
+        assert!(m.routines().is_empty());
         m.close();
         assert!(!m.is_current(ticket), "a run begun before Close is stale");
         assert_eq!(m.state, CompareState::Idle);

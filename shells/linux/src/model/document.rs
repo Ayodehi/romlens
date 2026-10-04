@@ -1778,9 +1778,7 @@ impl Document {
             (c.current_ticket(), other)
         };
         let generation = self.generation.get();
-        // Counted as refreshed now, so a burst of edits runs it once per
-        // generation rather than once per event.
-        self.compare.borrow_mut().refreshed(None, generation);
+        self.compare.borrow_mut().refreshing(generation);
         let this = Arc::clone(self.workbench());
         let weak = self.me.borrow().clone();
         background(
