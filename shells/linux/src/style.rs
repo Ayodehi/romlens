@@ -26,6 +26,17 @@ const CSS: &str = "
 .diff-changed { background: alpha(@orange_3, 0.2); }
 .diff-added   { background: alpha(@green_4, 0.2); }
 .diff-removed { background: alpha(@red_3, 0.2); }
+.voice-strip {
+    border-radius: 8px;
+    padding: 10px;
+    background: alpha(currentColor, 0.05);
+    border: 1px solid alpha(currentColor, 0.2);
+}
+.voice-selected { border: 2px solid @accent_bg_color; }
+.block-selected { background: alpha(@accent_bg_color, 0.3); }
+.block-loop { background: alpha(@green_4, 0.2); }
+.flag-on { background: alpha(@accent_bg_color, 0.25); }
+.flag-off { opacity: 0.45; }
 .romlens-flags-title { font-size: 0.8em; opacity: 0.6; }
 ";
 

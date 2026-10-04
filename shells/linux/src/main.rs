@@ -1,13 +1,17 @@
 //! Romlens for Linux: GTK4 and libadwaita over the Rust core.
 
 mod actions;
+mod aramview;
 mod asm;
 mod asmview;
 mod atlasview;
+mod audio_out;
+mod audioview;
 mod canvas;
 mod compareview;
 mod config;
 mod cview;
+mod echoview;
 mod editor_keys;
 mod files;
 mod frameview;
@@ -31,8 +35,11 @@ mod package;
 mod palette;
 mod paletteview;
 mod pixels;
+mod portsview;
 mod recording;
 mod results;
+mod samplesview;
+mod scopeview;
 mod settings;
 mod sheets;
 mod shortcuts;
@@ -42,7 +49,9 @@ mod stripview;
 mod style;
 mod tilemapview;
 mod tilesview;
+mod timelineview;
 mod transferview;
+mod voicesview;
 mod window;
 
 use adw::prelude::*;
@@ -61,6 +70,8 @@ fn write_fixture(kind: &str, out: &std::path::Path) -> std::io::Result<()> {
         "routines" => std::fs::write(out, romlens_ffi::make_routines_test_rom()),
         "explain" => std::fs::write(out, romlens_ffi::make_explain_test_rom()),
         "graphics" => std::fs::write(out, romlens_ffi::make_graphics_test_rom()),
+        "sound" => std::fs::write(out, romlens_ffi::make_sound_test_rom()),
+        "soundrec" => std::fs::write(out, romlens_ffi::make_sound_test_recording(40)),
         "recording" => std::fs::write(out, romlens_ffi::make_test_recording(40)),
         "compare" => {
             let roms = romlens_ffi::make_compare_test_roms();

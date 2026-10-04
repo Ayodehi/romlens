@@ -229,3 +229,8 @@ same way.
   and fingerprint. The live session listens on the loopback address only, so a
   Flatpak needs no extra permission for it. Live Session is a check item in the
   menu, not a command that changes its own label.
+- **Audio output.** `cpal` over ALSA, which PipeWire and PulseAudio serve, so
+  the Flatpak needs the PulseAudio socket and the snap the `audio-playback`
+  plug. The DSP runs at 32 kHz and is rendered ahead into a lock-free ring on
+  its own thread; the device callback resamples to the device's rate and never
+  allocates, locks or calls into the core.

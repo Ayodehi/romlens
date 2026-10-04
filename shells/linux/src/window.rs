@@ -16,8 +16,8 @@ use gtk::gio;
 use crate::hex::AddressStyle;
 use crate::model::{Change, Document, Tab};
 use crate::{
-    actions, asmview, atlasview, compareview, cview, graphicsview, graphview, headerband, hexview,
-    inspector, lockstep, menu, navigatorview, results, sheets, sourceview,
+    actions, asmview, atlasview, audioview, compareview, cview, graphicsview, graphview,
+    headerband, hexview, inspector, lockstep, menu, navigatorview, results, sheets, sourceview,
 };
 
 /// The macOS toolbar switches the editor tabs to a menu below this width,
@@ -137,6 +137,7 @@ fn build_header(doc: &Rc<Document>) -> (adw::HeaderBar, gtk::Box, gtk::MenuButto
     tabs.append(&tab_menu);
     tabs.set_spacing(8);
     tabs.append(&graphics_menu(doc));
+    tabs.append(&audio_menu(doc));
     header.set_title_widget(Some(&tabs));
 
     let primary = gtk::MenuButton::builder()
@@ -237,6 +238,7 @@ fn editor_stack(doc: &Rc<Document>) -> gtk::Stack {
     stack.add_named(&sourceview::build(doc), Some("source"));
     stack.add_named(&compareview::build(doc), Some("compare"));
     stack.add_named(&graphicsview::build(doc), Some("graphics"));
+    stack.add_named(&audioview::build(doc), Some("audio"));
     stack.add_named(
         &adw::StatusPage::builder()
             .icon_name("system-run-symbolic")
@@ -254,6 +256,8 @@ fn editor_stack(doc: &Rc<Document>) -> gtk::Stack {
             let tab = doc.tab();
             let page = if doc.graphics_tab().is_some() {
                 "graphics"
+            } else if doc.audio_tab().is_some() {
+                "audio"
             } else if tab.needs_disassembly() && !doc.has_disassembly() {
                 "analyzing"
             } else {
@@ -326,6 +330,33 @@ fn graphics_menu(doc: &Rc<Document>) -> gtk::MenuButton {
         move |c| {
             if matches!(c, Change::Layout | Change::Graphics) {
                 button.set_label(doc.graphics_tab().map_or("Graphics", G::title));
+            }
+        }
+    });
+    button
+}
+
+/// The Audio picker, beside the Graphics one and built the same way
+/// (docs/23).
+fn audio_menu(doc: &Rc<Document>) -> gtk::MenuButton {
+    use crate::model::audio::Tab as A;
+    let menu = gio::Menu::new();
+    for tab in A::ALL {
+        menu.append(Some(tab.title()), Some(&format!("win.show-{}", tab.id())));
+    }
+    let button = gtk::MenuButton::builder()
+        .menu_model(&menu)
+        .label("Audio")
+        .tooltip_text(
+            "Voices, Samples or Audio RAM: the sound CPU from a recording, or from the ROM's \
+             upload run by Romlens",
+        )
+        .build();
+    doc.subscribe({
+        let (doc, button) = (Rc::clone(doc), button.clone());
+        move |c| {
+            if matches!(c, Change::Layout | Change::Audio) {
+                button.set_label(doc.audio_tab().map_or("Audio", A::title));
             }
         }
     });

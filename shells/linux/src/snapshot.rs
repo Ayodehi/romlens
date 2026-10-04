@@ -16,6 +16,8 @@
 //! - `ROMLENS_SCREEN`: open the inspector's Screen section
 //! - `ROMLENS_RECORDING`: attach this `.romrec` first, then `ROMLENS_FRAME` (a frame
 //!   number) and `ROMLENS_PIXEL` (`x,y`, kept in the Frame view)
+//! - `ROMLENS_PLAY`: start playing the sound view's source after it opens
+//! - `ROMLENS_SAMPLE`: select a sample (and a block) in the Samples view: `0` or `0:1`
 //! - `ROMLENS_MENU`: capture a menu instead of the window: `primary`, or
 //!   the label of the menu button (`File + SNES`)
 
@@ -113,6 +115,21 @@ pub fn maybe_capture(window: &adw::ApplicationWindow, doc: &Rc<Document>) {
             }
             if std::env::var("ROMLENS_SCREEN").is_ok() {
                 doc.set_show_screen(true);
+            }
+            if let Ok(spec) = std::env::var("ROMLENS_SAMPLE") {
+                let mut parts = spec.split(':');
+                let sample = parts.next().and_then(|p| p.parse().ok());
+                let block = parts.next().and_then(|p| p.parse().ok());
+                doc.edit_audio(|a| {
+                    a.selected_sample = sample;
+                    a.selected_block = block;
+                });
+            }
+            if std::env::var("ROMLENS_PLAY").is_ok() {
+                doc.edit_audio(|a| a.play());
+                // Say whether the sound output could start: a headless
+                // machine has none.
+                eprintln!("audio output: {:?}", doc.audio().output.problem);
             }
             if let Ok(q) = std::env::var("ROMLENS_FIND") {
                 doc.edit_search(|s| s.query = q);

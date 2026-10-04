@@ -11,8 +11,9 @@ covered by its unit tests and screenshot checks, not yet verified by hand.
 Still open on Linux in Phases 0 to 2A: the sticky `00` to `0F` column header and
 hover names on header spans (0.4, 0.6), the launch log line (0.12), the
 undo title in the menu (1.12), and the traced-bytes line in the analysis
-status (2.3). Phase 3 and 4 rows are built on Linux except the C tab's versions and
-annotation sheets, which arrive with the tutor. The live session is covered by a
+status (2.3). Phase 3 to 5 rows are built on Linux except the C tab's versions and
+annotation sheets, which arrive with the tutor. The sound output opens a real
+device and plays, but whether it sounds right is a by-ear check not yet done. The live session is covered by a
 test against a replayed stream, not yet run against Mesen, and Mesen's Linux
 script data folder (`~/.config/Mesen2/LuaScriptData`) is assumed, not checked.
 
@@ -201,17 +202,17 @@ Written from `23-audio.md` on 26 September 2026.
 
 | # | Capability | Shell must expose | CLI scenario | macOS | Win | Linux |
 |---|---|---|---|---|---|---|
-| 5.1 | The sound driver's code | An SPC700 listing of audio RAM with `$F0–$FF` named, DSP writes explained field by field, code told from data | `romlens spc disasm <rec> --frame N [<addr>]` | 🧪 | ⬜ | ⬜ |
-| 5.2 | A BRR sample decoded | Samples: the directory, the waveform with its loop, each block's header and each nibble through its filter | `romlens brr <rom> <offset> [--blocks] [--ascii]` | 🧪 | ⬜ | ⬜ |
-| 5.3 | The DSP's registers explained | The inspector explains any DSP or SPC700 I/O write; `DIR`, `ESA`, `EDL` name the memory they point to | `romlens apu dsp --rec R --frame N` | 🧪 | ⬜ | ⬜ |
-| 5.4 | A recording's voices | Voices: eight strips with sample, note, volume, envelope curve and ENVX, flags | `romlens apu voices --rec R --frame N` | 🧪 | ⬜ | ⬜ |
-| 5.5 | Audio RAM as a map | Audio RAM: directory, samples, echo buffer, driver code and data, each with its ROM origin where known | `romlens apu map --rec R --frame N` | 🧪 | ⬜ | ⬜ |
-| 5.6 | The two CPUs' conversation | Ports: messages both ways with links to the 65816 and SPC700 code; an upload's blocks | `romlens apu ports --rec R --frames A..B` | 🧪 | ⬜ | ⬜ |
-| 5.7 | The upload traced from the ROM | The IPL upload idiom in the 65816 listing; its blocks and entry; uploaded ROM bytes classified | `romlens apu upload <rom> [--project P]` | 🧪 | ⬜ | ⬜ |
-| 5.8 | The notes over time | Timeline: a piano roll per voice; a note leads to its DSP write, SPC700 instruction and port command | `romlens apu timeline --rec R` | 🧪 | ⬜ | ⬜ |
-| 5.9 | Hearing it | Play a sample at a pitch, a recording from a frame, or the ROM's driver with a command; mute and solo voices; scopes. Nothing is exported (`12-content-policy.md` rule 11) | `romlens apu render … --digest` | 🧪 | ⬜ | ⬜ |
-| 5.10 | Echo and effects | Echo: FIR taps and response, delay, feedback, the buffer in audio RAM; noise and pitch modulation | `romlens apu dsp …` | 🧪 | ⬜ | ⬜ |
-| 5.11 | An N-SPC song read | The Timeline's track commands as text | `romlens apu song …` | 🧪 | ⬜ | ⬜ |
+| 5.1 | The sound driver's code | An SPC700 listing of audio RAM with `$F0–$FF` named, DSP writes explained field by field, code told from data | `romlens spc disasm <rec> --frame N [<addr>]` | 🧪 | ⬜ | 🧪 |
+| 5.2 | A BRR sample decoded | Samples: the directory, the waveform with its loop, each block's header and each nibble through its filter | `romlens brr <rom> <offset> [--blocks] [--ascii]` | 🧪 | ⬜ | 🧪 |
+| 5.3 | The DSP's registers explained | The inspector explains any DSP or SPC700 I/O write; `DIR`, `ESA`, `EDL` name the memory they point to | `romlens apu dsp --rec R --frame N` | 🧪 | ⬜ | 🧪 |
+| 5.4 | A recording's voices | Voices: eight strips with sample, note, volume, envelope curve and ENVX, flags | `romlens apu voices --rec R --frame N` | 🧪 | ⬜ | 🧪 |
+| 5.5 | Audio RAM as a map | Audio RAM: directory, samples, echo buffer, driver code and data, each with its ROM origin where known | `romlens apu map --rec R --frame N` | 🧪 | ⬜ | 🧪 |
+| 5.6 | The two CPUs' conversation | Ports: messages both ways with links to the 65816 and SPC700 code; an upload's blocks | `romlens apu ports --rec R --frames A..B` | 🧪 | ⬜ | 🧪 |
+| 5.7 | The upload traced from the ROM | The IPL upload idiom in the 65816 listing; its blocks and entry; uploaded ROM bytes classified | `romlens apu upload <rom> [--project P]` | 🧪 | ⬜ | 🧪 |
+| 5.8 | The notes over time | Timeline: a piano roll per voice; a note leads to its DSP write, SPC700 instruction and port command | `romlens apu timeline --rec R` | 🧪 | ⬜ | 🧪 |
+| 5.9 | Hearing it | Play a sample at a pitch, a recording from a frame, or the ROM's driver with a command; mute and solo voices; scopes. Nothing is exported (`12-content-policy.md` rule 11) | `romlens apu render … --digest` | 🧪 | ⬜ | 🧪 |
+| 5.10 | Echo and effects | Echo: FIR taps and response, delay, feedback, the buffer in audio RAM; noise and pitch modulation | `romlens apu dsp …` | 🧪 | ⬜ | 🧪 |
+| 5.11 | An N-SPC song read | The Timeline's track commands as text | `romlens apu song …` | 🧪 | ⬜ | 🧪 |
 
 ### 6A — the tutor
 

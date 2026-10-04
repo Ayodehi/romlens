@@ -198,8 +198,8 @@ fn source_bar(doc: &Rc<Document>) -> gtk::Widget {
 }
 
 /// The frame: previous and next, a scrubber and the number.
-struct FrameStepper {
-    widget: gtk::Box,
+pub struct FrameStepper {
+    pub widget: gtk::Box,
     previous: gtk::Button,
     next: gtk::Button,
     scrub: gtk::Scale,
@@ -209,7 +209,7 @@ struct FrameStepper {
 }
 
 impl FrameStepper {
-    fn build(doc: &Rc<Document>) -> Rc<Self> {
+    pub fn build(doc: &Rc<Document>) -> Rc<Self> {
         let previous = gtk::Button::from_icon_name("go-previous-symbolic");
         previous.set_tooltip_text(Some("Previous frame"));
         let next = gtk::Button::from_icon_name("go-next-symbolic");
@@ -270,7 +270,7 @@ impl FrameStepper {
         this
     }
 
-    fn update(&self, doc: &Rc<Document>) {
+    pub fn update(&self, doc: &Rc<Document>) {
         let g = doc.graphics();
         let (first, count, frame) = (g.first_frame(), g.frame_count(), g.frame());
         self.syncing.set(true);
