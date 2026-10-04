@@ -547,6 +547,14 @@ impl AudioModel {
         self.output.play(Some(p));
     }
 
+    /// The project is closing: stop playing and let the output go, with its
+    /// render thread.
+    pub fn shut_down(&mut self) {
+        self.playing = None;
+        self.live_player = None;
+        self.output.shut_down();
+    }
+
     pub fn pause(&mut self) {
         self.output.play(None);
         self.playing = None;
@@ -1239,6 +1247,8 @@ mod tests {
         assert!(m.played_seconds() >= 0.0);
         m.toggle_play();
         assert!(!m.is_playing() && m.playing().is_none());
+        // The output's callback honours the stop: nothing more is heard.
+        assert_eq!(m.output.ring().pop(), None);
         assert_eq!(m.output.ring().available(), 0);
     }
 

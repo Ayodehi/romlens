@@ -194,6 +194,13 @@ impl Session {
         }
     }
 
+    /// The project is closing: a re-analysis waiting on its timer never
+    /// starts, and a run under way is cancelled.
+    pub fn close(&self) {
+        self.debounce.set(self.debounce.get() + 1);
+        self.cancel_analysis();
+    }
+
     pub fn cancel_analysis(&self) {
         self.state.borrow_mut().rerun_requested = false;
         self.workbench.cancel_analysis();
