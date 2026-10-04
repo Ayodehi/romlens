@@ -16,8 +16,8 @@ use gtk::gio;
 use crate::hex::AddressStyle;
 use crate::model::{Change, Document, Tab};
 use crate::{
-    actions, asmview, headerband, hexview, inspector, lockstep, menu, navigatorview, results,
-    sheets,
+    actions, asmview, atlasview, compareview, cview, graphview, headerband, hexview, inspector,
+    lockstep, menu, navigatorview, results, sheets, sourceview,
 };
 
 /// The macOS toolbar switches the editor tabs to a menu below this width,
@@ -48,6 +48,9 @@ pub fn open_document(app: &adw::Application, doc: Rc<Document>) -> adw::Applicat
     // The switch View › Show Explanations remembered from the last window.
     let saved = crate::config::Settings::load();
     doc.set_explanations(!saved.hide_explanations);
+    if let Some(style) = crate::model::decompile::number_style_named(&saved.c_numbers) {
+        doc.set_c_numbers(style);
+    }
 
     let (header, tab_group, tab_menu) = build_header(&doc);
     let editor = editor_stack(&doc);
@@ -126,7 +129,7 @@ fn build_header(doc: &Rc<Document>) -> (adw::HeaderBar, gtk::Box, gtk::MenuButto
     header.pack_start(&title);
     titles(&title, doc);
 
-    let tab_group = tab_buttons();
+    let tab_group = tab_buttons(doc);
     let tab_menu = tab_menu_button(doc);
     tab_menu.set_visible(false);
     let tabs = gtk::Box::new(gtk::Orientation::Horizontal, 0);
@@ -226,6 +229,11 @@ fn editor_stack(doc: &Rc<Document>) -> gtk::Stack {
     stack.add_named(&hexview::build(doc).widget, Some("hex"));
     stack.add_named(&asmview::build(doc).widget, Some("disassembly"));
     stack.add_named(&lockstep::build(doc), Some("both"));
+    stack.add_named(&cview::build(doc), Some("c"));
+    stack.add_named(&graphview::build(doc), Some("graph"));
+    stack.add_named(&atlasview::build(doc), Some("atlas"));
+    stack.add_named(&sourceview::build(doc), Some("source"));
+    stack.add_named(&compareview::build(doc), Some("compare"));
     stack.add_named(
         &adw::StatusPage::builder()
             .icon_name("system-run-symbolic")
@@ -259,33 +267,55 @@ fn editor_stack(doc: &Rc<Document>) -> gtk::Stack {
 }
 
 /// The editor tabs as one linked group, the GNOME counterpart of the macOS
-/// segmented control.
-fn tab_buttons() -> gtk::Box {
+/// segmented control. Source and Compare appear only when there is something
+/// to show.
+fn tab_buttons(doc: &Rc<Document>) -> gtk::Box {
     let group = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     group.add_css_class("linked");
+    let mut buttons = Vec::new();
     for tab in Tab::BUILT {
         let button = gtk::ToggleButton::builder().label(tab.title()).build();
         button.set_action_name(Some("win.show-tab"));
         button.set_action_target_value(Some(&tab.id().to_variant()));
         button.set_tooltip_text(Some(&tab_tooltip()));
+        button.set_visible(doc.tab_available(tab));
         group.append(&button);
+        buttons.push((tab, button));
     }
+    doc.subscribe({
+        let doc = Rc::clone(doc);
+        move |c| {
+            if matches!(c, Change::Source | Change::Compare | Change::Layout) {
+                for (tab, button) in &buttons {
+                    button.set_visible(doc.tab_available(*tab));
+                }
+            }
+        }
+    });
     group
 }
 
 fn tab_tooltip() -> String {
-    "Hex (Alt+1), Disassembly (Alt+2) or Both (Alt+3)".to_owned()
+    "Hex (Alt+1), Disassembly (Alt+2), Both (Alt+3), C (Alt+8), Graph (Alt+9) or Atlas (Alt+Shift+A)"
+        .to_owned()
 }
 
 /// The same choice as a menu, for a window too narrow for the buttons.
 fn tab_menu_button(doc: &Rc<Document>) -> gtk::MenuButton {
     let menu = gio::Menu::new();
-    for tab in Tab::BUILT {
-        menu.append(
-            Some(tab.title()),
-            Some(&format!("win.show-tab::{}", tab.id())),
-        );
-    }
+    let fill = {
+        let (menu, doc) = (menu.clone(), Rc::clone(doc));
+        move || {
+            menu.remove_all();
+            for tab in Tab::BUILT.into_iter().filter(|t| doc.tab_available(*t)) {
+                menu.append(
+                    Some(tab.title()),
+                    Some(&format!("win.show-tab::{}", tab.id())),
+                );
+            }
+        }
+    };
+    fill();
     let button = gtk::MenuButton::builder()
         .menu_model(&menu)
         .label(doc.tab().title())
@@ -294,6 +324,9 @@ fn tab_menu_button(doc: &Rc<Document>) -> gtk::MenuButton {
     doc.subscribe({
         let (doc, button) = (Rc::clone(doc), button.clone());
         move |c| {
+            if matches!(c, Change::Source | Change::Compare) {
+                fill();
+            }
             if c == Change::Layout {
                 button.set_label(doc.tab().title());
             }

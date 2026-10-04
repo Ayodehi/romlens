@@ -219,4 +219,7 @@ same way.
 - **Minimum versions.** GTK 4.14 and libadwaita 1.6 (the accent colour). Ubuntu
   24.04 LTS ships libadwaita 1.5, so a `.deb` for it needs a fixed accent
   colour; the Flatpak is unaffected.
-
+- **Compare.** Compare With… takes a ROM file; Compare With Project… takes a
+  `.romlens` folder, because a file chooser cannot offer both. The Source and
+  Compare tabs appear only when there are imported sources or a comparison, and
+  View › Source and Compare are greyed out otherwise, as on macOS.

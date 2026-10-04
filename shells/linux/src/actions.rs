@@ -40,6 +40,11 @@ fn always(_: &Document) -> bool {
     true
 }
 
+/// Zoom acts on the graph and on the atlas.
+fn zooms(d: &Document) -> bool {
+    matches!(d.tab(), Tab::Graph | Tab::Atlas)
+}
+
 fn never(_: &Document) -> bool {
     false
 }
@@ -262,13 +267,37 @@ const ENTRIES: &[Entry] = &[
         enabled: |d| d.session.analysis().is_running(),
         run: |d, _| d.session.cancel_analysis(),
     },
-    pending!("export-c"),
+    Entry {
+        name: "export-c",
+        enabled: |d| d.decompile().result.is_some(),
+        run: |d, w| crate::cview::export(w, d),
+    },
     // Analysis views and tools that arrive with their tabs.
-    pending!("decompile-routine"),
-    pending!("show-graph"),
-    pending!("zoom-in"),
-    pending!("zoom-out"),
-    pending!("zoom-fit"),
+    Entry {
+        name: "decompile-routine",
+        enabled: has_selection,
+        run: |d, _| d.set_tab(Tab::C),
+    },
+    Entry {
+        name: "show-graph",
+        enabled: has_selection,
+        run: |d, _| d.set_tab(Tab::Graph),
+    },
+    Entry {
+        name: "zoom-in",
+        enabled: zooms,
+        run: |d, _| d.request_zoom(crate::model::Zoom::In),
+    },
+    Entry {
+        name: "zoom-out",
+        enabled: zooms,
+        run: |d, _| d.request_zoom(crate::model::Zoom::Out),
+    },
+    Entry {
+        name: "zoom-fit",
+        enabled: zooms,
+        run: |d, _| d.request_zoom(crate::model::Zoom::Fit),
+    },
     // Graphics, audio and the tutor
     pending!("show-frame"),
     pending!("show-layers"),
@@ -310,7 +339,31 @@ const ENTRIES: &[Entry] = &[
     pending!("export-frame-region"),
     pending!("close-recording"),
     pending!("live-session"),
-    pending!("compare-with"),
+    Entry {
+        name: "compare-with",
+        enabled: always,
+        run: |d, w| crate::files::choose_compare(w, d, false),
+    },
+    Entry {
+        name: "compare-with-project",
+        enabled: always,
+        run: |d, w| crate::files::choose_compare(w, d, true),
+    },
+    Entry {
+        name: "close-compare",
+        enabled: |d| d.compare().is_active(),
+        run: |d, _| d.close_compare(),
+    },
+    Entry {
+        name: "show-source",
+        enabled: |d| d.source().has_files(),
+        run: |d, _| d.set_tab(Tab::Source),
+    },
+    Entry {
+        name: "show-compare",
+        enabled: |d| d.compare().is_active(),
+        run: |d, _| d.set_tab(Tab::Compare),
+    },
     import!("import-trace", Trace),
     import!("import-symbols", Symbols),
     import!("import-dbg", Dbg),
@@ -425,6 +478,11 @@ pub const ACCELS: &[(&str, &[&str])] = &[
     ("win.address-style::file", &["<Control>3"]),
     // Analysis
     ("win.cancel-analysis", &["<Control>period"]),
+    // In the C pane (handled by the pane, not a window action)
+    ("local.c-fold", &["<Alt><Shift>Left"]),
+    ("local.c-unfold", &["<Alt><Shift>Right"]),
+    ("local.c-fold-all", &["<Control><Alt><Shift>Left"]),
+    ("local.c-unfold-all", &["<Control><Alt><Shift>Right"]),
 ];
 
 #[cfg(test)]
@@ -443,6 +501,7 @@ pub fn knows(action: &str) -> bool {
         }
         "app" => APP_ACTIONS.contains(&bare),
         "window" => bare == "close",
+        "local" => bare.starts_with("c-"),
         _ => false,
     }
 }
@@ -531,6 +590,15 @@ pub const SHORTCUT_GROUPS: &[(&str, &[(&str, &str)])] = &[
         ],
     ),
     (
+        "C pane",
+        &[
+            ("Fold", "local.c-fold"),
+            ("Unfold", "local.c-unfold"),
+            ("Fold All", "local.c-fold-all"),
+            ("Unfold All", "local.c-unfold-all"),
+        ],
+    ),
+    (
         "General",
         &[
             ("Cancel Analysis", "win.cancel-analysis"),
@@ -598,6 +666,7 @@ pub fn install(window: &adw::ApplicationWindow, doc: &Rc<Document>) {
                 .and_then(|p| p.get::<String>())
                 .and_then(|id| Tab::from_id(&id))
                 && Tab::BUILT.contains(&t)
+                && doc.tab_available(t)
             {
                 doc.set_tab(t);
             }
@@ -788,7 +857,9 @@ mod tests {
                 assert!(action_exists(bare), "no action {bare}");
             } else {
                 assert!(
-                    action.starts_with("app.") || action.starts_with("window."),
+                    action.starts_with("app.")
+                        || action.starts_with("window.")
+                        || action.starts_with("local."),
                     "{action}"
                 );
             }

@@ -3,13 +3,16 @@
 //! selection or the analysis changes: what it shows is derived from the core,
 //! and a section's own edits go back through the document.
 //!
-//! Not here yet: the Screen section (L2) and Play This Command (L4).
+//! Not here yet: Play This Command (L4) and the Screen section's links into
+//! the graphics views (L3).
 
 mod explain;
 mod header;
+mod screen;
 mod sections;
 mod ui;
 
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use gtk::prelude::*;
@@ -29,22 +32,30 @@ pub fn build(doc: &Rc<Document>) -> gtk::Widget {
 
     // Sections edit through the document, which re-reads and reports a Rows
     // change; rebuilding then shows the new value in place.
-    rebuild(&content, doc);
+    // The Screen section's result arrives later and updates in place, so the
+    // inspector does not jump back to the top.
+    let screen_body = Rc::new(RefCell::new(None));
+    rebuild(&content, doc, &screen_body);
     doc.subscribe({
         let (content, doc) = (content.clone(), Rc::clone(doc));
-        move |c| {
-            if matches!(c, Change::Selection | Change::Rows) {
-                rebuild(&content, &doc);
+        move |c| match c {
+            Change::Selection | Change::Rows => rebuild(&content, &doc, &screen_body),
+            Change::Screen => {
+                if let Some(section) = screen_body.borrow().as_ref() {
+                    section.fill(&doc);
+                }
             }
+            _ => {}
         }
     });
     scroll.upcast()
 }
 
-fn rebuild(content: &gtk::Box, doc: &Rc<Document>) {
+fn rebuild(content: &gtk::Box, doc: &Rc<Document>, screen_body: &RefCell<Option<screen::Section>>) {
     while let Some(child) = content.first_child() {
         content.remove(&child);
     }
+    *screen_body.borrow_mut() = None;
     if doc.selected().is_none() {
         content.append(&header::build(doc));
         return;
@@ -60,6 +71,11 @@ fn rebuild(content: &gtk::Box, doc: &Rc<Document>) {
             x,
             d.instruction.as_ref().map(|i| i.file_offset),
         ));
+    }
+    if d.instruction.is_some() {
+        let section = screen::section(doc);
+        content.append(&section.widget());
+        *screen_body.borrow_mut() = Some(section);
     }
     content.append(&sections::region(doc, &d));
     if let Some(p) = &d.preview {

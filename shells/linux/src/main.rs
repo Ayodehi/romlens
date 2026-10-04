@@ -3,11 +3,15 @@
 mod actions;
 mod asm;
 mod asmview;
+mod atlasview;
 mod canvas;
+mod compareview;
 mod config;
+mod cview;
 mod editor_keys;
 mod files;
 mod glib_runtime;
+mod graphview;
 mod headerband;
 mod hex;
 mod hexview;
@@ -26,6 +30,7 @@ mod settings;
 mod sheets;
 mod shortcuts;
 mod snapshot;
+mod sourceview;
 mod stripview;
 mod style;
 mod transferview;
@@ -37,9 +42,28 @@ use gtk::{gio, glib};
 const APP_ID: &str = "io.github.ayodehi.Romlens";
 
 fn write_fixture(kind: &str, out: &std::path::Path) -> std::io::Result<()> {
+    let into = |files: Vec<(String, Vec<u8>)>| -> std::io::Result<()> {
+        std::fs::create_dir_all(out)?;
+        files
+            .into_iter()
+            .try_for_each(|(name, bytes)| std::fs::write(out.join(name), bytes))
+    };
     match kind {
         "routines" => std::fs::write(out, romlens_ffi::make_routines_test_rom()),
         "explain" => std::fs::write(out, romlens_ffi::make_explain_test_rom()),
+        "compare" => {
+            let roms = romlens_ffi::make_compare_test_roms();
+            into(vec![
+                ("old.sfc".into(), roms[0].clone()),
+                ("new.sfc".into(), roms[1].clone()),
+            ])
+        }
+        "ca65" => into(
+            romlens_ffi::make_ca65_test_program()
+                .into_iter()
+                .map(|f| (f.name, f.bytes))
+                .collect(),
+        ),
         other => Err(std::io::Error::other(format!("unknown fixture {other}"))),
     }
 }
@@ -47,7 +71,8 @@ fn write_fixture(kind: &str, out: &std::path::Path) -> std::io::Result<()> {
 fn main() -> glib::ExitCode {
     // Development aid: `romlens --write-fixture <kind> <out>` writes one of the
     // core's test programs: `routines` (a ROM with loops and calls to
-    // decompile) or `explain` (a reset that sets the screen up).
+    // decompile), `explain` (a reset that sets the screen up), `compare` (`<out>` is a folder getting old.sfc and new.sfc)
+    // or `ca65` (a folder getting a ROM, its .dbg and the sources it names).
     let args: Vec<String> = std::env::args().collect();
     if let [_, flag, kind, out] = args.as_slice()
         && flag == "--write-fixture"

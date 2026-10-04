@@ -44,3 +44,11 @@ pub enum Sheet {
     DataType,
     Variable,
 }
+
+/// View › Zoom In, Zoom Out and Zoom to Fit, for the graph or the atlas.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Zoom {
+    In,
+    Out,
+    Fit,
+}

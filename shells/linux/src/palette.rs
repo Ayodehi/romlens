@@ -139,3 +139,23 @@ pub fn strip_color(code: u8, accent: &RGBA, fg: &RGBA) -> RGBA {
         _ => rgb(0x865e3c),
     }
 }
+
+use romlens_ffi::CTokenKind;
+
+/// Token colours for the C, in the disassembly's palette where the two name
+/// the same thing.
+pub fn c_token_color(kind: CTokenKind, dark: bool, fg: &RGBA, accent: &RGBA) -> RGBA {
+    let tone = |light: u32, dk: u32| rgb(if dark { dk } else { light });
+    match kind {
+        CTokenKind::Keyword => tone(0x813d9c, 0xdc8add),
+        CTokenKind::Type => tone(0x4a4ac4, 0x9ea0ff),
+        CTokenKind::Number => tone(0x1a7f8e, 0x7fd6e0),
+        CTokenKind::Comment => tone(0x1c7a4c, 0x8ff0a4),
+        CTokenKind::Function | CTokenKind::Label => *accent,
+        CTokenKind::Variable => tone(0xc64600, 0xffbe6f),
+        CTokenKind::Register => tone(0xc2457f, 0xf2a1c8),
+        CTokenKind::Helper => RGBA::new(fg.red(), fg.green(), fg.blue(), 0.6),
+        CTokenKind::Local => *fg,
+        CTokenKind::GotoLabel => tone(0x865e3c, 0xd9a36b),
+    }
+}

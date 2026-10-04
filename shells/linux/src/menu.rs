@@ -46,6 +46,8 @@ pub fn primary_menu() -> gio::Menu {
             ("Close Recording", "win.close-recording"),
             ("Start Live Session", "win.live-session"),
             ("Compare With…", "win.compare-with"),
+            ("Compare With Project…", "win.compare-with-project"),
+            ("Close Comparison", "win.close-compare"),
         ]),
     );
     let sections = gio::Menu::new();
@@ -136,14 +138,21 @@ fn edit_items() -> gio::Menu {
     m
 }
 
+/// The action that shows `tab`. Source and Compare have their own, so the
+/// menu can grey them out while there is nothing to show.
+pub fn tab_action(tab: Tab) -> String {
+    match tab {
+        Tab::Source => "win.show-source".to_owned(),
+        Tab::Compare => "win.show-compare".to_owned(),
+        _ => format!("win.show-tab::{}", tab.id()),
+    }
+}
+
 /// The tabs, then the graphics and sound views, then panes and zoom.
 fn view_items() -> Vec<gio::Menu> {
     let tabs = gio::Menu::new();
     for tab in Tab::BUILT {
-        tabs.append(
-            Some(tab.title()),
-            Some(&format!("win.show-tab::{}", tab.id())),
-        );
+        tabs.append(Some(tab.title()), Some(&tab_action(tab)));
     }
     let graphics = section(&[
         ("Frame", "win.show-frame"),
