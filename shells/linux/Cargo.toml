@@ -1,6 +1,6 @@
 [package]
 name = "romlens-gtk"
-description = "Romlens for Linux: GTK4 and libadwaita over the Rust core"
+description = "Super NES ROM analysis workbench"
 version = "0.1.0"
 edition = "2024"
 license = "0BSD"
@@ -39,7 +39,6 @@ name = "romlens"
 maintainer = "The Romlens authors <https://github.com/Ayodehi/romlens/issues>"
 copyright = "The Romlens authors"
 license-file = ["../../LICENSE", "0"]
-synopsis = "Super NES ROM analysis workbench"
 extended-description-file = "data/deb-description.txt"
 section = "devel"
 priority = "optional"
