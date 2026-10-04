@@ -1,0 +1,75 @@
+name: Release
+
+# A tag starts it; the result is a DRAFT release that a person reads and
+# publishes. Nothing is published to a store or a repository from here.
+on:
+  push:
+    tags: ['v*']
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: write
+
+jobs:
+  # In an Ubuntu 26.04 container: the shell needs libadwaita 1.6, which the
+  # runner images (24.04) lack. Built natively on each architecture.
+  packages:
+    name: Packages (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    container: ubuntu:26.04
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+    steps:
+      - run: >
+          apt-get update && apt-get install -y
+          build-essential pkg-config git curl ca-certificates
+          libgtk-4-dev libadwaita-1-dev libsecret-1-dev libasound2-dev
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo install cargo-deb cargo-generate-rpm --locked
+      - run: scripts/package-linux.sh deb rpm tarball
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages-${{ matrix.os }}
+          path: |
+            dist/*.deb
+            dist/*.rpm
+            dist/*.tar.gz
+
+  flatpak:
+    name: Flatpak (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y flatpak flatpak-builder
+      - run: flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+      - run: scripts/build-flatpak.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flatpak-${{ matrix.os }}
+          path: dist/*.flatpak
+
+  draft:
+    needs: [packages, flatpak]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - run: cd dist && sha256sum -- *.deb *.rpm *.tar.gz *.flatpak > SHA256SUMS
+      - run: >
+          gh release create "$GITHUB_REF_NAME" dist/*
+          --repo "$GITHUB_REPOSITORY" --draft --verify-tag
+          --title "Romlens $GITHUB_REF_NAME"
+          --notes "Draft: check the packages and SHA256SUMS, then publish."
+        env:
+          GH_TOKEN: ${{ github.token }}

@@ -245,3 +245,39 @@ same way.
   colours, tables as grids. The Settings window carries the macOS Settings pages
   (General, Providers, Tutor, Images, Privacy) as an `AdwPreferencesDialog`.
   Lessons, the map, progress and the quiz are dialogs over the Tutor window.
+- **Packaging.** The shell's data lives in `shells/linux/data`: the desktop file,
+  AppStream metainfo, a shared-mime-info file for `.romrec`, `.rlstream` and
+  `.spclog` (the ROM type is shared-mime-info's own; a `.romlens` project is a
+  folder, which a mime type cannot describe) and the icons. Every format is
+  built from those files and the one release binary, natively on each
+  architecture:
+  - `.deb` and `.rpm`: `cargo deb` and `cargo generate-rpm`, driven by
+    `scripts/package-linux.sh`, which also writes a tarball with an
+    `install.sh` and `SHA256SUMS`. The `.deb` takes its library dependencies
+    from the binary, so it needs the libraries and the glibc of the system it
+    was built on: the CI and release builds run in an Ubuntu 26.04 container
+    (libadwaita 1.9), which is also what the runner images (24.04, libadwaita
+    1.5) cannot build, because the shell needs 1.6. A package for an older
+    distribution is the Flatpak.
+  - Flatpak: `shells/linux/flatpak/io.github.ayodehi.Romlens.yaml` on the GNOME
+    50 runtime with the Rust SDK extension. `scripts/cargo-sources.py` lists
+    every crate in `Cargo.lock`, so the build is offline and checked against
+    the lockfile; `scripts/build-flatpak.sh` makes `dist/romlens-<arch>.flatpak`.
+    Permissions: Wayland and X11, the GPU, PulseAudio (cpal reaches PipeWire
+    through it), the network (the tutor's providers, and the live session's
+    loopback listener) and `org.freedesktop.secrets`. Files come through the
+    portal, so a ROM chosen there is the only file the sandbox sees: a sibling
+    `.dbg` or ROM is asked for. Flathub takes the same manifest with a `git`
+    source at a release tag in place of the `dir` source.
+  - Snap: `snap/snapcraft.yaml` on the `gnome` extension, with the `home`,
+    `network`, `network-bind`, `audio-playback` and `password-manager-service`
+    plugs, and ALSA routed to PulseAudio. It has not been built by the
+    authors (no snapcraft where it was written), so its `grade` is `devel`.
+  - `.github/workflows/release.yml` builds all of it for a `v*` tag and
+    leaves a draft GitHub release for a person to read and publish. An apt
+    repository needs a signing key and somewhere to host it, which are not
+    decided; until then the `.deb` is a release download.
+  - The shell links the core's `romlens-ffi` with the `bindgen` feature off,
+    so it does not build UniFFI's binding generators (askama, goblin and
+    their tree), which only the Swift shell needs. OpenSSL is not needed: TLS
+    is rustls.

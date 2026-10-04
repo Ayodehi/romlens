@@ -1,0 +1,9 @@
+Romlens is a workbench for studying Super NES ROMs. It disassembles the
+65816 code, lifts routines to C, draws the graphics and plays the sound
+with an emulated SPC700 and DSP, and keeps your names and comments in a
+project you can save.
+.
+An optional tutor answers questions about the ROM you have open. It needs an
+API key for a provider you choose, or a model served on your own machine.
+.
+Romlens never ships or fetches a ROM. Open one you own.

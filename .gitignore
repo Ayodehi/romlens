@@ -78,3 +78,8 @@ crates/romlens-core/tests/ground_truth/
 
 # A Mac's own signing identity for the macOS shell (see Signing.xcconfig).
 shells/macos/Local.xcconfig
+dist/
+shells/linux/flatpak/cargo-sources.json
+shells/linux/flatpak/.flatpak-builder/
+shells/linux/flatpak/build-dir/
+shells/linux/flatpak/repo/
