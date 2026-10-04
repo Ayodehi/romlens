@@ -35,10 +35,25 @@ impl Source for ApuPlayer {
 /// the producer renders on a background thread, the audio thread reads. A
 /// frame is its left and right samples packed in one atomic word, so a reader
 /// never sees half of one.
+///
+/// Only the consumer moves `read`. A clear is a request: the model's thread
+/// bumps `requested`, and the producer tags what it writes with the request
+/// its player was started under, marking where that player's samples begin.
+/// From the request the consumer plays silence until the mark, then skips to
+/// it, so what an old player rendered is never heard.
 pub struct SampleRing {
     buffer: Vec<AtomicU32>,
     written: AtomicUsize,
     read: AtomicUsize,
+    /// The latest clear asked for (the model's thread).
+    requested: AtomicUsize,
+    /// Where the samples of generation `start_generation` begin (producer).
+    start_at: AtomicUsize,
+    start_generation: AtomicUsize,
+    /// The generation the producer last wrote (producer only).
+    writing: AtomicUsize,
+    /// The generation the consumer plays (consumer only).
+    serving: AtomicUsize,
 }
 
 fn pack(left: i16, right: i16) -> u32 {
@@ -55,6 +70,11 @@ impl SampleRing {
             buffer: (0..capacity).map(|_| AtomicU32::new(0)).collect(),
             written: AtomicUsize::new(0),
             read: AtomicUsize::new(0),
+            requested: AtomicUsize::new(0),
+            start_at: AtomicUsize::new(0),
+            start_generation: AtomicUsize::new(0),
+            writing: AtomicUsize::new(0),
+            serving: AtomicUsize::new(0),
         }
     }
 
@@ -73,10 +93,34 @@ impl SampleRing {
         self.capacity() - self.available()
     }
 
-    /// Append interleaved left and right samples; what does not fit is
-    /// dropped. Returns the frames written.
+    /// Frames of `generation` waiting to be read, as the producer sees them:
+    /// an older player's left in the ring do not count.
+    pub fn pending(&self, generation: usize) -> usize {
+        if generation != self.writing.load(Ordering::Relaxed) {
+            return 0;
+        }
+        let from = self
+            .read
+            .load(Ordering::Acquire)
+            .max(self.start_at.load(Ordering::Relaxed));
+        self.written.load(Ordering::Relaxed).saturating_sub(from)
+    }
+
+    /// Append interleaved left and right samples, rendered before any clear;
+    /// what does not fit is dropped. Returns the frames written.
+    #[cfg(test)]
     pub fn write(&self, interleaved: &[i16]) -> usize {
+        self.write_for(interleaved, 0)
+    }
+
+    /// Append samples rendered for `generation` (the value a clear returned).
+    pub fn write_for(&self, interleaved: &[i16], generation: usize) -> usize {
         let w = self.written.load(Ordering::Relaxed);
+        if generation != self.writing.load(Ordering::Relaxed) {
+            self.writing.store(generation, Ordering::Relaxed);
+            self.start_at.store(w, Ordering::Relaxed);
+            self.start_generation.store(generation, Ordering::Release);
+        }
         let n = (interleaved.len() / 2).min(self.space());
         for i in 0..n {
             self.buffer[(w + i) % self.capacity()].store(
@@ -88,10 +132,24 @@ impl SampleRing {
         n
     }
 
-    /// The next frame, if there is one.
+    /// The next frame, if there is one. The consumer's alone: it honours a
+    /// clear here, by skipping to the new player's first sample, or by
+    /// dropping everything until the new player has written one.
     pub fn pop(&self) -> Option<(i16, i16)> {
-        let r = self.read.load(Ordering::Relaxed);
+        let mut r = self.read.load(Ordering::Relaxed);
+        let want = self.requested.load(Ordering::Acquire);
+        if want != self.serving.load(Ordering::Relaxed) {
+            if self.start_generation.load(Ordering::Acquire) == want {
+                r = r.max(self.start_at.load(Ordering::Relaxed));
+                self.serving.store(want, Ordering::Relaxed);
+            } else {
+                self.read
+                    .store(self.written.load(Ordering::Acquire), Ordering::Release);
+                return None;
+            }
+        }
         if self.written.load(Ordering::Acquire) == r {
+            self.read.store(r, Ordering::Release);
             return None;
         }
         let v = self.buffer[r % self.capacity()].load(Ordering::Relaxed);
@@ -99,9 +157,10 @@ impl SampleRing {
         Some(unpack(v))
     }
 
-    pub fn clear(&self) {
-        self.read
-            .store(self.written.load(Ordering::Acquire), Ordering::Release);
+    /// Ask the consumer to drop everything written so far; returns the
+    /// generation to render the next player for. Never moves `read`.
+    pub fn clear(&self) -> usize {
+        self.requested.fetch_add(1, Ordering::AcqRel) + 1
     }
 }
 
@@ -170,10 +229,11 @@ impl Resampler {
 /// Shared between the model's thread, the render thread and the callback.
 struct Shared {
     ring: SampleRing,
-    current: Mutex<Option<Arc<dyn Source>>>,
-    /// Held by whoever writes to the ring (the render thread, `play`, a
-    /// test's `fill`), since the ring takes one producer at a time. The
-    /// callback only reads, and never takes it.
+    /// The player rendered, with the ring generation it renders for.
+    current: Mutex<Option<(Arc<dyn Source>, usize)>>,
+    /// Held for the whole of a fill, so the render thread and a test filling
+    /// by hand are never two producers at once. The callback only reads, and
+    /// never takes it.
     producer: Mutex<()>,
     /// The output's level, 0 to 1, as `f32` bits.
     volume: AtomicU32,
@@ -184,16 +244,18 @@ impl Shared {
     /// Render until the ring holds `LEAD` frames, on the calling thread.
     fn fill(&self) {
         let _producer = self.producer.lock().unwrap_or_else(|e| e.into_inner());
-        let player = self
-            .current
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
-        let Some(player) = player else { return };
-        let need = LEAD.saturating_sub(self.ring.available());
-        if need > 0 {
-            self.ring
-                .write(&player.render(need.min(self.ring.space()) as u32));
+        let current = || self.current.lock().unwrap_or_else(|e| e.into_inner());
+        let Some((player, generation)) = current().clone() else {
+            return;
+        };
+        let need = LEAD.saturating_sub(self.ring.pending(generation));
+        if need == 0 {
+            return;
+        }
+        let samples = player.render(need.min(self.ring.space()) as u32);
+        // Swapped while rendering: these belong to a player no longer heard.
+        if current().as_ref().map(|(_, g)| *g) == Some(generation) {
+            self.ring.write_for(&samples, generation);
         }
     }
 }
@@ -260,21 +322,14 @@ impl ApuAudio {
     /// Play `player` from now, or stop with `None`.
     pub fn play(&mut self, player: Option<Arc<dyn Source>>) {
         let starting = player.is_some();
-        {
-            // So the render thread is not partway through writing the old
-            // player's samples when the ring is emptied for the new one.
-            let _producer = self
-                .shared
-                .producer
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
-            *self
-                .shared
-                .current
-                .lock()
-                .unwrap_or_else(|e| e.into_inner()) = player;
-            self.shared.ring.clear();
-        }
+        // The clear first: a fill under way for the old player writes for the
+        // old generation, which the callback skips.
+        let generation = self.shared.ring.clear();
+        *self
+            .shared
+            .current
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = player.map(|p| (p, generation));
         if !starting {
             if let Some(s) = &self.stream {
                 let _ = s.pause();
@@ -434,9 +489,23 @@ mod tests {
         let rest: Vec<_> = std::iter::from_fn(|| r.pop()).collect();
         assert_eq!(rest, [(3, -3), (4, -4), (6, -6), (7, -7)]);
         assert_eq!(r.pop(), None);
-        r.write(&[9, 9]);
-        r.clear();
-        assert_eq!(r.available(), 0);
+    }
+
+    /// A clear is honoured by the reader: what was written before it, and
+    /// what the old player rendered after it, is never heard.
+    #[test]
+    fn a_clear_drops_what_the_old_player_wrote() {
+        let r = SampleRing::new(16);
+        r.write(&[100, 100, 100, 100]);
+        let generation = r.clear();
+        r.write(&[200, 200]);
+        assert_eq!(r.pop(), None, "nothing of the new player yet");
+        r.write(&[200, 200]);
+        r.write_for(&[16384, 16384], generation);
+        assert_eq!(r.pending(generation), 1);
+        assert_eq!(r.pop(), Some((16384, 16384)));
+        assert_eq!(r.pop(), None);
+        assert_eq!(r.pending(generation), 0);
     }
 
     #[test]
@@ -460,6 +529,8 @@ mod tests {
         assert_eq!(out.ring().available(), LEAD, "refilled to the lead");
         out.play(None);
         assert!(!out.is_running());
+        // The callback honours the stop: nothing more is heard.
+        assert_eq!(out.ring().pop(), None);
         assert_eq!(out.ring().available(), 0);
         out.shut_down();
     }
