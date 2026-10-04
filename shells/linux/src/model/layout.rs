@@ -99,6 +99,9 @@ pub struct Layout {
     /// tab closes it, which is how the tab buttons and the Graphics menu
     /// share the area.
     pub graphics: Option<super::graphics::Tab>,
+    /// A sound view in the editor area, if one is open. A graphics view and a
+    /// sound view are never both open.
+    pub audio: Option<super::audio::Tab>,
     pub panes: Panes,
     pub results_kind: ResultsKind,
     /// What Focus on Code hid, to put back when it is turned off.
@@ -110,6 +113,7 @@ impl Default for Layout {
         Self {
             tab: Tab::Hex,
             graphics: None,
+            audio: None,
             panes: Panes::default(),
             results_kind: ResultsKind::Find,
             unfocused: None,

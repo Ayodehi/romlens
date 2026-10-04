@@ -5,7 +5,7 @@
 //!
 //! Not here yet: Play This Command (L4).
 
-mod explain;
+pub mod explain;
 mod header;
 mod screen;
 mod sections;

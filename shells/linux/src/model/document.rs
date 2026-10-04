@@ -17,6 +17,7 @@ use romlens_ffi::{
     VarTypeInfo, VarWidth, WarningInfo, Workbench, XRefInfo,
 };
 
+use super::audio::{self, AudioModel};
 use super::batch_cache::BatchCache;
 use super::commands::Zoom;
 use super::commands::{EditorCommand, EditorSource, Sheet};
@@ -69,6 +70,8 @@ pub enum Change {
     Zoom,
     /// A graphics view's source, settings or selection changed.
     Graphics,
+    /// A sound view's source, selection, playback or machine changed.
+    Audio,
     /// The inspector's Screen section opened, closed or got its result.
     Screen,
     /// The Source tab's files, shown file or text changed.
@@ -198,6 +201,8 @@ pub struct Document {
     graph: RefCell<GraphModel>,
     source: RefCell<SourceModel>,
     graphics: RefCell<GraphicsModel>,
+    audio: RefCell<AudioModel>,
+    audio_ticking: Cell<bool>,
     live_latest: Cell<Option<u64>>,
     live_scheduled: Cell<bool>,
     live_post: RefCell<Option<super::runtime::Post>>,
@@ -255,6 +260,7 @@ impl Document {
     ) -> Rc<Self> {
         let info = rom.info();
         let rom_for_graphics = Arc::clone(&rom);
+        let workbench_for_audio = Arc::clone(&workbench);
         let span_kinds = rom
             .spans()
             .into_iter()
@@ -289,6 +295,12 @@ impl Document {
             graph: RefCell::new(GraphModel::default()),
             source: RefCell::new(SourceModel::default()),
             graphics: RefCell::new(GraphicsModel::new(Arc::clone(&rom_for_graphics))),
+            audio: RefCell::new(AudioModel::new(
+                Arc::clone(&rom_for_graphics),
+                Arc::clone(&workbench_for_audio),
+                !cfg!(test),
+            )),
+            audio_ticking: Cell::new(false),
             live_latest: Cell::new(None),
             live_scheduled: Cell::new(false),
             live_post: RefCell::new(None),
@@ -333,6 +345,11 @@ impl Document {
     }
 
     fn emit(&self, change: Change) {
+        // The sound views read the graphics views' recording and frame: one
+        // frame for both.
+        if change == Change::Graphics {
+            self.sync_audio();
+        }
         for f in self.listeners.borrow().iter() {
             f(change);
         }
@@ -354,6 +371,9 @@ impl Document {
                 self.refresh_graph();
                 self.reload_source();
                 self.refresh_compare();
+                if self.audio_tab().is_some() && self.audio.borrow().source == audio::Source::Rom {
+                    self.load_upload();
+                }
                 self.emit(Change::Rows);
             }
             ChangeKind::Project { .. } => {}
@@ -514,7 +534,8 @@ impl Document {
             let mut l = self.layout.borrow_mut();
             // A text tab takes the editor area back from a graphics view.
             let was_graphics = l.graphics.take().is_some();
-            std::mem::replace(&mut l.tab, tab) != tab || was_graphics
+            let was_audio = l.audio.take().is_some();
+            std::mem::replace(&mut l.tab, tab) != tab || was_graphics || was_audio
         };
         if changed {
             self.emit(Change::Layout);
@@ -542,11 +563,147 @@ impl Document {
         {
             self.graphics.borrow_mut().rom_offset = range.start;
         }
-        let changed = self.layout.borrow_mut().graphics.replace(tab) != Some(tab);
+        let changed = {
+            let mut l = self.layout.borrow_mut();
+            let was_audio = l.audio.take().is_some();
+            l.graphics.replace(tab) != Some(tab) || was_audio
+        };
         if changed {
             self.emit(Change::Layout);
         }
         self.emit(Change::Graphics);
+    }
+
+    // MARK: Audio
+
+    pub fn audio(&self) -> std::cell::Ref<'_, AudioModel> {
+        self.audio.borrow()
+    }
+
+    /// The sound view in the editor area, if one is open.
+    pub fn audio_tab(&self) -> Option<audio::Tab> {
+        self.layout.borrow().audio
+    }
+
+    /// Open a sound view, on the recording's sound if it has any, else on the
+    /// ROM's upload.
+    pub fn open_audio(&self, tab: audio::Tab) {
+        let trace = self.audio.borrow_mut().opened();
+        let changed = {
+            let mut l = self.layout.borrow_mut();
+            let was_graphics = l.graphics.take().is_some();
+            l.audio.replace(tab) != Some(tab) || was_graphics
+        };
+        if changed {
+            self.emit(Change::Layout);
+        }
+        if trace {
+            self.load_upload();
+        }
+        self.emit(Change::Audio);
+    }
+
+    /// Keep the sound model's recording and frame current with the graphics
+    /// model's.
+    fn sync_audio(&self) {
+        let g = self.graphics.borrow();
+        self.audio.borrow_mut().sync_recording(
+            g.recording().cloned(),
+            g.recording_name(),
+            g.frame(),
+            g.frame_count(),
+        );
+    }
+
+    /// Change the sound model, then tell the views; playing starts the clock.
+    pub fn edit_audio<R>(&self, f: impl FnOnce(&mut AudioModel) -> R) -> R {
+        let r = f(&mut self.audio.borrow_mut());
+        self.emit(Change::Audio);
+        self.ensure_audio_clock();
+        r
+    }
+
+    /// Trace the upload in the current analysis, once per analysis.
+    pub fn load_upload(&self) {
+        if !self.has_disassembly() {
+            return;
+        }
+        let wb = Arc::clone(self.workbench());
+        let generation = wb.analysis_generation();
+        if !self.audio.borrow_mut().begin_upload(generation) {
+            return;
+        }
+        let weak = self.me.borrow().clone();
+        let wb_for_work = Arc::clone(&wb);
+        background(
+            &*self.runtime,
+            move || wb_for_work.sound_upload_blocking(),
+            move |report| {
+                let Some(d) = weak.upgrade() else { return };
+                d.audio.borrow_mut().finish_upload(generation, report);
+                d.emit(Change::Audio);
+            },
+        );
+        self.emit(Change::Audio);
+    }
+
+    /// The recording's notes for the timeline, read off the main thread.
+    pub fn load_notes(&self) {
+        let Some((recording, last)) = self.audio.borrow_mut().begin_notes() else {
+            return;
+        };
+        let weak = self.me.borrow().clone();
+        let rec = Arc::clone(&recording);
+        background(
+            &*self.runtime,
+            move || rec.note_timeline(0, last).unwrap_or_default(),
+            move |notes| {
+                let Some(d) = weak.upgrade() else { return };
+                d.audio.borrow_mut().finish_notes(&recording, notes);
+                d.emit(Change::Audio);
+            },
+        );
+        self.emit(Change::Audio);
+    }
+
+    /// While playing, a few times a second: read the machine again, and move
+    /// the graphics' frame along with a recording.
+    fn ensure_audio_clock(&self) {
+        if !self.audio.borrow().is_playing() || self.audio_ticking.replace(true) {
+            return;
+        }
+        self.audio_clock();
+    }
+
+    fn audio_clock(&self) {
+        let weak = self.me.borrow().clone();
+        self.runtime.after(
+            std::time::Duration::from_millis(audio::TICK_MS),
+            Box::new(move || {
+                let Some(d) = weak.upgrade() else { return };
+                let result = d.audio.borrow_mut().tick();
+                if let Some(frame) = result.move_to {
+                    d.graphics.borrow_mut().set_frame(frame);
+                    d.emit(Change::Graphics);
+                }
+                d.emit(Change::Audio);
+                if d.audio.borrow().is_playing() {
+                    d.audio_clock();
+                } else {
+                    d.audio_ticking.set(false);
+                }
+            }),
+        );
+    }
+
+    /// Play This Command: the ROM's driver, sent `value` on `port`.
+    pub fn play_command(&self, port: u8, value: u8) {
+        let trace = self.audio.borrow_mut().play_command(port, value);
+        if trace {
+            self.load_upload();
+        }
+        self.emit(Change::Audio);
+        self.ensure_audio_clock();
     }
 
     /// Change the graphics model. The closure may return the ROM bytes the

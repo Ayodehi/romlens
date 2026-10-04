@@ -329,13 +329,41 @@ const ENTRIES: &[Entry] = &[
         enabled: always,
         run: |d, _| d.open_graphics(crate::model::graphics::Tab::Tilemap),
     },
-    pending!("show-voices"),
-    pending!("show-timeline"),
-    pending!("show-samples"),
-    pending!("show-audio-ram"),
-    pending!("show-ports"),
-    pending!("show-echo"),
-    pending!("show-scope"),
+    Entry {
+        name: "show-voices",
+        enabled: always,
+        run: |d, _| d.open_audio(crate::model::audio::Tab::Voices),
+    },
+    Entry {
+        name: "show-timeline",
+        enabled: always,
+        run: |d, _| d.open_audio(crate::model::audio::Tab::Timeline),
+    },
+    Entry {
+        name: "show-samples",
+        enabled: always,
+        run: |d, _| d.open_audio(crate::model::audio::Tab::Samples),
+    },
+    Entry {
+        name: "show-audio-ram",
+        enabled: always,
+        run: |d, _| d.open_audio(crate::model::audio::Tab::Aram),
+    },
+    Entry {
+        name: "show-ports",
+        enabled: always,
+        run: |d, _| d.open_audio(crate::model::audio::Tab::Ports),
+    },
+    Entry {
+        name: "show-echo",
+        enabled: always,
+        run: |d, _| d.open_audio(crate::model::audio::Tab::Echo),
+    },
+    Entry {
+        name: "show-scope",
+        enabled: always,
+        run: |d, _| d.open_audio(crate::model::audio::Tab::Scope),
+    },
     pending!("show-tutor"),
     // File
     Entry {

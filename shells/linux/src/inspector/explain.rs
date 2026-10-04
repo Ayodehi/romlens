@@ -17,12 +17,34 @@ pub fn section(doc: &Rc<Document>, x: &ExplanationInfo, selected_insn: Option<u3
     b.append(&heading("Explanation"));
     if let Some(r) = &x.register {
         b.append(&register_access(r));
-        // Play This Command (sound-port stores) arrives with the audio views.
+        if let Some((port, value)) = sound_command(r) {
+            let play = gtk::Button::with_label("Play This Command");
+            play.set_halign(gtk::Align::Start);
+            play.set_tooltip_text(Some(&format!(
+                "Boot the ROM's sound driver in Romlens and send it ${value:02X} on port {port}, as this store does"
+            )));
+            let doc = Rc::clone(doc);
+            play.connect_clicked(move |_| {
+                doc.open_audio(crate::model::audio::Tab::Voices);
+                doc.play_command(port, value);
+            });
+            b.append(&play);
+        }
     }
     for idiom in &x.idioms {
         b.append(&idiom_view(doc, idiom, selected_insn));
     }
     b.upcast()
+}
+
+/// A store to a sound port ($2140 to $2143) of a known value: the port and the
+/// byte, to play as the game would send it.
+pub fn sound_command(r: &RegisterAccessInfo) -> Option<(u8, u8)> {
+    let address = r.parts.first()?.address;
+    if !r.store || !(0x2140..=0x2143).contains(&address) {
+        return None;
+    }
+    Some(((address - 0x2140) as u8, (r.value? & 0xFF) as u8))
 }
 
 /// Whether an explanation has anything to show.
@@ -57,7 +79,7 @@ fn register_access(a: &RegisterAccessInfo) -> gtk::Widget {
     b.upcast()
 }
 
-fn register_part(part: &RegisterPartInfo) -> gtk::Widget {
+pub fn register_part(part: &RegisterPartInfo) -> gtk::Widget {
     let b = gtk::Box::new(gtk::Orientation::Vertical, 4);
     let short = mono(&part.short);
     short.add_css_class("heading");
@@ -189,4 +211,53 @@ fn select_row(doc: &Document, offsets: &[u32]) {
         .map_or(1, |i| u32::from(i.len));
     doc.select_range(*first..*last + len);
     doc.request_scroll(*first);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn access(address: u32, store: bool, value: Option<u32>) -> RegisterAccessInfo {
+        let rom = romlens_ffi::Rom::from_bytes(romlens_ffi::make_sound_test_rom(), "s.sfc".into())
+            .unwrap();
+        let wb = romlens_ffi::Workbench::new(rom);
+        wb.analyze_blocking().unwrap();
+        // Any real register access, with the fields we care about replaced.
+        let mut found = (0..0x8000u32)
+            .filter_map(|o| wb.explain_at(o).register)
+            .next()
+            .expect("the fixture writes a register");
+        found.store = store;
+        found.value = value;
+        found.parts[0].address = address;
+        found
+    }
+
+    #[test]
+    fn only_a_store_of_a_known_value_to_a_sound_port_can_be_played() {
+        assert_eq!(
+            sound_command(&access(0x2140, true, Some(0x1234))),
+            Some((0, 0x34))
+        );
+        assert_eq!(
+            sound_command(&access(0x2143, true, Some(0x05))),
+            Some((3, 0x05))
+        );
+        assert_eq!(
+            sound_command(&access(0x2144, true, Some(1))),
+            None,
+            "past the ports"
+        );
+        assert_eq!(sound_command(&access(0x213F, true, Some(1))), None);
+        assert_eq!(
+            sound_command(&access(0x2141, false, Some(1))),
+            None,
+            "a read"
+        );
+        assert_eq!(
+            sound_command(&access(0x2141, true, None)),
+            None,
+            "value unknown until run time"
+        );
+    }
 }

@@ -5,6 +5,7 @@
 //! a display.
 
 pub mod atlas;
+pub mod audio;
 pub mod batch_cache;
 pub mod cfold;
 pub mod commands;
