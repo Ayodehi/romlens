@@ -74,11 +74,51 @@ make docker-test # cargo test --workspace inside rust:1.95, a real Linux run
 make ci-local    # all of the above: the local stand-in for CI
 ```
 
+### Linux requirements
+
+The Linux shell (`shells/linux`, in progress) is Rust with GTK4 and
+libadwaita. `make linux` builds it, `make linux-test` checks it, and
+`cargo run --release -- path/to/rom.sfc` from `shells/linux` opens a ROM. It builds natively on both x86_64 and aarch64; build on the
+architecture you are targeting rather than cross-compiling GTK. The core,
+CLI and tests need only Rust and a C toolchain.
+
+Tested on Ubuntu 26.04 (GTK 4.22, libadwaita 1.9). Install the build
+dependencies:
+
+```
+sudo apt install -y build-essential pkg-config \
+  libgtk-4-dev libadwaita-1-dev libsecret-1-dev libasound2-dev
+```
+
+| Package | Used for |
+|---|---|
+| `build-essential`, `pkg-config` | linking and locating the libraries below |
+| `libgtk-4-dev`, `libadwaita-1-dev` | the shell's windows, widgets and drawing (GTK 4.14 or newer, libadwaita 1.6 or newer) |
+| `libsecret-1-dev` | tutor API keys, kept in the Secret Service (GNOME Keyring or KWallet) |
+| `libasound2-dev` | audio playback through ALSA, which PulseAudio and PipeWire both serve |
+| `flatpak-builder` | optional: building the Flatpak package |
+
+Packages for a release (`.deb`, `.rpm`, a tarball and the Flatpak) are built by
+`scripts/package-linux.sh` and `scripts/build-flatpak.sh`; see
+`docs/08-cross-platform.md`. The shell needs libadwaita 1.6, so Ubuntu 24.04
+(1.5) builds only the Flatpak, and the other formats want Ubuntu 26.04 or newer.
+
+Install Rust with rustup (not the distro `rustc`, which lags the 1.88
+minimum and lacks the extra targets):
+
+```
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal -c rustfmt,clippy
+```
+
+On Fedora and RHEL the equivalents are `gcc pkgconf-pkg-config gtk4-devel
+libadwaita-devel libsecret-devel alsa-lib-devel`.
+
 Layout:
 
 ```
 Cargo.toml                    workspace: crates/romlens-core, romlens-ffi, romlens-cli
 bindings/swift/RomlensKit/    Swift package wrapping the generated bindings (generated files are git-ignored)
+shells/linux/                 GTK4 + libadwaita shell (its own Cargo workspace, not part of `cargo test --workspace`)
 shells/macos/                 XcodeGen spec + Swift sources; Romlens.xcodeproj is generated
 scripts/                      build-xcframework.sh, check-cross.sh
 .github/workflows/ci.yml      core tests on macOS, Windows, Ubuntu; advisory macOS shell job

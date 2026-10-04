@@ -1,0 +1,64 @@
+# Flatpak for Romlens. Build it with scripts/build-flatpak.sh, which first makes
+# cargo-sources.json (every crate, so the build needs no network).
+#
+# This builds the working tree. A Flathub submission swaps the `dir` source for
+# a `git` source at a release tag; nothing else changes.
+app-id: io.github.ayodehi.Romlens
+runtime: org.gnome.Platform
+runtime-version: '50'
+sdk: org.gnome.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: romlens
+
+finish-args:
+  # The window, drawn by the GPU.
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  # Sound: cpal over ALSA reaches PipeWire through PulseAudio's socket.
+  - --socket=pulseaudio
+  # The tutor's providers, and the live session, which listens on the loopback
+  # address for an emulator on the same machine.
+  - --share=network
+  # The tutor's API keys, in the desktop's keyring.
+  - --talk-name=org.freedesktop.secrets
+  # Files come through the portal. A ROM opened that way is the only file the
+  # sandbox sees, so Romlens asks for a sibling .dbg or ROM when it needs one.
+
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin
+  env:
+    CARGO_HOME: /run/build/romlens/cargo
+    CARGO_NET_OFFLINE: 'true'
+
+modules:
+  - name: romlens
+    buildsystem: simple
+    build-commands:
+      - cargo --offline build --release --locked --manifest-path shells/linux/Cargo.toml
+      - install -Dm755 shells/linux/target/release/romlens /app/bin/romlens
+      - install -Dm644 shells/linux/data/io.github.ayodehi.Romlens.desktop -t /app/share/applications
+      - install -Dm644 shells/linux/data/io.github.ayodehi.Romlens.metainfo.xml -t /app/share/metainfo
+      - install -Dm644 shells/linux/data/io.github.ayodehi.Romlens.xml -t /app/share/mime/packages
+      - install -Dm644 shells/linux/data/icons/hicolor/scalable/apps/io.github.ayodehi.Romlens.svg -t /app/share/icons/hicolor/scalable/apps
+      - install -Dm644 shells/linux/data/icons/hicolor/symbolic/apps/io.github.ayodehi.Romlens-symbolic.svg -t /app/share/icons/hicolor/symbolic/apps
+      - install -Dm644 LICENSE -t /app/share/licenses/io.github.ayodehi.Romlens
+      - install -Dm644 THIRD-PARTY-NOTICES.md -t /app/share/licenses/io.github.ayodehi.Romlens
+    sources:
+      - type: dir
+        path: ../../..
+        skip:
+          - target
+          - shells/linux/target
+          - shells/linux/flatpak/.flatpak-builder
+          - shells/linux/flatpak/build-dir
+          - shells/linux/flatpak/repo
+          - shells/macos
+          - bindings
+          - spikes
+          - roms
+          - dist
+          - .git
+      - cargo-sources.json

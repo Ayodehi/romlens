@@ -18,7 +18,7 @@ XCODE_PROJECT := shells/macos/Romlens.xcodeproj
 XCODE_DD := shells/macos/build/DerivedData
 XCODEBUILD := xcodebuild -project $(XCODE_PROJECT) -scheme Romlens -destination 'platform=macOS' -derivedDataPath $(XCODE_DD)
 
-.PHONY: help test test-rom xcframework swift app app-test ci-local cross docker-test clean
+.PHONY: help test test-rom xcframework swift app app-test linux linux-test ci-local cross docker-test clean
 
 help:
 	@echo "make test        cargo fmt --check, clippy -D warnings, cargo test --workspace"
@@ -27,6 +27,8 @@ help:
 	@echo "make xcframework build the Rust library and Swift bindings the app links"
 	@echo "make app         the XCFramework, then xcodegen generate + xcodebuild build"
 	@echo "make app-test    xcodebuild test for the macOS shell"
+	@echo "make linux       build the GTK4 / libadwaita shell (Linux only, see README)"
+	@echo "make linux-test  fmt, clippy -D warnings and tests for the Linux shell"
 	@echo "make cross       cargo check for Linux and Windows targets (rustup targets)"
 	@echo "make docker-test cargo test --workspace inside rust:$(RUST_VERSION) (a real Linux run)"
 	@echo "make ci-local    everything above, the local stand-in for CI"
@@ -57,6 +59,14 @@ app: xcframework
 app-test: app
 	$(XCODEBUILD) test 2>&1 | grep -E '✔|✘|error:|TEST' | grep -v 'DerivedData/.*\.swift'
 
+linux:
+	cd shells/linux && $(CARGO) build --release
+
+linux-test:
+	cd shells/linux && $(CARGO) fmt --all -- --check
+	cd shells/linux && $(CARGO) clippy --all-targets -- -D warnings
+	cd shells/linux && $(CARGO) test
+
 cross:
 	CARGO=$(CARGO) scripts/check-cross.sh
 
@@ -67,4 +77,5 @@ ci-local: test cross docker-test swift app-test
 
 clean:
 	$(CARGO) clean
+	cd shells/linux && $(CARGO) clean
 	rm -rf $(XCODE_DD) bindings/swift/RomlensKit/.build bindings/swift/RomlensKit/.gen

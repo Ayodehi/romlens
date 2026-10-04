@@ -29,6 +29,26 @@ binding to the C library) because the C build needs a cross-compiler for
 every target, which `make cross` and CI's Windows and Linux jobs do not have
 (`16-phase2-plan.md` 2C.7 named it as the fallback).
 
+## The Linux shell
+
+`shells/linux` is dynamically linked against the system's GTK 4, libadwaita,
+GLib, Cairo, Pango, libsecret and ALSA, which are LGPL-2.1-or-later: the
+packages depend on the distribution's copies (the Flatpak and snap carry the
+runtime's), and a person can replace them. Its Rust crates keep their own
+licenses:
+
+| Component | License | Used for |
+|---|---|---|
+| [gtk4-rs, libadwaita-rs, libsecret-rs and the gtk-rs family](https://github.com/gtk-rs) | MIT | Rust bindings to the libraries above |
+| [cpal](https://github.com/RustAudio/cpal) 0.18 | Apache-2.0 | The sound output |
+| [UniFFI](https://github.com/mozilla/uniffi-rs) 0.31 (`uniffi`, `uniffi_core`, `uniffi_macros` and friends) | MPL-2.0 | The core's public API, which the macOS shell reads through generated Swift. The Linux build links the runtime crates and not the binding generators. MPL-2.0 is file-level: the crates are unmodified, and their source is on crates.io under the versions in `Cargo.lock` |
+| [rustls](https://github.com/rustls/rustls), [ring](https://github.com/briansmith/ring), rustls-webpki, rustls-native-certs, untrusted | Apache-2.0 OR ISC OR MIT; Apache-2.0 AND ISC; ISC | The tutor's HTTPS connections to a model provider |
+| [webpki-roots](https://github.com/rustls/webpki-roots) | CDLA-Permissive-2.0 | A built-in list of CA certificates for the HTTPS connections |
+
+The rest of the shell's dependency tree is MIT, Apache-2.0, Zlib, BSD-2-Clause,
+BSD-3-Clause, ISC, Unlicense, or a choice among them (`cargo metadata` in
+`shells/linux` lists each crate's license). No dependency is GPL or AGPL.
+
 Anticipated when the corresponding phase lands:
 
 - UniFFI (Mozilla) — MPL-2.0 for the tool; generated bindings are ours to

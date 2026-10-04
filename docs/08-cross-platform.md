@@ -198,3 +198,86 @@ same way.
 - **Contributors.** Each shell needs someone who cares about that platform.
   The core-first design means a Windows or Linux contributor can start with a
   working brain and a checklist.
+
+## Linux shell decisions (October 2026)
+
+- **Menus.** A GNOME hamburger menu, not a menu bar. The macOS menu tree is
+  flattened into sections and Import, Export, Edit, View and Go submenus.
+  Every command is a named `gio` action, so a menu item, a shortcut and a
+  button reach it the same way; a command whose feature is not built yet is
+  listed and insensitive.
+- **Shortcuts.** Ctrl stands for Command and Alt for Option, with the view
+  tabs on Alt+digit (as GNOME terminals and browsers switch tabs) and the
+  tutor, live session and compare on Alt+Shift, because Ctrl+Alt combinations
+  collide with desktop bindings. The one table is `ACCELS` in
+  `shells/linux/src/actions.rs`; the Keyboard Shortcuts window is built from
+  it, and tests fail if two commands share a shortcut or the window omits one.
+- **Projects.** A `.romlens` package is a folder, so Open ROM and Open Project
+  are separate commands (a file chooser cannot offer both). A project that has
+  a file is saved when its window closes and every 30 seconds, as
+  `autosavesInPlace` does; an untitled one asks.
+- **Minimum versions.** GTK 4.14 and libadwaita 1.6 (the accent colour). Ubuntu
+  24.04 LTS ships libadwaita 1.5, so a `.deb` for it needs a fixed accent
+  colour; the Flatpak is unaffected.
+- **Compare.** Compare With… takes a ROM file; Compare With Project… takes a
+  `.romlens` folder, because a file chooser cannot offer both. The Source and
+  Compare tabs appear only when there are imported sources or a comparison, and
+  View › Source and Compare are greyed out otherwise, as on macOS.
+- **Recordings and live sessions.** Open Recording takes a `.romrec`, or an
+  `.rlstream`, which is packed into `$XDG_DATA_HOME/romlens/Recordings` first.
+  A recording is read where it is and never copied; the project keeps its path
+  and fingerprint. The live session listens on the loopback address only, so a
+  Flatpak needs no extra permission for it. Live Session is a check item in the
+  menu, not a command that changes its own label.
+- **Audio output.** `cpal` over ALSA, which PipeWire and PulseAudio serve, so
+  the Flatpak needs the PulseAudio socket and the snap the `audio-playback`
+  plug. The DSP runs at 32 kHz and is rendered ahead into a lock-free ring on
+  its own thread; the device callback resamples to the device's rate and never
+  allocates, locks or calls into the core.
+- **Tutor.** One Tutor window per project, transient for its project window and
+  closed with it. Keys live in the Secret Service through libsecret (schema
+  `io.github.ayodehi.Romlens.tutor`, attribute `endpoint`), never in the
+  settings file `$XDG_CONFIG_HOME/romlens/tutor.json` or a project; where no
+  Secret Service is running no key can be saved. Conversations are kept under
+  `$XDG_DATA_HOME/romlens/Tutor`, not in the project. Answers are Markdown drawn
+  as GTK labels: prose as Pango markup with each citation a link into the main
+  window and each glossary term a link to a bubble, code in the C view's
+  colours, tables as grids. The Settings window carries the macOS Settings pages
+  (General, Providers, Tutor, Images, Privacy) as an `AdwPreferencesDialog`.
+  Lessons, the map, progress and the quiz are dialogs over the Tutor window.
+- **Packaging.** The shell's data lives in `shells/linux/data`: the desktop file,
+  AppStream metainfo, a shared-mime-info file for `.romrec`, `.rlstream` and
+  `.spclog` (the ROM type is shared-mime-info's own; a `.romlens` project is a
+  folder, which a mime type cannot describe) and the icons. Every format is
+  built from those files and the one release binary, natively on each
+  architecture:
+  - `.deb` and `.rpm`: `cargo deb` and `cargo generate-rpm`, driven by
+    `scripts/package-linux.sh`, which also writes a tarball with an
+    `install.sh` and `SHA256SUMS`. The `.deb` takes its library dependencies
+    from the binary, so it needs the libraries and the glibc of the system it
+    was built on: the CI and release builds run in an Ubuntu 26.04 container
+    (libadwaita 1.9), which is also what the runner images (24.04, libadwaita
+    1.5) cannot build, because the shell needs 1.6. A package for an older
+    distribution is the Flatpak.
+  - Flatpak: `shells/linux/flatpak/io.github.ayodehi.Romlens.yaml` on the GNOME
+    50 runtime with the Rust SDK extension. `scripts/cargo-sources.py` lists
+    every crate in `Cargo.lock`, so the build is offline and checked against
+    the lockfile; `scripts/build-flatpak.sh` makes `dist/romlens-<arch>.flatpak`.
+    Permissions: Wayland and X11, the GPU, PulseAudio (cpal reaches PipeWire
+    through it), the network (the tutor's providers, and the live session's
+    loopback listener) and `org.freedesktop.secrets`. Files come through the
+    portal, so a ROM chosen there is the only file the sandbox sees: a sibling
+    `.dbg` or ROM is asked for. Flathub takes the same manifest with a `git`
+    source at a release tag in place of the `dir` source.
+  - Snap: `snap/snapcraft.yaml` on the `gnome` extension, with the `home`,
+    `network`, `network-bind`, `audio-playback` and `password-manager-service`
+    plugs, and ALSA routed to PulseAudio. It has not been built by the
+    authors (no snapcraft where it was written), so its `grade` is `devel`.
+  - `.github/workflows/release.yml` builds all of it for a `v*` tag and
+    leaves a draft GitHub release for a person to read and publish. An apt
+    repository needs a signing key and somewhere to host it, which are not
+    decided; until then the `.deb` is a release download.
+  - The shell links the core's `romlens-ffi` with the `bindgen` feature off,
+    so it does not build UniFFI's binding generators (askama, goblin and
+    their tree), which only the Swift shell needs. OpenSSL is not needed: TLS
+    is rustls.

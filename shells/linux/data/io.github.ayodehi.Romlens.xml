@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Types Romlens adds. The Super NES ROM type itself (*.sfc, *.smc) is
+     shared-mime-info's, application/vnd.nintendo.snes.rom. A .romlens project
+     is a folder, which a mime type cannot describe, so it has none. -->
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-romlens-recording">
+    <comment>Romlens recording</comment>
+    <glob pattern="*.romrec"/>
+    <icon name="io.github.ayodehi.Romlens"/>
+  </mime-type>
+  <mime-type type="application/x-romlens-stream">
+    <comment>Romlens live stream capture</comment>
+    <glob pattern="*.rlstream"/>
+    <icon name="io.github.ayodehi.Romlens"/>
+  </mime-type>
+  <mime-type type="application/x-romlens-spclog">
+    <comment>SPC700 execution log</comment>
+    <glob pattern="*.spclog"/>
+  </mime-type>
+</mime-info>

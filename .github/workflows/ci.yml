@@ -52,3 +52,90 @@ jobs:
           -destination 'platform=macOS'
           CODE_SIGNING_ALLOWED=NO
         continue-on-error: true
+
+  # Native on each architecture: GTK is built where it runs, not cross-compiled.
+  # In an Ubuntu 26.04 container: the shell needs libadwaita 1.6 (the accent
+  # colour), and the runner images (24.04) carry 1.5.
+  linux-shell:
+    name: Linux shell (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    container: ubuntu:26.04
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+    steps:
+      - run: >
+          apt-get update && apt-get install -y
+          build-essential pkg-config git curl ca-certificates
+          libgtk-4-dev libadwaita-1-dev libsecret-1-dev libasound2-dev
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: shells/linux
+      - run: cargo fmt --all -- --check
+        working-directory: shells/linux
+      - run: cargo clippy --all-targets -- -D warnings
+        working-directory: shells/linux
+      - run: cargo test
+        working-directory: shells/linux
+
+  # The packages the release job ships, built and smoke-tested on every pull
+  # request, natively on each architecture.
+  linux-packages:
+    name: Linux packages (${{ matrix.os }})
+    needs: linux-shell
+    runs-on: ${{ matrix.os }}
+    container: ubuntu:26.04
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+    steps:
+      - run: >
+          apt-get update && apt-get install -y
+          build-essential pkg-config git curl ca-certificates
+          libgtk-4-dev libadwaita-1-dev libsecret-1-dev libasound2-dev
+          desktop-file-utils appstream
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: shells/linux
+      - run: cargo install cargo-deb cargo-generate-rpm --locked
+      - run: desktop-file-validate shells/linux/data/io.github.ayodehi.Romlens.desktop
+      - run: appstreamcli validate --no-net shells/linux/data/io.github.ayodehi.Romlens.metainfo.xml
+      - run: scripts/package-linux.sh all
+      # Installs the .deb as a person would, and runs the installed binary far
+      # enough to prove its libraries resolve (no display needed).
+      - run: |
+          apt-get install -y ./dist/*.deb
+          romlens --write-fixture explain /tmp/explain.sfc
+          test -s /tmp/explain.sfc
+          test -f /usr/share/applications/io.github.ayodehi.Romlens.desktop
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-packages-${{ matrix.os }}
+          path: dist/
+
+  # Flatpak builds inside its own runtime, so the host's libraries do not matter.
+  linux-flatpak:
+    name: Flatpak (${{ matrix.os }})
+    needs: linux-shell
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y flatpak flatpak-builder
+      - run: flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+      - run: scripts/build-flatpak.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-flatpak-${{ matrix.os }}
+          path: dist/*.flatpak
