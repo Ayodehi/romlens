@@ -16,7 +16,7 @@ use adw::prelude::*;
 
 use crate::model::{Change, Document};
 use crate::tabgrid::{self, Grid};
-use crate::{actions, headerband, inspector, menu, results, sheets, sidebar};
+use crate::{actions, headerband, inspector, jumpbar, menu, results, sheets, sidebar};
 
 pub fn open_document(app: &adw::Application, doc: Rc<Document>) -> adw::ApplicationWindow {
     let window = adw::ApplicationWindow::builder()
@@ -47,6 +47,7 @@ pub fn open_document(app: &adw::Application, doc: Rc<Document>) -> adw::Applicat
     }
 
     let header = build_header(&doc);
+    titles(&window, &doc);
     let grid = Grid::build(&doc);
     let editor = grid.root.clone();
 
@@ -116,9 +117,7 @@ fn build_header(doc: &Rc<Document>) -> adw::HeaderBar {
     );
     header.pack_start(&navigator);
     header.pack_start(&back_forward());
-    let title = adw::WindowTitle::new(&doc.display_name(), &doc.subtitle());
-    header.set_title_widget(Some(&title));
-    titles(&title, doc);
+    header.set_title_widget(Some(&jumpbar::build(doc)));
 
     let primary = gtk::MenuButton::builder()
         .icon_name("open-menu-symbolic")
@@ -132,20 +131,28 @@ fn build_header(doc: &Rc<Document>) -> adw::HeaderBar {
         "win.toggle-inspector",
         "Show or hide the inspector (Alt+0)",
     ));
+    header.pack_end(
+        &gtk::Button::builder()
+            .icon_name("system-search-symbolic")
+            .action_name("win.open-quickly")
+            .tooltip_text("Open Quickly (Ctrl+P)")
+            .build(),
+    );
     header
 }
 
 /// The window's title follows the project: its name, with a dot while it has
-/// changes not yet saved.
-fn titles(title: &adw::WindowTitle, doc: &Rc<Document>) {
+/// changes not yet saved. The header's centre is the jump bar, so the name
+/// shows where the desktop lists windows.
+fn titles(window: &adw::ApplicationWindow, doc: &Rc<Document>) {
     let update = {
-        let (title, doc) = (title.clone(), Rc::clone(doc));
+        let (window, doc) = (window.downgrade(), Rc::downgrade(doc));
         move || {
+            let (Some(window), Some(doc)) = (window.upgrade(), doc.upgrade()) else {
+                return;
+            };
             let dirty = if doc.session.is_dirty() { "• " } else { "" };
-            title.set_title(&format!("{dirty}{}", doc.display_name()));
-            if let Some(w) = title.root().and_downcast::<gtk::Window>() {
-                w.set_title(Some(&format!("{dirty}{}", doc.display_name())));
-            }
+            window.set_title(Some(&format!("{dirty}{}", doc.display_name())));
         }
     };
     update();

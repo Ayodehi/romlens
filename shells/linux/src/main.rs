@@ -24,6 +24,7 @@ mod headerband;
 mod hex;
 mod hexview;
 mod inspector;
+mod jumpbar;
 mod layersview;
 mod lessonsheets;
 mod lessonview;
