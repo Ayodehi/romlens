@@ -13,10 +13,11 @@ use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
 use adw::prelude::*;
-use gtk::{gio, glib};
+use gtk::{gdk, gio, glib};
 
 use crate::model::workspace::{
-    CodeRep, DropEdge, DropTarget, EditorContent, EditorItem, Id, LayoutNode, SplitAxis, TabDrop,
+    CodeRep, DropEdge, DropTarget, DropZone, EditorContent, EditorItem, Id, LayoutNode, Rect,
+    SplitAxis, TabDrop, drop_zone,
 };
 use crate::model::{Change, Document};
 use crate::{
@@ -148,7 +149,10 @@ struct Group {
     id: Id,
     root: gtk::Box,
     view: adw::TabView,
+    bar: adw::TabBar,
     body: gtk::Stack,
+    /// Where a drop would land, shown over the group's view while dragging.
+    preview: gtk::Box,
     /// The tab the tab menu was opened on.
     menu_item: Cell<Option<Id>>,
     follow: gio::SimpleAction,
@@ -206,10 +210,21 @@ impl Group {
         body.add_named(&empty, Some("empty"));
         body.set_vexpand(true);
 
+        // The drop preview: translucent accent over the whole view, or the
+        // half on the side a tab would split to. It takes no events.
+        let preview = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        preview.add_css_class("romlens-drop-preview");
+        preview.set_can_target(false);
+        preview.set_visible(false);
+        let overlay = gtk::Overlay::new();
+        overlay.set_child(Some(&body));
+        overlay.add_overlay(&preview);
+        overlay.set_vexpand(true);
+
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
         root.add_css_class("romlens-group");
         root.append(&bar);
-        root.append(&body);
+        root.append(&overlay);
         root.set_size_request(MIN_PANE, MIN_PANE);
 
         let follow = gio::SimpleAction::new_stateful("follow", None, &true.to_variant());
@@ -217,7 +232,9 @@ impl Group {
             id,
             root,
             view,
+            bar,
             body,
+            preview,
             menu_item: Cell::new(None),
             follow,
         });
@@ -321,6 +338,8 @@ impl Group {
         // A tab is never torn off into a window of its own.
         self.view.connect_create_window(|_| None);
 
+        self.wire_drops(grid);
+
         // The tab menu, for the tab it was opened on.
         let menu = gio::Menu::new();
         let close = gio::Menu::new();
@@ -401,6 +420,134 @@ impl Group {
         actions.add_action(&self.follow);
         self.root.insert_action_group("tab", Some(&actions));
     }
+}
+
+impl Group {
+    /// Drops on the group's view (a tab, or a row of the sidebar to open):
+    /// the middle moves it here, the outer third of a side splits there, as
+    /// the preview shows. Rows of the sidebar dropped on the tab bar open at
+    /// that place; tabs dragged between bars are the bar's own.
+    fn wire_drops(self: &Rc<Self>, grid: &Rc<Grid>) {
+        let id = self.id;
+        let target = gtk::DropTarget::new(glib::Type::INVALID, gdk::DragAction::MOVE);
+        target.set_types(&[adw::TabPage::static_type(), String::static_type()]);
+        target.set_actions(gdk::DragAction::MOVE | gdk::DragAction::COPY);
+        let me = Rc::downgrade(self);
+        target.connect_motion(move |t, x, y| {
+            let Some(me) = me.upgrade() else {
+                return gdk::DragAction::empty();
+            };
+            let zone = me.zone_at(t, x, y);
+            me.show_preview(zone);
+            gdk::DragAction::MOVE
+        });
+        let me = Rc::downgrade(self);
+        target.connect_leave(move |_| {
+            if let Some(me) = me.upgrade() {
+                me.preview.set_visible(false);
+            }
+        });
+        let (me, g) = (Rc::downgrade(self), Rc::downgrade(grid));
+        target.connect_drop(move |t, value, x, y| {
+            let (Some(me), Some(grid)) = (me.upgrade(), g.upgrade()) else {
+                return false;
+            };
+            me.preview.set_visible(false);
+            let Some(drop) = tab_drop(value) else {
+                return false;
+            };
+            let zone = me.zone_at(t, x, y);
+            grid.defer_drop(drop, id, DropTarget::Zone(zone));
+            true
+        });
+        if let Some(over) = self.preview.parent() {
+            over.add_controller(target);
+        }
+
+        // Sidebar rows dropped between two tabs of the bar.
+        self.bar.setup_extra_drop_target(
+            gdk::DragAction::COPY | gdk::DragAction::MOVE,
+            &[String::static_type()],
+        );
+        let g = Rc::downgrade(grid);
+        let view = self.view.clone();
+        self.bar.connect_extra_drag_drop(move |_, page, value| {
+            let Some(grid) = g.upgrade() else {
+                return false;
+            };
+            let Some(drop) = value
+                .get::<String>()
+                .ok()
+                .and_then(|s| TabDrop::from_json(&s))
+            else {
+                return false;
+            };
+            let at = view.page_position(page).max(0) as usize;
+            grid.defer_drop(drop, id, DropTarget::TabBar(at));
+            true
+        });
+    }
+
+    /// The zone of the group's view a point in the drop target is in.
+    fn zone_at(&self, target: &gtk::DropTarget, x: f64, y: f64) -> DropZone {
+        let Some(w) = target.widget() else {
+            return DropZone::Center;
+        };
+        drop_zone(
+            x,
+            y,
+            Rect {
+                x: 0.0,
+                y: 0.0,
+                width: f64::from(w.width()),
+                height: f64::from(w.height()),
+            },
+        )
+    }
+
+    /// The preview for a zone: the whole view or the half by that edge,
+    /// inset 4 px.
+    fn show_preview(&self, zone: DropZone) {
+        let Some(over) = self.preview.parent() else {
+            return;
+        };
+        let (w, h) = (over.width(), over.height());
+        let (mut top, mut bottom, mut start, mut end) = (4, 4, 4, 4);
+        match zone {
+            DropZone::Center => {}
+            DropZone::Edge(DropEdge::Left) => end = w / 2,
+            DropZone::Edge(DropEdge::Right) => start = w / 2,
+            DropZone::Edge(DropEdge::Top) => bottom = h / 2,
+            DropZone::Edge(DropEdge::Bottom) => top = h / 2,
+        }
+        self.preview.set_margin_top(top);
+        self.preview.set_margin_bottom(bottom);
+        self.preview.set_margin_start(start);
+        self.preview.set_margin_end(end);
+        self.preview.set_visible(true);
+    }
+}
+
+/// What a drop carries: a tab dragged from a bar, or a sidebar row's
+/// `TabDrop` as JSON.
+fn tab_drop(value: &glib::Value) -> Option<TabDrop> {
+    if let Ok(page) = value.get::<adw::TabPage>() {
+        return item_of(&page).map(TabDrop::Item);
+    }
+    value
+        .get::<String>()
+        .ok()
+        .and_then(|s| TabDrop::from_json(&s))
+}
+
+/// A drag source carrying `drop`, for a row of the sidebar.
+pub fn drag_source(drop: impl Fn() -> Option<TabDrop> + 'static) -> gtk::DragSource {
+    let source = gtk::DragSource::new();
+    source.set_actions(gdk::DragAction::COPY);
+    source.connect_prepare(move |_, _, _| {
+        drop().map(|d| gdk::ContentProvider::for_value(&d.to_json().to_value()))
+    });
+    source
 }
 
 // MARK: The grid

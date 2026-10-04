@@ -8,6 +8,7 @@ use romlens_ffi::{LabelInfo, LabelSource, RegionInfo, RegionKind, VariableInfo};
 
 use crate::lists::{ValueList, child_at, row_box, spacer};
 use crate::model::navigator::{Bank, NavTab};
+use crate::model::workspace::{CodeRep, TabDrop};
 use crate::model::{Change, Document};
 use crate::style::chip;
 
@@ -140,9 +141,18 @@ fn label_list(doc: &Rc<Document>) -> ValueList<LabelInfo> {
             r.append(&spacer());
             r.append(&chip("", "chip-accent"));
             r.append(&dim_mono(""));
+            // Dragged into the editor area: a new Disassembly tab at the
+            // label, where it is dropped (docs/29). The row is reused, so it
+            // carries its label's address in its name.
+            let row = r.clone();
+            r.add_controller(crate::tabgrid::drag_source(move || {
+                let address = u32::from_str_radix(&row.widget_name(), 16).ok()?;
+                Some(TabDrop::OpenAt(CodeRep::Assembly, address))
+            }));
             r.upcast()
         },
         |row: &gtk::Widget, l: &LabelInfo| {
+            row.set_widget_name(&format!("{:06X}", l.address));
             let name = child_at(row, 0);
             set_text(&name, &l.name);
             if l.source == LabelSource::Auto {
