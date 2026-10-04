@@ -399,12 +399,18 @@ pub fn preview(doc: &Rc<Document>, p: &PreviewInfo) -> gtk::Widget {
         format!("Open in {view}")
     };
     let row = hbox(8);
-    // The graphics views arrive in L3; until then the way in is disabled.
     let open = gtk::Button::with_label(&title);
-    open.set_sensitive(false);
+    {
+        let (doc, p) = (Rc::clone(doc), p.clone());
+        open.connect_clicked(move |_| doc.open_preview(&p));
+    }
     row.append(&open);
     let options = gtk::Button::with_label("Options…");
-    options.set_sensitive(false);
+    options.set_sensitive(doc.marked_range().is_some());
+    {
+        let doc = Rc::clone(doc);
+        options.connect_clicked(move |_| doc.show_sheet(Some(crate::model::Sheet::PreviewOptions)));
+    }
     options.set_tooltip_text(Some(if doc.marked_range().is_none() {
         "Mark the range first; preview options belong to a mark"
     } else {

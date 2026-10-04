@@ -3,8 +3,7 @@
 //! selection or the analysis changes: what it shows is derived from the core,
 //! and a section's own edits go back through the document.
 //!
-//! Not here yet: Play This Command (L4) and the Screen section's links into
-//! the graphics views (L3).
+//! Not here yet: Play This Command (L4).
 
 mod explain;
 mod header;

@@ -25,6 +25,16 @@ pub fn config_dir() -> PathBuf {
     base.join("romlens")
 }
 
+/// Where the shell keeps its data (packed recordings): `$XDG_DATA_HOME/romlens`.
+pub fn data_dir() -> PathBuf {
+    let base = std::env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
+        .unwrap_or_else(|| PathBuf::from(".local/share"));
+    base.join("romlens")
+}
+
 impl Settings {
     pub fn path() -> PathBuf {
         config_dir().join("settings.json")

@@ -44,7 +44,7 @@ pub fn primary_menu() -> gio::Menu {
             ("Import Snapshot…", "win.import-snapshot"),
             ("Export Frame Region…", "win.export-frame-region"),
             ("Close Recording", "win.close-recording"),
-            ("Start Live Session", "win.live-session"),
+            ("Live Session", "win.live-session"),
             ("Compare With…", "win.compare-with"),
             ("Compare With Project…", "win.compare-with-project"),
             ("Close Comparison", "win.close-compare"),

@@ -43,6 +43,7 @@ pub enum Sheet {
     Find,
     DataType,
     Variable,
+    PreviewOptions,
 }
 
 /// View › Zoom In, Zoom Out and Zoom to Fit, for the graph or the atlas.

@@ -16,8 +16,8 @@ use gtk::gio;
 use crate::hex::AddressStyle;
 use crate::model::{Change, Document, Tab};
 use crate::{
-    actions, asmview, atlasview, compareview, cview, graphview, headerband, hexview, inspector,
-    lockstep, menu, navigatorview, results, sheets, sourceview,
+    actions, asmview, atlasview, compareview, cview, graphicsview, graphview, headerband, hexview,
+    inspector, lockstep, menu, navigatorview, results, sheets, sourceview,
 };
 
 /// The macOS toolbar switches the editor tabs to a menu below this width,
@@ -135,6 +135,8 @@ fn build_header(doc: &Rc<Document>) -> (adw::HeaderBar, gtk::Box, gtk::MenuButto
     let tabs = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     tabs.append(&tab_group);
     tabs.append(&tab_menu);
+    tabs.set_spacing(8);
+    tabs.append(&graphics_menu(doc));
     header.set_title_widget(Some(&tabs));
 
     let primary = gtk::MenuButton::builder()
@@ -234,6 +236,7 @@ fn editor_stack(doc: &Rc<Document>) -> gtk::Stack {
     stack.add_named(&atlasview::build(doc), Some("atlas"));
     stack.add_named(&sourceview::build(doc), Some("source"));
     stack.add_named(&compareview::build(doc), Some("compare"));
+    stack.add_named(&graphicsview::build(doc), Some("graphics"));
     stack.add_named(
         &adw::StatusPage::builder()
             .icon_name("system-run-symbolic")
@@ -249,7 +252,9 @@ fn editor_stack(doc: &Rc<Document>) -> gtk::Stack {
         let (stack, doc) = (stack.clone(), Rc::clone(doc));
         move || {
             let tab = doc.tab();
-            let page = if tab.needs_disassembly() && !doc.has_disassembly() {
+            let page = if doc.graphics_tab().is_some() {
+                "graphics"
+            } else if tab.needs_disassembly() && !doc.has_disassembly() {
                 "analyzing"
             } else {
                 tab.id()
@@ -298,6 +303,33 @@ fn tab_buttons(doc: &Rc<Document>) -> gtk::Box {
 fn tab_tooltip() -> String {
     "Hex (Alt+1), Disassembly (Alt+2), Both (Alt+3), C (Alt+8), Graph (Alt+9) or Atlas (Alt+Shift+A)"
         .to_owned()
+}
+
+/// The Graphics picker, beside the tabs rather than inside them: eight tabs
+/// and six views is too wide, and the text tabs keep their place.
+fn graphics_menu(doc: &Rc<Document>) -> gtk::MenuButton {
+    use crate::model::graphics::Tab as G;
+    let menu = gio::Menu::new();
+    for tab in G::ALL {
+        menu.append(Some(tab.title()), Some(&format!("win.show-{}", tab.id())));
+    }
+    let button = gtk::MenuButton::builder()
+        .menu_model(&menu)
+        .label("Graphics")
+        .tooltip_text(
+            "Frame and Layers (from a recording), Tile Decoder (Alt+4), Palette (Alt+5), \
+             OAM (Alt+6) or Tilemap (Alt+7)",
+        )
+        .build();
+    doc.subscribe({
+        let (doc, button) = (Rc::clone(doc), button.clone());
+        move |c| {
+            if matches!(c, Change::Layout | Change::Graphics) {
+                button.set_label(doc.graphics_tab().map_or("Graphics", G::title));
+            }
+        }
+    });
+    button
 }
 
 /// The same choice as a menu, for a window too narrow for the buttons.

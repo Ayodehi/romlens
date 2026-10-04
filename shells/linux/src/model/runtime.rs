@@ -29,10 +29,18 @@ pub trait Runtime {
         done: Box<dyn FnOnce(Box<dyn Any + Send>)>,
     );
 
+    /// A way for any thread to hand a message to `handler`, which runs on the
+    /// main thread: how a live session's frames, status and execution logs
+    /// reach the model. Messages are delivered in order.
+    fn sink(&self, handler: Rc<dyn Fn(Box<dyn Any + Send>)>) -> Post;
+
     /// Deliver the workbench's events (raised on any thread) to `handler` on
     /// the main thread.
     fn attach_listener(&self, workbench: &Workbench, handler: Rc<dyn Fn(WorkbenchEvent)>);
 }
+
+/// Posts a message to the main thread from any thread.
+pub type Post = std::sync::Arc<dyn Fn(Box<dyn Any + Send>) + Send + Sync>;
 
 /// Typed wrapper over [`Runtime::spawn`]: slow reads (the navigator's lists,
 /// a decompile) run off the main thread and land back on it.

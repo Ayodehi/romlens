@@ -8,6 +8,7 @@ mod find;
 mod flags;
 mod jump;
 mod label;
+mod preview;
 mod variable;
 
 use std::rc::Rc;
@@ -121,6 +122,7 @@ pub fn present(window: &adw::ApplicationWindow, doc: &Rc<Document>, sheet: Sheet
         Sheet::Find => find::build(doc),
         Sheet::DataType => datatype::build(doc),
         Sheet::Variable => variable::build(doc),
+        Sheet::PreviewOptions => preview::build(doc),
     };
     // Whoever dismisses it, the document forgets the request.
     let d = Rc::clone(doc);
