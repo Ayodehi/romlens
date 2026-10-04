@@ -60,7 +60,7 @@ pub fn build(doc: &Rc<Document>) -> gtk::Widget {
     let refresh = {
         let (doc, stack) = (Rc::clone(doc), stack.clone());
         move || {
-            if doc.audio_tab() != Some(Tab::Ports) {
+            if !doc.shows_audio(Tab::Ports) {
                 return;
             }
             match doc.audio().source {

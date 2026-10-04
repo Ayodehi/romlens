@@ -114,24 +114,6 @@ pub enum AddressStyle {
 
 impl AddressStyle {
     pub const ALL: [AddressStyle; 3] = [Self::Both, Self::Snes, Self::File];
-
-    /// What the menu shows. Not "Both": the editor tabs already have one.
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Both => "File + SNES",
-            Self::Snes => "SNES only",
-            Self::File => "File only",
-        }
-    }
-
-    /// What the toolbar button shows: the current value, shorter.
-    pub fn short_label(self) -> &'static str {
-        match self {
-            Self::Both => "File + SNES",
-            Self::Snes => "SNES",
-            Self::File => "File",
-        }
-    }
 }
 
 /// Column geometry in character cells; the widget multiplies by the font's

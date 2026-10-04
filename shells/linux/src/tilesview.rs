@@ -336,7 +336,7 @@ impl View {
     // MARK: Updating
 
     fn refresh(self: &Rc<Self>) {
-        if self.doc.graphics_tab() != Some(gfx::Tab::Tiles) {
+        if !self.doc.shows_graphics(gfx::Tab::Tiles) {
             return;
         }
         let g = self.doc.graphics();

@@ -4,25 +4,19 @@
 //! collapse into overlays on a narrow window. The macOS twin is
 //! `RomWindowController` and `DocumentView`.
 //!
-//! The toolbar holds only controls: the editor tabs in the centre, and
-//! navigation and the address style trailing. What the analyzer found is not
-//! a control, so it is in the header band with the overview strip.
+//! The editor is tab groups in a grid (docs/29, `tabgrid.rs`), and the
+//! header bar holds commands only: the panels, Back and Forward, and the
+//! menu. Views are chosen from the View menu and their keys. What the
+//! analyzer found is not a control, so it is in the header band with the
+//! overview strip.
 
 use std::rc::Rc;
 
 use adw::prelude::*;
-use gtk::gio;
 
-use crate::hex::AddressStyle;
-use crate::model::{Change, Document, Tab};
-use crate::{
-    actions, asmview, atlasview, audioview, compareview, cview, graphicsview, graphview,
-    headerband, hexview, inspector, lockstep, menu, navigatorview, results, sheets, sourceview,
-};
-
-/// The macOS toolbar switches the editor tabs to a menu below this width,
-/// because a control that does not fit goes to an overflow menu as blanks.
-const COMPACT_WIDTH: f64 = 1180.0;
+use crate::model::{Change, Document};
+use crate::tabgrid::{self, Grid};
+use crate::{actions, headerband, inspector, menu, navigatorview, results, sheets};
 
 pub fn open_document(app: &adw::Application, doc: Rc<Document>) -> adw::ApplicationWindow {
     let window = adw::ApplicationWindow::builder()
@@ -52,8 +46,9 @@ pub fn open_document(app: &adw::Application, doc: Rc<Document>) -> adw::Applicat
         doc.set_c_numbers(style);
     }
 
-    let (header, tab_group, tab_menu) = build_header(&doc);
-    let editor = editor_stack(&doc);
+    let header = build_header(&doc);
+    let grid = Grid::build(&doc);
+    let editor = grid.root.clone();
 
     let center = gtk::Box::new(gtk::Orientation::Vertical, 0);
     center.append(&headerband::build(&doc));
@@ -90,14 +85,16 @@ pub fn open_document(app: &adw::Application, doc: Rc<Document>) -> adw::Applicat
     view.set_content(Some(&body));
     window.set_content(Some(&view));
 
-    // Below the compact width the tab buttons give way to a menu.
+    // A narrow window shows only the focused group.
     let breakpoint = adw::Breakpoint::new(adw::BreakpointCondition::new_length(
         adw::BreakpointConditionLengthType::MaxWidth,
-        COMPACT_WIDTH,
+        tabgrid::COMPACT_WIDTH,
         adw::LengthUnit::Px,
     ));
-    breakpoint.add_setter(&tab_group, "visible", Some(&false.to_value()));
-    breakpoint.add_setter(&tab_menu, "visible", Some(&true.to_value()));
+    let g = Rc::clone(&grid);
+    breakpoint.connect_apply(move |_| g.set_compact(true));
+    let g = Rc::clone(&grid);
+    breakpoint.connect_unapply(move |_| g.set_compact(false));
     window.add_breakpoint(breakpoint);
 
     // Analysis runs off the main thread; the rows refetch when it lands,
@@ -108,9 +105,8 @@ pub fn open_document(app: &adw::Application, doc: Rc<Document>) -> adw::Applicat
     window
 }
 
-/// The header bar, and the two forms of the tab selector (the breakpoint
-/// swaps them).
-fn build_header(doc: &Rc<Document>) -> (adw::HeaderBar, gtk::Box, gtk::MenuButton) {
+/// The header bar: commands only.
+fn build_header(doc: &Rc<Document>) -> adw::HeaderBar {
     let header = adw::HeaderBar::new();
 
     let navigator = toggle_button(
@@ -118,27 +114,11 @@ fn build_header(doc: &Rc<Document>) -> (adw::HeaderBar, gtk::Box, gtk::MenuButto
         "win.toggle-navigator",
         "Show or hide the navigator (Ctrl+0)",
     );
-    let focus = toggle_button(
-        "view-fullscreen-symbolic",
-        "win.focus-on-code",
-        "Focus on Code: hide the panels (Ctrl+Alt+F)",
-    );
     header.pack_start(&navigator);
-    header.pack_start(&focus);
+    header.pack_start(&back_forward());
     let title = adw::WindowTitle::new(&doc.display_name(), &doc.subtitle());
-    header.pack_start(&title);
+    header.set_title_widget(Some(&title));
     titles(&title, doc);
-
-    let tab_group = tab_buttons(doc);
-    let tab_menu = tab_menu_button(doc);
-    tab_menu.set_visible(false);
-    let tabs = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    tabs.append(&tab_group);
-    tabs.append(&tab_menu);
-    tabs.set_spacing(8);
-    tabs.append(&graphics_menu(doc));
-    tabs.append(&audio_menu(doc));
-    header.set_title_widget(Some(&tabs));
 
     let primary = gtk::MenuButton::builder()
         .icon_name("open-menu-symbolic")
@@ -152,9 +132,7 @@ fn build_header(doc: &Rc<Document>) -> (adw::HeaderBar, gtk::Box, gtk::MenuButto
         "win.toggle-inspector",
         "Show or hide the inspector (Alt+0)",
     ));
-    header.pack_end(&address_style_button(doc));
-    header.pack_end(&back_forward());
-    (header, tab_group, tab_menu)
+    header
 }
 
 /// The window's title follows the project: its name, with a dot while it has
@@ -225,179 +203,6 @@ fn sync_panes(
     });
 }
 
-/// The centre of the window: one page per editor tab, with the listing
-/// replaced by a note until the first analysis has landed.
-fn editor_stack(doc: &Rc<Document>) -> gtk::Stack {
-    let stack = gtk::Stack::new();
-    stack.add_named(&hexview::build(doc).widget, Some("hex"));
-    stack.add_named(&asmview::build(doc).widget, Some("disassembly"));
-    stack.add_named(&lockstep::build(doc), Some("both"));
-    stack.add_named(&cview::build(doc), Some("c"));
-    stack.add_named(&graphview::build(doc), Some("graph"));
-    stack.add_named(&atlasview::build(doc), Some("atlas"));
-    stack.add_named(&sourceview::build(doc), Some("source"));
-    stack.add_named(&compareview::build(doc), Some("compare"));
-    stack.add_named(&graphicsview::build(doc), Some("graphics"));
-    stack.add_named(&audioview::build(doc), Some("audio"));
-    stack.add_named(
-        &adw::StatusPage::builder()
-            .icon_name("system-run-symbolic")
-            .title("Analyzing…")
-            .description(
-                "The disassembly appears when the first analysis finishes. \
-                 The Hex tab works meanwhile.",
-            )
-            .build(),
-        Some("analyzing"),
-    );
-    let show = {
-        let (stack, doc) = (stack.clone(), Rc::clone(doc));
-        move || {
-            let tab = doc.tab();
-            let page = if doc.graphics_tab().is_some() {
-                "graphics"
-            } else if doc.audio_tab().is_some() {
-                "audio"
-            } else if tab.needs_disassembly() && !doc.has_disassembly() {
-                "analyzing"
-            } else {
-                tab.id()
-            };
-            stack.set_visible_child_name(page);
-        }
-    };
-    show();
-    doc.subscribe(move |c| {
-        if matches!(c, Change::Layout | Change::Rows | Change::Status) {
-            show();
-        }
-    });
-    stack
-}
-
-/// The editor tabs as one linked group, the GNOME counterpart of the macOS
-/// segmented control. Source and Compare appear only when there is something
-/// to show.
-fn tab_buttons(doc: &Rc<Document>) -> gtk::Box {
-    let group = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    group.add_css_class("linked");
-    let mut buttons = Vec::new();
-    for tab in Tab::BUILT {
-        let button = gtk::ToggleButton::builder().label(tab.title()).build();
-        button.set_action_name(Some("win.show-tab"));
-        button.set_action_target_value(Some(&tab.id().to_variant()));
-        button.set_tooltip_text(Some(&tab_tooltip()));
-        button.set_visible(doc.tab_available(tab));
-        group.append(&button);
-        buttons.push((tab, button));
-    }
-    doc.subscribe({
-        let doc = Rc::clone(doc);
-        move |c| {
-            if matches!(c, Change::Source | Change::Compare | Change::Layout) {
-                for (tab, button) in &buttons {
-                    button.set_visible(doc.tab_available(*tab));
-                }
-            }
-        }
-    });
-    group
-}
-
-fn tab_tooltip() -> String {
-    "Hex (Alt+1), Disassembly (Alt+2), Both (Alt+3), C (Alt+8), Graph (Alt+9) or Atlas (Alt+Shift+A)"
-        .to_owned()
-}
-
-/// The Graphics picker, beside the tabs rather than inside them: eight tabs
-/// and six views is too wide, and the text tabs keep their place.
-fn graphics_menu(doc: &Rc<Document>) -> gtk::MenuButton {
-    use crate::model::graphics::Tab as G;
-    let menu = gio::Menu::new();
-    for tab in G::ALL {
-        menu.append(Some(tab.title()), Some(&format!("win.show-{}", tab.id())));
-    }
-    let button = gtk::MenuButton::builder()
-        .menu_model(&menu)
-        .label("Graphics")
-        .tooltip_text(
-            "Frame and Layers (from a recording), Tile Decoder (Alt+4), Palette (Alt+5), \
-             OAM (Alt+6) or Tilemap (Alt+7)",
-        )
-        .build();
-    doc.subscribe({
-        let (doc, button) = (Rc::clone(doc), button.clone());
-        move |c| {
-            if matches!(c, Change::Layout | Change::Graphics) {
-                button.set_label(doc.graphics_tab().map_or("Graphics", G::title));
-            }
-        }
-    });
-    button
-}
-
-/// The Audio picker, beside the Graphics one and built the same way
-/// (docs/23).
-fn audio_menu(doc: &Rc<Document>) -> gtk::MenuButton {
-    use crate::model::audio::Tab as A;
-    let menu = gio::Menu::new();
-    for tab in A::ALL {
-        menu.append(Some(tab.title()), Some(&format!("win.show-{}", tab.id())));
-    }
-    let button = gtk::MenuButton::builder()
-        .menu_model(&menu)
-        .label("Audio")
-        .tooltip_text(
-            "Voices, Samples or Audio RAM: the sound CPU from a recording, or from the ROM's \
-             upload run by Romlens",
-        )
-        .build();
-    doc.subscribe({
-        let (doc, button) = (Rc::clone(doc), button.clone());
-        move |c| {
-            if matches!(c, Change::Layout | Change::Audio) {
-                button.set_label(doc.audio_tab().map_or("Audio", A::title));
-            }
-        }
-    });
-    button
-}
-
-/// The same choice as a menu, for a window too narrow for the buttons.
-fn tab_menu_button(doc: &Rc<Document>) -> gtk::MenuButton {
-    let menu = gio::Menu::new();
-    let fill = {
-        let (menu, doc) = (menu.clone(), Rc::clone(doc));
-        move || {
-            menu.remove_all();
-            for tab in Tab::BUILT.into_iter().filter(|t| doc.tab_available(*t)) {
-                menu.append(
-                    Some(tab.title()),
-                    Some(&format!("win.show-tab::{}", tab.id())),
-                );
-            }
-        }
-    };
-    fill();
-    let button = gtk::MenuButton::builder()
-        .menu_model(&menu)
-        .label(doc.tab().title())
-        .tooltip_text(tab_tooltip())
-        .build();
-    doc.subscribe({
-        let (doc, button) = (Rc::clone(doc), button.clone());
-        move |c| {
-            if matches!(c, Change::Source | Change::Compare) {
-                fill();
-            }
-            if c == Change::Layout {
-                button.set_label(doc.tab().title());
-            }
-        }
-    });
-    button
-}
-
 fn back_forward() -> gtk::Box {
     let group = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     group.add_css_class("linked");
@@ -414,32 +219,6 @@ fn back_forward() -> gtk::Box {
         );
     }
     group
-}
-
-/// The address columns menu. A `MenuButton` whose label follows the current
-/// value, as the macOS button does.
-fn address_style_button(doc: &Rc<Document>) -> gtk::MenuButton {
-    let menu = gio::Menu::new();
-    for style in AddressStyle::ALL {
-        menu.append(
-            Some(style.label()),
-            Some(&format!("win.address-style::{}", actions::style_id(style))),
-        );
-    }
-    let button = gtk::MenuButton::builder()
-        .menu_model(&menu)
-        .label(doc.address_style().short_label())
-        .tooltip_text("Which address columns the editor shows")
-        .build();
-    doc.subscribe({
-        let (doc, button) = (Rc::clone(doc), button.clone());
-        move |c| {
-            if c == Change::AddressStyle {
-                button.set_label(doc.address_style().short_label());
-            }
-        }
-    });
-    button
 }
 
 /// The name of the welcome window, so opening a document can retire it.

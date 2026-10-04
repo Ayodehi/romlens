@@ -113,7 +113,7 @@ impl View {
     }
 
     fn refresh(&self) {
-        if self.doc.graphics_tab() != Some(gfx::Tab::Palette) {
+        if !self.doc.shows_graphics(gfx::Tab::Palette) {
             return;
         }
         *self.entries.borrow_mut() = self.doc.graphics().colours();

@@ -23,6 +23,7 @@ use crate::model::cfold::{self, Folder};
 use crate::model::decompile::{
     DecompileState, LEVELS, NUMBER_STYLES, bases, literal_value, utf16_to_chars,
 };
+use crate::model::workspace::Id;
 use crate::model::{CEdit, Change, Document};
 use crate::palette;
 
@@ -67,6 +68,8 @@ struct MenuTarget {
 
 struct Pane {
     doc: Rc<Document>,
+    /// The tab the pane is in: its own C.
+    item: Option<Id>,
     view: gtk::TextView,
     scroll: gtk::ScrolledWindow,
     gutter: gtk::DrawingArea,
@@ -102,9 +105,9 @@ struct Pane {
 }
 
 /// The whole tab: disassembly on the left, the C pane on the right.
-pub fn build(doc: &Rc<Document>) -> gtk::Widget {
-    let asm = asmview::build(doc);
-    let (root, pane) = Pane::build(doc);
+pub fn build(doc: &Rc<Document>, item: Option<Id>) -> gtk::Widget {
+    let asm = asmview::build(doc, item);
+    let (root, pane) = Pane::build(doc, item);
     // The closures the pane wires hold it weakly; the widget keeps it alive.
     root.connect_destroy(move |_| {
         let _ = &pane;
@@ -145,7 +148,7 @@ fn toggle_group(labels: &[&str], tip: &str) -> (gtk::Box, Vec<gtk::ToggleButton>
 }
 
 impl Pane {
-    fn build(doc: &Rc<Document>) -> (gtk::Widget, Rc<Self>) {
+    fn build(doc: &Rc<Document>, item: Option<Id>) -> (gtk::Widget, Rc<Self>) {
         let view = gtk::TextView::builder()
             .editable(false)
             .monospace(true)
@@ -234,6 +237,7 @@ impl Pane {
 
         let pane = Rc::new(Self {
             doc: Rc::clone(doc),
+            item,
             view,
             scroll,
             gutter,
@@ -487,7 +491,7 @@ impl Pane {
     fn update(self: &Rc<Self>) {
         let doc = &self.doc;
         let (state, level, numbers, generation, result) = {
-            let d = doc.decompile();
+            let d = doc.decompile_of(self.item);
             (
                 d.state.clone(),
                 d.level,
@@ -567,7 +571,7 @@ impl Pane {
             .map(|i| i.file_offset)
             .or_else(|| doc.selected());
         let lines = start
-            .map(|s| doc.decompile().lines_for_instruction(s))
+            .map(|s| doc.decompile_of(self.item).lines_for_instruction(s))
             .unwrap_or_default();
         if lines != *self.highlighted.borrow() {
             self.set_highlight(&lines, start != self.highlighted_for.get());
@@ -748,7 +752,10 @@ impl Pane {
             self.follow_version_line(&version, self.line_of(at));
             return;
         }
-        let offsets = self.doc.decompile().offsets_for_line(self.line_of(at));
+        let offsets = self
+            .doc
+            .decompile_of(self.item)
+            .offsets_for_line(self.line_of(at));
         let Some(first) = offsets.iter().min().copied() else {
             return;
         };
@@ -814,7 +821,11 @@ impl Pane {
 
     /// The routine shown.
     fn entry(&self) -> Option<u32> {
-        self.doc.decompile().result.as_ref().map(|r| r.entry)
+        self.doc
+            .decompile_of(self.item)
+            .result
+            .as_ref()
+            .map(|r| r.entry)
     }
 
     /// The version picked, if it still exists for the routine shown.
@@ -996,7 +1007,10 @@ impl Pane {
                         notes.append(Some(&format!("Name “{word}”…")), Some("c.name-local"));
                         target.local = Some((word, original));
                     }
-                    let offsets = self.doc.decompile().offsets_for_line(self.line_of(index));
+                    let offsets = self
+                        .doc
+                        .decompile_of(self.item)
+                        .offsets_for_line(self.line_of(index));
                     if let Some(a) = offsets.iter().min().and_then(|o| self.doc.snes_address(*o)) {
                         target.address = Some(a);
                         notes.append(Some("C Comment Here…"), Some("c.comment"));

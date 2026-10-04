@@ -142,7 +142,7 @@ fn mono_label(text: &str, chars: i32) -> gtk::Label {
 
 impl View {
     fn refresh(self: &Rc<Self>) {
-        if self.doc.audio_tab() != Some(Tab::Samples) {
+        if !self.doc.shows_audio(Tab::Samples) {
             return;
         }
         let a = self.doc.audio();

@@ -4,6 +4,11 @@
 //!
 //! Set up the state to capture with:
 //! - `ROMLENS_TAB`: the editor tab to show first (`hex`, `disassembly`)
+//! - `ROMLENS_OPEN`: comma-separated views to open in turn, by key
+//!   (`code.assembly`, `code.c`, `graphics.tiles`, `audio.voices`, `atlas`)
+//! - `ROMLENS_SPLIT`: comma-separated splits of the focused tab, `right` or
+//!   `down`, made after the views open
+//! - `ROMLENS_LAYOUT`: an Editor Layout preset (`two-columns`, `three`)
 //! - `ROMLENS_SELECT`: a file offset (decimal or 0x hex) to jump to
 //! - `ROMLENS_SIZE`: `WIDTHxHEIGHT` for the window
 //! - `ROMLENS_ACTIONS`: comma-separated window actions to run, each
@@ -92,6 +97,25 @@ pub fn maybe_capture(window: &adw::ApplicationWindow, doc: &Rc<Document>) {
         move || {
             if let Ok(tab) = std::env::var("ROMLENS_TAB") {
                 run_action(&window, &format!("show-tab::{tab}"));
+            }
+            for key in std::env::var("ROMLENS_OPEN").unwrap_or_default().split(',') {
+                if let Some(content) = crate::model::workspace::EditorContent::from_key(key.trim())
+                {
+                    doc.show(content);
+                }
+            }
+            for edge in std::env::var("ROMLENS_SPLIT")
+                .unwrap_or_default()
+                .split(',')
+            {
+                match edge.trim() {
+                    "right" => doc.split_focused(crate::model::workspace::DropEdge::Right),
+                    "down" => doc.split_focused(crate::model::workspace::DropEdge::Bottom),
+                    _ => {}
+                }
+            }
+            if let Ok(preset) = std::env::var("ROMLENS_LAYOUT") {
+                run_action(&window, &format!("editor-layout::{preset}"));
             }
             if let Ok(text) = std::env::var("ROMLENS_SELECT") {
                 let parsed = match text.strip_prefix("0x") {

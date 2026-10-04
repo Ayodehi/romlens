@@ -273,7 +273,9 @@ impl View {
         let Some((kind, id)) = self.doc.zoom_request() else {
             return;
         };
-        if id == self.zoom_id.get() || self.doc.tab() != Tab::Atlas {
+        if id == self.zoom_id.get()
+            || self.doc.focused_content() != Some(crate::model::workspace::EditorContent::Atlas)
+        {
             return;
         }
         self.zoom_id.set(id);

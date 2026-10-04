@@ -168,7 +168,7 @@ impl View {
     }
 
     fn refresh(&self) {
-        if self.doc.graphics_tab() != Some(gfx::Tab::Layers) {
+        if !self.doc.shows_graphics(gfx::Tab::Layers) {
             return;
         }
         let (frame, math, fit, has) = {

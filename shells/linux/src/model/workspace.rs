@@ -181,6 +181,22 @@ impl EditorContent {
         }
     }
 
+    /// The content a `singleton_key` names (for scripts and tests).
+    pub fn from_key(key: &str) -> Option<Self> {
+        let (kind, rest) = key.split_once('.').unwrap_or((key, ""));
+        Some(match kind {
+            "code" => EditorContent::Code(CodeRep::from_raw(rest)?),
+            "header" => EditorContent::Header,
+            "atlas" => EditorContent::Atlas,
+            "compare" => EditorContent::Compare,
+            "source" => EditorContent::Source,
+            "graphics" => EditorContent::Graphics(gfx_from_raw(rest)?),
+            "audio" => EditorContent::Audio(audio_from_raw(rest)?),
+            "tutor" => EditorContent::Tutor,
+            _ => return None,
+        })
+    }
+
     /// The view's name, as the sidebar and a tab say it.
     pub fn title(self) -> &'static str {
         match self {
@@ -1634,6 +1650,21 @@ mod tests {
         }
         for r in CodeRep::ALL {
             assert_eq!(CodeRep::from_raw(r.raw()), Some(r));
+        }
+        let every = CodeRep::ALL
+            .map(EditorContent::Code)
+            .into_iter()
+            .chain(gfx::Tab::ALL.map(EditorContent::Graphics))
+            .chain(audio::Tab::ALL.map(EditorContent::Audio))
+            .chain([
+                EditorContent::Header,
+                EditorContent::Atlas,
+                EditorContent::Compare,
+                EditorContent::Source,
+                EditorContent::Tutor,
+            ]);
+        for c in every {
+            assert_eq!(EditorContent::from_key(&c.singleton_key()), Some(c));
         }
     }
 

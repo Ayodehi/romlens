@@ -237,7 +237,7 @@ impl View {
     }
 
     fn refresh(self: &Rc<Self>) {
-        if self.doc.graphics_tab() != Some(gfx::Tab::Frame) {
+        if !self.doc.shows_graphics(gfx::Tab::Frame) {
             return;
         }
         let (frame, scale, image, selected) = {

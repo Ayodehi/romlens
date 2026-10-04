@@ -11,11 +11,14 @@ use gtk::{cairo, gdk};
 use crate::actions;
 use crate::canvas::{self, Metrics, VScroll, set_source, with_alpha};
 use crate::hex::{BYTES_PER_ROW, HexLayout, HexRow};
+use crate::model::workspace::Id;
 use crate::model::{Change, Document, EditorSource};
 use crate::palette;
 
 struct State {
     doc: Rc<Document>,
+    /// The tab the view is in, for the scroll requests meant for it.
+    item: Option<Id>,
     area: gtk::DrawingArea,
     scroll: VScroll,
     metrics: Cell<Metrics>,
@@ -46,7 +49,7 @@ impl HexPane {
     }
 }
 
-pub fn build(doc: &Rc<Document>) -> HexPane {
+pub fn build(doc: &Rc<Document>, item: Option<Id>) -> HexPane {
     let area = gtk::DrawingArea::builder()
         .hexpand(true)
         .vexpand(true)
@@ -57,6 +60,7 @@ pub fn build(doc: &Rc<Document>) -> HexPane {
     let scroll = VScroll::new(doc.row_count(), metrics.row_height);
     let state = Rc::new(State {
         doc: Rc::clone(doc),
+        item,
         area: area.clone(),
         scroll: scroll.clone(),
         metrics: Cell::new(metrics),
@@ -136,7 +140,7 @@ impl State {
 
     fn follow_scroll(&self) {
         self.scroll
-            .follow(self.doc.scroll_request(), None, &self.area, |offset| {
+            .follow(self.doc.scroll_request(), self.item, &self.area, |offset| {
                 Some(offset / BYTES_PER_ROW as u32)
             });
     }

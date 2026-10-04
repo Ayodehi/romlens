@@ -33,7 +33,7 @@ struct Pane {
 }
 
 pub fn build(doc: &Rc<Document>) -> gtk::Widget {
-    let asm = asmview::build(doc);
+    let asm = asmview::build(doc, None);
     let (root, pane) = Pane::build(doc);
     root.connect_destroy(move |_| {
         let _ = &pane;
@@ -234,7 +234,10 @@ impl Pane {
     }
 
     fn update(self: &Rc<Self>) {
-        if self.doc.tab() != crate::model::Tab::Source {
+        if !self
+            .doc
+            .shows(crate::model::workspace::EditorContent::Source)
+        {
             return;
         }
         // The file of the selected byte comes up on its own.

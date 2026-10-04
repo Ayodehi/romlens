@@ -11,11 +11,14 @@ use gtk::{cairo, gdk, pango};
 use crate::actions;
 use crate::asm::{AsmLayout, AsmLine, LineKind};
 use crate::canvas::{self, Metrics, VScroll, set_source, with_alpha};
+use crate::model::workspace::Id;
 use crate::model::{Change, Document, EditorSource};
 use crate::palette;
 
 struct State {
     doc: Rc<Document>,
+    /// The tab the view is in, for the scroll requests meant for it.
+    item: Option<Id>,
     area: gtk::DrawingArea,
     scroll: VScroll,
     hscroll: gtk::Adjustment,
@@ -38,7 +41,7 @@ impl AsmPane {
     }
 }
 
-pub fn build(doc: &Rc<Document>) -> AsmPane {
+pub fn build(doc: &Rc<Document>, item: Option<Id>) -> AsmPane {
     let area = gtk::DrawingArea::builder()
         .hexpand(true)
         .vexpand(true)
@@ -50,6 +53,7 @@ pub fn build(doc: &Rc<Document>) -> AsmPane {
     let hscroll = gtk::Adjustment::new(0.0, 0.0, 1.0, 16.0, 120.0, 1.0);
     let state = Rc::new(State {
         doc: Rc::clone(doc),
+        item,
         area: area.clone(),
         scroll: scroll.clone(),
         hscroll: hscroll.clone(),
@@ -150,7 +154,7 @@ impl State {
     fn follow_scroll(&self) {
         let doc = &self.doc;
         self.scroll
-            .follow(doc.scroll_request(), None, &self.area, |offset| {
+            .follow(doc.scroll_request(), self.item, &self.area, |offset| {
                 doc.line_for_offset(offset)
             });
     }
