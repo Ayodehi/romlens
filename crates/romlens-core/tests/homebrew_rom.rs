@@ -101,6 +101,17 @@ fn size_limits() {
     );
 }
 
+/// A file that never ends is refused after the largest image's worth, not
+/// read until memory runs out.
+#[cfg(unix)]
+#[test]
+fn an_endless_file_is_refused_as_too_large() {
+    assert!(matches!(
+        RomImage::load("/dev/zero"),
+        Err(RomError::TooLarge { .. })
+    ));
+}
+
 /// Both slots carry a complete, complement-valid header; only the map-mode
 /// byte differs, and it decides.
 #[test]
