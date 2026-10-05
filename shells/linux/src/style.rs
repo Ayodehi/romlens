@@ -22,6 +22,12 @@ const CSS: &str = "
    macOS tab bar does (docs/29). */
 .romlens-group.focused tabbar tab:selected { box-shadow: inset 0 2px @accent_bg_color; }
 .romlens-group tabbar .box { min-height: 30px; }
+/* Where a dragged tab would land: the accent at 18%, edged. */
+.romlens-drop-preview {
+    background: alpha(@accent_bg_color, 0.18);
+    border: 1px solid @accent_bg_color;
+    border-radius: 5px;
+}
 .romlens-idiom {
     border-radius: 8px;
     padding: 10px;
