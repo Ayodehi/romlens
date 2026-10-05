@@ -1778,9 +1778,7 @@ impl Document {
             (c.current_ticket(), other)
         };
         let generation = self.generation.get();
-        // Counted as refreshed now, so a burst of edits runs it once per
-        // generation rather than once per event.
-        self.compare.borrow_mut().refreshed(None, generation);
+        self.compare.borrow_mut().refreshing(generation);
         let this = Arc::clone(self.workbench());
         let weak = self.me.borrow().clone();
         background(
@@ -2592,6 +2590,21 @@ fn tutor_utc_offset() -> i32 {
         .unwrap_or(0)
 }
 
+impl Document {
+    /// The window is gone. Nothing may go on running, or spending, for it:
+    /// the tutor's turn, the analysis, the sound, a live session and a
+    /// comparison all stop. Clearing the listeners lets go of the window's
+    /// closures, which hold the document, so it is freed.
+    pub fn close(&self) {
+        self.tutor.borrow_mut().close();
+        self.session.close();
+        self.audio.borrow_mut().shut_down();
+        self.graphics.borrow_mut().stop_live();
+        self.compare.borrow_mut().close();
+        self.listeners.borrow_mut().clear();
+    }
+}
+
 impl Drop for Document {
     fn drop(&mut self) {
         // A closed window must not leave an analysis running for it.
@@ -2645,6 +2658,26 @@ mod tests {
         d.start_analysis();
         rt.pump();
         (d, rt)
+    }
+
+    /// Closing stops what was running for the window and frees the document,
+    /// although a listener (as every view's is) holds it.
+    #[test]
+    fn closing_stops_the_work_and_frees_the_document() {
+        let (d, rt) = doc();
+        d.subscribe({
+            let held = Rc::clone(&d);
+            move |_| {
+                let _ = &held;
+            }
+        });
+        d.start_analysis();
+        d.close();
+        let (session, weak) = (Rc::clone(&d.session), Rc::downgrade(&d));
+        drop(d);
+        rt.pump();
+        assert!(weak.upgrade().is_none(), "nothing keeps a closed document");
+        assert!(!session.analysis().is_running());
     }
 
     #[test]

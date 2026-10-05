@@ -37,8 +37,15 @@ fn filters(items: &[(&str, &[&str])]) -> gio::ListStore {
     store
 }
 
-/// Where Mesen's recorder script writes its streams, if Mesen is installed
-/// the usual way: its settings folder's `LuaScriptData`.
+/// Where Mesen's recorder script writes its streams: `~/Documents/Romlens/
+/// Recordings`, where they are easy to find and clear out (the script names
+/// it from `$HOME`, not the XDG documents folder).
+pub fn recordings_folder() -> Option<PathBuf> {
+    std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Documents/Romlens/Recordings"))
+}
+
+/// Where earlier versions of the script wrote them, if Mesen is installed the
+/// usual way: its settings folder's `LuaScriptData`.
 pub fn mesen_script_data() -> Option<PathBuf> {
     let config = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
@@ -64,7 +71,10 @@ pub fn open(window: &adw::ApplicationWindow, doc: &Rc<Document>) {
             &["romrec", "rlstream"],
         )]))
         .build();
-    if let Some(dir) = mesen_script_data() {
+    if let Some(dir) = recordings_folder()
+        .filter(|d| d.is_dir())
+        .or_else(mesen_script_data)
+    {
         dialog.set_initial_folder(Some(&gio::File::for_path(dir)));
     }
     let (window, doc) = (window.clone(), Rc::clone(doc));
@@ -107,22 +117,26 @@ pub fn pack(window: &adw::ApplicationWindow, doc: &Rc<Document>, stream: &Path) 
         None
     });
     let (window, doc_done, out_done) = (window.clone(), Rc::clone(doc), out.clone());
-    doc.pack_recording(stream.to_path_buf(), out, move |result| {
+    let stream = stream.to_path_buf();
+    doc.pack_recording(stream.clone(), out, move |result| {
         doc_done.edit_graphics(|g| {
             g.packing = None;
             None
         });
         match result {
             Ok(summary) => {
-                if attach(&window, &doc_done, &out_done, false) && summary.truncated {
-                    alert(
-                        Some(window.upcast_ref()),
-                        "The recording was cut short",
-                        &format!(
-                            "Mesen closed before the recorder finished; every whole frame, {} of them, was kept.",
-                            summary.frames
-                        ),
-                    );
+                if attach(&window, &doc_done, &out_done, false) {
+                    if summary.truncated {
+                        alert(
+                            Some(window.upcast_ref()),
+                            "The recording was cut short",
+                            &format!(
+                                "Mesen closed before the recorder finished; every whole frame, {} of them, was kept.",
+                                summary.frames
+                            ),
+                        );
+                    }
+                    offer_to_trash(&window, &stream);
                 }
             }
             Err(e) => alert(
@@ -177,6 +191,40 @@ pub fn attach(
             false
         }
     }
+}
+
+/// The raw stream is far larger than the recording packed from it and is not
+/// needed once packed, so offer to put it in the Trash. The logs beside it
+/// stay.
+fn offer_to_trash(window: &adw::ApplicationWindow, stream: &Path) {
+    let size = std::fs::metadata(stream).map_or(0, |m| m.len());
+    let name = stream
+        .file_name()
+        .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+    let dialog = adw::AlertDialog::new(
+        Some("Move the raw stream to the Trash?"),
+        Some(&format!(
+            "{name} ({}) has been packed into a recording and is not needed to open it.",
+            glib::format_size(size)
+        )),
+    );
+    dialog.add_response("keep", "Keep");
+    dialog.add_response("trash", "Move to Trash");
+    dialog.set_response_appearance("trash", adw::ResponseAppearance::Destructive);
+    dialog.set_close_response("keep");
+    let (parent, stream) = (window.clone(), stream.to_path_buf());
+    dialog.choose(Some(window), gio::Cancellable::NONE, move |response| {
+        if response != "trash" {
+            return;
+        }
+        if let Err(e) = gio::File::for_path(&stream).trash(gio::Cancellable::NONE) {
+            alert(
+                Some(parent.upcast_ref()),
+                "The stream could not be moved to the Trash",
+                &e.to_string(),
+            );
+        }
+    });
 }
 
 fn offer_recovery(window: &adw::ApplicationWindow, doc: &Rc<Document>, path: &Path, reason: &str) {

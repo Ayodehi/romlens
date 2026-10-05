@@ -490,6 +490,11 @@ fn install(app: &adw::Application, window: &adw::ApplicationWindow, doc: &Rc<Doc
         }
     });
 
+    window.connect_destroy({
+        let doc = Rc::clone(doc);
+        move |_| doc.close()
+    });
+
     accept_drops(app, window.upcast_ref());
 }
 

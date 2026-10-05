@@ -559,6 +559,22 @@ impl TutorModel {
         }
     }
 
+    /// The project is closing: every card still waiting says no, and the
+    /// turn stops, so nothing goes on spending for a window that is gone.
+    pub fn close(&mut self) {
+        let waiting: Vec<String> = self
+            .live
+            .iter()
+            .flat_map(|l| &l.cards)
+            .filter(|c| c.state == CardState::Waiting)
+            .map(|c| c.proposal.id.clone())
+            .collect();
+        for id in waiting {
+            self.answer_card(&id, false, None, false);
+        }
+        self.stop();
+    }
+
     pub fn answer_card(&mut self, id: &str, accept: bool, why: Option<String>, and_the_rest: bool) {
         self.accept_rest = accept && and_the_rest;
         if let Some(s) = &self.session {

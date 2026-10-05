@@ -13,8 +13,10 @@ hover names on header spans (0.4, 0.6), the launch log line (0.12), the
 undo title in the menu (1.12), and the traced-bytes line in the analysis
 status (2.3). Phase 3 to 5 rows are built on Linux, and so is 6A, the tutor. The sound output opens a real
 device and plays, but whether it sounds right is a by-ear check not yet done. The live session is covered by a
-test against a replayed stream, not yet run against Mesen, and Mesen's Linux
-script data folder (`~/.config/Mesen2/LuaScriptData`) is assumed, not checked.
+test against a replayed stream, not yet run against Mesen. Open Recording
+starts in `~/Documents/Romlens/Recordings`, where the recorder now writes, else
+Mesen's Linux script data folder (`~/.config/Mesen2/LuaScriptData`), which is
+assumed, not checked.
 The tutor is covered against the scripted loopback server the core's own tests
 use, never a real provider, and its keys against an in-memory store, not a real
 Secret Service: the keyring check (item 52's Keychain twin) is by hand.

@@ -139,7 +139,11 @@ impl GraphModel {
     pub fn finish(&mut self, run: Key, outcome: Result<Built, String>) -> Option<Key> {
         self.running = false;
         let key = self.key?;
-        if key.entry == run.entry && key.mode == run.mode {
+        // Blocks hold the listing's offsets, so blocks built against an older
+        // listing are not shown over the new one (the macOS twin read lines
+        // the batch lacked); calls hold only addresses and still show.
+        let current = key.generation == run.generation || run.mode == GraphMode::Calls;
+        if key.entry == run.entry && key.mode == run.mode && current {
             match outcome {
                 Ok(built) => self.install(built, run),
                 Err(e) if key == run => self.state = GraphState::Failed(e),
@@ -271,6 +275,10 @@ mod tests {
         let next = g
             .finish(first, build(&wb, first))
             .expect("then the newer one");
+        assert!(
+            g.blocks.is_none(),
+            "blocks of the older listing are not shown"
+        );
         assert_eq!(next.generation, 2);
         assert!(g.finish(next, build(&wb, next)).is_none());
     }

@@ -1,5 +1,6 @@
 //! A loaded ROM: payload, detected mapping, parsed header, identity.
 
+use std::io::Read;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -81,13 +82,20 @@ impl RomImage {
     pub fn load(path: impl AsRef<Path>) -> Result<Self, RomError> {
         let path = path.as_ref();
         // Too large even with a copier header: refused before it is read.
+        let limit = MAX_ROM_LEN + COPIER_HEADER_LEN;
         let len = std::fs::metadata(path)?.len();
-        if len > (MAX_ROM_LEN + COPIER_HEADER_LEN) as u64 {
+        if len > limit as u64 {
             return Err(RomError::TooLarge {
                 len: usize::try_from(len).unwrap_or(usize::MAX),
             });
         }
-        let bytes = std::fs::read(path)?;
+        // A device or pipe gives no length (`/dev/zero` reads as 0 bytes
+        // long and never ends), so the read stops one byte past the limit
+        // and that byte makes it too large.
+        let mut bytes = Vec::new();
+        std::fs::File::open(path)?
+            .take(limit as u64 + 1)
+            .read_to_end(&mut bytes)?;
         let name = path
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())

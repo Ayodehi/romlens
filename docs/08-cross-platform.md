@@ -223,8 +223,11 @@ same way.
   `.romlens` folder, because a file chooser cannot offer both. The Source and
   Compare tabs appear only when there are imported sources or a comparison, and
   View › Source and Compare are greyed out otherwise, as on macOS.
-- **Recordings and live sessions.** Open Recording takes a `.romrec`, or an
-  `.rlstream`, which is packed into `$XDG_DATA_HOME/romlens/Recordings` first.
+- **Recordings and live sessions.** Open Recording starts in
+  `~/Documents/Romlens/Recordings`, where the recorder script writes (named
+  from `$HOME`, as the script does, not the XDG documents folder), and takes a
+  `.romrec`, or an `.rlstream`, which is packed into
+  `$XDG_DATA_HOME/romlens/Recordings` first and may then be moved to the Trash.
   A recording is read where it is and never copied; the project keeps its path
   and fingerprint. The live session listens on the loopback address only, so a
   Flatpak needs no extra permission for it. Live Session is a check item in the
