@@ -20,6 +20,15 @@ assumed, not checked.
 The tutor is covered against the scripted loopback server the core's own tests
 use, never a real provider, and its keys against an in-memory store, not a real
 Secret Service: the keyring check (item 52's Keychain twin) is by hand.
+The workspace (`29-workspace.md`) is built on Linux too, from 4 October
+2026: the sidebar, tab groups in a grid with the edge drops, the jump bar
+and Open Quickly, the status bar, the tutor in the drawer and as a tab, the
+cited lines outlined, the layout in `local.json` and the Pseudo-C tab. Its
+model is the macOS tests' twin (`model/workspace.rs`, `model/sidebar.rs`,
+`model/quick.rs` and the document's tests); steps 74 to 79 below, with
+real drags, are still to run on Linux, as on macOS. Linux has no hex
+column header yet (0.4), so the address columns are in the editor's menu
+and View only.
 
 Status: macOS ✅ done, 🧪 built and covered by the app test bundle but not
 yet verified by hand, ⬜ not yet; Windows and Linux start after macOS
@@ -542,7 +551,9 @@ Quiz additions (`28-quizzes.md`, still to run):
     earns its points once; with Show points and achievements off, no
     points, rank or toasts show, but the map still shows proven and due.
 
-Workspace additions (`29-workspace.md`, still to run):
+Workspace additions (`29-workspace.md`, still to run on both shells; on
+Linux the overlay is the accent colour, the tab bar's own insertion mark
+shows the place, and Ctrl+Alt+digit focuses a group):
 
 74. Splitting by dragging (29): drag a tab over another group; the blue
     overlay fills the middle, then the half nearest each edge as the

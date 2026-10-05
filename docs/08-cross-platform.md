@@ -206,12 +206,33 @@ same way.
   Every command is a named `gio` action, so a menu item, a shortcut and a
   button reach it the same way; a command whose feature is not built yet is
   listed and insensitive.
+- **The workspace (docs/29, October 2026).** The window follows the macOS
+  workspace: the sidebar (`sidebar.rs`) lists every view by its chip, then
+  the symbols; the editor is tab groups in a grid (`tabgrid.rs`), each an
+  `AdwTabBar` over an `AdwTabView`, the grid nested `gtk::Paned`s built from
+  the workspace's tree (`model/workspace.rs`), which is the truth: the tab
+  widgets tell the document what the person did and are made to match what
+  it then says. A tab dragged out of a bar carries its `AdwTabPage`, which a
+  drop target on each group's view takes for the edge splits; a tab is never
+  torn off into a window. The TabView's own Alt+digit and Ctrl+Page keys are
+  off, since Alt+digit are the views. The header bar holds the panels, Back
+  and Forward, the jump bar (`jumpbar.rs`), Open Quickly and the menu; the
+  window's title keeps the project's name. The strip and the analysis are a
+  status bar under the groups (`statusbar.rs`). The layout is kept in
+  `local.json` in the macOS shell's JSON, with the macOS bookmark written
+  back as it was read.
 - **Shortcuts.** Ctrl stands for Command and Alt for Option, with the view
   tabs on Alt+digit (as GNOME terminals and browsers switch tabs) and the
   tutor, live session and compare on Alt+Shift, because Ctrl+Alt combinations
   collide with desktop bindings. The one table is `ACCELS` in
   `shells/linux/src/actions.rs`; the Keyboard Shortcuts window is built from
   it, and tests fail if two commands share a shortcut or the window omits one.
+  The workspace's keys: Close Tab Ctrl+W and Close Window Ctrl+Shift+W (⌘W
+  and ⇧⌘W); Split Right Ctrl+\ and Split Down Ctrl+Shift+\ (⌘\ and ⌥⌘\);
+  Next and Previous Tab Ctrl+Page Down and Up, as GNOME does (⇧⌘] and ⇧⌘[);
+  Focus Group 1 to 4 Ctrl+Alt+1 to 4 (⌃1 to ⌃4: Ctrl+digit is already the
+  address columns and Alt+digit the views); Open Quickly Ctrl+P (⇧⌘O, which
+  is Open Project here).
 - **Projects.** A `.romlens` package is a folder, so Open ROM and Open Project
   are separate commands (a file chooser cannot offer both). A project that has
   a file is saved when its window closes and every 30 seconds, as
@@ -237,17 +258,19 @@ same way.
   plug. The DSP runs at 32 kHz and is rendered ahead into a lock-free ring on
   its own thread; the device callback resamples to the device's rate and never
   allocates, locks or calls into the core.
-- **Tutor.** One Tutor window per project, transient for its project window and
-  closed with it. Keys live in the Secret Service through libsecret (schema
+- **Tutor.** No window of its own (docs/29): the tutor is a tab of the
+  inspector's drawer (`drawer.rs`) and can be opened as a tab of the grid, two
+  views of the document's one conversation. Keys live in the Secret Service through libsecret (schema
   `io.github.ayodehi.Romlens.tutor`, attribute `endpoint`), never in the
   settings file `$XDG_CONFIG_HOME/romlens/tutor.json` or a project; where no
   Secret Service is running no key can be saved. Conversations are kept under
   `$XDG_DATA_HOME/romlens/Tutor`, not in the project. Answers are Markdown drawn
-  as GTK labels: prose as Pango markup with each citation a link into the main
-  window and each glossary term a link to a bubble, code in the C view's
+  as GTK labels: prose as Pango markup with each citation a link into the
+  window's tabs (beside the tutor's tab when that has focus; pointing at a
+  paragraph outlines the lines it cites) and each glossary term a link to a bubble, code in the C view's
   colours, tables as grids. The Settings window carries the macOS Settings pages
   (General, Providers, Tutor, Images, Privacy) as an `AdwPreferencesDialog`.
-  Lessons, the map, progress and the quiz are dialogs over the Tutor window.
+  Lessons, the map, progress and the quiz are dialogs over the project window.
 - **Packaging.** The shell's data lives in `shells/linux/data`: the desktop file,
   AppStream metainfo, a shared-mime-info file for `.romrec`, `.rlstream` and
   `.spclog` (the ROM type is shared-mime-info's own; a `.romlens` project is a
