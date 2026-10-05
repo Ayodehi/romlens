@@ -211,7 +211,7 @@ fn view_items() -> Vec<gio::Menu> {
         ("File Offset Only", "win.address-style::file"),
     ]);
     let panes = section(&[
-        ("Show Navigator", "win.toggle-navigator"),
+        ("Show Sidebar", "win.toggle-navigator"),
         ("Show Inspector", "win.toggle-inspector"),
         ("Show Overview Strip", "win.toggle-strip"),
         ("Show Results", "win.toggle-results"),

@@ -24,6 +24,7 @@ pub mod runtime;
 pub mod screen;
 pub mod search;
 pub mod session;
+pub mod sidebar;
 pub mod source;
 pub mod strip;
 #[cfg(test)]

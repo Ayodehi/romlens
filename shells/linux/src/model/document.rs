@@ -2131,11 +2131,9 @@ impl Document {
             d.numbers = style;
             d.invalidate();
         }
-        crate::config::Settings {
-            hide_explanations: !self.explanations(),
-            c_numbers: super::decompile::number_style_name(style).to_owned(),
-        }
-        .save();
+        let mut saved = crate::config::Settings::load();
+        saved.c_numbers = super::decompile::number_style_name(style).to_owned();
+        saved.save();
         self.refresh_decompile();
     }
 
