@@ -1,7 +1,9 @@
-//! The band under the toolbar: the whole ROM as a strip, and what the
-//! analyzer made of it. The swatches double as the strip's legend, so the
-//! numbers and the picture are one thing rather than two. The macOS twin is
-//! `RomHeaderBand`.
+//! The status bar under the tab groups (docs/29): the whole ROM as a slim
+//! strip to click, and what the analyzer made of it. The swatches double as
+//! the strip's legend, so the numbers and the picture are one thing rather
+//! than two. It was a band over the editor, which put it above every view,
+//! the sound views included. Focus on Code hides it. The macOS twin is
+//! `WorkspaceStatusBar`.
 
 use std::rc::Rc;
 
@@ -14,14 +16,16 @@ use crate::{palette, stripview};
 pub fn build(doc: &Rc<Document>) -> gtk::Box {
     let band = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
-        .spacing(6)
+        .spacing(4)
         .margin_start(12)
         .margin_end(12)
-        .margin_top(8)
-        .margin_bottom(8)
+        .margin_top(4)
+        .margin_bottom(4)
         .build();
 
     let strip = stripview::build(doc);
+    strip.set_height_request(10);
+    strip.set_tooltip_text(Some("The whole ROM, one column per pixel. Click to jump."));
     // Rounded like the macOS strip; clipped by the frame.
     let frame = gtk::Frame::new(None);
     frame.set_child(Some(&strip));
@@ -37,10 +41,16 @@ pub fn build(doc: &Rc<Document>) -> gtk::Box {
     status.add_css_class("numeric");
     band.append(&status);
 
+    let bar = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    bar.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+    bar.append(&band);
+
     let refresh = {
-        let (doc, status, frame) = (Rc::clone(doc), status.clone(), frame.clone());
+        let (doc, status, frame, bar) =
+            (Rc::clone(doc), status.clone(), frame.clone(), bar.clone());
         move || {
             frame.set_visible(doc.panes().strip);
+            bar.set_visible(!doc.is_focused());
             rebuild_status(&status, &doc);
         }
     };
@@ -50,7 +60,7 @@ pub fn build(doc: &Rc<Document>) -> gtk::Box {
             refresh();
         }
     });
-    band
+    bar
 }
 
 fn rebuild_status(status: &gtk::Box, doc: &Rc<Document>) {
