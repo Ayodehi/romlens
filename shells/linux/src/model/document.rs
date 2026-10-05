@@ -242,6 +242,8 @@ pub struct Document {
     /// The lines the paragraph pointed at in an answer cites, outlined in the
     /// Assembly and Hex tabs.
     citation_highlight: RefCell<Vec<std::ops::Range<u32>>>,
+    /// The inspector's drawer shows the tutor (docs/29).
+    tutor_in_drawer: Cell<bool>,
     source: RefCell<SourceModel>,
     graphics: RefCell<GraphicsModel>,
     audio: RefCell<AudioModel>,
@@ -346,6 +348,7 @@ impl Document {
             code_titles: RefCell::new(HashMap::new()),
             label_index: RefCell::new(Vec::new()),
             citation_highlight: RefCell::new(Vec::new()),
+            tutor_in_drawer: Cell::new(false),
             source: RefCell::new(SourceModel::default()),
             graphics: RefCell::new(GraphicsModel::new(Arc::clone(&rom_for_graphics))),
             audio: RefCell::new(AudioModel::new(
@@ -1051,9 +1054,35 @@ impl Document {
         self.citation_highlight.borrow().clone()
     }
 
-    /// The tutor as a tab (docs/29): the sidebar's Tutor and Open Quickly.
+    /// The tutor as a tab (docs/29): the drawer's button, Open Quickly. The
+    /// drawer goes back to the inspector, so the window does not show the
+    /// conversation twice.
     pub fn show_tutor_tab(&self) {
+        self.tutor_in_drawer.set(false);
         self.show(EditorContent::Tutor);
+        self.emit(Change::Layout);
+    }
+
+    /// Whether the inspector's drawer shows the tutor rather than the
+    /// inspector.
+    pub fn tutor_in_drawer(&self) -> bool {
+        self.tutor_in_drawer.get()
+    }
+
+    /// View › Show Tutor (Alt+Shift+T): the drawer, on its Tutor tab, shown.
+    pub fn show_tutor_in_drawer(&self) {
+        self.tutor_in_drawer.set(true);
+        if !self.panes().inspector {
+            self.set_pane(|p| &mut p.inspector, true);
+        }
+        self.emit(Change::Layout);
+    }
+
+    /// The drawer's tabs: the inspector, or the tutor.
+    pub fn set_tutor_in_drawer(&self, tutor: bool) {
+        if self.tutor_in_drawer.replace(tutor) != tutor {
+            self.emit(Change::Layout);
+        }
     }
 
     // MARK: Graphics
@@ -4405,6 +4434,32 @@ mod tests {
         assert!(d.follow_citation(tutor::Citation::Routine(0x00_8020)));
         assert_eq!(d.workspace().layout().groups().len(), 2);
         assert_eq!(d.tab(), Tab::C);
+    }
+
+    #[test]
+    fn the_tutor_shows_in_the_drawer_and_as_a_tab_not_both() {
+        let (d, _) = routines_doc();
+        d.set_pane(|p| &mut p.inspector, false);
+        d.show_tutor_in_drawer();
+        assert!(
+            d.tutor_in_drawer() && d.panes().inspector,
+            "the drawer opens on it"
+        );
+        d.show_tutor_tab();
+        assert!(
+            !d.tutor_in_drawer(),
+            "the drawer goes back to the inspector"
+        );
+        assert_eq!(d.focused_content(), Some(EditorContent::Tutor));
+        assert_eq!(
+            d.workspace()
+                .layout()
+                .items()
+                .iter()
+                .filter(|i| i.content == EditorContent::Tutor)
+                .count(),
+            1
+        );
     }
 
     #[test]

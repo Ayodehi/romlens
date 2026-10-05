@@ -225,7 +225,7 @@ fn step(doc: &Rc<Document>, lesson: &LessonInfo, i: usize, on_link: &OnLink) -> 
         button.set_halign(gtk::Align::Start);
         let (doc, f) = (Rc::clone(doc), f.clone());
         button.connect_clicked(move |_| {
-            messageview::follow(&doc, &f, false);
+            messageview::follow(&doc, &f);
         });
         b.append(&button);
     }
@@ -383,12 +383,12 @@ fn controls(doc: &Rc<Document>, lesson: &LessonInfo, at: usize) -> gtk::Widget {
     row.upcast()
 }
 
-/// Moves the card to step `to`, and the main window to what it is about.
+/// Moves the card to step `to`, and the window's tabs to what it is about.
 fn go(doc: &Rc<Document>, lesson: &LessonInfo, to: usize) {
     if to >= lesson.steps.len() {
         return;
     }
     if let Some(focus) = doc.edit_tutor(|t| t.show_step(lesson, to)) {
-        messageview::follow(doc, &focus, false);
+        messageview::follow(doc, &focus);
     }
 }

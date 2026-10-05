@@ -58,8 +58,13 @@ pub fn build(doc: &Rc<Document>) -> gtk::Widget {
     ];
     for (i, w) in parts.into_iter().enumerate() {
         if i > 0 {
+            // Each part after the first brings its own separator, shown
+            // only while the part is.
             let sep = gtk::Image::from_icon_name("go-next-symbolic");
             sep.add_css_class("dim-label");
+            w.bind_property("visible", &sep, "visible")
+                .sync_create()
+                .build();
             bar.append(&sep);
         }
         bar.append(w);

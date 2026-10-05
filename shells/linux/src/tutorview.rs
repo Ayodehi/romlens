@@ -1,6 +1,6 @@
-//! The Tutor window (docs/24): the conversation, then the composer, then a
-//! status line. One per project, a second window beside the main one. The
-//! macOS twin is `TutorView`, `TranscriptView`, `ComposerArea`, `EditCard`
+//! The Tutor (docs/24, docs/29): the conversation, then the composer, then a
+//! status line. It lives in the inspector's drawer, or in a tab of the
+//! window; there is no Tutor window any more. The macOS twin is `TutorView`, `TranscriptView`, `ComposerArea`, `EditCard`
 //! and `StatusLine`.
 
 use std::cell::{Cell, RefCell};
@@ -18,53 +18,28 @@ use crate::model::{Change, Document};
 use crate::tutorsheets;
 
 thread_local! {
-    /// The window of each open ROM's Tutor, by payload hash.
-    static WINDOWS: RefCell<Vec<(String, glib::WeakRef<adw::Window>)>> = const { RefCell::new(Vec::new()) };
-    /// The views behind them.
+    /// Every tutor view open, for a setting changed in Settings.
     static VIEWS: RefCell<Vec<std::rc::Weak<View>>> = const { RefCell::new(Vec::new()) };
 }
 
-/// View > Show Tutor: the project's Tutor window, made on first use and
-/// brought forward after.
-pub fn open(app: &adw::Application, parent: &adw::ApplicationWindow, doc: &Rc<Document>) {
-    let sha = doc.info.sha256.clone();
-    let existing = WINDOWS.with(|w| {
-        let mut w = w.borrow_mut();
-        w.retain(|(_, x)| x.upgrade().is_some());
-        w.iter()
-            .find(|(s, _)| *s == sha)
-            .and_then(|(_, x)| x.upgrade())
-    });
-    if let Some(w) = existing {
-        w.present();
-        return;
-    }
-    let window = adw::Window::builder()
-        .application(app)
-        .title("Tutor")
-        .default_width(520)
-        .default_height(720)
-        // It belongs to the project's window: it goes when that does.
-        .transient_for(parent)
-        .destroy_with_parent(true)
-        .build();
-    let view = View::build(app, doc, &window);
-    window.set_content(Some(&view.root));
-    // The window keeps its view, and the view the document.
-    window.connect_destroy({
+/// The tutor for a project's window: in the inspector's drawer, or as a tab
+/// (docs/29). Several views can show one conversation, which is the
+/// document's; each is made when it first shows.
+pub fn build(doc: &Rc<Document>) -> gtk::Widget {
+    let view = View::build(doc);
+    // The widget keeps its view, and the view the document.
+    view.root.connect_destroy({
         let view = Rc::clone(&view);
         move |_| {
             let _ = &view;
         }
     });
-    WINDOWS.with(|w| w.borrow_mut().push((sha, window.downgrade())));
     VIEWS.with(|v| {
         let mut v = v.borrow_mut();
         v.retain(|x| x.strong_count() > 0);
         v.push(Rc::downgrade(&view));
     });
-    window.present();
-    view.composer.grab_focus();
+    view.root.clone().upcast()
 }
 
 /// A Tutor setting changed: every open Tutor shows it.
@@ -82,20 +57,8 @@ pub fn settings_changed() {
     }
 }
 
-/// The project's Tutor window, if it is open.
-pub fn window_for(sha256: &str) -> Option<adw::Window> {
-    WINDOWS.with(|w| {
-        w.borrow()
-            .iter()
-            .find(|(s, _)| s == sha256)
-            .and_then(|(_, x)| x.upgrade())
-    })
-}
-
 struct View {
     doc: Rc<Document>,
-    app: adw::Application,
-    window: adw::Window,
     root: adw::ToolbarView,
     scroll: gtk::ScrolledWindow,
     history_box: gtk::Box,
@@ -151,7 +114,7 @@ fn icon_toggle(icon: &str, tip: &str) -> gtk::ToggleButton {
 }
 
 impl View {
-    fn build(app: &adw::Application, doc: &Rc<Document>, window: &adw::Window) -> Rc<Self> {
+    fn build(doc: &Rc<Document>) -> Rc<Self> {
         // The transcript.
         let history_box = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
@@ -334,7 +297,11 @@ impl View {
         overlay.add_overlay(&banner);
 
         let title = adw::WindowTitle::new("Tutor", "");
-        let header = adw::HeaderBar::new();
+        // Inside the window, not a window: no window buttons.
+        let header = adw::HeaderBar::builder()
+            .show_start_title_buttons(false)
+            .show_end_title_buttons(false)
+            .build();
         header.set_title_widget(Some(&title));
         let new = gtk::Button::from_icon_name("list-add-symbolic");
         new.set_tooltip_text(Some("New conversation (/new)"));
@@ -348,8 +315,6 @@ impl View {
 
         let view = Rc::new(Self {
             doc: Rc::clone(doc),
-            app: app.clone(),
-            window: window.clone(),
             root,
             scroll,
             history_box,
@@ -405,7 +370,7 @@ impl View {
                 });
                 return true;
             }
-            messageview::follow(&v.doc, uri, true)
+            messageview::follow(&v.doc, uri)
         });
         *self.on_link.borrow_mut() = Some(Rc::clone(&h));
         h
@@ -865,7 +830,8 @@ impl View {
         s.context.set_tooltip_text(Some(
             "How full the model's context was at the last answer; past 80% it summarises first",
         ));
-        s.cost.set_text(&format!("${:.3}", t.cost));
+        // A cost that rounds to nothing is shown as nothing, never $-0.000.
+        s.cost.set_text(&format!("${:.3}", t.cost.max(0.0)));
         s.cost
             .set_tooltip_text(Some("What this conversation has cost"));
         let due = t.due_count();
@@ -954,7 +920,7 @@ impl View {
         b.append(&t);
         let about = gtk::Label::builder()
             .label(
-                "Select an instruction, a routine or a frame in the main window, then ask: what it \
+                "Select an instruction, a routine or a frame in the window, then ask: what it \
                  does, why it is written that way, what would change if… The tutor reads Romlens's \
                  analysis with its tools and cites every address.",
             )
@@ -977,8 +943,16 @@ impl View {
         if !ready {
             let button = gtk::Button::with_label("Add a Key in Settings…");
             button.set_halign(gtk::Align::Start);
-            let app = self.app.clone();
-            button.connect_clicked(move |_| crate::settings::show(&app));
+            button.connect_clicked(|b| {
+                if let Some(app) = b
+                    .root()
+                    .and_downcast::<gtk::Window>()
+                    .and_then(|w| w.application())
+                    .and_downcast::<adw::Application>()
+                {
+                    crate::settings::show(&app);
+                }
+            });
             b.append(&button);
         }
         b.upcast()
@@ -1378,7 +1352,7 @@ impl View {
                 v.doc.edit_tutor(|t| t.sheet = None);
             }
         });
-        dialog.present(Some(&self.window));
+        dialog.present(Some(&self.root));
     }
 }
 

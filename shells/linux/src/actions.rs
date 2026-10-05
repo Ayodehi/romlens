@@ -394,36 +394,31 @@ const ENTRIES: &[Entry] = &[
         enabled: always,
         run: |d, _| d.open_audio(crate::model::audio::Tab::Scope),
     },
+    // The inspector's drawer, on its Tutor tab (docs/29).
     Entry {
         name: "show-tutor",
         enabled: always,
-        run: |d, w| {
-            if let Some(app) = w
-                .application()
-                .and_then(|a| a.downcast::<adw::Application>().ok())
-            {
-                crate::tutorview::open(&app, w, d);
-            }
-        },
+        run: |d, _| d.show_tutor_in_drawer(),
     },
     Entry {
         name: "open-quickly",
         enabled: always,
         run: |d, w| crate::jumpbar::open_quickly(w, d),
     },
-    // The sidebar's Lessons and Quizzes: the tutor, at its lessons.
+    // The sidebar's Lessons and Quizzes: the drawer's tutor, at its lessons.
     Entry {
         name: "show-lessons",
         enabled: always,
-        run: |d, w| {
-            if let Some(app) = w
-                .application()
-                .and_then(|a| a.downcast::<adw::Application>().ok())
-            {
-                crate::tutorview::open(&app, w, d);
-            }
+        run: |d, _| {
+            d.show_tutor_in_drawer();
             d.edit_tutor(|t| t.sheet = Some(crate::model::tutor::Sheet::Lessons));
         },
+    },
+    // The tutor as a tab, with more room.
+    Entry {
+        name: "show-tutor-tab",
+        enabled: always,
+        run: |d, _| d.show_tutor_tab(),
     },
     // File
     Entry {
@@ -905,7 +900,7 @@ pub fn install(window: &adw::ApplicationWindow, doc: &Rc<Document>) {
     // A view by its key, as the jump bar and Open Quickly name it.
     let open_view = gio::SimpleAction::new("open-view", Some(glib::VariantTy::STRING));
     open_view.connect_activate({
-        let (doc, window) = (Rc::clone(doc), window.downgrade());
+        let doc = Rc::clone(doc);
         move |_, param| {
             use crate::model::workspace::EditorContent;
             let Some(content) = param
@@ -917,11 +912,7 @@ pub fn install(window: &adw::ApplicationWindow, doc: &Rc<Document>) {
             match content {
                 EditorContent::Graphics(t) => doc.open_graphics(t),
                 EditorContent::Audio(t) => doc.open_audio(t),
-                EditorContent::Tutor => {
-                    if let Some(w) = window.upgrade() {
-                        gio::prelude::ActionGroupExt::activate_action(&w, "show-tutor", None);
-                    }
-                }
+                EditorContent::Tutor => doc.show_tutor_tab(),
                 c => doc.show(c),
             }
         }

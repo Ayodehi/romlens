@@ -11,6 +11,7 @@ mod canvas;
 mod compareview;
 mod config;
 mod cview;
+mod drawer;
 mod echoview;
 mod editor_keys;
 mod files;
