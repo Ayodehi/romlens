@@ -16,9 +16,9 @@ use gtk::{cairo, gdk, gio, glib};
 use romlens_ffi::cnotes::CVersionInfo;
 use romlens_ffi::{CTokenInfo, CTokenKind, Command};
 
-use crate::asmview;
 use crate::canvas::{set_source, with_alpha};
 use crate::files::alert;
+use crate::lists::{ValueList, child_at, row_box, spacer};
 use crate::model::cfold::{self, Folder};
 use crate::model::decompile::{
     DecompileState, LEVELS, NUMBER_STYLES, bases, literal_value, utf16_to_chars,
@@ -104,32 +104,150 @@ struct Pane {
     overlays: RefCell<Vec<gtk::Widget>>,
 }
 
-/// The whole tab: disassembly on the left, the C pane on the right.
+/// The whole Pseudo-C tab (docs/29, after first use): a bar naming the
+/// routine, whose list of every routine filters as you type, over the C.
+/// The disassembly is its own tab, beside this one if wanted. The macOS twin
+/// is `CTabView`.
 pub fn build(doc: &Rc<Document>, item: Option<Id>) -> gtk::Widget {
-    let asm = asmview::build(doc, item);
     let (root, pane) = Pane::build(doc, item);
     // The closures the pane wires hold it weakly; the widget keeps it alive.
     root.connect_destroy(move |_| {
         let _ = &pane;
     });
-    let paned = gtk::Paned::builder()
-        .orientation(gtk::Orientation::Horizontal)
-        .start_child(&asm.widget)
-        .end_child(&root)
-        .resize_start_child(true)
-        .resize_end_child(true)
-        .shrink_start_child(false)
-        .shrink_end_child(false)
+    root.set_vexpand(true);
+    let tab = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    tab.append(&routine_bar(doc, item));
+    tab.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+    tab.append(&root);
+    tab.upcast()
+}
+
+/// "Routine", the one shown (a menu of every routine), its address, and how
+/// many there are.
+fn routine_bar(doc: &Rc<Document>, item: Option<Id>) -> gtk::Widget {
+    let bar = gtk::Box::builder()
+        .spacing(8)
+        .margin_start(10)
+        .margin_end(10)
+        .height_request(30)
         .build();
-    // Half and half the first time there is room to say so.
-    let placed = Rc::new(Cell::new(false));
-    paned.connect_notify_local(Some("max-position"), move |p, _| {
-        if !placed.get() && p.width() > 400 {
-            placed.set(true);
-            p.set_position(p.width() / 2);
+    let caption = gtk::Label::new(Some("Routine"));
+    caption.add_css_class("dim-label");
+    let address = gtk::Label::new(None);
+    address.add_css_class("monospace");
+    address.add_css_class("dim-label");
+    let count = gtk::Label::builder().hexpand(true).xalign(1.0).build();
+    count.add_css_class("dim-label");
+    count.add_css_class("caption");
+
+    // The list of routines, filtered by name or by `$BB:AAAA`.
+    let filter = gtk::SearchEntry::builder()
+        .placeholder_text("Filter routines, or $BB:AAAA")
+        .build();
+    let popover = gtk::Popover::new();
+    let list: Rc<ValueList<romlens_ffi::LabelInfo>> = Rc::new(ValueList::new(
+        false,
+        || {
+            let r = row_box();
+            let name = gtk::Label::builder()
+                .xalign(0.0)
+                .ellipsize(gtk::pango::EllipsizeMode::End)
+                .build();
+            name.add_css_class("monospace");
+            r.append(&name);
+            r.append(&spacer());
+            let at = gtk::Label::new(None);
+            at.add_css_class("dim-label");
+            at.add_css_class("caption");
+            r.append(&at);
+            r.upcast()
+        },
+        |row: &gtk::Widget, l: &romlens_ffi::LabelInfo| {
+            if let Some(name) = child_at(row, 0).downcast_ref::<gtk::Label>() {
+                name.set_text(&l.name);
+            }
+            if let Some(at) = child_at(row, 2).downcast_ref::<gtk::Label>() {
+                at.set_text(&romlens_ffi::format_snes_address(l.address));
+            }
+        },
+        {
+            let (doc, popover) = (Rc::downgrade(doc), popover.downgrade());
+            move |_, l: &romlens_ffi::LabelInfo| {
+                if let Some(p) = popover.upgrade() {
+                    p.popdown();
+                }
+                let Some(doc) = doc.upgrade() else { return };
+                // This tab first, so a Disassembly tab that follows the
+                // selection goes there too.
+                if let Some(item) = item {
+                    doc.focus_item(item);
+                }
+                doc.jump_to_snes(l.address);
+            }
+        },
+    ));
+    list.widget.set_size_request(340, 380);
+    let body = gtk::Box::new(gtk::Orientation::Vertical, 6);
+    body.append(&filter);
+    body.append(&list.widget);
+    popover.set_child(Some(&body));
+    let fill = {
+        let (doc, list, filter) = (Rc::downgrade(doc), Rc::clone(&list), filter.clone());
+        move || {
+            if let Some(doc) = doc.upgrade() {
+                list.set(crate::model::navigator::filter_labels(
+                    &doc.routines(),
+                    &filter.text(),
+                ));
+            }
+        }
+    };
+    let f = fill.clone();
+    filter.connect_search_changed(move |_| f());
+    let (f, entry) = (fill.clone(), filter.clone());
+    popover.connect_show(move |_| {
+        f();
+        entry.grab_focus();
+    });
+    let choose = gtk::MenuButton::builder()
+        .popover(&popover)
+        .always_show_arrow(true)
+        .build();
+    choose.add_css_class("flat");
+
+    bar.append(&caption);
+    bar.append(&choose);
+    bar.append(&address);
+    bar.append(&count);
+
+    let update = {
+        let doc = Rc::downgrade(doc);
+        move || {
+            let Some(doc) = doc.upgrade() else { return };
+            let (name, entry) = {
+                let d = doc.decompile_of(item);
+                match d.result.as_ref() {
+                    Some(r) => (r.name.clone(), Some(r.entry)),
+                    None => ("None selected".to_owned(), None),
+                }
+            };
+            choose.set_label(&name);
+            address.set_text(
+                &entry
+                    .map(romlens_ffi::format_snes_address)
+                    .unwrap_or_default(),
+            );
+            let n = doc.routines().len();
+            count.set_text(&format!("{n} routine{}", if n == 1 { "" } else { "s" }));
+        }
+    };
+    update();
+    doc.subscribe(move |c| {
+        if matches!(c, Change::Decompile | Change::Navigator) {
+            update();
         }
     });
-    paned.upcast()
+    bar.upcast()
 }
 
 fn toggle_group(labels: &[&str], tip: &str) -> (gtk::Box, Vec<gtk::ToggleButton>) {
