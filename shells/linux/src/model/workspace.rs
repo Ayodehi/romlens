@@ -1063,9 +1063,33 @@ impl Workspace {
         self.decompilers.entry(key).or_default()
     }
 
+    /// The tab's decompiler if it has one: what a finished run, which must not
+    /// bring a closed tab's model back, writes to.
+    pub fn existing_decompiler(&mut self, id: Id) -> Option<&mut Decompile> {
+        self.decompilers.get_mut(&id)
+    }
+
+    /// The decompiler `decompiler(Some(id))` made; `None` before it is made.
+    pub fn decompiler_ref(&self, id: Id) -> Option<&Decompile> {
+        self.decompilers.get(&id)
+    }
+
+    /// Every tab's decompiler, for a setting they share (how C prints numbers).
+    pub fn decompilers_mut(&mut self) -> impl Iterator<Item = &mut Decompile> {
+        self.decompilers.values_mut()
+    }
+
     pub fn graph(&mut self, id: Option<Id>) -> &mut GraphModel {
         let key = id.unwrap_or_else(|| self.current_code_item());
         self.graphs.entry(key).or_default()
+    }
+
+    pub fn existing_graph(&mut self, id: Id) -> Option<&mut GraphModel> {
+        self.graphs.get_mut(&id)
+    }
+
+    pub fn graph_ref(&self, id: Id) -> Option<&GraphModel> {
+        self.graphs.get(&id)
     }
 
     /// The analysis changed: every tab's C and graph are stale.

@@ -36,16 +36,41 @@ use super::session::{ChangeKind, Session};
 use super::source::{self, SourceModel};
 use super::transfer::{self, ExportKind, ImportKind};
 use super::tutor::{self, TutorModel};
+use super::workspace::{
+    CodeRep, DropEdge, DropTarget, DropZone, EditorContent, EditorItem, Id, LayoutPreset, TabDrop,
+    Workspace,
+};
 use crate::asm::AsmBatch;
 use crate::hex::{AddressStyle, BYTES_PER_ROW, HexBatch};
 use crate::package::{self, LocalRecord};
 
 /// Compatibility with a request that names a place to scroll to; the id makes
 /// two requests for the same offset distinct, so a view scrolls again.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScrollRequest {
     pub id: u64,
     pub offset: u32,
+    /// The tabs that should scroll: the focused tab and those following the
+    /// selection (docs/29). `None` for every view.
+    pub targets: Option<Rc<[Id]>>,
+}
+
+impl ScrollRequest {
+    /// Whether a view in the tab `item` should act on it. A view that names
+    /// no tab acts on every request.
+    pub fn applies(&self, item: Option<Id>) -> bool {
+        match (&self.targets, item) {
+            (Some(targets), Some(item)) => targets.contains(&item),
+            _ => true,
+        }
+    }
+}
+
+/// A place Back and Forward go to: the offset, and the tab it was seen in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct HistoryEntry {
+    offset: u32,
+    item: Option<Id>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -201,8 +226,22 @@ pub struct Document {
     references: RefCell<ReferencesModel>,
     variable_draft: RefCell<VariableDraft>,
     project_path: RefCell<Option<PathBuf>>,
-    decompile: RefCell<Decompile>,
-    graph: RefCell<GraphModel>,
+    /// The window's tabs and their layout, with each code tab's C and graph
+    /// (docs/29).
+    workspace: RefCell<Workspace>,
+    /// The text view last focused, which `tab` answers while a graphics,
+    /// sound or tutor tab has focus.
+    last_text_tab: Cell<Tab>,
+    /// How C prints numbers, for every C tab (a setting).
+    c_numbers: Cell<romlens_ffi::NumberStyle>,
+    /// The routine each code tab was last on, by the label at or before it.
+    code_titles: RefCell<HashMap<Id, String>>,
+    /// Labels by address, for naming a routine; rebuilt when the navigator's
+    /// list changes size.
+    label_index: RefCell<Vec<(u32, String)>>,
+    /// The lines the paragraph pointed at in an answer cites, outlined in the
+    /// Assembly and Hex tabs.
+    citation_highlight: RefCell<Vec<std::ops::Range<u32>>>,
     source: RefCell<SourceModel>,
     graphics: RefCell<GraphicsModel>,
     audio: RefCell<AudioModel>,
@@ -220,9 +259,9 @@ pub struct Document {
     span_kinds: HashMap<u8, SpanKind>,
     selection: RefCell<Selection>,
     details: RefCell<Details>,
-    history: RefCell<Vec<u32>>,
-    forward_history: RefCell<Vec<u32>>,
-    scroll: Cell<Option<ScrollRequest>>,
+    history: RefCell<Vec<HistoryEntry>>,
+    forward_history: RefCell<Vec<HistoryEntry>>,
+    scroll: RefCell<Option<ScrollRequest>>,
     style: Cell<AddressStyle>,
     /// Bumped whenever cached rows must be rebuilt (snapshot or view change).
     generation: Cell<u64>,
@@ -298,8 +337,12 @@ impl Document {
             references: RefCell::new(ReferencesModel::default()),
             variable_draft: RefCell::new(VariableDraft::default()),
             project_path: RefCell::new(None),
-            decompile: RefCell::new(Decompile::default()),
-            graph: RefCell::new(GraphModel::default()),
+            workspace: RefCell::new(Workspace::default()),
+            last_text_tab: Cell::new(Tab::Hex),
+            c_numbers: Cell::new(romlens_ffi::NumberStyle::Auto),
+            code_titles: RefCell::new(HashMap::new()),
+            label_index: RefCell::new(Vec::new()),
+            citation_highlight: RefCell::new(Vec::new()),
             source: RefCell::new(SourceModel::default()),
             graphics: RefCell::new(GraphicsModel::new(Arc::clone(&rom_for_graphics))),
             audio: RefCell::new(AudioModel::new(
@@ -326,7 +369,7 @@ impl Document {
             details: RefCell::new(Details::default()),
             history: RefCell::new(Vec::new()),
             forward_history: RefCell::new(Vec::new()),
-            scroll: Cell::new(None),
+            scroll: RefCell::new(None),
             style: Cell::new(AddressStyle::default()),
             generation: Cell::new(0),
             listeners: RefCell::new(Vec::new()),
@@ -377,8 +420,7 @@ impl Document {
                 self.screen.borrow_mut().invalidate();
                 self.refresh_details();
                 self.reload_navigator();
-                self.decompile.borrow_mut().invalidate();
-                self.graph.borrow_mut().invalidate();
+                self.workspace.borrow_mut().invalidate_all();
                 self.refresh_decompile();
                 self.refresh_graph();
                 self.reload_source();
@@ -537,23 +579,447 @@ impl Document {
 
     // MARK: Layout
 
+    /// The text view of the focused tab, or the last text view while a
+    /// graphics, sound or tutor tab has focus.
     pub fn tab(&self) -> Tab {
-        self.layout.borrow().tab
+        self.focused_content()
+            .and_then(Tab::from_content)
+            .unwrap_or(self.last_text_tab.get())
     }
 
+    /// View › Hex, Disassembly and the rest: `show` for a text view.
     pub fn set_tab(&self, tab: Tab) {
-        let changed = {
-            let mut l = self.layout.borrow_mut();
-            // A text tab takes the editor area back from a graphics view.
-            let was_graphics = l.graphics.take().is_some();
-            let was_audio = l.audio.take().is_some();
-            std::mem::replace(&mut l.tab, tab) != tab || was_graphics || was_audio
-        };
-        if changed {
-            self.emit(Change::Layout);
-            self.refresh_decompile();
-            self.refresh_graph();
+        self.show(tab.content());
+    }
+
+    // MARK: Tabs (docs/29)
+
+    pub fn workspace(&self) -> std::cell::Ref<'_, Workspace> {
+        self.workspace.borrow()
+    }
+
+    pub fn focused_content(&self) -> Option<EditorContent> {
+        self.workspace.borrow().focused_item().map(|i| i.content)
+    }
+
+    /// Shows `content` in a tab of its own: for code, the focused tab if it
+    /// shows it, else the focused group's tab of it, else one shown in another
+    /// group, else a new tab in the focused group; anything else has one tab,
+    /// brought forward wherever it is. Choosing a view never turns another
+    /// view's tab into it.
+    pub fn show(&self, content: EditorContent) {
+        if self.focused_content() == Some(content) {
+            return;
         }
+        {
+            let mut w = self.workspace.borrow_mut();
+            if matches!(content, EditorContent::Code(_)) {
+                let here = w
+                    .layout()
+                    .group(w.focused_group())
+                    .and_then(|g| g.items.iter().find(|i| i.content == content).copied());
+                let shown = w.visible_items().into_iter().find(|i| i.content == content);
+                if w.focused_item().is_some_and(|f| f.content == content) {
+                    // Already showing.
+                } else if let Some(i) = here.or(shown) {
+                    w.focus_item(i.id);
+                } else {
+                    w.open(content, None);
+                }
+            } else {
+                w.open(content, None);
+            }
+        }
+        self.after_focus();
+    }
+
+    /// Closes the one tab of a view that can no longer show (Source with no
+    /// files left, Compare when the comparison closes).
+    fn close_view(&self, content: EditorContent) {
+        let tab = self.workspace.borrow().layout().existing(content);
+        if let Some(t) = tab {
+            self.close_item(t.id);
+        }
+    }
+
+    /// Shows the tab `id` and gives its group focus.
+    pub fn focus_item(&self, id: Id) {
+        self.workspace.borrow_mut().focus_item(id);
+        self.after_focus();
+    }
+
+    /// Gives a group focus, as a click in it does.
+    pub fn focus_group(&self, id: Id) {
+        self.workspace.borrow_mut().focus_group(id);
+        self.after_focus();
+    }
+
+    /// Focus Group 1 to 4, in reading order.
+    pub fn focus_group_at(&self, index: usize) {
+        let id = self
+            .workspace
+            .borrow()
+            .layout()
+            .groups()
+            .get(index)
+            .map(|g| g.id);
+        if let Some(id) = id {
+            self.focus_group(id);
+        }
+    }
+
+    /// Next Tab and Previous Tab, within the focused group, wrapping.
+    pub fn select_adjacent_tab(&self, delta: isize) {
+        let next = {
+            let w = self.workspace.borrow();
+            let Some(g) = w.layout().group(w.focused_group()) else {
+                return;
+            };
+            let n = g.items.len();
+            let Some(i) = g.items.iter().position(|i| Some(i.id) == g.selected) else {
+                return;
+            };
+            if n < 2 {
+                return;
+            }
+            g.items[(i as isize + delta).rem_euclid(n as isize) as usize].id
+        };
+        self.focus_item(next);
+    }
+
+    /// Closes a tab, from its close button or Close Tab.
+    pub fn close_item(&self, id: Id) {
+        self.workspace.borrow_mut().close(id);
+        self.code_titles.borrow_mut().remove(&id);
+        self.after_focus();
+    }
+
+    /// Close Tab. False when the focused group has no tab, for the window to
+    /// close instead.
+    pub fn close_focused_tab(&self) -> bool {
+        let Some(id) = self.workspace.borrow().focused_item().map(|i| i.id) else {
+            return false;
+        };
+        self.close_item(id);
+        true
+    }
+
+    /// Split Right and Split Down: the focused code tab again in a new group on
+    /// that side, as Visual Studio Code's Split Editor does; a view with one
+    /// tab moves there instead, when its group has others.
+    pub fn split_focused(&self, edge: DropEdge) {
+        {
+            let mut w = self.workspace.borrow_mut();
+            let Some(item) = w.focused_item() else { return };
+            let group = w.focused_group();
+            if matches!(item.content, EditorContent::Code(_)) {
+                let Some(copy) = w.open(item.content, Some(group)) else {
+                    return;
+                };
+                let title = self.code_titles.borrow().get(&item.id).cloned();
+                if let Some(title) = title {
+                    self.code_titles.borrow_mut().insert(copy, title);
+                }
+                w.split(group, edge, copy);
+            } else {
+                w.split(group, edge, item.id);
+            }
+        }
+        self.after_focus();
+    }
+
+    /// A drop in the editor area: the one entry point the drop handler and the
+    /// tests both use. A tab moves, or splits off on an edge; something to
+    /// open opens there, or in a new group on the edge.
+    pub fn drop_tab(&self, drop: TabDrop, group: Id, target: DropTarget) {
+        if self.workspace.borrow().layout().group(group).is_none() {
+            return;
+        }
+        match drop {
+            TabDrop::Item(id) => {
+                if self.workspace.borrow().layout().item(id).is_none() {
+                    return;
+                }
+                {
+                    let mut w = self.workspace.borrow_mut();
+                    match target {
+                        DropTarget::TabBar(index) => w.move_item(id, group, Some(index)),
+                        DropTarget::Zone(DropZone::Center) => w.move_item(id, group, None),
+                        DropTarget::Zone(DropZone::Edge(edge)) => {
+                            w.split(group, edge, id);
+                        }
+                    }
+                }
+                self.focus_item(id);
+            }
+            TabDrop::Open(content) => {
+                // Opened in the group, or, for a view with one tab elsewhere,
+                // shown there; then placed as a dragged tab would be.
+                let Some(id) = self.workspace.borrow_mut().open(content, Some(group)) else {
+                    return;
+                };
+                let landed = self
+                    .workspace
+                    .borrow()
+                    .layout()
+                    .group_containing(id)
+                    .map(|g| g.id);
+                if target == DropTarget::Zone(DropZone::Center) && landed == Some(group) {
+                    self.focus_item(id);
+                    return;
+                }
+                self.drop_tab(TabDrop::Item(id), group, target);
+            }
+            TabDrop::OpenAt(rep, address) => {
+                // Always a new tab, which is what dragging a label out asks for.
+                let Some(id) = self
+                    .workspace
+                    .borrow_mut()
+                    .open(EditorContent::Code(rep), Some(group))
+                else {
+                    return;
+                };
+                self.drop_tab(TabDrop::Item(id), group, target);
+                self.jump_to_snes(address);
+            }
+        }
+    }
+
+    /// View › Editor Layout.
+    pub fn apply_layout(&self, preset: LayoutPreset) {
+        self.workspace.borrow_mut().apply(preset);
+        self.after_focus();
+    }
+
+    /// A divider double-clicked: the split's children equal.
+    pub fn equalize_split(&self, split: Id) {
+        self.workspace.borrow_mut().equalize(split);
+        self.emit(Change::Layout);
+    }
+
+    /// A divider dragged. The grid reads its own sizes, so this does not
+    /// tell the views.
+    pub fn set_split_fractions(&self, split: Id, fractions: &[f64]) {
+        self.workspace.borrow_mut().set_fractions(split, fractions);
+    }
+
+    /// The tab's menu: Follow Selection.
+    pub fn set_follows_selection(&self, id: Id, follows: bool) {
+        self.workspace
+            .borrow_mut()
+            .set_follows_selection(id, follows);
+        self.emit(Change::Layout);
+        self.refresh_decompile();
+        self.refresh_graph();
+    }
+
+    /// Whatever changed the tabs or the focus: the text view to remember, and
+    /// C and Graph to follow the selection in any tab now showing.
+    fn after_focus(&self) {
+        if let Some(t) = self.focused_content().and_then(Tab::from_content) {
+            self.last_text_tab.set(t);
+        }
+        self.emit(Change::Layout);
+        self.refresh_decompile();
+        self.refresh_graph();
+    }
+
+    /// Why a view cannot open yet, for the sidebar to say; `None` when it can.
+    pub fn unavailable_reason(&self, content: EditorContent) -> Option<&'static str> {
+        match content {
+            EditorContent::Code(
+                CodeRep::Assembly | CodeRep::C | CodeRep::Graph | CodeRep::Both,
+            ) => (!self.has_disassembly()).then_some("analyzing"),
+            EditorContent::Compare => (!self.compare.borrow().is_active()).then_some("needs a ROM"),
+            EditorContent::Source => (!self.source.borrow().has_files()).then_some("no sources"),
+            EditorContent::Graphics(t) => (t.needs_recording()
+                && !self.graphics.borrow().has_recording())
+            .then_some("needs a recording"),
+            _ => None,
+        }
+    }
+
+    /// A tab's name: its view's, with the routine added when two tabs show the
+    /// same view, to tell them apart.
+    pub fn title_of(&self, item: &EditorItem) -> String {
+        let EditorContent::Code(rep) = item.content else {
+            return item.content.title().to_owned();
+        };
+        let twins = self
+            .workspace
+            .borrow()
+            .layout()
+            .items()
+            .iter()
+            .filter(|i| i.content == item.content)
+            .count()
+            > 1;
+        match self.code_titles.borrow().get(&item.id) {
+            Some(routine) if twins => format!("{} · {routine}", rep.view_title()),
+            _ => rep.view_title().to_owned(),
+        }
+    }
+
+    /// The label at or before `address` in its bank.
+    pub fn routine_name(&self, address: u32) -> Option<String> {
+        {
+            let labels = &self.navigator.borrow().data.labels;
+            if self.label_index.borrow().len() != labels.len() {
+                let mut index: Vec<(u32, String)> =
+                    labels.iter().map(|l| (l.address, l.name.clone())).collect();
+                index.sort_by_key(|(a, _)| *a);
+                *self.label_index.borrow_mut() = index;
+            }
+        }
+        let index = self.label_index.borrow();
+        let at = index.partition_point(|(a, _)| *a <= address);
+        let (found, name) = index.get(at.checked_sub(1)?)?;
+        (found >> 16 == address >> 16).then(|| name.clone())
+    }
+
+    /// The routines, for the Pseudo-C tab's list: the analysis's routine names
+    /// (SUB and the vectors') and the student's and imported labels on code,
+    /// by address.
+    pub fn routines(&self) -> Vec<LabelInfo> {
+        const ENTRIES: [&str; 7] = ["SUB", "RESET", "NMI", "IRQ", "COP", "BRK", "ABORT"];
+        let mut found: Vec<LabelInfo> = self
+            .navigator
+            .borrow()
+            .data
+            .labels
+            .iter()
+            .filter(|l| {
+                if l.source == LabelSource::Auto {
+                    return l
+                        .name
+                        .split('_')
+                        .next()
+                        .is_some_and(|p| ENTRIES.contains(&p));
+                }
+                l.file_offset
+                    .and_then(|o| self.workbench().region_at(o))
+                    .is_some_and(|r| r.kind == romlens_ffi::RegionKind::Code)
+            })
+            .cloned()
+            .collect();
+        found.sort_by_key(|l| l.address);
+        found
+    }
+
+    /// Name the code tabs on the selection by its routine.
+    fn refresh_titles(&self) {
+        let Some(address) = self.selected().and_then(|o| self.rom.snes_address_for(o)) else {
+            return;
+        };
+        // No label before the selection in its bank: no name, rather than the
+        // last one kept.
+        let name = self.routine_name(address);
+        let w = self.workspace.borrow();
+        let focused = w.focused_item().map(|i| i.id);
+        let mut titles = self.code_titles.borrow_mut();
+        for item in w.layout().items() {
+            if !matches!(item.content, EditorContent::Code(_))
+                || !(Some(item.id) == focused || item.follows_selection)
+            {
+                continue;
+            }
+            match &name {
+                Some(n) => titles.insert(item.id, n.clone()),
+                None => titles.remove(&item.id),
+            };
+        }
+    }
+
+    /// The code tabs that should be on the routine at the selection: those
+    /// shown in their groups that have focus or follow the selection.
+    fn following_code_tabs(&self, rep: CodeRep) -> Vec<Id> {
+        let w = self.workspace.borrow();
+        let focused = w.focused_item().map(|i| i.id);
+        w.visible_items()
+            .into_iter()
+            .filter(|i| {
+                i.content == EditorContent::Code(rep)
+                    && (Some(i.id) == focused || i.follows_selection)
+            })
+            .map(|i| i.id)
+            .collect()
+    }
+
+    /// Shows `content` for a citation without hiding the tutor's tab: with the
+    /// tutor focused, in another group (the one already showing it, or the
+    /// first other), or in a new group beside it.
+    pub fn reveal(&self, content: EditorContent) {
+        if self.focused_content() != Some(EditorContent::Tutor) {
+            self.show(content);
+            return;
+        }
+        let (tutor_group, existing, code, other) = {
+            let w = self.workspace.borrow();
+            let tutor_group = w.focused_group();
+            let others: Vec<_> = w
+                .layout()
+                .groups()
+                .into_iter()
+                .filter(|g| g.id != tutor_group)
+                .collect();
+            let existing = w
+                .layout()
+                .existing(content)
+                .filter(|e| w.layout().group_containing(e.id).map(|g| g.id) != Some(tutor_group))
+                .map(|e| e.id);
+            let code = others
+                .iter()
+                .filter_map(|g| g.selected_item())
+                .find(|i| matches!(i.content, EditorContent::Code(_)))
+                .map(|i| i.id);
+            (tutor_group, existing, code, others.first().map(|g| g.id))
+        };
+        if let Some(e) = existing {
+            self.focus_item(e);
+        } else if let (EditorContent::Code(_), Some(c)) = (content, code) {
+            self.focus_item(c);
+            self.show(content);
+        } else if let Some(o) = other {
+            self.focus_group(o);
+            self.show(content);
+        } else {
+            let id = self.workspace.borrow_mut().open(content, Some(tutor_group));
+            if let Some(id) = id {
+                self.workspace
+                    .borrow_mut()
+                    .split(tutor_group, DropEdge::Right, id);
+                self.focus_item(id);
+            }
+        }
+    }
+
+    /// What the student is pointing at in an answer: the lines its citations
+    /// name, outlined in every Assembly and Hex tab.
+    pub fn point_at_citations(&self, snes_addresses: &[u32]) {
+        let ranges: Vec<std::ops::Range<u32>> = snes_addresses
+            .iter()
+            .filter_map(|a| {
+                let offset = self.rom.file_offset_for(*a)?;
+                let len = self
+                    .workbench()
+                    .instruction_at(offset)
+                    .map_or(1, |i| u32::from(i.len));
+                Some(offset..offset + len.max(1))
+            })
+            .collect();
+        if *self.citation_highlight.borrow() != ranges {
+            *self.citation_highlight.borrow_mut() = ranges;
+            self.emit(Change::Rows);
+        }
+    }
+
+    pub fn citation_highlight(&self) -> Vec<std::ops::Range<u32>> {
+        self.citation_highlight.borrow().clone()
+    }
+
+    /// The tutor as a tab (docs/29): the sidebar's Tutor and Open Quickly.
+    pub fn show_tutor_tab(&self) {
+        self.show(EditorContent::Tutor);
     }
 
     // MARK: Graphics
@@ -562,9 +1028,12 @@ impl Document {
         self.graphics.borrow()
     }
 
-    /// The graphics view in the editor area, if one is open.
+    /// The graphics view in the focused tab, if it is one.
     pub fn graphics_tab(&self) -> Option<gfx::Tab> {
-        self.layout.borrow().graphics
+        match self.focused_content() {
+            Some(EditorContent::Graphics(t)) => Some(t),
+            _ => None,
+        }
     }
 
     /// Open a graphics view, reading the ROM bytes at the selection.
@@ -575,14 +1044,7 @@ impl Document {
         {
             self.graphics.borrow_mut().rom_offset = range.start;
         }
-        let changed = {
-            let mut l = self.layout.borrow_mut();
-            let was_audio = l.audio.take().is_some();
-            l.graphics.replace(tab) != Some(tab) || was_audio
-        };
-        if changed {
-            self.emit(Change::Layout);
-        }
+        self.show(EditorContent::Graphics(tab));
         self.emit(Change::Graphics);
     }
 
@@ -736,10 +1198,10 @@ impl Document {
     /// The C the student is reading when the C tab has the editor: the
     /// generated C around the selection.
     fn tutor_c_text(&self, offset: u32) -> Option<String> {
-        if self.tab() != Tab::C || self.graphics_tab().is_some() || self.audio_tab().is_some() {
+        if self.focused_content() != Some(EditorContent::Code(CodeRep::C)) {
             return None;
         }
-        let d = self.decompile.borrow();
+        let d = self.decompile();
         let r = d
             .result
             .as_ref()
@@ -767,11 +1229,18 @@ impl Document {
     pub fn follow_citation(&self, c: tutor::Citation) -> bool {
         match c {
             tutor::Citation::Address(a) => {
+                // A view that shows no address, or the tutor's own tab: the
+                // disassembly, beside the tutor.
+                if Tab::from_content(self.focused_content().unwrap_or(EditorContent::Tutor))
+                    .is_none()
+                {
+                    self.reveal(EditorContent::Code(CodeRep::Assembly));
+                }
                 self.jump_to_snes(a);
                 true
             }
             tutor::Citation::Routine(a) => {
-                self.set_tab(Tab::C);
+                self.reveal(EditorContent::Code(CodeRep::C));
                 self.jump_to_snes(a);
                 true
             }
@@ -780,7 +1249,8 @@ impl Document {
                     return false;
                 }
                 self.set_frame(n);
-                self.open_graphics(view.unwrap_or(gfx::Tab::Frame));
+                self.reveal(EditorContent::Graphics(view.unwrap_or(gfx::Tab::Frame)));
+                self.emit(Change::Graphics);
                 true
             }
             // A register has no place in the ROM to show; the step names it.
@@ -794,23 +1264,19 @@ impl Document {
         self.audio.borrow()
     }
 
-    /// The sound view in the editor area, if one is open.
+    /// The sound view in the focused tab, if it is one.
     pub fn audio_tab(&self) -> Option<audio::Tab> {
-        self.layout.borrow().audio
+        match self.focused_content() {
+            Some(EditorContent::Audio(t)) => Some(t),
+            _ => None,
+        }
     }
 
     /// Open a sound view, on the recording's sound if it has any, else on the
     /// ROM's upload.
     pub fn open_audio(&self, tab: audio::Tab) {
         let trace = self.audio.borrow_mut().opened();
-        let changed = {
-            let mut l = self.layout.borrow_mut();
-            let was_graphics = l.graphics.take().is_some();
-            l.audio.replace(tab) != Some(tab) || was_graphics
-        };
-        if changed {
-            self.emit(Change::Layout);
-        }
+        self.show(EditorContent::Audio(tab));
         if trace {
             self.load_upload();
         }
@@ -1520,15 +1986,46 @@ impl Document {
 
     // MARK: C
 
+    /// The C of the focused code tab, or the last one focused.
     pub fn decompile(&self) -> std::cell::Ref<'_, Decompile> {
-        self.decompile.borrow()
+        self.decompile_of(None)
     }
 
-    /// Keep the C tab on the routine at the selection. Only while a tab is
+    /// A C tab's own C (the current code tab's for `None`).
+    pub fn decompile_of(&self, item: Option<Id>) -> std::cell::Ref<'_, Decompile> {
+        let key = item.unwrap_or_else(|| self.workspace.borrow().current_code_item());
+        // Made only when missing, so reading one while another is borrowed
+        // never needs the workspace mutably.
+        if self.workspace.borrow().decompiler_ref(key).is_none() {
+            self.with_decompile(key, |_| ());
+        }
+        std::cell::Ref::map(self.workspace.borrow(), |w| {
+            w.decompiler_ref(key).expect("made above")
+        })
+    }
+
+    /// Change a tab's C model, made with the C number setting when first
+    /// wanted.
+    fn with_decompile<R>(&self, item: Id, f: impl FnOnce(&mut Decompile) -> R) -> R {
+        let numbers = self.c_numbers.get();
+        let mut w = self.workspace.borrow_mut();
+        let made = w.decompiler_ref(item).is_none();
+        let d = w.decompiler(Some(item));
+        if made {
+            d.numbers = numbers;
+        }
+        f(d)
+    }
+
+    /// Keep the C tabs on the routine at the selection. Only while one is
     /// showing: decompiling costs a summary of every routine the first time
     /// after an analysis.
     pub fn refresh_decompile(&self) {
-        if self.tab() != Tab::C || !self.has_disassembly() {
+        if !self.has_disassembly() {
+            return;
+        }
+        let tabs = self.following_code_tabs(CodeRep::C);
+        if tabs.is_empty() {
             return;
         }
         let start = self
@@ -1538,17 +2035,18 @@ impl Document {
             .as_ref()
             .map(|i| i.file_offset)
             .or_else(|| self.selected());
-        let run =
-            self.decompile
-                .borrow_mut()
-                .follow(self.workbench(), start, self.generation.get());
-        if let Some(run) = run {
-            self.run_decompile(run);
+        for item in tabs {
+            let run = self.with_decompile(item, |d| {
+                d.follow(self.workbench(), start, self.generation.get())
+            });
+            if let Some(run) = run {
+                self.run_decompile(item, run);
+            }
         }
         self.emit(Change::Decompile);
     }
 
-    fn run_decompile(&self, run: DecompileKey) {
+    fn run_decompile(&self, item: Id, run: DecompileKey) {
         let wb = Arc::clone(self.workbench());
         let weak = self.me.borrow().clone();
         background(
@@ -1560,33 +2058,42 @@ impl Document {
             },
             move |outcome| {
                 let Some(d) = weak.upgrade() else { return };
-                let next = d.decompile.borrow_mut().finish(run, outcome);
+                // A tab closed meanwhile takes its C with it.
+                let next = d
+                    .workspace
+                    .borrow_mut()
+                    .existing_decompiler(item)
+                    .and_then(|c| c.finish(run, outcome));
                 d.emit(Change::Decompile);
                 if let Some(next) = next {
-                    d.run_decompile(next);
+                    d.run_decompile(item, next);
                 }
             },
         );
     }
 
+    /// The focused C tab's level.
     pub fn set_decompile_level(&self, level: romlens_ffi::DecompileLevel) {
-        {
-            let mut d = self.decompile.borrow_mut();
+        let item = self.workspace.borrow().current_code_item();
+        let changed = self.with_decompile(item, |d| {
             if d.level == level {
-                return;
+                return false;
             }
             d.level = level;
             d.invalidate();
+            true
+        });
+        if changed {
+            self.refresh_decompile();
         }
-        self.refresh_decompile();
     }
 
+    /// How every C tab prints numbers: a setting, so kept and shared.
     pub fn set_c_numbers(&self, style: romlens_ffi::NumberStyle) {
-        {
-            let mut d = self.decompile.borrow_mut();
-            if d.numbers == style {
-                return;
-            }
+        if self.c_numbers.replace(style) == style {
+            return;
+        }
+        for d in self.workspace.borrow_mut().decompilers_mut() {
             d.numbers = style;
             d.invalidate();
         }
@@ -1600,13 +2107,29 @@ impl Document {
 
     // MARK: Graph
 
+    /// The graph of the focused code tab, or the last one focused.
     pub fn graph(&self) -> std::cell::Ref<'_, GraphModel> {
-        self.graph.borrow()
+        self.graph_of(None)
     }
 
-    /// Keep the Graph tab on the routine at the selection, while it shows.
+    /// A Graph tab's own graph (the current code tab's for `None`).
+    pub fn graph_of(&self, item: Option<Id>) -> std::cell::Ref<'_, GraphModel> {
+        let key = item.unwrap_or_else(|| self.workspace.borrow().current_code_item());
+        if self.workspace.borrow().graph_ref(key).is_none() {
+            self.workspace.borrow_mut().graph(Some(key));
+        }
+        std::cell::Ref::map(self.workspace.borrow(), |w| {
+            w.graph_ref(key).expect("made above")
+        })
+    }
+
+    /// Keep the Graph tabs on the routine at the selection, while one shows.
     pub fn refresh_graph(&self) {
-        if self.tab() != Tab::Graph || !self.has_disassembly() {
+        if !self.has_disassembly() {
+            return;
+        }
+        let tabs = self.following_code_tabs(CodeRep::Graph);
+        if tabs.is_empty() {
             return;
         }
         let start = self
@@ -1616,17 +2139,20 @@ impl Document {
             .as_ref()
             .map(|i| i.file_offset)
             .or_else(|| self.selected());
-        let run = self
-            .graph
-            .borrow_mut()
-            .follow(self.workbench(), start, self.generation.get());
-        if let Some(run) = run {
-            self.run_graph(run);
+        for item in tabs {
+            let run = self.workspace.borrow_mut().graph(Some(item)).follow(
+                self.workbench(),
+                start,
+                self.generation.get(),
+            );
+            if let Some(run) = run {
+                self.run_graph(item, run);
+            }
         }
         self.emit(Change::Graph);
     }
 
-    fn run_graph(&self, run: GraphKey) {
+    fn run_graph(&self, item: Id, run: GraphKey) {
         let wb = Arc::clone(self.workbench());
         let weak = self.me.borrow().clone();
         background(
@@ -1634,18 +2160,24 @@ impl Document {
             move || graph::build(&wb, run),
             move |outcome| {
                 let Some(d) = weak.upgrade() else { return };
-                let next = d.graph.borrow_mut().finish(run, outcome);
+                let next = d
+                    .workspace
+                    .borrow_mut()
+                    .existing_graph(item)
+                    .and_then(|g| g.finish(run, outcome));
                 d.emit(Change::Graph);
                 if let Some(next) = next {
-                    d.run_graph(next);
+                    d.run_graph(item, next);
                 }
             },
         );
     }
 
+    /// The focused Graph tab's mode.
     pub fn set_graph_mode(&self, mode: GraphMode) {
         {
-            let mut g = self.graph.borrow_mut();
+            let mut w = self.workspace.borrow_mut();
+            let g = w.graph(None);
             if g.mode == mode {
                 return;
             }
@@ -1669,8 +2201,8 @@ impl Document {
         if self.source.borrow().generation != before {
             self.emit(Change::Source);
         }
-        if self.tab() == Tab::Source && !self.source.borrow().has_files() {
-            self.set_tab(Tab::Disassembly);
+        if !self.source.borrow().has_files() {
+            self.close_view(EditorContent::Source);
         }
     }
 
@@ -1798,9 +2330,7 @@ impl Document {
     pub fn close_compare(&self) {
         self.compare.borrow_mut().close();
         self.emit(Change::Compare);
-        if self.tab() == Tab::Compare {
-            self.set_tab(Tab::Disassembly);
-        }
+        self.close_view(EditorContent::Compare);
     }
 
     pub fn select_compare_item(&self, item: Option<CompareItem>) {
@@ -1956,16 +2486,18 @@ impl Document {
 
     /// The version of the shown routine picked in the C tab.
     pub fn shown_version(&self) -> Option<String> {
-        self.decompile.borrow().shown_version.clone()
+        self.decompile().shown_version.clone()
     }
 
     /// Pick a C version of the shown routine, or `None` for the generated C.
     pub fn show_c_version(&self, name: Option<String>) {
-        if self.decompile.borrow().shown_version == name {
-            return;
+        let item = self.workspace.borrow().current_code_item();
+        let changed = self.with_decompile(item, |d| {
+            (d.shown_version != name).then(|| d.shown_version = name)
+        });
+        if changed.is_some() {
+            self.emit(Change::Decompile);
         }
-        self.decompile.borrow_mut().shown_version = name;
-        self.emit(Change::Decompile);
     }
 
     /// Carry out a C annotation, and leave the sheet.
@@ -1980,8 +2512,12 @@ impl Document {
             _ => None,
         };
         self.session.execute(command)?;
-        if removed.is_some() && removed == self.shown_version() {
-            self.decompile.borrow_mut().shown_version = None;
+        if removed.is_some() {
+            for d in self.workspace.borrow_mut().decompilers_mut() {
+                if d.shown_version == removed {
+                    d.shown_version = None;
+                }
+            }
         }
         self.refresh_decompile();
         self.emit(Change::Decompile);
@@ -2098,6 +2634,7 @@ impl Document {
             Some(o) if o < self.byte_count() => {
                 self.selection.borrow_mut().offset = Some(o);
                 self.refresh_details();
+                self.refresh_titles();
                 self.refresh_decompile();
                 self.refresh_graph();
                 self.emit(Change::Selection);
@@ -2358,8 +2895,9 @@ impl Document {
             && let Some(from) = self.selected()
             && from != offset
         {
+            let item = self.workspace.borrow().focused_item().map(|i| i.id);
             let mut h = self.history.borrow_mut();
-            h.push(from);
+            h.push(HistoryEntry { offset: from, item });
             if h.len() > HISTORY_LIMIT {
                 h.remove(0);
             }
@@ -2436,10 +2974,10 @@ impl Document {
         let Some(previous) = self.history.borrow_mut().pop() else {
             return;
         };
-        if let Some(current) = self.selected() {
-            self.forward_history.borrow_mut().push(current);
+        if let Some(entry) = self.here() {
+            self.forward_history.borrow_mut().push(entry);
         }
-        self.jump(previous, false);
+        self.revisit(previous);
         self.emit(Change::History);
     }
 
@@ -2447,11 +2985,35 @@ impl Document {
         let Some(next) = self.forward_history.borrow_mut().pop() else {
             return;
         };
-        if let Some(current) = self.selected() {
-            self.history.borrow_mut().push(current);
+        if let Some(entry) = self.here() {
+            self.history.borrow_mut().push(entry);
         }
-        self.jump(next, false);
+        self.revisit(next);
         self.emit(Change::History);
+    }
+
+    /// Where the selection is now, in the focused tab.
+    fn here(&self) -> Option<HistoryEntry> {
+        Some(HistoryEntry {
+            offset: self.selected()?,
+            item: self.workspace.borrow().focused_item().map(|i| i.id),
+        })
+    }
+
+    /// Back to where an entry was seen: its tab, if it is still open.
+    fn revisit(&self, entry: HistoryEntry) {
+        let (exists, focused) = {
+            let w = self.workspace.borrow();
+            let exists = entry.item.is_some_and(|i| w.layout().item(i).is_some());
+            (exists, w.focused_item().map(|i| i.id))
+        };
+        if let Some(item) = entry.item
+            && exists
+            && Some(item) != focused
+        {
+            self.focus_item(item);
+        }
+        self.jump(entry.offset, false);
     }
 
     /// Follow the selected instruction's target (or a pointer's).
@@ -2472,12 +3034,28 @@ impl Document {
     }
 
     pub fn scroll_request(&self) -> Option<ScrollRequest> {
-        self.scroll.get()
+        self.scroll.borrow().clone()
     }
 
+    /// Scroll the focused tab, and every tab following the selection, to
+    /// `offset`.
     pub fn request_scroll(&self, offset: u32) {
-        let id = self.scroll.get().map_or(0, |r| r.id) + 1;
-        self.scroll.set(Some(ScrollRequest { id, offset }));
+        let targets: Rc<[Id]> = {
+            let w = self.workspace.borrow();
+            let focused = w.focused_item().map(|i| i.id);
+            w.layout()
+                .items()
+                .into_iter()
+                .filter(|i| i.follows_selection || Some(i.id) == focused)
+                .map(|i| i.id)
+                .collect()
+        };
+        let id = self.scroll.borrow().as_ref().map_or(0, |r| r.id) + 1;
+        *self.scroll.borrow_mut() = Some(ScrollRequest {
+            id,
+            offset,
+            targets: Some(targets),
+        });
         self.emit(Change::Scroll);
     }
 
@@ -2763,7 +3341,7 @@ mod tests {
         }
         assert_eq!(d.history.borrow().len(), HISTORY_LIMIT);
         // The oldest entries were the ones dropped.
-        assert_eq!(d.history.borrow()[0], 50);
+        assert_eq!(d.history.borrow()[0].offset, 50);
     }
 
     #[test]
@@ -3346,6 +3924,482 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    // MARK: The workspace (docs/29), after the macOS WorkspaceModelTests
+
+    fn routines_doc() -> (Rc<Document>, Rc<TestRuntime>) {
+        let rt = TestRuntime::new();
+        let rom =
+            romlens_ffi::Rom::from_bytes(romlens_ffi::make_routines_test_rom(), "r.sfc".into())
+                .unwrap();
+        let d = Document::new(rom, rt.clone());
+        d.start_analysis();
+        rt.pump();
+        (d, rt)
+    }
+
+    fn focused(d: &Document) -> Id {
+        d.workspace().focused_item().expect("a tab has focus").id
+    }
+
+    fn item_count(d: &Document) -> usize {
+        d.workspace().layout().items().len()
+    }
+
+    #[test]
+    fn a_view_chosen_gets_its_own_tab() {
+        let (d, _) = routines_doc();
+        let hex = focused(&d);
+        d.set_tab(Tab::C);
+        let c = focused(&d);
+        assert_ne!(c, hex);
+        assert_eq!(
+            d.workspace().layout().item(hex).unwrap().content,
+            EditorContent::Code(CodeRep::Hex),
+            "the Hex tab is still Hex"
+        );
+        assert_eq!(item_count(&d), 2);
+        // Choosing Hex again shows its tab rather than opening another.
+        d.set_tab(Tab::Hex);
+        assert_eq!(focused(&d), hex);
+        assert_eq!(item_count(&d), 2);
+        // A view shown in another group is brought forward there.
+        let g = d.workspace().focused_group();
+        d.workspace.borrow_mut().split(g, DropEdge::Right, c);
+        d.focus_item(hex);
+        d.set_tab(Tab::C);
+        assert_eq!(focused(&d), c);
+        assert_eq!(item_count(&d), 2);
+    }
+
+    #[test]
+    fn a_code_tab_is_named_by_its_view_and_twins_by_their_routine() {
+        let (d, _) = routines_doc();
+        assert!(!d.navigator().data.labels.is_empty());
+        d.select(Some(0x44));
+        let hex = d.workspace().focused_item().unwrap();
+        assert_eq!(d.title_of(&hex), "Hex");
+        d.split_focused(DropEdge::Right);
+        let routine = d.routine_name(0x00_8044).expect("a label before it");
+        let titles: Vec<String> = d
+            .workspace()
+            .layout()
+            .items()
+            .iter()
+            .map(|i| d.title_of(i))
+            .collect();
+        assert_eq!(
+            titles,
+            [format!("Hex · {routine}"), format!("Hex · {routine}")]
+        );
+        // Moving to another routine renames the tab that follows.
+        d.select(Some(0x22));
+        let other = d.routine_name(0x00_8022).unwrap();
+        assert_ne!(other, routine);
+        let follower = d
+            .workspace()
+            .layout()
+            .items()
+            .into_iter()
+            .find(|i| i.follows_selection)
+            .unwrap();
+        assert_eq!(d.title_of(&follower), format!("Hex · {other}"));
+    }
+
+    #[test]
+    fn graphics_and_sound_open_their_own_tabs_beside_the_code_tab() {
+        let (d, _) = routines_doc();
+        d.set_tab(Tab::Disassembly);
+        let code = focused(&d);
+        d.open_graphics(gfx::Tab::Tiles);
+        assert_eq!(d.graphics_tab(), Some(gfx::Tab::Tiles));
+        assert_eq!(
+            d.tab(),
+            Tab::Disassembly,
+            "the last text view is still the tab"
+        );
+        d.open_audio(audio::Tab::Voices);
+        assert_eq!(
+            (d.audio_tab(), d.graphics_tab()),
+            (Some(audio::Tab::Voices), None)
+        );
+        // Hex, Disassembly, Tile Decoder, Voices.
+        assert_eq!(item_count(&d), 4);
+        // Choosing a text view again shows the code tab; the others stay.
+        d.set_tab(Tab::Disassembly);
+        assert_eq!(focused(&d), code);
+        assert_eq!(item_count(&d), 4);
+        // The Tiles tab is shown again rather than opened twice.
+        d.open_graphics(gfx::Tab::Tiles);
+        assert_eq!(item_count(&d), 4);
+        // Closing it shows the tab on its right, the sound view.
+        assert!(d.close_focused_tab());
+        assert_eq!(d.audio_tab(), Some(audio::Tab::Voices));
+    }
+
+    #[test]
+    fn a_jump_scrolls_the_focused_tab_and_the_followers_only() {
+        let (d, _) = routines_doc();
+        let hex = focused(&d);
+        d.set_tab(Tab::Disassembly);
+        let a = focused(&d);
+        let group = d.workspace().focused_group();
+        // A second assembly tab does not follow: it would always show the same
+        // place as the first.
+        let b = d
+            .workspace
+            .borrow_mut()
+            .open(EditorContent::Code(CodeRep::Assembly), None)
+            .unwrap();
+        assert!(!d.workspace().layout().item(b).unwrap().follows_selection);
+        d.workspace.borrow_mut().split(group, DropEdge::Right, b);
+        d.focus_item(a);
+        d.jump_to(0x40);
+        let request = d.scroll_request().unwrap();
+        assert!(request.applies(Some(a)));
+        assert!(
+            request.applies(Some(hex)),
+            "a hex tab follows the selection"
+        );
+        assert!(!request.applies(Some(b)));
+        assert!(
+            request.applies(None),
+            "a view outside any tab acts on every request"
+        );
+        // In b, b scrolls.
+        d.focus_item(b);
+        d.jump_to(0x20);
+        assert!(d.scroll_request().unwrap().applies(Some(b)));
+    }
+
+    #[test]
+    fn each_c_tab_keeps_its_own_routine() {
+        let (d, rt) = routines_doc();
+        d.select(Some(0x44));
+        d.set_tab(Tab::C);
+        let a = focused(&d);
+        // A second C tab, beside the first, not following the selection: it
+        // opens on the routine at the selection and stays there.
+        let b = d
+            .workspace
+            .borrow_mut()
+            .open(EditorContent::Code(CodeRep::C), None)
+            .unwrap();
+        let g = d.workspace().focused_group();
+        d.workspace.borrow_mut().split(g, DropEdge::Right, b);
+        d.focus_item(b);
+        rt.pump();
+        let name = |id| {
+            d.decompile_of(Some(id))
+                .result
+                .as_ref()
+                .map(|r| r.name.clone())
+        };
+        assert_eq!(name(b).as_deref(), Some("SUB_008040"));
+        let current = d.decompile().result.as_ref().map(|r| r.name.clone());
+        assert_eq!(current, name(b), "the document's C is the focused tab's");
+        // Reading on in a: a moves to the new routine, b does not.
+        d.focus_item(a);
+        d.select(Some(0x22));
+        rt.pump();
+        assert_eq!(name(a).as_deref(), Some("SUB_008020"));
+        assert_eq!(name(b).as_deref(), Some("SUB_008040"));
+    }
+
+    #[test]
+    fn back_goes_to_the_tab_a_place_was_seen_in() {
+        let (d, _) = routines_doc();
+        d.set_tab(Tab::Disassembly);
+        let a = focused(&d);
+        d.select(Some(0x10));
+        d.jump_to(0x20);
+        d.open_graphics(gfx::Tab::Tiles);
+        let tiles = focused(&d);
+        d.jump_to(0x40);
+        // 0x20 was left from the Tiles tab, 0x10 from the assembly tab.
+        d.go_back();
+        assert_eq!((d.selected(), focused(&d)), (Some(0x20), tiles));
+        d.go_back();
+        assert_eq!((d.selected(), focused(&d)), (Some(0x10), a));
+        d.go_forward();
+        assert_eq!(d.selected(), Some(0x20));
+    }
+
+    #[test]
+    fn dropping_a_tab_moves_splits_or_inserts() {
+        let (d, _) = routines_doc();
+        let a = focused(&d);
+        let left = d.workspace().focused_group();
+        let b = d
+            .workspace
+            .borrow_mut()
+            .open(EditorContent::Atlas, None)
+            .unwrap();
+        let c = d
+            .workspace
+            .borrow_mut()
+            .open(EditorContent::Graphics(gfx::Tab::Palette), None)
+            .unwrap();
+        // On the right edge: a new group there, holding the tab.
+        d.drop_tab(
+            TabDrop::Item(c),
+            left,
+            DropTarget::Zone(DropZone::Edge(DropEdge::Right)),
+        );
+        let right = d.workspace().layout().group_containing(c).unwrap().id;
+        assert!(right != left && d.workspace().layout().groups().len() == 2);
+        assert_eq!(d.workspace().focused_group(), right);
+        // In the middle of the other group: moved there, shown.
+        d.drop_tab(TabDrop::Item(b), right, DropTarget::Zone(DropZone::Center));
+        let ids = |d: &Document| -> Vec<Id> {
+            d.workspace()
+                .layout()
+                .group(right)
+                .unwrap()
+                .items
+                .iter()
+                .map(|i| i.id)
+                .collect()
+        };
+        assert_eq!(ids(&d), [c, b]);
+        assert_eq!(
+            d.workspace().layout().group(right).unwrap().selected,
+            Some(b)
+        );
+        // On a tab bar: inserted at that place.
+        d.drop_tab(TabDrop::Item(a), right, DropTarget::TabBar(1));
+        assert_eq!(ids(&d), [c, a, b]);
+        // The left group lost its last tab, so it went.
+        assert_eq!(d.workspace().layout().groups().len(), 1);
+    }
+
+    #[test]
+    fn dropping_something_to_open_opens_it_there() {
+        let (d, _) = routines_doc();
+        let left = d.workspace().focused_group();
+        let tilemap = EditorContent::Graphics(gfx::Tab::Tilemap);
+        d.drop_tab(
+            TabDrop::Open(tilemap),
+            left,
+            DropTarget::Zone(DropZone::Edge(DropEdge::Bottom)),
+        );
+        assert_eq!(d.workspace().layout().groups().len(), 2);
+        assert_eq!(d.graphics_tab(), Some(gfx::Tab::Tilemap));
+        let bottom = d.workspace().focused_group();
+        assert_ne!(bottom, left);
+        // A view with one tab, dropped on another group, comes to it.
+        d.drop_tab(
+            TabDrop::Open(tilemap),
+            left,
+            DropTarget::Zone(DropZone::Center),
+        );
+        let at = d
+            .workspace()
+            .layout()
+            .group_containing(focused(&d))
+            .unwrap()
+            .id;
+        assert_eq!(at, left);
+        let tilemaps = d
+            .workspace()
+            .layout()
+            .items()
+            .iter()
+            .filter(|i| i.content == tilemap)
+            .count();
+        assert_eq!(tilemaps, 1);
+        assert_eq!(
+            d.workspace().layout().groups().len(),
+            1,
+            "the bottom group emptied and went"
+        );
+        // Code opens a new tab each time.
+        d.drop_tab(
+            TabDrop::Open(EditorContent::Code(CodeRep::C)),
+            left,
+            DropTarget::TabBar(0),
+        );
+        assert_eq!(
+            d.workspace().layout().groups()[0].items[0].content,
+            EditorContent::Code(CodeRep::C)
+        );
+    }
+
+    #[test]
+    fn dropping_a_groups_only_tab_on_itself_changes_nothing() {
+        let (d, _) = routines_doc();
+        let g = d.workspace().focused_group();
+        let a = focused(&d);
+        let before = d.workspace().layout().clone();
+        d.drop_tab(
+            TabDrop::Item(a),
+            g,
+            DropTarget::Zone(DropZone::Edge(DropEdge::Left)),
+        );
+        assert_eq!(*d.workspace().layout(), before);
+    }
+
+    #[test]
+    fn a_label_dropped_out_opens_a_new_tab_there() {
+        let (d, _) = routines_doc();
+        let g = d.workspace().focused_group();
+        d.drop_tab(
+            TabDrop::OpenAt(CodeRep::Assembly, 0x00_8040),
+            g,
+            DropTarget::Zone(DropZone::Edge(DropEdge::Right)),
+        );
+        assert_eq!(d.workspace().layout().groups().len(), 2);
+        assert_eq!(
+            d.focused_content(),
+            Some(EditorContent::Code(CodeRep::Assembly))
+        );
+        assert_eq!(d.selected(), Some(0x40));
+    }
+
+    #[test]
+    fn the_routine_list_holds_routines_not_loops() {
+        let (d, rt) = routines_doc();
+        let names: Vec<String> = d.routines().into_iter().map(|l| l.name).collect();
+        assert!(names.iter().any(|n| n.starts_with("SUB_")), "{names:?}");
+        assert!(names.iter().any(|n| n.starts_with("RESET")), "{names:?}");
+        assert!(
+            !names.iter().any(|n| n.starts_with("LOOP_")
+                || n.starts_with("SKIP_")
+                || n.starts_with("DATA_")),
+            "{names:?}"
+        );
+        let addresses: Vec<u32> = d.routines().iter().map(|l| l.address).collect();
+        let mut sorted = addresses.clone();
+        sorted.sort();
+        assert_eq!(addresses, sorted);
+        // A label of the student's on a routine is listed by that name.
+        d.select(Some(0x20));
+        d.set_label(Some("ClearSlots".into())).unwrap();
+        rt.pump();
+        assert!(d.routines().iter().any(|l| l.name == "ClearSlots"));
+    }
+
+    #[test]
+    fn choosing_a_routine_shows_its_c() {
+        let (d, rt) = routines_doc();
+        d.set_tab(Tab::C);
+        let c = focused(&d);
+        let sub = d
+            .routines()
+            .into_iter()
+            .find(|l| l.address == 0x00_8040)
+            .expect("the routine at $00:8040");
+        d.jump_to_snes(sub.address);
+        rt.pump();
+        assert_eq!(
+            d.decompile_of(Some(c)).result.as_ref().map(|r| r.entry),
+            Some(0x00_8040)
+        );
+    }
+
+    #[test]
+    fn closing_the_last_tab_leaves_an_empty_group_and_close_tab_then_closes_nothing() {
+        let (d, _) = routines_doc();
+        assert!(d.close_focused_tab());
+        assert_eq!(item_count(&d), 0);
+        assert_eq!(d.workspace().layout().groups().len(), 1);
+        assert!(!d.close_focused_tab(), "the window closes instead");
+    }
+
+    #[test]
+    fn next_and_previous_tab_wrap_within_the_group() {
+        let (d, _) = routines_doc();
+        let hex = focused(&d);
+        d.set_tab(Tab::Disassembly);
+        let asm = focused(&d);
+        d.select_adjacent_tab(1);
+        assert_eq!(focused(&d), hex, "past the end wraps to the first");
+        d.select_adjacent_tab(-1);
+        assert_eq!(focused(&d), asm);
+    }
+
+    #[test]
+    fn a_citation_from_the_tutors_tab_opens_beside_it() {
+        let (d, _) = routines_doc();
+        d.show_tutor_tab();
+        assert_eq!(d.focused_content(), Some(EditorContent::Tutor));
+        assert!(d.follow_citation(tutor::Citation::Address(0x00_8040)));
+        assert_eq!(
+            d.workspace().layout().groups().len(),
+            2,
+            "a new group beside it"
+        );
+        assert_eq!(
+            d.focused_content(),
+            Some(EditorContent::Code(CodeRep::Assembly))
+        );
+        let tutor_group = d
+            .workspace()
+            .layout()
+            .existing(EditorContent::Tutor)
+            .and_then(|t| d.workspace().layout().group_containing(t.id).map(|g| g.id))
+            .unwrap();
+        assert_ne!(
+            d.workspace().focused_group(),
+            tutor_group,
+            "the tutor stays in view"
+        );
+        // A second citation reuses the group.
+        d.focus_group(tutor_group);
+        assert!(d.follow_citation(tutor::Citation::Routine(0x00_8020)));
+        assert_eq!(d.workspace().layout().groups().len(), 2);
+        assert_eq!(d.tab(), Tab::C);
+    }
+
+    #[test]
+    fn pointing_at_a_paragraph_outlines_what_it_cites() {
+        let (d, _) = routines_doc();
+        d.point_at_citations(&[0x00_8020, 0x00_8040]);
+        let ranges = d.citation_highlight();
+        assert_eq!(ranges.len(), 2);
+        assert_eq!(ranges[0].start, 0x20);
+        assert!(!ranges[0].is_empty());
+        d.point_at_citations(&[]);
+        assert!(d.citation_highlight().is_empty());
+    }
+
+    #[test]
+    fn views_that_cannot_open_yet_say_why() {
+        let (d, _) = doc();
+        assert_eq!(
+            d.unavailable_reason(EditorContent::Code(CodeRep::Assembly)),
+            Some("analyzing")
+        );
+        assert_eq!(
+            d.unavailable_reason(EditorContent::Code(CodeRep::Hex)),
+            None
+        );
+        assert_eq!(
+            d.unavailable_reason(EditorContent::Compare),
+            Some("needs a ROM")
+        );
+        assert_eq!(
+            d.unavailable_reason(EditorContent::Source),
+            Some("no sources")
+        );
+        assert_eq!(
+            d.unavailable_reason(EditorContent::Graphics(gfx::Tab::Frame)),
+            Some("needs a recording")
+        );
+        assert_eq!(
+            d.unavailable_reason(EditorContent::Graphics(gfx::Tab::Tiles)),
+            None
+        );
+        assert_eq!(
+            d.unavailable_reason(EditorContent::Audio(audio::Tab::Voices)),
+            None
+        );
+        let (d, _) = routines_doc();
+        assert_eq!(
+            d.unavailable_reason(EditorContent::Code(CodeRep::Assembly)),
+            None
+        );
+    }
+
     #[test]
     fn the_c_tab_follows_the_selection_and_its_level() {
         let rt = TestRuntime::new();
@@ -3487,11 +4541,14 @@ mod tests {
         assert_eq!(d.compare().state, compare::CompareState::Ready);
         d.close_compare();
         assert!(!d.compare().is_active());
-        assert_eq!(
-            d.tab(),
-            Tab::Disassembly,
+        assert!(
+            d.workspace()
+                .layout()
+                .existing(EditorContent::Compare)
+                .is_none(),
             "the tab closes with the comparison"
         );
+        assert_eq!(d.tab(), Tab::Hex, "and the tab beside it shows");
         assert!(before.is_some());
         let _ = std::fs::remove_dir_all(dir);
     }

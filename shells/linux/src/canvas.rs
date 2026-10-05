@@ -10,6 +10,7 @@ use gtk::prelude::*;
 use gtk::{gdk, glib, pango};
 
 use crate::editor_keys;
+use crate::model::workspace::Id;
 use crate::model::{EditorCommand, ScrollRequest};
 
 /// The editor font. Adwaita Mono where installed, else Source Code Pro, else
@@ -134,14 +135,23 @@ impl VScroll {
     /// before its first analysis, or while another tab shows) leaves the
     /// request pending and takes it up when it appears, so a jump made
     /// elsewhere is not lost.
+    ///
+    /// `item` is the tab the view is in: a request for other tabs (one that
+    /// does not follow the selection) leaves it where it is, except that a
+    /// view never scrolled yet opens on the selection.
     pub fn follow(
         &self,
         request: Option<ScrollRequest>,
+        item: Option<Id>,
         area: &gtk::DrawingArea,
         row_of: impl FnOnce(u32) -> Option<u32>,
     ) {
         let Some(request) = request else { return };
         if request.id == self.handled.get() || !area.is_mapped() || area.height() <= 0 {
+            return;
+        }
+        if self.handled.get() != 0 && !request.applies(item) {
+            self.handled.set(request.id);
             return;
         }
         if let Some(row) = row_of(request.offset) {
