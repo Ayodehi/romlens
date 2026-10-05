@@ -191,7 +191,7 @@ impl View {
     }
 
     fn refresh(self: &Rc<Self>) {
-        if self.doc.audio_tab() != Some(Tab::Timeline) {
+        if !self.doc.shows_audio(Tab::Timeline) {
             return;
         }
         self.doc.load_notes();

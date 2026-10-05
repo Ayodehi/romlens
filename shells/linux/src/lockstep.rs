@@ -11,6 +11,7 @@ use crate::asmview::{self, AsmPane};
 use crate::canvas::{set_source, with_alpha};
 use crate::hex::BYTES_PER_ROW;
 use crate::hexview::{self, HexPane};
+use crate::model::workspace::Id;
 use crate::model::{Change, Document};
 
 /// The listing line that should be at the top when hex row `row` is. Rows
@@ -37,9 +38,9 @@ pub fn hex_row_for_top_line(doc: &Document, line: i64) -> Option<u32> {
         .map(|o| o / BYTES_PER_ROW as u32)
 }
 
-pub fn build(doc: &Rc<Document>) -> gtk::Widget {
-    let hex = Rc::new(hexview::build(doc));
-    let asm = Rc::new(asmview::build(doc));
+pub fn build(doc: &Rc<Document>, item: Option<Id>) -> gtk::Widget {
+    let hex = Rc::new(hexview::build(doc, item));
+    let asm = Rc::new(asmview::build(doc, item));
 
     let paned = gtk::Paned::builder()
         .orientation(gtk::Orientation::Horizontal)

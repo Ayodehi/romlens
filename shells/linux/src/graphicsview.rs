@@ -1,6 +1,5 @@
-//! The editor area when a graphics view is open: a bar naming what the views
-//! read, then the view. The macOS twin is `GraphicsEditorView` and
-//! `GraphicsSourceBar`.
+//! A graphics view's tab: a bar naming what the views read, then the view.
+//! The macOS twin is `GraphicsEditorView` and `GraphicsSourceBar`.
 
 use std::rc::Rc;
 
@@ -10,18 +9,18 @@ use crate::model::graphics::{Source, Tab};
 use crate::model::{Change, Document};
 use crate::{frameview, layersview, oamview, paletteview, tilemapview, tilesview};
 
-pub fn build(doc: &Rc<Document>) -> gtk::Widget {
-    let stack = gtk::Stack::new();
-    stack.add_named(&tilesview::build(doc), Some(Tab::Tiles.id()));
-    stack.add_named(&paletteview::build(doc), Some(Tab::Palette.id()));
-    stack.add_named(&oamview::build(doc), Some(Tab::Oam.id()));
-    stack.add_named(&tilemapview::build(doc), Some(Tab::Tilemap.id()));
+pub fn build(doc: &Rc<Document>, tab: Tab) -> gtk::Widget {
+    let view = match tab {
+        Tab::Tiles => tilesview::build(doc),
+        Tab::Palette => paletteview::build(doc),
+        Tab::Oam => oamview::build(doc),
+        Tab::Tilemap => tilemapview::build(doc),
+        Tab::Frame => frameview::build(doc),
+        Tab::Layers => layersview::build(doc),
+    };
     // Frame and Layers draw the screen, which exists only in a recording:
     // without one, a note says how to get one.
-    for (tab, view) in [
-        (Tab::Frame, frameview::build(doc)),
-        (Tab::Layers, layersview::build(doc)),
-    ] {
+    let view = if tab.needs_recording() {
         let inner = gtk::Stack::new();
         inner.add_named(&view, Some("view"));
         inner.add_named(&needs_recording(tab), Some("none"));
@@ -39,30 +38,16 @@ pub fn build(doc: &Rc<Document>) -> gtk::Widget {
                 update();
             }
         });
-        stack.add_named(&inner, Some(tab.id()));
-    }
-
-    let bar = source_bar(doc);
-    let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    root.append(&bar);
-    root.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
-    root.append(&stack);
-    stack.set_vexpand(true);
-
-    let show = {
-        let (stack, doc) = (stack.clone(), Rc::clone(doc));
-        move || {
-            if let Some(tab) = doc.graphics_tab() {
-                stack.set_visible_child_name(tab.id());
-            }
-        }
+        inner.upcast()
+    } else {
+        view
     };
-    show();
-    doc.subscribe(move |c| {
-        if matches!(c, Change::Layout | Change::Graphics) {
-            show();
-        }
-    });
+
+    let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    root.append(&source_bar(doc));
+    root.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+    root.append(&view);
+    view.set_vexpand(true);
     root.upcast()
 }
 

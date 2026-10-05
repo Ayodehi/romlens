@@ -40,9 +40,13 @@ fn always(_: &Document) -> bool {
     true
 }
 
-/// Zoom acts on the graph and on the atlas.
+/// Zoom acts on a focused Graph tab and on the atlas.
 fn zooms(d: &Document) -> bool {
-    matches!(d.tab(), Tab::Graph | Tab::Atlas)
+    use crate::model::workspace::{CodeRep, EditorContent};
+    matches!(
+        d.focused_content(),
+        Some(EditorContent::Code(CodeRep::Graph) | EditorContent::Atlas)
+    )
 }
 
 /// File › Import: a trace, symbols or ca65 debug information.
@@ -87,7 +91,51 @@ macro_rules! mark_as {
     };
 }
 
+/// The focused group has a tab: Split Right and Down.
+fn has_tab(d: &Document) -> bool {
+    d.focused_item_id().is_some()
+}
+
+/// The focused group has another tab to go to.
+fn has_other_tab(d: &Document) -> bool {
+    let w = d.workspace();
+    w.layout()
+        .group(w.focused_group())
+        .is_some_and(|g| g.items.len() > 1)
+}
+
 const ENTRIES: &[Entry] = &[
+    // Tabs and groups (docs/29)
+    Entry {
+        name: "close-tab",
+        enabled: always,
+        // With no tab in the focused group, the window closes instead.
+        run: |d, w| {
+            if !d.close_focused_tab() {
+                w.close();
+            }
+        },
+    },
+    Entry {
+        name: "split-right",
+        enabled: has_tab,
+        run: |d, _| d.split_focused(crate::model::workspace::DropEdge::Right),
+    },
+    Entry {
+        name: "split-down",
+        enabled: has_tab,
+        run: |d, _| d.split_focused(crate::model::workspace::DropEdge::Bottom),
+    },
+    Entry {
+        name: "next-tab",
+        enabled: has_other_tab,
+        run: |d, _| d.select_adjacent_tab(1),
+    },
+    Entry {
+        name: "previous-tab",
+        enabled: has_other_tab,
+        run: |d, _| d.select_adjacent_tab(-1),
+    },
     // Go
     Entry {
         name: "follow-reference",
@@ -511,7 +559,8 @@ pub const ACCELS: &[(&str, &[&str])] = &[
     ("win.duplicate", &["<Control><Alt><Shift>s"]),
     ("win.live-session", &["<Alt><Shift>l"]),
     ("win.compare-with", &["<Alt><Shift>d"]),
-    ("window.close", &["<Control>w"]),
+    ("win.close-tab", &["<Control>w"]),
+    ("window.close", &["<Control><Shift>w"]),
     ("app.quit", &["<Control>q"]),
     ("app.settings", &["<Control>comma"]),
     ("app.shortcuts", &["<Control>question"]),
@@ -556,6 +605,20 @@ pub const ACCELS: &[(&str, &[&str])] = &[
     ("win.address-style::both", &["<Control>1"]),
     ("win.address-style::snes", &["<Control>2"]),
     ("win.address-style::file", &["<Control>3"]),
+    // Tabs and groups: Ctrl+\ as Visual Studio Code splits, GNOME's
+    // Ctrl+Page Up and Down between tabs, and Ctrl+Alt+digit for the groups
+    // (Ctrl+digit is the address columns, Alt+digit the views).
+    ("win.split-right", &["<Control>backslash"]),
+    (
+        "win.split-down",
+        &["<Control><Shift>backslash", "<Control>bar"],
+    ),
+    ("win.next-tab", &["<Control>Page_Down"]),
+    ("win.previous-tab", &["<Control>Page_Up"]),
+    ("win.focus-group::1", &["<Control><Alt>1"]),
+    ("win.focus-group::2", &["<Control><Alt>2"]),
+    ("win.focus-group::3", &["<Control><Alt>3"]),
+    ("win.focus-group::4", &["<Control><Alt>4"]),
     // Analysis
     ("win.cancel-analysis", &["<Control>period"]),
     // In the C pane (handled by the pane, not a window action)
@@ -577,7 +640,7 @@ pub fn knows(action: &str) -> bool {
         "win" => {
             ENTRIES.iter().any(|e| e.name == bare)
                 || TOGGLES.iter().any(|t| t.name == bare)
-                || ["show-tab", "address-style"].contains(&bare)
+                || PARAMETERIZED.contains(&bare)
         }
         "app" => APP_ACTIONS.contains(&bare),
         "window" => bare == "close",
@@ -585,6 +648,10 @@ pub fn knows(action: &str) -> bool {
         _ => false,
     }
 }
+
+/// The window actions that take a string parameter, made by `install` itself.
+#[cfg(test)]
+const PARAMETERIZED: &[&str] = &["show-tab", "address-style", "focus-group", "editor-layout"];
 
 /// Actions on the application (see `main.rs`).
 #[cfg(test)]
@@ -612,6 +679,7 @@ pub const SHORTCUT_GROUPS: &[(&str, &[(&str, &str)])] = &[
             ("Open Recording", "win.open-recording"),
             ("Start Live Session", "win.live-session"),
             ("Compare With", "win.compare-with"),
+            ("Close Tab", "win.close-tab"),
             ("Close Window", "window.close"),
             ("Quit", "app.quit"),
         ],
@@ -667,6 +735,19 @@ pub const SHORTCUT_GROUPS: &[(&str, &[(&str, &str)])] = &[
             ("File and SNES Addresses", "win.address-style::both"),
             ("SNES Addresses Only", "win.address-style::snes"),
             ("File Offsets Only", "win.address-style::file"),
+        ],
+    ),
+    (
+        "Tabs",
+        &[
+            ("Split Right", "win.split-right"),
+            ("Split Down", "win.split-down"),
+            ("Next Tab", "win.next-tab"),
+            ("Previous Tab", "win.previous-tab"),
+            ("Focus Group 1", "win.focus-group::1"),
+            ("Focus Group 2", "win.focus-group::2"),
+            ("Focus Group 3", "win.focus-group::3"),
+            ("Focus Group 4", "win.focus-group::4"),
         ],
     ),
     (
@@ -772,6 +853,41 @@ pub fn install(window: &adw::ApplicationWindow, doc: &Rc<Document>) {
     });
     window.add_action(&style);
 
+    // Focus Group 1 to 4, in reading order; its state checks the focused one.
+    let focus_group = gio::SimpleAction::new_stateful(
+        "focus-group",
+        Some(glib::VariantTy::STRING),
+        &"1".to_variant(),
+    );
+    focus_group.connect_activate({
+        let doc = Rc::clone(doc);
+        move |_, param| {
+            if let Some(n) = param
+                .and_then(|p| p.get::<String>())
+                .and_then(|n| n.parse::<usize>().ok())
+                .filter(|n| *n >= 1)
+            {
+                doc.focus_group_at(n - 1);
+            }
+        }
+    });
+    window.add_action(&focus_group);
+
+    // View › Editor Layout.
+    let layout = gio::SimpleAction::new("editor-layout", Some(glib::VariantTy::STRING));
+    layout.connect_activate({
+        let doc = Rc::clone(doc);
+        move |_, param| {
+            if let Some(preset) = param
+                .and_then(|p| p.get::<String>())
+                .and_then(|id| crate::model::workspace::LayoutPreset::from_id(&id))
+            {
+                doc.apply_layout(preset);
+            }
+        }
+    });
+    window.add_action(&layout);
+
     let refresh = {
         let doc = Rc::clone(doc);
         move || {
@@ -788,6 +904,16 @@ pub fn install(window: &adw::ApplicationWindow, doc: &Rc<Document>) {
                 doc.tab().id()
             };
             tab.set_state(&current.to_variant());
+            let n = {
+                let w = doc.workspace();
+                let focused = w.focused_group();
+                w.layout()
+                    .groups()
+                    .iter()
+                    .position(|g| g.id == focused)
+                    .map_or(0, |i| i + 1)
+            };
+            focus_group.set_state(&n.to_string().to_variant());
             style.set_state(&style_id(doc.address_style()).to_variant());
         }
     };
@@ -907,7 +1033,7 @@ mod tests {
     fn action_exists(bare: &str) -> bool {
         ENTRIES.iter().any(|e| e.name == bare)
             || TOGGLES.iter().any(|t| t.name == bare)
-            || ["show-tab", "address-style"].contains(&bare)
+            || PARAMETERIZED.contains(&bare)
     }
 
     #[test]

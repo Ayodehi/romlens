@@ -223,7 +223,7 @@ impl View {
     }
 
     fn refresh(self: &Rc<Self>) {
-        if self.doc.audio_tab() != Some(Tab::Aram) {
+        if !self.doc.shows_audio(Tab::Aram) {
             return;
         }
         let a = self.doc.audio();

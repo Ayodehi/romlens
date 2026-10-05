@@ -40,6 +40,13 @@ pub fn primary_menu() -> gio::Menu {
     menu.append_section(
         None,
         &section(&[
+            ("Close Tab", "win.close-tab"),
+            ("Close Window", "window.close"),
+        ]),
+    );
+    menu.append_section(
+        None,
+        &section(&[
             ("Open Recording…", "win.open-recording"),
             ("Import Snapshot…", "win.import-snapshot"),
             ("Export Frame Region…", "win.export-frame-region"),
@@ -175,6 +182,29 @@ fn view_items() -> Vec<gio::Menu> {
     kinds.append_submenu(Some("Graphics"), &graphics);
     kinds.append_submenu(Some("Audio"), &audio);
     kinds.append(Some("Tutor"), Some("win.show-tutor"));
+    // Tabs and groups (docs/29).
+    let groups = section(&[
+        ("Split Right", "win.split-right"),
+        ("Split Down", "win.split-down"),
+    ]);
+    let layouts = gio::Menu::new();
+    for p in crate::model::workspace::LayoutPreset::ALL {
+        layouts.append(
+            Some(p.title()),
+            Some(&format!("win.editor-layout::{}", p.id())),
+        );
+    }
+    groups.append_submenu(Some("Editor Layout"), &layouts);
+    groups.append(Some("Next Tab"), Some("win.next-tab"));
+    groups.append(Some("Previous Tab"), Some("win.previous-tab"));
+    let focus = gio::Menu::new();
+    for n in 1..=4 {
+        focus.append(
+            Some(&format!("Group {n}")),
+            Some(&format!("win.focus-group::{n}")),
+        );
+    }
+    groups.append_submenu(Some("Focus Group"), &focus);
     let addresses = section(&[
         ("File Offset and SNES Address", "win.address-style::both"),
         ("SNES Address Only", "win.address-style::snes"),
@@ -193,7 +223,7 @@ fn view_items() -> Vec<gio::Menu> {
         ("Zoom Out", "win.zoom-out"),
         ("Zoom to Fit", "win.zoom-fit"),
     ]);
-    vec![tabs, kinds, addresses, panes, zoom]
+    vec![tabs, kinds, groups, addresses, panes, zoom]
 }
 
 fn go_items() -> gio::Menu {

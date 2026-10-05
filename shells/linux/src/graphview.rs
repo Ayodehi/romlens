@@ -14,6 +14,7 @@ use crate::canvas::{self, Metrics, set_source, with_alpha};
 use crate::model::Zoom;
 use crate::model::graph::{GraphMode, GraphState};
 use crate::model::graphscene::{self, Box_, Cells, Edge, EdgeColor, Line, Scene, SegmentStyle};
+use crate::model::workspace::Id;
 use crate::model::{Change, Document};
 use crate::palette;
 
@@ -23,6 +24,8 @@ const STEP: f64 = 1.25;
 
 struct View {
     doc: Rc<Document>,
+    /// The tab the view is in: its own graph, and the zoom when it has focus.
+    item: Option<Id>,
     area: gtk::DrawingArea,
     scroll: gtk::ScrolledWindow,
     title: gtk::Label,
@@ -40,7 +43,7 @@ struct View {
     zoom_id: Cell<u64>,
 }
 
-pub fn build(doc: &Rc<Document>) -> gtk::Widget {
+pub fn build(doc: &Rc<Document>, item: Option<Id>) -> gtk::Widget {
     let area = gtk::DrawingArea::builder()
         .focusable(true)
         .has_tooltip(true)
@@ -111,6 +114,7 @@ pub fn build(doc: &Rc<Document>) -> gtk::Widget {
 
     let view = Rc::new(View {
         doc: Rc::clone(doc),
+        item,
         area,
         scroll,
         title,
@@ -243,7 +247,7 @@ impl View {
 
     fn update(self: &Rc<Self>) {
         let (state, mode, generation, blocks, calls) = {
-            let g = self.doc.graph();
+            let g = self.doc.graph_of(self.item);
             (
                 g.state.clone(),
                 g.mode,
@@ -323,8 +327,8 @@ impl View {
             && id != self.zoom_id.get()
         {
             self.zoom_id.set(id);
-            // Only the Graph tab answers; the atlas has its own zoom.
-            if self.doc.tab() == crate::model::Tab::Graph {
+            // Only the focused Graph tab answers; the atlas has its own zoom.
+            if self.doc.focused_item_id().is_some() && self.doc.focused_item_id() == self.item {
                 match kind {
                     Zoom::In => self.set_zoom(self.zoom.get() * STEP),
                     Zoom::Out => self.set_zoom(self.zoom.get() / STEP),

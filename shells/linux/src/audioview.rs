@@ -1,5 +1,5 @@
-//! The editor area when a sound view is open (docs/23): what the views read
-//! and the transport, then the view. The macOS twin is `AudioEditorView`,
+//! A sound view's tab (docs/23): what the views read and the transport, then
+//! the view. The macOS twin is `AudioEditorView`,
 //! `AudioSourceBar` and `TransportControls`.
 
 use std::rc::Rc;
@@ -12,21 +12,22 @@ use crate::model::audio::{Source, Tab};
 use crate::model::{Change, Document};
 use crate::{aramview, echoview, portsview, samplesview, scopeview, timelineview, voicesview};
 
-pub fn build(doc: &Rc<Document>) -> gtk::Widget {
-    let stack = gtk::Stack::new();
-    stack.add_named(&voicesview::build(doc), Some(Tab::Voices.id()));
-    stack.add_named(&samplesview::build(doc), Some(Tab::Samples.id()));
-    stack.add_named(&aramview::build(doc), Some(Tab::Aram.id()));
-    stack.add_named(&timelineview::build(doc), Some(Tab::Timeline.id()));
-    stack.add_named(&portsview::build(doc), Some(Tab::Ports.id()));
-    stack.add_named(&echoview::build(doc), Some(Tab::Echo.id()));
-    stack.add_named(&scopeview::build(doc), Some(Tab::Scope.id()));
+pub fn build(doc: &Rc<Document>, tab: Tab) -> gtk::Widget {
+    let view = match tab {
+        Tab::Voices => voicesview::build(doc),
+        Tab::Samples => samplesview::build(doc),
+        Tab::Aram => aramview::build(doc),
+        Tab::Timeline => timelineview::build(doc),
+        Tab::Ports => portsview::build(doc),
+        Tab::Echo => echoview::build(doc),
+        Tab::Scope => scopeview::build(doc),
+    };
 
     let unavailable = adw::StatusPage::builder()
         .icon_name("audio-volume-muted-symbolic")
         .build();
     let body = gtk::Stack::new();
-    body.add_named(&stack, Some("content"));
+    body.add_named(&view, Some("content"));
     body.add_named(&unavailable, Some("none"));
     body.set_vexpand(true);
 
@@ -36,11 +37,8 @@ pub fn build(doc: &Rc<Document>) -> gtk::Widget {
     root.append(&body);
 
     let show = {
-        let (doc, stack, body, unavailable) = (Rc::clone(doc), stack, body, unavailable);
+        let (doc, body, unavailable) = (Rc::clone(doc), body, unavailable);
         move || {
-            if let Some(tab) = doc.audio_tab() {
-                stack.set_visible_child_name(tab.id());
-            }
             let a = doc.audio();
             if a.state().is_some() {
                 body.set_visible_child_name("content");

@@ -107,7 +107,7 @@ pub fn build(doc: &Rc<Document>) -> gtk::Widget {
 
 impl View {
     fn refresh(&self) {
-        if self.doc.audio_tab() != Some(Tab::Voices) {
+        if !self.doc.shows_audio(Tab::Voices) {
             return;
         }
         let a = self.doc.audio();

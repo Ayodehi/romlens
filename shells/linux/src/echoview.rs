@@ -32,7 +32,7 @@ pub fn build(doc: &Rc<Document>) -> gtk::Widget {
     let refresh = {
         let (doc, body) = (Rc::clone(doc), body);
         move || {
-            if doc.audio_tab() != Some(Tab::Echo) {
+            if !doc.shows_audio(Tab::Echo) {
                 return;
             }
             let Some(state) = doc.audio().state() else {

@@ -54,6 +54,7 @@ mod snapshot;
 mod sourceview;
 mod stripview;
 mod style;
+mod tabgrid;
 mod tilemapview;
 mod tilesview;
 mod timelineview;

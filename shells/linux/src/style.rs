@@ -18,6 +18,10 @@ const CSS: &str = "
 .chip-purple { background: alpha(@purple_3, 0.25); }
 .chip-indigo { background: alpha(@purple_2, 0.2); }
 .romlens-strip-frame { border-radius: 4px; }
+/* The focused tab group: its shown tab edged in the accent colour, as the
+   macOS tab bar does (docs/29). */
+.romlens-group.focused tabbar tab:selected { box-shadow: inset 0 2px @accent_bg_color; }
+.romlens-group tabbar .box { min-height: 30px; }
 .romlens-idiom {
     border-radius: 8px;
     padding: 10px;

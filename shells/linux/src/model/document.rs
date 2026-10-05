@@ -266,6 +266,9 @@ pub struct Document {
     /// Bumped whenever cached rows must be rebuilt (snapshot or view change).
     generation: Cell<u64>,
     listeners: RefCell<Vec<Listener>>,
+    /// Listeners added while a change was going out (a tab's view made by the
+    /// grid as the layout changed): they join when it has gone.
+    joining: RefCell<Vec<Listener>>,
 }
 
 impl Document {
@@ -373,6 +376,7 @@ impl Document {
             style: Cell::new(AddressStyle::default()),
             generation: Cell::new(0),
             listeners: RefCell::new(Vec::new()),
+            joining: RefCell::new(Vec::new()),
         });
         *doc.me.borrow_mut() = Rc::downgrade(&doc);
         doc.source.borrow_mut().reload(doc.workbench());
@@ -396,7 +400,10 @@ impl Document {
     }
 
     pub fn subscribe(&self, f: impl Fn(Change) + 'static) {
-        self.listeners.borrow_mut().push(Box::new(f));
+        match self.listeners.try_borrow_mut() {
+            Ok(mut l) => l.push(Box::new(f)),
+            Err(_) => self.joining.borrow_mut().push(Box::new(f)),
+        }
     }
 
     fn emit(&self, change: Change) {
@@ -407,6 +414,11 @@ impl Document {
         }
         for f in self.listeners.borrow().iter() {
             f(change);
+        }
+        // The outermost change to finish lets the newcomers in; a view made
+        // during this change has already read the state it was made from.
+        if let Ok(mut l) = self.listeners.try_borrow_mut() {
+            l.append(&mut self.joining.borrow_mut());
         }
     }
 
@@ -596,6 +608,28 @@ impl Document {
 
     pub fn workspace(&self) -> std::cell::Ref<'_, Workspace> {
         self.workspace.borrow()
+    }
+
+    pub fn focused_item_id(&self) -> Option<Id> {
+        self.workspace.borrow().focused_item().map(|i| i.id)
+    }
+
+    /// Whether some group shows `content`: what a view checks before doing
+    /// work for it, now that several can show at once.
+    pub fn shows(&self, content: EditorContent) -> bool {
+        self.workspace
+            .borrow()
+            .visible_items()
+            .iter()
+            .any(|i| i.content == content)
+    }
+
+    pub fn shows_graphics(&self, tab: gfx::Tab) -> bool {
+        self.shows(EditorContent::Graphics(tab))
+    }
+
+    pub fn shows_audio(&self, tab: audio::Tab) -> bool {
+        self.shows(EditorContent::Audio(tab))
     }
 
     pub fn focused_content(&self) -> Option<EditorContent> {
@@ -3180,6 +3214,7 @@ impl Document {
         self.graphics.borrow_mut().stop_live();
         self.compare.borrow_mut().close();
         self.listeners.borrow_mut().clear();
+        self.joining.borrow_mut().clear();
     }
 }
 
@@ -3240,6 +3275,30 @@ mod tests {
 
     /// Closing stops what was running for the window and frees the document,
     /// although a listener (as every view's is) holds it.
+    /// A view made while a change goes out (the grid building a tab) hears
+    /// the changes after it.
+    #[test]
+    fn a_listener_added_during_a_change_hears_the_next_one() {
+        let (d, _) = doc();
+        let heard = Rc::new(Cell::new(0));
+        let added = Rc::new(Cell::new(false));
+        d.subscribe({
+            let (d2, heard, added) = (Rc::downgrade(&d), Rc::clone(&heard), Rc::clone(&added));
+            move |_| {
+                if !added.replace(true)
+                    && let Some(d) = d2.upgrade()
+                {
+                    let heard = Rc::clone(&heard);
+                    d.subscribe(move |_| heard.set(heard.get() + 1));
+                }
+            }
+        });
+        d.emit(Change::Layout);
+        assert_eq!(heard.get(), 0, "not the change it was made during");
+        d.emit(Change::Layout);
+        assert_eq!(heard.get(), 1);
+    }
+
     #[test]
     fn closing_stops_the_work_and_frees_the_document() {
         let (d, rt) = doc();

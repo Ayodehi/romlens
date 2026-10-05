@@ -254,7 +254,7 @@ impl View {
     }
 
     fn refresh(&self) {
-        if self.doc.graphics_tab() != Some(gfx::Tab::Tilemap) {
+        if !self.doc.shows_graphics(gfx::Tab::Tilemap) {
             return;
         }
         let (recording, size, scale, layer, info, image) = {

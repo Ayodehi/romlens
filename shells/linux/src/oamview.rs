@@ -225,7 +225,7 @@ impl View {
     }
 
     fn refresh(self: &Rc<Self>) {
-        if self.doc.graphics_tab() != Some(gfx::Tab::Oam) {
+        if !self.doc.shows_graphics(gfx::Tab::Oam) {
             return;
         }
         let (key, sort, visible, obsel) = {
