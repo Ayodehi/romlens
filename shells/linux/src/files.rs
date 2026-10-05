@@ -108,6 +108,7 @@ pub fn open_project(app: &adw::Application, path: &Path) {
     }
 
     let (app, package_path, sha) = (app.clone(), path.to_path_buf(), identity.sha256.clone());
+    let kept = local.clone();
     let finish = move |rom_path: PathBuf| {
         let parent = app.active_window();
         let rom = match Rom::open(rom_path.to_string_lossy().into_owned()) {
@@ -116,6 +117,8 @@ pub fn open_project(app: &adw::Application, path: &Path) {
         };
         match Document::from_project(rom, files, &package_path, &rom_path, Rc::new(GlibRuntime)) {
             Ok(doc) => {
+                // The window as it was left (docs/29), before it is built.
+                doc.restore_local(&kept);
                 locator::remember(&sha, &rom_path);
                 add_recent(&package_path, true);
                 show(&app, doc);
@@ -485,7 +488,10 @@ fn install(app: &adw::Application, window: &adw::ApplicationWindow, doc: &Rc<Doc
 
     window.connect_destroy({
         let doc = Rc::clone(doc);
-        move |_| doc.close()
+        move |_| {
+            doc.keep_workspace();
+            doc.close();
+        }
     });
 
     accept_drops(app, window.upcast_ref());

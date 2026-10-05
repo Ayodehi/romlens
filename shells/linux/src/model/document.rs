@@ -38,7 +38,7 @@ use super::transfer::{self, ExportKind, ImportKind};
 use super::tutor::{self, TutorModel};
 use super::workspace::{
     CodeRep, DropEdge, DropTarget, DropZone, EditorContent, EditorItem, Id, LayoutPreset, TabDrop,
-    Workspace,
+    Workspace, WorkspaceRecord,
 };
 use crate::asm::AsmBatch;
 use crate::hex::{AddressStyle, BYTES_PER_ROW, HexBatch};
@@ -246,6 +246,9 @@ pub struct Document {
     citation_highlight: RefCell<Vec<std::ops::Range<u32>>>,
     /// The inspector's drawer shows the tutor (docs/29).
     tutor_in_drawer: Cell<bool>,
+    /// The macOS bookmark a project's `local.json` had, written back as it
+    /// was.
+    bookmark: RefCell<Option<String>>,
     source: RefCell<SourceModel>,
     graphics: RefCell<GraphicsModel>,
     audio: RefCell<AudioModel>,
@@ -351,6 +354,7 @@ impl Document {
             label_index: RefCell::new(Vec::new()),
             citation_highlight: RefCell::new(Vec::new()),
             tutor_in_drawer: Cell::new(false),
+            bookmark: RefCell::new(None),
             source: RefCell::new(SourceModel::default()),
             graphics: RefCell::new(GraphicsModel::new(Arc::clone(&rom_for_graphics))),
             audio: RefCell::new(AudioModel::new(
@@ -503,10 +507,70 @@ impl Document {
         let files = self.workbench().project_files();
         package::write(dir, &files).map_err(io)?;
         package::remove_stale(dir, &files).map_err(io)?;
-        let local = LocalRecord {
+        package::write_local(dir, &self.local_record()).map_err(io)
+    }
+
+    /// `local.json` as it should be now: the ROM's path, the macOS bookmark
+    /// as it was read, and the window.
+    fn local_record(&self) -> LocalRecord {
+        LocalRecord {
+            bookmark: self.bookmark.borrow().clone(),
             last_path: self.rom_path().map(|p| p.to_string_lossy().into_owned()),
+            workspace: Some(self.workspace_record()),
+        }
+    }
+
+    /// The window as `local.json` keeps it (docs/29, W10).
+    pub fn workspace_record(&self) -> WorkspaceRecord {
+        let w = self.workspace.borrow();
+        let panes = self.panes();
+        WorkspaceRecord {
+            layout: w.layout().clone(),
+            focused_group: Some(w.focused_group()),
+            sidebar: panes.navigator,
+            inspector: panes.inspector,
+            strip: panes.strip,
+            tutor_in_drawer: self.tutor_in_drawer.get(),
+        }
+    }
+
+    /// Put back a project's window from what its `local.json` kept, and keep
+    /// the bookmark to write back. A comparison is not kept with the project,
+    /// so a Compare tab is left out, as is a Header and Vectors tab, which is
+    /// no longer offered.
+    pub fn restore_local(&self, local: &LocalRecord) {
+        self.bookmark.replace(local.bookmark.clone());
+        let Some(record) = &local.workspace else {
+            return;
         };
-        package::write_local(dir, &local).map_err(io)
+        let mut layout = record.layout.clone();
+        for item in layout.items() {
+            if matches!(item.content, EditorContent::Compare | EditorContent::Header) {
+                layout.close(item.id);
+            }
+        }
+        self.workspace
+            .borrow_mut()
+            .restore(layout, record.focused_group);
+        {
+            let mut l = self.layout.borrow_mut();
+            l.panes.navigator = record.sidebar;
+            l.panes.inspector = record.inspector;
+            l.panes.strip = record.strip;
+        }
+        self.tutor_in_drawer.set(record.tutor_in_drawer);
+        self.after_focus();
+    }
+
+    /// The window is closing: keep its layout in the package's `local.json`
+    /// alone. A layout is not an edit, so the project stays as saved.
+    pub fn keep_workspace(&self) {
+        if let Some(dir) = self.project_path()
+            && dir.is_dir()
+        {
+            // Failing to remember a layout is not worth an error.
+            let _ = package::write_local(&dir, &self.local_record());
+        }
     }
 
     /// Save the project to `dir`, and remember it as where it lives.
@@ -3838,6 +3902,122 @@ mod tests {
         let (files, local) = crate::package::split_local(files);
         let rom_path = local.last_path.expect("a recorded ROM path");
         Document::from_project(test_rom(), files, dir, Path::new(&rom_path), rt.clone()).unwrap()
+    }
+
+    /// The window round-trips through the package (docs/29, W10): its tabs
+    /// (but not Compare), groups and focus, the panels and the drawer.
+    #[test]
+    fn the_layout_round_trips_through_the_package() {
+        let (d, rt) = analysed();
+        *d.rom_path.borrow_mut() = Some(PathBuf::from("/roms/game.sfc"));
+        d.set_tab(Tab::Disassembly);
+        d.split_focused(DropEdge::Right);
+        let focused = d.workspace().focused_group();
+        d.open_graphics(gfx::Tab::Tiles);
+        d.workspace.borrow_mut().open(EditorContent::Compare, None);
+        d.set_pane(|p| &mut p.navigator, false);
+        d.show_tutor_in_drawer();
+        let dir = scratch("layout").join("Game.romlens");
+        d.save_to(&dir).unwrap();
+
+        let back = reopen(&dir, &rt);
+        let files =
+            romlens_ffi::workbench::read_project_package(dir.to_string_lossy().into_owned())
+                .unwrap();
+        let (_, local) = crate::package::split_local(files);
+        back.restore_local(&local);
+        let w = back.workspace();
+        assert_eq!(w.layout().groups().len(), 2);
+        assert_eq!(w.focused_group(), focused);
+        let contents: Vec<_> = w.layout().items().iter().map(|i| i.content).collect();
+        assert!(contents.contains(&EditorContent::Graphics(gfx::Tab::Tiles)));
+        assert!(
+            !contents.contains(&EditorContent::Compare),
+            "a comparison is not kept"
+        );
+        drop(w);
+        assert!(!back.panes().navigator && back.tutor_in_drawer());
+        assert!(!back.session.is_dirty(), "restoring is not an edit");
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
+    }
+
+    /// Closing writes the layout into `local.json` alone: the project is not
+    /// marked edited, and the next save keeps it.
+    #[test]
+    fn closing_keeps_the_layout_without_marking_the_project_edited() {
+        let (d, _) = analysed();
+        *d.rom_path.borrow_mut() = Some(PathBuf::from("/roms/game.sfc"));
+        let dir = scratch("keep").join("Game.romlens");
+        d.save_to(&dir).unwrap();
+        d.set_tab(Tab::C);
+        d.split_focused(DropEdge::Bottom);
+        d.keep_workspace();
+        assert!(!d.session.is_dirty());
+        let read = || {
+            let files =
+                romlens_ffi::workbench::read_project_package(dir.to_string_lossy().into_owned())
+                    .unwrap();
+            crate::package::split_local(files).1
+        };
+        assert_eq!(read().workspace.unwrap().layout.groups().len(), 2);
+        d.save_to(&dir).unwrap();
+        assert_eq!(read().workspace.unwrap().layout.groups().len(), 2);
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
+    }
+
+    /// A `local.json` written on a Mac: its bookmark is written back as it
+    /// was, a Header and Vectors tab is left out, and a layout this version
+    /// cannot read costs only the layout.
+    #[test]
+    fn a_macos_local_record_keeps_its_bookmark_and_drops_the_header_tab() {
+        let (d, _) = analysed();
+        *d.rom_path.borrow_mut() = Some(PathBuf::from("/roms/game.sfc"));
+        let mac = r#"{
+  "bookmark" : "Ym9va21hcms=",
+  "lastPath" : "/Users/someone/game.sfc",
+  "workspace" : {
+    "inspector" : true,
+    "layout" : { "root" : { "group" : { "_0" : {
+      "id" : "6A8B1C2D-0E4F-4A5B-8C7D-9E0F1A2B3C4D",
+      "items" : [
+        { "content" : { "header" : { } }, "followsSelection" : true,
+          "id" : "11111111-2222-4333-8444-555555555555" },
+        { "content" : { "code" : { "_0" : "assembly" } }, "followsSelection" : true,
+          "id" : "22222222-2222-4333-8444-555555555555" }
+      ],
+      "selected" : "11111111-2222-4333-8444-555555555555"
+    } } } },
+    "sidebar" : true,
+    "strip" : false,
+    "tutorInDrawer" : false
+  }
+}"#;
+        let local: LocalRecord = serde_json::from_str(mac).unwrap();
+        d.restore_local(&local);
+        let contents: Vec<_> = d
+            .workspace()
+            .layout()
+            .items()
+            .iter()
+            .map(|i| i.content)
+            .collect();
+        assert_eq!(contents, [EditorContent::Code(CodeRep::Assembly)]);
+        assert!(!d.panes().strip);
+        let dir = scratch("mac").join("Game.romlens");
+        d.save_to(&dir).unwrap();
+        let files =
+            romlens_ffi::workbench::read_project_package(dir.to_string_lossy().into_owned())
+                .unwrap();
+        let (_, written) = crate::package::split_local(files);
+        assert_eq!(written.bookmark.as_deref(), Some("Ym9va21hcms="));
+        // A layout from a newer version: the rest of the record still reads.
+        let newer: LocalRecord = serde_json::from_str(
+            r#"{"lastPath":"/r.sfc","workspace":{"layout":{"root":{"tabs":{}}}}}"#,
+        )
+        .unwrap();
+        assert_eq!(newer.last_path.as_deref(), Some("/r.sfc"));
+        assert!(newer.workspace.is_none());
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
     }
 
     #[test]

@@ -148,6 +148,7 @@ mod tests {
         std::fs::write(dir.join("last.sfc"), &rom).unwrap();
         let local = LocalRecord {
             last_path: Some(dir.join("last.sfc").to_string_lossy().into_owned()),
+            ..LocalRecord::default()
         };
         assert_eq!(
             locate_with(&id, &package, &local, &hints_file),
