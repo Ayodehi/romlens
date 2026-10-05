@@ -26,16 +26,40 @@ pub fn message(doc: &Rc<Document>, text: &str, on_link: &OnLink) -> gtk::Box {
     let mut seen: HashSet<String> = HashSet::new();
     for s in markdown::segments(text) {
         match s {
-            Segment::Prose(p) => b.append(&prose(&markdown::prose_markup(&p, &mut seen), on_link)),
+            Segment::Prose(p) => {
+                b.append(&prose(doc, &markdown::prose_markup(&p, &mut seen), on_link))
+            }
             Segment::Code { language, body } => b.append(&code_block(doc, &language, &body)),
-            Segment::Table { header, rows } => b.append(&table(&header, &rows, &mut seen, on_link)),
+            Segment::Table { header, rows } => {
+                b.append(&table(doc, &header, &rows, &mut seen, on_link))
+            }
             Segment::Rule => b.append(&gtk::Separator::new(gtk::Orientation::Horizontal)),
         }
     }
     b
 }
 
-fn prose(markup: &str, on_link: &OnLink) -> gtk::Label {
+/// The addresses a paragraph's citations name: its `romlens://a/` and `c/`
+/// links.
+pub fn cited_addresses(markup: &str) -> Vec<u32> {
+    let mut out = Vec::new();
+    for kind in ["romlens://a/", "romlens://c/"] {
+        for (at, _) in markup.match_indices(kind) {
+            let hex: String = markup[at + kind.len()..]
+                .chars()
+                .take_while(char::is_ascii_hexdigit)
+                .collect();
+            if let Ok(a) = u32::from_str_radix(&hex, 16)
+                && !out.contains(&a)
+            {
+                out.push(a);
+            }
+        }
+    }
+    out
+}
+
+fn prose(doc: &Rc<Document>, markup: &str, on_link: &OnLink) -> gtk::Label {
     let l = gtk::Label::builder()
         .use_markup(true)
         .label(markup)
@@ -52,12 +76,32 @@ fn prose(markup: &str, on_link: &OnLink) -> gtk::Label {
             gtk::glib::Propagation::Proceed
         }
     });
+    // Pointing at a paragraph outlines every line it cites in the Assembly
+    // and Hex tabs (docs/29, W9).
+    let cited = cited_addresses(markup);
+    if !cited.is_empty() {
+        let motion = gtk::EventControllerMotion::new();
+        let d = Rc::downgrade(doc);
+        motion.connect_enter(move |_, _, _| {
+            if let Some(d) = d.upgrade() {
+                d.point_at_citations(&cited);
+            }
+        });
+        let d = Rc::downgrade(doc);
+        motion.connect_leave(move |_| {
+            if let Some(d) = d.upgrade() {
+                d.point_at_citations(&[]);
+            }
+        });
+        l.add_controller(motion);
+    }
     l
 }
 
 /// A Markdown table: a bold header, rows between rules, each cell inline
 /// Markdown with its citations as links.
 fn table(
+    doc: &Rc<Document>,
     header: &[String],
     rows: &[Vec<String>],
     seen: &mut HashSet<String>,
@@ -69,6 +113,7 @@ fn table(
         .build();
     for (c, h) in header.iter().enumerate() {
         let l = prose(
+            doc,
             &format!("<b>{}</b>", markdown::prose_markup(h, seen)),
             on_link,
         );
@@ -84,7 +129,7 @@ fn table(
     );
     for (r, row) in rows.iter().enumerate() {
         for (c, cell) in row.iter().enumerate() {
-            let l = prose(&markdown::prose_markup(cell, seen), on_link);
+            let l = prose(doc, &markdown::prose_markup(cell, seen), on_link);
             l.set_hexpand(true);
             grid.attach(&l, c as i32, r as i32 + 2, 1, 1);
         }
@@ -287,6 +332,13 @@ pub fn follow(doc: &Rc<Document>, uri: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_paragraph_cites_its_address_and_routine_links_once_each() {
+        let markup = r#"<a href="romlens://a/008020">$00:8020</a> calls <a href="romlens://c/008040">it</a>, and <a href="romlens://a/008020">again</a>; <a href="romlens://f/12">frame 12</a>"#;
+        assert_eq!(cited_addresses(markup), [0x00_8020, 0x00_8040]);
+        assert!(cited_addresses("no links").is_empty());
+    }
 
     #[test]
     fn assembly_gets_its_mnemonics_numbers_and_comments_painted() {

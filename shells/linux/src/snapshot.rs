@@ -9,6 +9,8 @@
 //! - `ROMLENS_SPLIT`: comma-separated splits of the focused tab, `right` or
 //!   `down`, made after the views open
 //! - `ROMLENS_LAYOUT`: an Editor Layout preset (`two-columns`, `three`)
+//! - `ROMLENS_CITE`: comma-separated SNES addresses in hex an answer's
+//!   paragraph is pointing at, outlined in the Assembly and Hex tabs
 //! - `ROMLENS_SELECT`: a file offset (decimal or 0x hex) to jump to
 //! - `ROMLENS_SIZE`: `WIDTHxHEIGHT` for the window
 //! - `ROMLENS_ACTIONS`: comma-separated window actions to run, each
@@ -116,6 +118,13 @@ pub fn maybe_capture(window: &adw::ApplicationWindow, doc: &Rc<Document>) {
             }
             if let Ok(preset) = std::env::var("ROMLENS_LAYOUT") {
                 run_action(&window, &format!("editor-layout::{preset}"));
+            }
+            if let Ok(cited) = std::env::var("ROMLENS_CITE") {
+                let addresses: Vec<u32> = cited
+                    .split(',')
+                    .filter_map(|a| u32::from_str_radix(a.trim().trim_start_matches('$'), 16).ok())
+                    .collect();
+                doc.point_at_citations(&addresses);
             }
             if let Ok(text) = std::env::var("ROMLENS_SELECT") {
                 let parsed = match text.strip_prefix("0x") {

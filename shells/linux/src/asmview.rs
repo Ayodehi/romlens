@@ -104,6 +104,7 @@ pub fn build(doc: &Rc<Document>, item: Option<Id>) -> AsmPane {
             s.resized(f64::from(s.area.width()), f64::from(s.area.height()));
             s.area.queue_draw();
         }
+        Change::Citations => s.area.queue_draw(),
         Change::AddressStyle | Change::Selection => {
             s.resized(f64::from(s.area.width()), f64::from(s.area.height()));
             s.area.queue_draw();
@@ -191,6 +192,7 @@ impl State {
             .doc
             .selected()
             .and_then(|o| self.doc.line_for_offset(o));
+        let cited = self.doc.citation_highlight();
 
         let top = self.scroll.top();
         let first = top.floor().max(0.0) as u32;
@@ -227,6 +229,10 @@ impl State {
             }
             if line.has_warning() {
                 warning_mark(cr, AsmLayout::mark_start() - hx, y, rh);
+            }
+            // A line the paragraph pointed at in an answer cites (docs/29).
+            if cited.iter().any(|r| r.contains(&line.file_offset)) {
+                cited_outline(cr, &accent, width, y, rh);
             }
 
             pango_layout.set_text(&layout.text(&line));
@@ -357,4 +363,13 @@ fn warning_mark(cr: &cairo::Context, x: f64, y: f64, h: f64) {
     let _ = cr.fill();
     cr.rectangle(x + (side - bar) / 2.0, top + side * 0.76, bar, bar);
     let _ = cr.fill();
+}
+
+/// The outline of a line an answer's paragraph cites: 1.5 px of the accent,
+/// inset by 1, as the macOS canvases draw it.
+pub fn cited_outline(cr: &cairo::Context, accent: &gdk::RGBA, width: f64, y: f64, rh: f64) {
+    set_source(cr, accent);
+    cr.set_line_width(1.5);
+    cr.rectangle(1.0, y + 1.0, width - 2.0, rh - 2.0);
+    let _ = cr.stroke();
 }
