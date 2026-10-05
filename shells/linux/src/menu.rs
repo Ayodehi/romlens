@@ -239,6 +239,7 @@ fn go_items() -> gio::Menu {
     m.append_section(
         None,
         &section(&[
+            ("Open Quickly…", "win.open-quickly"),
             ("Jump to Address…", "win.jump-to-address"),
             ("Follow Reference", "win.follow-reference"),
             ("Find References", "win.find-references"),

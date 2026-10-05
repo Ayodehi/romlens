@@ -19,6 +19,7 @@ pub mod layout;
 pub mod live;
 pub mod markdown;
 pub mod navigator;
+pub mod quick;
 pub mod references;
 pub mod runtime;
 pub mod screen;

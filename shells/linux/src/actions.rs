@@ -406,6 +406,11 @@ const ENTRIES: &[Entry] = &[
             }
         },
     },
+    Entry {
+        name: "open-quickly",
+        enabled: always,
+        run: |d, w| crate::jumpbar::open_quickly(w, d),
+    },
     // The sidebar's Lessons and Quizzes: the tutor, at its lessons.
     Entry {
         name: "show-lessons",
@@ -589,6 +594,7 @@ pub const ACCELS: &[(&str, &[&str])] = &[
     ("win.find-next", &["<Control>g"]),
     ("win.find-previous", &["<Control><Shift>g"]),
     ("win.jump-to-address", &["<Control>l"]),
+    ("win.open-quickly", &["<Control>p"]),
     ("win.follow-reference", &["<Control>Return"]),
     ("win.find-references", &["<Control><Shift>f"]),
     ("win.go-back", &["<Control>bracketleft", "<Alt>Left"]),
@@ -665,7 +671,15 @@ pub fn knows(action: &str) -> bool {
 
 /// The window actions that take a string parameter, made by `install` itself.
 #[cfg(test)]
-const PARAMETERIZED: &[&str] = &["show-tab", "address-style", "focus-group", "editor-layout"];
+const PARAMETERIZED: &[&str] = &[
+    "show-tab",
+    "address-style",
+    "focus-group",
+    "editor-layout",
+    "open-view",
+    "jump-snes",
+    "jump-offset",
+];
 
 /// Actions on the application (see `main.rs`).
 #[cfg(test)]
@@ -714,6 +728,7 @@ pub const SHORTCUT_GROUPS: &[(&str, &[(&str, &str)])] = &[
             ("Find", "win.find"),
             ("Find Next", "win.find-next"),
             ("Find Previous", "win.find-previous"),
+            ("Open Quickly", "win.open-quickly"),
             ("Jump to Address", "win.jump-to-address"),
             ("Follow Reference", "win.follow-reference"),
             ("Find References", "win.find-references"),
@@ -887,6 +902,51 @@ pub fn install(window: &adw::ApplicationWindow, doc: &Rc<Document>) {
     });
     window.add_action(&focus_group);
 
+    // A view by its key, as the jump bar and Open Quickly name it.
+    let open_view = gio::SimpleAction::new("open-view", Some(glib::VariantTy::STRING));
+    open_view.connect_activate({
+        let (doc, window) = (Rc::clone(doc), window.downgrade());
+        move |_, param| {
+            use crate::model::workspace::EditorContent;
+            let Some(content) = param
+                .and_then(|p| p.get::<String>())
+                .and_then(|k| EditorContent::from_key(&k))
+            else {
+                return;
+            };
+            match content {
+                EditorContent::Graphics(t) => doc.open_graphics(t),
+                EditorContent::Audio(t) => doc.open_audio(t),
+                EditorContent::Tutor => {
+                    if let Some(w) = window.upgrade() {
+                        gio::prelude::ActionGroupExt::activate_action(&w, "show-tutor", None);
+                    }
+                }
+                c => doc.show(c),
+            }
+        }
+    });
+    window.add_action(&open_view);
+    // An address or a file offset, in hex, from the jump bar's menus.
+    for (name, snes) in [("jump-snes", true), ("jump-offset", false)] {
+        let jump = gio::SimpleAction::new(name, Some(glib::VariantTy::STRING));
+        let doc = Rc::clone(doc);
+        jump.connect_activate(move |_, param| {
+            let Some(at) = param
+                .and_then(|p| p.get::<String>())
+                .and_then(|h| u32::from_str_radix(&h, 16).ok())
+            else {
+                return;
+            };
+            if snes {
+                doc.jump_to_snes(at);
+            } else {
+                doc.jump_to(at);
+            }
+        });
+        window.add_action(&jump);
+    }
+
     // View › Editor Layout.
     let layout = gio::SimpleAction::new("editor-layout", Some(glib::VariantTy::STRING));
     layout.connect_activate({
@@ -989,6 +1049,16 @@ pub fn context_menu(doc: &Document) -> gio::Menu {
         None,
         &section(&[("Copy Address", "copy-address"), ("Copy Line", "copy-line")]),
     );
+    // The address columns, here as on macOS, since the header has no button
+    // for them (docs/29).
+    let addresses = section(&[
+        ("File Offset and SNES Address", "address-style::both"),
+        ("SNES Address Only", "address-style::snes"),
+        ("File Offset Only", "address-style::file"),
+    ]);
+    let tail = gio::Menu::new();
+    tail.append_submenu(Some("Addresses"), &addresses);
+    menu.append_section(None, &tail);
     menu
 }
 
